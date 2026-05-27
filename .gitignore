@@ -1,0 +1,22 @@
+# Dependency directories
+node_modules/
+
+# Production builds
+dist/
+dist-server/
+dist-ssr/
+
+# Wrangler cache/build directory
+.wrangler/
+
+# Environment files
+.env
+.env.production
+.dev.vars
+
+# System logs & lock files
+*.log
+.DS_Store
+
+# Antigravity CLI
+.antigravitycli/

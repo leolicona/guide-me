@@ -1,0 +1,18 @@
+{
+  "name": "guide-me-monorepo",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Monorepo for the guide-me application and API services",
+  "scripts": {
+    "dev:api": "pnpm --filter api-guideme dev",
+    "dev:app": "pnpm --filter app-guideme dev",
+    "build:api": "pnpm --filter api-guideme build",
+    "build:app": "pnpm --filter app-guideme build",
+    "deploy:api": "pnpm --filter api-guideme deploy",
+    "deploy:app": "pnpm --filter app-guideme deploy",
+    "cf-typegen:api": "pnpm --filter api-guideme cf-typegen",
+    "cf-typegen:app": "pnpm --filter app-guideme cf-typegen",
+    "lint:app": "pnpm --filter app-guideme lint",
+    "dev": "pnpm --parallel dev"
+  }
+}
