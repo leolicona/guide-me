@@ -8,11 +8,15 @@
     "dev:app": "pnpm --filter app-guideme dev",
     "build:api": "pnpm --filter api-guideme build",
     "build:app": "pnpm --filter app-guideme build",
-    "deploy:api": "pnpm --filter api-guideme deploy",
-    "deploy:app": "pnpm --filter app-guideme deploy",
+    "deploy:api": "pnpm --filter api-guideme run deploy",
+    "deploy:app": "pnpm --filter app-guideme run deploy",
     "cf-typegen:api": "pnpm --filter api-guideme cf-typegen",
     "cf-typegen:app": "pnpm --filter app-guideme cf-typegen",
     "lint:app": "pnpm --filter app-guideme lint",
-    "dev": "pnpm --parallel dev"
+    "dev": "pnpm --parallel dev",
+    "test:api": "pnpm --filter api-guideme test",
+    "db:migrate:local": "pnpm --filter api-guideme db:migrate:local",
+    "db:migrate": "pnpm --filter api-guideme db:migrate",
+    "db:generate": "pnpm --filter api-guideme db:generate"
   }
 }

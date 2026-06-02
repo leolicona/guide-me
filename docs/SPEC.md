@@ -1,226 +1,229 @@
 # GuideMe — Product Specification
 
-## Visión del Producto
+## Product Vision
 
-GuideMe es una plataforma SaaS multi-tenant, optimizada para móviles, que centraliza la venta de servicios turísticos, el control de inventario en tiempo real, el cálculo de comisiones y la validación de accesos mediante códigos QR. Está diseñada para que empresas turísticas (organizaciones) puedan operar con agilidad en campo, garantizando control financiero y una experiencia digital moderna para el turista.
+GuideMe is a multi-tenant, mobile-optimized SaaS platform that centralizes the sale of tourist services, real-time inventory control, commission calculation, and access validation via QR codes. It is designed so that tourism companies (organizations) can operate agilely in the field, ensuring financial control and a modern digital experience for the tourist.
 
-**Problema que resuelve:** Los equipos de ventas turísticas operan con hojas de cálculo, WhatsApp informal y efectivo sin trazabilidad. GuideMe reemplaza ese caos con una herramienta móvil-first que evita sobreventas, controla comisiones y entrega comprobantes digitales automáticamente.
-
----
-
-## Principios de Diseño
-
-- **Mobile-first:** Toda la interfaz de agentes se diseña para teléfono en campo, sin depender de un escritorio.
-- **Offline-capable en validación QR:** El escáner funciona sin internet. Los tickets consumidos se sincronizan con el servidor al recuperar conexión.
-- **Cero contraseñas para agentes y clientes:** Acceso por magic link a email o WhatsApp. Solo el admin usa contraseña.
-- **Inventario en tiempo real:** Ningún agente puede vender más cupos de los disponibles en un horario dado.
-- **Multitenancy:** Cada organización opera de forma completamente aislada (datos, catálogo, personal).
+**Problem solved:** Tourism sales teams operate with spreadsheets, informal WhatsApp, and untraceable cash. GuideMe replaces this chaos with a mobile-first tool that prevents overbooking, controls commissions, and automatically delivers digital receipts.
 
 ---
 
-## Roles del Sistema
+## Design Principles
 
-| Rol | Descripción | Autenticación |
+- **Mobile-first:** The entire agent interface is designed for field use on mobile phones, without relying on a desktop.
+- **Offline-capable QR validation:** The scanner works without internet. Consumed tickets are synchronized with the server once connection is restored.
+- **Authentication via email and password for admins and agents:** Both administrators and sales agents log in using their email and password. Clients do not log in directly in this phase.
+- **Email ownership verification:** Account verification for admins (on registration) and agents (on accepting invitations) is done via magic links sent through Resend.
+- **Offline-capable QR validation:** The scanner works without internet. Consumed tickets are synchronized with the server once connection is restored.
+- **Real-time inventory:** No agent can sell more spots than those available at a given time slot.
+- **Multitenancy:** Each organization operates in a completely isolated manner (data, catalog, staff).
+
+---
+
+## System Roles
+
+| Role | Description | Authentication |
 |---|---|---|
-| `admin` | Control total de la organización: catálogo, personal, reportes, finanzas | Email + contraseña |
-| `agent` | Vende servicios, gestiona su caja diaria, escanea QR de acceso | Magic link por email o WhatsApp |
-| `client` | Recibe boletos digitales y códigos QR vía WhatsApp. No interactúa con la app directamente en esta fase | Magic link por WhatsApp (futuro) |
+| `admin` | Full control of the organization: catalog, staff, reports, finances | Email + password (verification via Resend magic link) |
+| `agent` | Sells services, manages daily cash drawers, scans access QRs | Email + password (onboarding/verification via Resend magic link) |
+| `client` | Receives digital tickets and QR codes via WhatsApp. Does not interact directly with the app in this phase | No authentication |
 
 ---
 
 ## User Stories
 
-### Administrador
+### Administrator
 
-#### Autenticación y Cuenta
+### Authentication and Account
 
-- **US-A01** — Como admin, quiero registrarme con mi nombre, email, contraseña y nombre de empresa para crear mi organización en GuideMe.
-- **US-A02** — Como admin, quiero verificar mi email haciendo clic en un magic link para activar mi cuenta.
-- **US-A03** — Como admin, quiero iniciar sesión con email y contraseña para acceder a mi panel de control.
-- **US-A04** — Como admin, quiero recuperar mi contraseña por email en caso de olvidarla.
+- **US-A01** — As an admin, I want to register with my name, email, password, and company name to create my organization in GuideMe.
+- **US-A02** — As an admin, I want to verify my email by clicking on a magic link sent via Resend to activate my account.
+- **US-A03** — As an admin, I want to log in with email and password to access my dashboard.
+- **US-A04** — As an admin, I want to recover my password via email in case I forget it.
 
-#### Gestión de Personal
+#### Staff Management
 
-- **US-A05** — Como admin, quiero invitar a un agente de ventas por email o WhatsApp para que se una a mi organización.
-- **US-A06** — Como admin, quiero ver la lista de agentes activos de mi organización con su porcentaje de comisión asignado.
-- **US-A07** — Como admin, quiero editar el perfil y el porcentaje de comisión base de un agente.
-- **US-A08** — Como admin, quiero desactivar (dar de baja) a un agente para que pierda acceso a la plataforma sin eliminar su historial.
+- **US-A05** — As an admin, I want to invite a sales agent by email to join my organization.
+- **US-A06** — As an admin, I want to see the list of active agents in my organization with their assigned commission percentage.
+- **US-A07** — As an admin, I want to edit an agent's profile and base commission percentage.
+- **US-A08** — As an admin, I want to deactivate (suspend) an agent so they lose access to the platform without deleting their history.
 
-#### Catálogo de Servicios
+#### Service Catalog
 
-- **US-A09** — Como admin, quiero crear un servicio turístico (ej. "Recorrido Cañón al Amanecer") con nombre, descripción, precio base, precio mínimo de venta y capacidad máxima por horario.
-- **US-A10** — Como admin, quiero definir horarios recurrentes o fechas específicas para cada servicio, con su cupo independiente por slot.
-- **US-A11** — Como admin, quiero agregar "extras" opcionales a un servicio (ej. "Foto profesional", "Seguro de viaje") con su precio individual.
-- **US-A12** — Como admin, quiero definir un bonus de comisión adicional por servicio específico, que se suma al % base del agente.
-- **US-A13** — Como admin, quiero editar o desactivar un servicio del catálogo sin afectar los folios ya vendidos.
+- **US-A09** — As an admin, I want to create a tour/service (e.g., "Canyon Sunrise Tour") with a name, description, base price, minimum selling price, and maximum capacity per time slot.
+- **US-A10** — As an admin, I want to define recurring schedules or specific dates for each service, with its independent capacity per slot.
+- **US-A11** — As an admin, I want to add optional "extras" to a service (e.g., "Professional photo", "Travel insurance") with their individual price.
+- **US-A12** — As an admin, I want to define an additional commission bonus per specific service, which is added to the agent's base %.
+- **US-A13** — As an admin, I want to edit or deactivate a service in the catalog without affecting already sold tickets (folios).
 
-#### Dashboard y Monitoreo
+#### Dashboard and Monitoring
 
-- **US-A14** — Como admin, quiero ver un tablero visual de ocupación que muestre el estado (disponible / próximo a saturarse / lleno) de todos los horarios activos del día.
-- **US-A15** — Como admin, quiero ver en tiempo real cuántos lugares quedan disponibles por servicio y horario.
-- **US-A16** — Como admin, quiero ver un resumen de ventas del día: total recaudado, número de folios, ventas por agente.
+- **US-A14** — As an admin, I want to see a visual occupancy dashboard showing the status (available / close to capacity / full) of all active schedules for the day.
+- **US-A15** — As an admin, I want to see in real-time how many spots remain available per service and schedule.
+- **US-A16** — As an admin, I want to see a summary of the day's sales: total collected, number of folios, and sales per agent.
 
-#### Reportes Financieros y Comisiones
+#### Financial Reports and Commissions
 
-- **US-A17** — Como admin, quiero generar un reporte de comisiones por agente en un período de fechas, mostrando ventas totales, comisión base, bonus por servicio y comisión total a pagar.
-- **US-A18** — Como admin, quiero ver un comparativo de desempeño entre agentes (folios vendidos, monto total) en un período dado.
-- **US-A19** — Como admin, quiero revisar y validar los cortes de caja diarios entregados por los agentes.
-- **US-A20** — Como admin, quiero exportar reportes de ventas y comisiones (CSV o PDF) para su procesamiento externo.
+- **US-A17** — As an admin, I want to generate a commission report per agent for a range of dates, showing total sales, base commission, service bonuses, and total commission to pay.
+- **US-A18** — As an admin, I want to see a performance comparison between agents (folios sold, total amount) in a given period.
+- **US-A19** — As an admin, I want to review and validate the daily cash drawer closures submitted by agents.
+- **US-A20** — As an admin, I want to export sales and commission reports (CSV or PDF) for external processing.
 
-#### Cancelaciones
+#### Cancellations
 
-- **US-A21** — Como admin, quiero cancelar un folio completo para liberar automáticamente los cupos de todos los servicios incluidos y dejar registro de la cancelación.
-
----
-
-### Agente de Ventas
-
-#### Autenticación
-
-- **US-AG01** — Como agente, quiero aceptar mi invitación haciendo clic en el enlace recibido por email o WhatsApp para activar mi cuenta en GuideMe.
-- **US-AG02** — Como agente, quiero solicitar un magic link a mi email o WhatsApp para iniciar sesión sin necesidad de recordar una contraseña.
-
-#### Punto de Venta
-
-- **US-AG03** — Como agente, quiero ver el catálogo de servicios disponibles con su disponibilidad en tiempo real (cupos restantes por horario) para elegir qué vender.
-- **US-AG04** — Como agente, quiero seleccionar un servicio, elegir un horario disponible y agregar el número de personas para iniciar una venta.
-- **US-AG05** — Como agente, quiero agregar extras opcionales al carrito de venta (ej. foto, seguro) para aumentar el ticket promedio.
-- **US-AG06** — Como agente, quiero aplicar un descuento manual al precio de un servicio, con el límite bloqueado en el precio mínimo definido por el admin, para evitar vender por debajo del costo permitido.
-- **US-AG07** — Como agente, quiero registrar una venta como "apartado" con un monto parcial recibido, para reservar el cupo y cobrar el resto después.
-- **US-AG08** — Como agente, quiero confirmar la venta y generar un folio único que incluya todos los servicios del carrito.
-- **US-AG09** — Como agente, quiero que el cliente reciba automáticamente por WhatsApp su comprobante de compra, itinerario y código QR al confirmar la venta.
-
-#### Disponibilidad en Tiempo Real
-
-- **US-AG10** — Como agente, quiero ver en la pantalla de venta una indicación clara de cuántos cupos quedan por servicio/horario para evitar vender servicios llenos.
-- **US-AG11** — Como agente, quiero que el sistema me bloquee la confirmación de venta si el cupo ya no está disponible al momento de confirmar (protección contra race conditions).
-
-#### Caja Diaria
-
-- **US-AG12** — Como agente, quiero ver un resumen de mis ventas del día: folios generados, total en efectivo, total de apartados pendientes de cobro.
-- **US-AG13** — Como agente, quiero registrar gastos operativos del día (ej. gasolina, insumos) con monto y descripción para que el balance neto de mi caja sea real.
-- **US-AG14** — Como agente, quiero generar mi corte de caja diario con el desglose de ingresos, gastos y balance neto para entregarlo al admin.
-
-#### Escáner de Acceso (QR)
-
-- **US-AG15** — Como agente, quiero usar la cámara de mi teléfono para escanear el código QR de un cliente y validar su boleto al momento del acceso al servicio.
-- **US-AG16** — Como agente, quiero que la validación del QR funcione sin internet, marcando el ticket como consumido en mi dispositivo y sincronizando cuando recupere conexión.
-- **US-AG17** — Como agente, quiero ver una pantalla clara de resultado del escaneo: ✓ Válido (nombre del cliente, servicio, horario) o ✗ Inválido (razón: ya usado, expirado, falso).
+- **US-A21** — As an admin, I want to cancel an entire folio to automatically release the spots for all included services and record the cancellation.
 
 ---
 
-### Cliente
+### Sales Agent
 
-> En esta fase el cliente no interactúa directamente con la app. Su experiencia es 100% por WhatsApp.
+#### Authentication
 
-- **US-C01** — Como cliente, quiero recibir automáticamente por WhatsApp un comprobante de compra con el detalle de mi servicio, horario y monto pagado al momento de la venta.
-- **US-C02** — Como cliente, quiero recibir un código QR único por cada servicio adquirido para presentarlo como boleto de acceso.
-- **US-C03** — Como cliente, quiero recibir una notificación por WhatsApp si mi folio es cancelado para saber que mi reserva ya no está activa.
+- **US-AG01** — As an agent, I want to accept my invitation by clicking the link received via email to activate my account, verify my email ownership, and set my password.
+- **US-AG02** — As an agent, I want to log in with my email and password to access the app.
+- **US-AG18** — As an agent, I want to recover my password via email in case I forget it.
+
+#### Point of Sale
+
+- **US-AG03** — As an agent, I want to view the catalog of available services with their real-time availability (remaining spots per schedule) to choose what to sell.
+- **US-AG04** — As an agent, I want to select a service, choose an available schedule, and add the number of people to start a sale.
+- **US-AG05** — As an agent, I want to add optional extras to the sales cart (e.g., photo, insurance) to increase the average ticket size.
+- **US-AG06** — As an agent, I want to apply a manual discount to a service's price, with the limit locked at the minimum price defined by the admin, to avoid selling below the allowed cost.
+- **US-AG07** — As an agent, I want to register a sale as a "booking/down-payment" (apartado) with a partial amount received, to reserve the spots and collect the rest later.
+- **US-AG08** — As an agent, I want to confirm the sale and generate a unique folio containing all services in the cart.
+- **US-AG09** — As an agent, I want the client to automatically receive their purchase receipt, itinerary, and QR code via WhatsApp upon confirming the sale.
+
+#### Real-Time Availability
+
+- **US-AG10** — As an agent, I want to see a clear indication of how many spots remain per service/schedule on the sales screen to avoid selling full services.
+- **US-AG11** — As an agent, I want the system to block my sale confirmation if the spot is no longer available at the time of confirmation (protection against race conditions).
+
+#### Daily Cash Drawer
+
+- **US-AG12** — As an agent, I want to see a summary of my daily sales: generated folios, total cash, total pending bookings to be collected.
+- **US-AG13** — As an agent, I want to register daily operating expenses (e.g., gasoline, supplies) with amount and description so my cash drawer's net balance is accurate.
+- **US-AG14** — As an agent, I want to generate my daily cash closure report with the breakdown of income, expenses, and net balance to submit it to the admin.
+
+#### Access Scanner (QR)
+
+- **US-AG15** — As an agent, I want to use my phone's camera to scan a client's QR code and validate their ticket when they access the service.
+- **US-AG16** — As an agent, I want the QR validation to work offline, marking the ticket as consumed on my device and syncing when connection is restored.
+- **US-AG17** — As an agent, I want to see a clear scan result screen: ✓ Valid (client name, service, schedule) or ✗ Invalid (reason: already used, expired, fake).
 
 ---
 
-## Funcionalidades por Fase
+### Client
 
-### Fase 1 — MVP (Alcance Inicial)
+> In this phase, the client does not interact directly with the app. Their experience is 100% via WhatsApp.
 
-| Módulo | Incluido |
+- **US-C01** — As a client, I want to automatically receive a purchase receipt via WhatsApp with details of my service, schedule, and amount paid at the time of sale.
+- **US-C02** — As a client, I want to receive a unique QR code for each purchased service to present as an access ticket.
+- **US-C03** — As a client, I want to receive a WhatsApp notification if my folio is cancelled to know that my booking is no longer active.
+
+---
+
+## Features by Phase
+
+### Phase 1 — MVP (Initial Scope)
+
+| Module | Included |
 |---|---|
-| Auth (admin, agente, cliente) | ✅ |
-| Gestión de personal (invitar, editar, desactivar agentes) | ✅ |
-| Catálogo de servicios con extras y precio mínimo | ✅ |
-| Horarios/slots con cupo por fecha y hora | ✅ |
-| Punto de venta móvil con descuento controlado | ✅ |
-| Apartados (pago parcial con reserva de cupo) | ✅ |
-| Generación de folio con QR firmado (HMAC) | ✅ |
-| Envío de comprobante y QR al cliente por WhatsApp | ✅ |
-| Escáner QR offline-capable con sync posterior | ✅ |
-| Caja diaria del agente con gastos operativos | ✅ |
-| Dashboard visual de ocupación (admin) | ✅ |
-| Comisiones: % base por agente + bonus por servicio | ✅ |
-| Reporte de comisiones por período | ✅ |
-| Cancelación total de folio | ✅ |
-| Multitenancy (organizaciones aisladas) | ✅ |
+| Auth (admin & agent via email/password, verification via Resend) | ✅ |
+| Staff management (invite via email, edit, deactivate agents) | ✅ |
+| Service catalog with extras and minimum price | ✅ |
+| Schedules/slots with capacity by date and time | ✅ |
+| Mobile point of sale with controlled discount | ✅ |
+| Bookings/down-payments (partial payment with spot reservation) | ✅ |
+| Folio generation with signed QR code (HMAC) | ✅ |
+| Sending receipt and QR code to client via WhatsApp | ✅ |
+| Offline-capable QR scanner with post-sync | ✅ |
+| Agent's daily cash drawer with operating expenses | ✅ |
+| Occupancy visual dashboard (admin) | ✅ |
+| Commissions: base % per agent + bonus per service | ✅ |
+| Commission report by period | ✅ |
+| Total folio cancellation | ✅ |
+| Multitenancy (isolated organizations) | ✅ |
 
-### Fuera del MVP (Fase 2+)
+### Out of MVP (Phase 2+)
 
-| Funcionalidad | Razón de exclusión |
+| Feature | Reason for exclusion |
 |---|---|
-| Pagos con tarjeta integrados (Stripe, Conekta) | Complejidad de integración de pagos |
-| Compra online self-service por el cliente | Requiere pasarela de pago y flujo de checkout |
-| Cancelaciones parciales (por servicio dentro del folio) | Simplificar lógica de inventario en MVP |
-| App nativa (iOS / Android) | PWA mobile-first es suficiente en Fase 1 |
-| Registro silencioso de clientes por mensaje de WhatsApp | Requiere WhatsApp Business API bidireccional (webhook) |
-| Exportación de reportes (PDF/CSV) | Fase 2 post-validación de reportes en pantalla |
-| Múltiples métodos de pago (tarjeta, transferencia) | Solo efectivo en Fase 1 |
+| Integrated card payments (Stripe, Conekta) | Payment integration complexity |
+| Client self-service online purchase | Requires payment gateway and checkout flow |
+| Partial cancellations (per service within the folio) | Simplifies inventory logic in MVP |
+| Native App (iOS / Android) | Mobile-first PWA is sufficient for Phase 1 |
+| Discarded: Bidirectional WhatsApp / Silent client registration | The only WhatsApp API integration is to send tickets to clients |
+| Report export (PDF/CSV) | Phase 2 after verifying on-screen reports |
+| Multiple payment methods (card, wire transfer) | Cash only in Phase 1 |
 
 ---
 
-## Reglas de Negocio Clave
+## Key Business Rules
 
-### Inventario
+### Inventory
 
-- Cada slot (servicio + fecha + hora) tiene un `cupo_maximo` definido por el admin.
-- Al confirmar una venta (incluyendo apartados), el cupo se descuenta inmediatamente.
-- Si al momento de confirmar el cupo llegó a 0 (race condition), la venta se rechaza con error claro.
-- Al cancelar un folio, todo el cupo de los slots involucrados se libera.
+- Each slot (service + date + time) has a `max_capacity` defined by the admin.
+- Upon confirming a sale (including bookings), the spots are deducted immediately.
+- If the capacity reaches 0 at the time of confirmation (race condition), the sale is rejected with a clear error.
+- Upon cancelling a folio, all spots for the involved slots are released.
 
-### Precios y Descuentos
+### Pricing and Discounts
 
-- Cada servicio tiene `precio_base` y `precio_minimo` (ambos definidos por el admin).
-- El agente puede reducir el precio hasta `precio_minimo`, inclusive. Por debajo, el sistema bloquea la venta.
-- Los extras tienen precio fijo; no se les aplica descuento.
+- Each service has a `base_price` and a `minimum_price` (both defined by the admin).
+- The agent can reduce the price down to the `minimum_price`, inclusive. Below this, the system blocks the sale.
+- Extras have a fixed price; no discounts are applied to them.
 
-### Comisiones
+### Commissions
 
-- Cada agente tiene un `comision_base` (%) asignado por el admin.
-- Cada servicio puede tener un `bonus_comision` (%) adicional definido por el admin.
-- Comisión total por línea de venta = `(precio_vendido × comision_base) + (precio_vendido × bonus_comision)`.
-- Las comisiones se calculan sobre el precio final vendido (post-descuento), no sobre el precio base.
-- Los apartados generan comisión solo sobre el monto efectivamente cobrado hasta el corte.
+- Each agent has a `base_commission` (%) assigned by the admin.
+- Each service can have an additional `commission_bonus` (%) defined by the admin.
+- Total commission per sales line = `(sold_price × base_commission) + (sold_price × commission_bonus)`.
+- Commissions are calculated on the final sold price (post-discount), not on the base price.
+- Bookings/down-payments generate commissions only on the amount actually collected until the cash closure.
 
-### Apartados (Pago Parcial)
+### Bookings (Down-payment / Partial Payment)
 
-- Un apartado reserva el cupo del slot igual que una venta completa.
-- El agente registra el monto recibido (`monto_apartado`) y el saldo pendiente se calcula automáticamente.
-- El folio queda en estado `apartado` hasta que se cobra el saldo restante y cambia a `pagado`.
+- A booking reserves the slot capacity just like a full sale.
+- The agent registers the received amount (`booking_amount`) and the pending balance is calculated automatically.
+- The folio remains in a `booking` state until the remaining balance is collected, transitioning to `paid`.
 
-### QR y Validación de Acceso
+### QR and Access Validation
 
-- El QR contiene un payload JSON firmado con HMAC-SHA256 usando un `QR_SECRET` por organización.
-- El payload incluye: `folio_id`, `servicio_id`, `slot_id`, `cliente_identity`, `expires_at`.
-- La validación offline verifica la firma localmente. Si la firma es inválida → ✗ Falso.
-- Los tickets consumidos se almacenan en `localStorage` del dispositivo del agente escaneador.
-- Al recuperar conexión, el dispositivo sincroniza los tickets consumidos con el servidor (`POST /api/tickets/sync`).
-- El servidor es la fuente de verdad: si un ticket ya fue marcado como consumido en el servidor por otro dispositivo, prevalece ese estado.
+- The QR contains a JSON payload signed with HMAC-SHA256 using a `QR_SECRET` per organization.
+- The payload includes: `folio_id`, `service_id`, `slot_id`, `client_identity`, `expires_at`.
+- Offline validation verifies the signature locally. If the signature is invalid → ✗ Fake.
+- Consumed tickets are stored in the `localStorage` of the scanning agent's device.
+- Once connection is restored, the device syncs the consumed tickets with the server (`POST /api/tickets/sync`).
+- The server is the single source of truth: if a ticket was already marked as consumed on the server by another device, that state prevails.
 
 ### Multitenancy
 
-- Todos los datos (servicios, agentes, folios, slots) pertenecen a una `organization_id`.
-- Un agente solo puede ver y vender servicios de su propia organización.
-- El admin solo gestiona su propia organización.
+- All data (services, agents, folios, slots) belongs to an `organization_id`.
+- An agent can only view and sell services from their own organization.
+- The admin only manages their own organization.
 
 ---
 
-## Integraciones Externas
+## External Integrations
 
-| Servicio | Propósito |
+| Service | Purpose |
 |---|---|
-| **Agnostic Auth** (Cloudflare Worker) | Emisión de JWT y magic links |
-| **Resend** | Emails transaccionales: verificación admin, invitación agente, reset de contraseña |
-| **Meta WhatsApp Cloud API** | Magic links para agentes (teléfono), comprobantes + QR para clientes, invitaciones por WhatsApp |
-| **Cloudflare D1** | Base de datos principal (SQLite) |
-| **Cloudflare Workers** | Runtime del backend (Hono) |
+| **Agnostic Auth** (Cloudflare Worker) | JWT issuance for sessions (internal token generator) |
+| **Resend** | Transactional emails: admin verification (magic link), agent invitation (magic link), password reset |
+| **Meta WhatsApp Cloud API** | Send receipts + QR for clients (the only WhatsApp integration) |
+| **Cloudflare D1** | Primary database (SQLite) |
+| **Cloudflare Workers** | Backend runtime (Hono) |
 
 ---
 
-## Glosario
+## Glossary
 
-| Término | Definición |
+| Term | Definition |
 |---|---|
-| **Folio** | Registro de una venta completa. Puede incluir uno o más servicios. Tiene un ID único y un QR por servicio. |
-| **Slot** | Una instancia de un servicio en una fecha y hora específica, con cupo máximo propio. |
-| **Extra** | Producto o servicio opcional que se suma a un folio (ej. foto, seguro). |
-| **Apartado** | Folio con pago parcial que reserva el cupo pero queda pendiente de cobro completo. |
-| **Corte de caja** | Resumen diario del agente: ventas, gastos operativos y balance neto. |
-| **Precio mínimo** | Piso de precio por servicio definido por el admin. El agente no puede vender por debajo. |
-| **Bonus de comisión** | Porcentaje adicional de comisión definido por el admin para un servicio específico. |
+| **Folio** | Record of a complete sale. Can include one or more services. Has a unique ID and one QR code per service. |
+| **Slot** | An instance of a service at a specific date and time, with its own maximum capacity. |
+| **Extra** | Optional product or service added to a folio (e.g., photo, insurance). |
+| **Booking (Apartado)** | Folio with a partial payment that reserves capacity but remains pending complete collection. |
+| **Cash closure (Corte de caja)** | Agent's daily summary: sales, operating expenses, and net balance. |
+| **Minimum price (Precio mínimo)** | Price floor per service defined by the admin. The agent cannot sell below it. |
+| **Commission bonus (Bonus de comisión)** | Additional commission percentage defined by the admin for a specific service. |

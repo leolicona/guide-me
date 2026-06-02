@@ -2,5 +2,26 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "api-guideme",
   "compatibility_date": "2025-08-03",
-  "main": "./src/index.tsx"
+  "main": "./src/index.tsx",
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "guideme-db",
+      "database_id": "15cd8f75-c94e-41e8-9ec0-d43b1cf73a04",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "services": [
+    {
+      "binding": "AGNOSTIC_AUTH_API",
+      "service": "agnostic-auth"
+    }
+  ],
+  "vars": {
+    "AGNOSTIC_AUTH_APP_ID": "guide-me",
+    "COOKIE_DOMAIN": "",
+    "CORS_ORIGIN": "http://localhost:5173",
+    "API_BASE_URL": "https://api-guideme.leolicona-dev.workers.dev",
+    "RESEND_FROM": "onboarding@resend.dev"
+  }
 }

@@ -1,26 +1,27 @@
-# GuideMe — Arquitectura del Sistema
+# GuideMe — System Architecture
 
-## Visión General
+## Overview
 
-GuideMe se compone de cuatro servicios independientes que se comunican entre sí. La UI nunca interactúa directamente con los servicios internos ni manipula tokens — toda la lógica de sesión y autenticación ocurre en el servidor.
+GuideMe consists of four independent services that communicate with each other. The UI never interacts directly with internal services or manipulates tokens — all session and authentication logic occurs on the server.
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                        INTERNET                             │
 │                                                             │
 │   ┌──────────────────┐         ┌──────────────────────┐    │
-│   │   UI (SPA)       │         │   Meta WhatsApp API  │    │
-│   │ app.guideme.com  │         │  (webhook events)    │    │
-│   └────────┬─────────┘         └──────────┬───────────┘    │
-│            │ HTTPS + cookies               │ HTTPS POST     │
-└────────────┼───────────────────────────────┼────────────────┘
-             │                               │
-    ┌────────▼───────────────────────────────▼────────┐
-    │              CLOUDFLARE NETWORK                  │
-    │                                                  │
-    │  ┌──────────────────────┐  Service  ┌─────────┐ │
+│   │   UI (SPA)       │         │  Meta WhatsApp API   │    │
+│   │ app.guideme.com  │         │ (outbound templates) │    │
+│   └────────┬─────────┘         └──────────▲───────────┘    │
+│            │ HTTPS + cookies              │ HTTPS POST     │
+│            │                              │                │
+└────────────┼──────────────────────────────┼────────────────┘
+             │                              │
+    ┌────────▼──────────────────────────────┼─────────┐
+    │              CLOUDFLARE NETWORK       │         │
+    │                                       │         │
+    │  ┌──────────────────────┐  Service  ┌─┴───────┐ │
     │  │     api-guideme      │  Binding  │whatsapp │ │
-    │  │   api.guideme.com    │◄──────────│ -worker │ │
+    │  │   api.guideme.com    │──────────►│ -worker │ │
     │  │   (Hono Worker/BFF)  │           └─────────┘ │
     │  └──────┬──────────┬────┘                        │
     │         │          │  Service Binding             │
@@ -30,89 +31,88 @@ GuideMe se compone de cuatro servicios independientes que se comunican entre sí
     │         │                    │  (Auth Worker)   │ │
     │         │                    └──────────────────┘ │
     │  ┌──────▼──────┐                                  │
-    │  │Cloudflare D1│      ── Resend (HTTP externo)    │
-    │  │  (SQLite)   │      ── Meta WhatsApp (HTTP ext) │
+    │  │Cloudflare D1│      ── Resend (external HTTP)   │
+    │  │  (SQLite)   │                                  │
     │  └─────────────┘                                  │
     └──────────────────────────────────────────────────┘
 ```
 
 ---
 
-## Servicios
+## Services
 
-### 1. UI — Aplicación Frontend (SPA)
+### 1. UI — Frontend Application (SPA)
 
-- **Dominio:** `app.guideme.com`
-- **Tecnología:** SPA (React / Next / Vite) — por definir
-- **Responsabilidad:** Interfaz de usuario para admin y agentes. Mobile-first.
-- **Comunicación:** Solo habla con `api-guideme`. Nunca llama a otros servicios directamente.
-- **Manejo de sesión:** No almacena tokens. La sesión vive en cookies HttpOnly gestionadas por `api-guideme`. El frontend usa `credentials: 'include'` en todos los fetch.
+- **Domain:** `app.guideme.com`
+- **Technology:** SPA (React / Next / Vite) — to be defined
+- **Responsibility:** User interface for admins and agents. Mobile-first.
+- **Communication:** Only talks to `api-guideme`. Never calls other services directly.
+- **Session Management:** Does not store tokens. The session lives in HttpOnly cookies managed by `api-guideme`. The frontend uses `credentials: 'include'` on all fetches.
 
 ### 2. api-guideme — Backend for Frontend (BFF)
 
-- **Dominio:** `api.guideme.com`
+- **Domain:** `api.guideme.com`
 - **Runtime:** Cloudflare Worker (Hono)
-- **Responsabilidad:** Punto de entrada único para la UI. Gestiona sesión, autorización, lógica de negocio, acceso a D1 y orquestación de llamadas a servicios internos y externos.
+- **Responsibility:** Single entry point for the UI. Manages sessions, authorization, business logic, D1 access, and orchestration of calls to internal and external services.
 - **Bindings:**
 
-| Binding | Tipo | Propósito |
+| Binding | Type | Purpose |
 |---|---|---|
-| `DB` | D1Database | Base de datos principal |
-| `AGNOSTIC_AUTH_API` | Fetcher (Service Binding) | Emitir y renovar JWT |
-| `WHATSAPP_WORKER` | Fetcher (Service Binding) | Enviar mensajes vía WhatsApp Worker |
-| `RESEND_API_KEY` | Secret | Envío de emails transaccionales |
+| `DB` | D1Database | Main database |
+| `AGNOSTIC_AUTH_API` | Fetcher (Service Binding) | Issue and renew JWTs |
+| `WHATSAPP_WORKER` | Fetcher (Service Binding) | Send messages via WhatsApp Worker |
+| `RESEND_API_KEY` | Secret | Transmit transactional emails |
 | `WHATSAPP_API_TOKEN` | Secret | Meta WhatsApp Cloud API |
-| `WHATSAPP_PHONE_NUMBER_ID` | Secret | Número de WhatsApp registrado en Meta |
-| `AGNOSTIC_AUTH_APP_ID` | Var | `"guide-me"` — appId registrado en Agnostic Auth |
-| `QR_SECRET` | Secret | Clave HMAC para firmar/verificar códigos QR |
+| `WHATSAPP_PHONE_NUMBER_ID` | Secret | Registered WhatsApp number ID with Meta |
+| `AGNOSTIC_AUTH_APP_ID` | Var | `"guide-me"` — appId registered in Agnostic Auth |
+| `QR_SECRET` | Secret | HMAC key to sign/verify QR codes |
 | `COOKIE_DOMAIN` | Var | `.guideme.com` |
 
-### 3. agnostic-auth — Proveedor de Identidad (IdP)
+### 3. agnostic-auth — Identity Provider (IdP)
 
-- **Servicio:** `agnostic-auth` (Cloudflare Worker existente)
-- **Acceso desde api-guideme:** Service Binding `AGNOSTIC_AUTH_API`
-- **Responsabilidad:** Emitir JWT (access token) y refresh tokens. Gestionar magic links en KV. Rotar tokens (RTR).
-- **api-guideme nunca expone estos tokens al frontend** — los lee de la respuesta de Agnostic Auth y los escribe como cookies.
+- **Service:** `agnostic-auth` (existing Cloudflare Worker)
+- **Access from api-guideme:** Service Binding `AGNOSTIC_AUTH_API`
+- **Responsibility:** Issue JWTs (access token) and refresh tokens. Manage magic links in KV. Rotate tokens (RTR).
+- **api-guideme never exposes these tokens to the frontend** — it reads them from the Agnostic Auth response and writes them as cookies.
 
-### 4. whatsapp-worker — Webhook de Meta WhatsApp
+### 4. whatsapp-worker — WhatsApp Integration Proxy
 
-- **Servicio:** Worker separado (repositorio independiente o en este monorepo)
-- **Responsabilidad:**
-  - Recibir eventos del webhook de Meta WhatsApp Cloud API (mensajes entrantes, status de entrega).
-  - Validar la firma HMAC-SHA256 de Meta en cada request.
-  - Reenviar eventos relevantes a `api-guideme` via Service Binding.
-- **En Fase 1:** Solo recibe confirmaciones de entrega de los mensajes enviados (comprobantes, magic links). El procesamiento de mensajes entrantes es Fase 2.
-- **Binding en api-guideme:** `WHATSAPP_WORKER: Fetcher` — api-guideme puede enviar mensajes usando este binding como proxy (opcional; también puede llamar a Meta directamente).
+- **Service:** Separate Worker (independent repository or in this monorepo)
+- **Responsibility:**
+  - Standardize and format requests before dispatching them to the Meta WhatsApp Cloud API.
+  - Send outbound purchase receipts and QR tickets to clients.
+  - Webhooks and incoming message processing are disabled/not supported (the only WhatsApp integration is outbound to send tickets).
+- **Binding in api-guideme:** `WHATSAPP_WORKER: Fetcher` — api-guideme calls this binding to proxy outbound messages to the Meta Cloud API.
 
 ---
 
-## Patrón BFF — Sesión con Cookies HttpOnly
+## BFF Pattern — Sessions with HttpOnly Cookies
 
-### Por qué BFF con cookies
+### Why BFF with Cookies
 
-La UI nunca almacena el JWT en `localStorage` ni en memoria JavaScript expuesta. Todas las credenciales viven en cookies HttpOnly, que el navegador incluye automáticamente en cada request y que JavaScript no puede leer. Esto elimina el riesgo de robo de tokens por XSS.
+The UI never stores the JWT in `localStorage` or in exposed JavaScript memory. All credentials live in HttpOnly cookies, which the browser automatically includes in every request and that JavaScript cannot read. This eliminates the risk of token theft via XSS.
 
-### Cookies de sesión
+### Session Cookies
 
-| Cookie | Contenido | Duración | Configuración |
+| Cookie | Content | Duration | Configuration |
 |---|---|---|---|
-| `gm_access` | JWT emitido por Agnostic Auth | 15 min | `HttpOnly; Secure; SameSite=Lax; Domain=.guideme.com` |
-| `gm_refresh` | Refresh token de Agnostic Auth | 7 días | `HttpOnly; Secure; SameSite=Lax; Domain=.guideme.com; Path=/api/auth/refresh` |
+| `gm_access` | JWT issued by Agnostic Auth | 15 min | `HttpOnly; Secure; SameSite=Lax; Domain=.guideme.com` |
+| `gm_refresh` | Refresh token from Agnostic Auth | 7 days | `HttpOnly; Secure; SameSite=Lax; Domain=.guideme.com; Path=/api/auth/refresh` |
 
-> `gm_refresh` se restringe al path `/api/auth/refresh` para que el navegador solo lo envíe cuando la app pida explícitamente un refresh, nunca en requests normales de datos.
+> `gm_refresh` is restricted to the `/api/auth/refresh` path so that the browser only sends it when the app explicitly requests a refresh, never during normal data requests.
 
-### Configuración de dominio y CORS
+### Domain and CORS Configuration
 
-- UI en `app.guideme.com`, API en `api.guideme.com` — mismo dominio raíz `.guideme.com`.
-- Cookie con `Domain=.guideme.com` → válida para ambos subdominios.
-- `SameSite=Lax` → el navegador envía la cookie automáticamente en requests same-site. No requiere `SameSite=None`.
-- CORS en `api-guideme`: `Access-Control-Allow-Origin: https://app.guideme.com` + `Access-Control-Allow-Credentials: true`.
+- UI on `app.guideme.com`, API on `api.guideme.com` — same root domain `.guideme.com`.
+- Cookie with `Domain=.guideme.com` → valid for both subdomains.
+- `SameSite=Lax` → the browser automatically sends the cookie in same-site requests. Does not require `SameSite=None`.
+- CORS in `api-guideme`: `Access-Control-Allow-Origin: https://app.guideme.com` + `Access-Control-Allow-Credentials: true`.
 
 ---
 
-## Flujos de Comunicación
+## Communication Flows
 
-### Login / Obtención de tokens
+### Login / Token Acquisition
 
 ```
 UI                       api-guideme              agnostic-auth
@@ -138,7 +138,7 @@ UI                       api-guideme              agnostic-auth
 │  Set-Cookie: gm_refresh=... │                        │
 ```
 
-### Request autenticado (middleware de api-guideme)
+### Authenticated Request (api-guideme middleware)
 
 ```
 UI                        api-guideme
@@ -146,47 +146,47 @@ UI                        api-guideme
 │  GET /api/services           │
 │  Cookie: gm_access=jwt       │
 │─────────────────────────────►│
-│                              │  1. Lee gm_access cookie
-│                              │  2. Verifica JWT (firma + exp)
-│                              │  3. Extrae sub (email/teléfono)
-│                              │  4. Lookup usuario en D1
-│                              │  5. Adjunta user al contexto Hono
-│                              │  6. Ejecuta handler
+│                              │  1. Read gm_access cookie
+│                              │  2. Verify JWT (signature + exp)
+│                              │  3. Extract sub (email/phone)
+│                              │  4. Lookup user in D1
+│                              │  5. Attach user to Hono context
+│                              │  6. Execute handler
 │◄─────────────────────────────│
 │  200 OK { services: [...] }  │
 ```
 
-### Renovación transparente de sesión (token refresh)
+### Transparent Session Renewal (Token Refresh)
 
 ```
 UI                        api-guideme              agnostic-auth
 │                              │                        │
 │  GET /api/dashboard          │                        │
-│  Cookie: gm_access=EXPIRADO  │                        │
+│  Cookie: gm_access=EXPIRED   │                        │
 │  Cookie: gm_refresh=rt_...   │                        │
 │─────────────────────────────►│                        │
-│                              │  JWT expirado → leer gm_refresh
+│                              │  Expired JWT → read gm_refresh
 │                              │  POST /auth/refresh    │
 │                              │  { appId, refreshToken }
 │                              │───────────────────────►│
 │                              │◄───────────────────────│
 │                              │  { jwt, refreshToken } │
-│                              │  (RTR: refresh rotado) │
+│                              │  (RTR: rotated refresh)│
 │◄─────────────────────────────│                        │
 │  200 OK { dashboard }        │                        │
-│  Set-Cookie: gm_access=nuevo │                        │
-│  Set-Cookie: gm_refresh=nuevo│                        │
+│  Set-Cookie: gm_access=new   │                        │
+│  Set-Cookie: gm_refresh=new  │                        │
 ```
 
-> El frontend **no sabe** que hubo un refresh. La respuesta llega con los datos y las cookies nuevas, de forma completamente transparente.
+> The frontend **does not know** a refresh occurred. The response arrives with the data and the new cookies, completely transparently.
 
-### Envío de mensaje WhatsApp (desde api-guideme)
+### Send WhatsApp Message (from api-guideme)
 
 ```
 api-guideme                  whatsapp-worker          Meta Cloud API
 │                                  │                       │
-│  Confirmar venta → generar QR    │                       │
-│  → notificar cliente             │                       │
+│  Confirm sale → generate QR      │                       │
+│  → notify client                 │                       │
 │                                  │                       │
 │  Service Binding call            │                       │
 │  POST /send { to, template, vars}│                       │
@@ -200,79 +200,57 @@ api-guideme                  whatsapp-worker          Meta Cloud API
 │  { message_id }                  │                       │
 ```
 
-### Webhook entrante de Meta WhatsApp
 
-```
-Meta Cloud API            whatsapp-worker           api-guideme
-│                               │                        │
-│  POST /webhook                │                        │
-│  X-Hub-Signature-256: sha256= │                        │
-│──────────────────────────────►│                        │
-│                               │  1. Validar firma HMAC │
-│                               │  2. Parsear evento     │
-│                               │  3. (Fase 1: solo      │
-│                               │     status updates)    │
-│                               │                        │
-│                               │  Service Binding call  │
-│                               │  POST /internal/wa-event
-│                               │───────────────────────►│
-│                               │                        │  Actualizar estado
-│                               │                        │  de mensaje en D1
-│◄──────────────────────────────│                        │
-│  200 OK                       │                        │
-```
 
----
+## Authorization Middleware in api-guideme
 
-## Middleware de Autorización en api-guideme
-
-Todo endpoint protegido pasa por el middleware de auth antes de llegar al handler:
+Every protected endpoint passes through the auth middleware before reaching the handler:
 
 ```
 Request
   │
   ├─► [auth middleware]
-  │     ├─ Leer cookie gm_access
-  │     ├─ Si no existe → 401 UNAUTHORIZED
-  │     ├─ Verificar JWT (firma, exp)
-  │     │   ├─ Válido → continuar
-  │     │   └─ Expirado → intentar refresh con gm_refresh
-  │     │       ├─ Refresh OK → renovar cookies → continuar
-  │     │       └─ Refresh inválido → limpiar cookies → 401
-  │     ├─ Extraer sub (identity) del JWT
-  │     ├─ Lookup usuario en D1 por identity
-  │     │   └─ No encontrado → 401
-  │     └─ Adjuntar { user_id, role, organization_id } al contexto
+  │     ├─ Read gm_access cookie
+  │     ├─ If not present → 401 UNAUTHORIZED
+  │     ├─ Verify JWT (signature, exp)
+  │     │   ├─ Valid → continue
+  │     │   └─ Expired → try refresh with gm_refresh
+  │     │       ├─ Refresh OK → renew cookies → continue
+  │     │       └─ Refresh invalid → clear cookies → 401
+  │     ├─ Extract sub (identity) from JWT
+  │     ├─ Lookup user in D1 by identity
+  │     │   └─ Not found → 401
+  │     └─ Attach { user_id, role, organization_id } to context
   │
-  └─► [role middleware] (en rutas que lo requieran)
-        ├─ Verificar c.var.user.role === "admin" (o "agent")
-        └─ Si no corresponde → 403 FORBIDDEN
+  ├─► [role middleware] (on routes requiring it)
+  │     ├─ Verify c.var.user.role === "admin" (or "agent")
+  │     └─ If mismatch → 403 FORBIDDEN
   │
-  └─► Handler de negocio
+  └─► Business Handler
 ```
 
 ---
 
-## Estructura de Workers en Cloudflare
+## Workers Structure in Cloudflare
 
 ```
-Cuenta Cloudflare leolicona-dev
+Cloudflare Account leolicona-dev
 │
-├── api-guideme              ← Este repositorio (api-guideme/)
-│   ├── Binding D1: guideme-db
+├── api-guideme              ← This repository (api-guideme/)
+│   ├── D1 Binding: guideme-db
 │   ├── Service Binding: AGNOSTIC_AUTH_API → agnostic-auth
-│   └── (opcional) Service Binding: WHATSAPP_WORKER → whatsapp-worker
+│   └── (optional) Service Binding: WHATSAPP_WORKER → whatsapp-worker
 │
-├── agnostic-auth            ← Worker existente (repositorio separado)
-│   └── KV: tokens de verificación y refresh
+├── agnostic-auth            ← Existing Worker (separate repository)
+│   └── KV: verification and refresh tokens
 │
-└── whatsapp-worker          ← [PLACEHOLDER: Worker a crear]
-    └── Service Binding: API_GUIDEME → api-guideme
+└── whatsapp-worker          ← [PLACEHOLDER: Worker to be created]
+    └── Send template messages to Meta Cloud API (outbound only)
 ```
 
 ---
 
-## Configuración `wrangler.jsonc` de api-guideme
+## `wrangler.jsonc` Config for api-guideme
 
 ```jsonc
 {
@@ -283,7 +261,7 @@ Cuenta Cloudflare leolicona-dev
     {
       "binding": "DB",
       "database_name": "guideme-db",
-      "database_id": "PLACEHOLDER"  // Reemplazar tras: wrangler d1 create guideme-db
+      "database_id": "PLACEHOLDER"  // Replace after running: wrangler d1 create guideme-db
     }
   ],
   "services": [
@@ -291,7 +269,7 @@ Cuenta Cloudflare leolicona-dev
       "binding": "AGNOSTIC_AUTH_API",
       "service": "agnostic-auth"
     }
-    // Descomentar cuando whatsapp-worker esté creado:
+    // Uncomment once whatsapp-worker is created:
     // { "binding": "WHATSAPP_WORKER", "service": "whatsapp-worker" }
   ],
   "vars": {
@@ -309,25 +287,25 @@ Cuenta Cloudflare leolicona-dev
 
 ---
 
-## Decisiones de Arquitectura y Justificación
+## Architectural Decisions and Rationale
 
-| Decisión | Alternativa descartada | Por qué |
+| Decision | Discarded Alternative | Why |
 |---|---|---|
-| Cookies HttpOnly para sesión | JWT en localStorage / memory | XSS no puede robar cookies HttpOnly. localStorage es vulnerable. |
-| Dos cookies (access + refresh) | Session ID en KV | Evita un lookup en KV por cada request. El JWT es autocontenido. |
-| `gm_refresh` restringido a `/api/auth/refresh` | Refresh en cualquier path | El navegador solo envía el refresh token cuando la app lo necesita explícitamente. |
-| Service Binding para auth | HTTP fetch a URL pública | Cero latencia, sin egress cost, comunicación interna en la red de Cloudflare. |
-| Worker separado para WhatsApp webhook | Ruta dentro de api-guideme | Aislamiento de responsabilidades. El webhook de Meta puede tener picos de tráfico independientes. Firma HMAC se valida sin pasar por la lógica de negocio. |
-| SameSite=Lax (no None) | SameSite=None | Mismo dominio raíz, no se necesita None. Lax es más seguro y no requiere HTTPS estricto en dev. |
+| HttpOnly cookies for session | JWT in localStorage / memory | XSS cannot steal HttpOnly cookies. localStorage is vulnerable. |
+| Two cookies (access + refresh) | Session ID in KV | Avoids a KV lookup on every request. JWT is self-contained. |
+| `gm_refresh` restricted to `/api/auth/refresh` | Refresh on any path | Browser only sends the refresh token when the app explicitly needs it. |
+| Service Binding for auth | HTTP fetch to public URL | Zero latency, no egress cost, internal communication inside Cloudflare network. |
+| Outbound-only WhatsApp proxy | Bidirectional/webhook Worker | Meta's webhook and incoming handling are discarded. The only integration is outbound template delivery for sales folios, simplifying the architecture. |
+| SameSite=Lax (not None) | SameSite=None | Same root domain, None is not needed. Lax is more secure and doesn't require strict HTTPS in dev. |
 
 ---
 
-## Placeholders Pendientes
+## Outstanding Placeholders
 
-| Item | Acción requerida |
+| Item | Required Action |
 |---|---|
-| `database_id` en `wrangler.jsonc` | Ejecutar `wrangler d1 create guideme-db` y pegar el ID |
-| `appId: "guide-me"` en Agnostic Auth | Confirmar que `guide-me` está registrado en el App Registry de agnostic-auth |
-| `whatsapp-worker` | Crear el Worker, configurar webhook en Meta Business, agregar Service Binding |
-| Dominio `guideme.com` | Configurar DNS en Cloudflare, rutas de Workers para `api.guideme.com` y `app.guideme.com` |
-| Templates de WhatsApp | Crear y obtener aprobación de Meta para: comprobante de venta, magic link, notificación de cancelación |
+| `database_id` in `wrangler.jsonc` | Run `wrangler d1 create guideme-db` and paste the ID |
+| `appId: "guide-me"` in Agnostic Auth | Confirm `guide-me` is registered in the App Registry of agnostic-auth |
+| `whatsapp-worker` | Create the Worker, add Service Binding for outbound message proxying |
+| Domain `guideme.com` | Configure DNS in Cloudflare, set up Workers routes for `api.guideme.com` and `app.guideme.com` |
+| WhatsApp Templates | Create and obtain approval from Meta for: sales receipt, cancellation notification |

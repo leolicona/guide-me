@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 `guide-me` is a monorepo containing:
 - A Cloudflare Worker API (`api-guideme/`) built with Hono and served via Vite SSR.
-- A React application (`app-guideme/`) built with Vite and Wrangler (assets).
+- A React application as a Chrome Extension (`app-guideme/`) built with React 18, TypeScript, Vite with CRXJS, and TailwindCSS.
 
 The project uses `pnpm` workspaces. Commands can be run from the root.
 
@@ -38,7 +38,7 @@ The Worker entry point is `src/index.tsx` — `.tsx` because Hono uses its own J
 const app = new Hono<{ Bindings: CloudflareBindings }>()
 ```
 
-## Folder Structure Rules (from `project_rules.md`)
+## Backend Folder Structure Rules (from `project_rules.md`)
 
 When expanding into a RESTful API, organize by resource under `src/routes/<resource>/`:
 
@@ -53,3 +53,27 @@ Additional directories:
 - `src/utils/` — utilities like `jwt.ts`, `db.ts`
 - `src/types/` — TypeScript interfaces for data models
 - `src/bindings.d.ts` — Cloudflare env binding type declarations
+
+---
+
+## Frontend Stack & Architecture
+
+- **Framework & Build**: React 18, TypeScript, Vite with CRXJS and TailwindCSS.
+- **Data Fetching (Network)**: TanStack Query (React Query) for efficient caching and backend calls.
+- **State Management**: Zustand for lightweight global state.
+- **Forms**: React Hook Form and Zod (sharing validation schemas with the backend).
+
+### Frontend  Layered Folder Structure 
+
+Organize the `app-guideme/` codebase using the following layered architecture:
+
+- `pages/` — Route assembly only, no business logic.
+- `layout/` — Shared layout components (Header, Sidebar, BottomNav, PageWrapper).
+- `features/<Name>/` — Feature-based modules:
+  - `components/` — Presentational UI components.
+  - `hooks/` — Logic, local state, and API/Query hooks.
+  - `types.ts` — Type definitions local to the feature.
+  - `index.ts` — Public API / exports for the feature.
+- `store/` — Zustand store (cross-feature global state).
+- `services/` — Pure API fetch clients (e.g., `http.ts`, `authService.ts`).
+- `config/` — General configuration files.
