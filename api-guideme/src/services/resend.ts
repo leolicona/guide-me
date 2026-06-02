@@ -70,3 +70,38 @@ export const sendInvitationEmail = async (
     throw new ApiError('INTERNAL_ERROR', 502, `Resend error: ${body}`)
   }
 }
+
+interface PasswordResetEmailInput {
+  to: string
+  name: string
+  resetLink: string
+}
+
+export const sendPasswordResetEmail = async (
+  env: CloudflareBindings,
+  { to, name, resetLink }: PasswordResetEmailInput,
+): Promise<void> => {
+  const res = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${env.RESEND_API_KEY}`,
+    },
+    body: JSON.stringify({
+      from: env.RESEND_FROM,
+      to,
+      subject: 'Recupera tu contraseña de GuideMe',
+      html: `
+        <p>Hola ${name},</p>
+        <p>Recibimos una solicitud para restablecer tu contraseña. Haz clic en el siguiente enlace (válido por 1 hora):</p>
+        <p><a href="${resetLink}">Restablecer mi contraseña</a></p>
+        <p>Si tú no solicitaste este cambio, puedes ignorar este correo. Tu contraseña actual seguirá siendo válida.</p>
+      `,
+    }),
+  })
+
+  if (!res.ok) {
+    const body = await res.text()
+    throw new ApiError('INTERNAL_ERROR', 502, `Resend error: ${body}`)
+  }
+}

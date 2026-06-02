@@ -2,7 +2,12 @@ import type { Context } from 'hono'
 import { and, eq } from 'drizzle-orm'
 import { getCookie } from 'hono/cookie'
 import { getDb } from '../../db/client'
-import { invitations, organizations, users } from '../../db/schema'
+import {
+  invitations,
+  organizations,
+  passwordResetTokens,
+  users,
+} from '../../db/schema'
 import {
   hashPassword,
   initiateMagicLink,
@@ -10,17 +15,24 @@ import {
   verifyPassword,
   verifyToken,
 } from '../../services/agnosticAuth'
-import { sendMagicLinkEmail } from '../../services/resend'
+import { sendMagicLinkEmail, sendPasswordResetEmail } from '../../services/resend'
 import { clearSessionCookies, setSessionCookies } from '../../utils/cookies'
 import { extractIdentity } from '../../utils/jwt'
 import { ApiError } from '../../types/errors'
 import type {
   AcceptInviteQuery,
   CompleteInviteInput,
+  ForgotPasswordInput,
   LoginInput,
   RegisterInput,
+  ResetPasswordInput,
   VerifyQuery,
 } from './schema'
+
+const PASSWORD_RESET_TTL_SECONDS = 60 * 60
+const GENERIC_FORGOT_RESPONSE = {
+  message: 'Si el correo está registrado, recibirás instrucciones.',
+}
 
 type AuthContext = Context<{ Bindings: CloudflareBindings }>
 
@@ -260,4 +272,101 @@ export const completeInvite = async (c: AuthContext) => {
   setSessionCookies(c, { jwt, refreshToken })
 
   return c.json({ user: { name: input.name, role: 'agent' } }, 200)
+}
+
+const findValidPasswordResetToken = async (
+  c: AuthContext,
+  token: string,
+) => {
+  const db = getDb(c.env)
+  const found = await db
+    .select({
+      id: passwordResetTokens.id,
+      userId: passwordResetTokens.userId,
+      expiresAt: passwordResetTokens.expiresAt,
+    })
+    .from(passwordResetTokens)
+    .where(eq(passwordResetTokens.token, token))
+    .limit(1)
+
+  const resetToken = found[0]
+  if (!resetToken) {
+    throw new ApiError('INVALID_TOKEN', 400, 'Invalid or expired reset token')
+  }
+
+  const expiresAtMs =
+    resetToken.expiresAt instanceof Date
+      ? resetToken.expiresAt.getTime()
+      : Number(resetToken.expiresAt) * 1000
+
+  if (expiresAtMs <= Date.now()) {
+    throw new ApiError('INVALID_TOKEN', 400, 'Invalid or expired reset token')
+  }
+
+  return resetToken
+}
+
+export const forgotPassword = async (c: AuthContext) => {
+  const input = (await c.req.json()) as ForgotPasswordInput
+  const db = getDb(c.env)
+
+  const found = await db
+    .select({ id: users.id, name: users.name, email: users.email })
+    .from(users)
+    .where(eq(users.email, input.email))
+    .limit(1)
+
+  const user = found[0]
+  if (!user) {
+    return c.json(GENERIC_FORGOT_RESPONSE, 200)
+  }
+
+  await db
+    .delete(passwordResetTokens)
+    .where(eq(passwordResetTokens.userId, user.id))
+
+  const token = crypto.randomUUID()
+  const expiresAt = new Date(Date.now() + PASSWORD_RESET_TTL_SECONDS * 1000)
+
+  await db.insert(passwordResetTokens).values({
+    id: crypto.randomUUID(),
+    userId: user.id,
+    token,
+    expiresAt,
+  })
+
+  const resetLink = `${c.env.API_BASE_URL}/reset-password?token=${token}`
+
+  await sendPasswordResetEmail(c.env, {
+    to: user.email,
+    name: user.name,
+    resetLink,
+  })
+
+  return c.json(GENERIC_FORGOT_RESPONSE, 200)
+}
+
+export const resetPassword = async (c: AuthContext) => {
+  const input = (await c.req.json()) as ResetPasswordInput
+
+  const resetToken = await findValidPasswordResetToken(c, input.token)
+
+  const db = getDb(c.env)
+
+  const { hash, salt } = await hashPassword(c.env, input.password)
+
+  await db
+    .update(users)
+    .set({
+      passwordHash: hash,
+      passwordSalt: salt,
+      updatedAt: new Date(),
+    })
+    .where(eq(users.id, resetToken.userId))
+
+  await db
+    .delete(passwordResetTokens)
+    .where(eq(passwordResetTokens.id, resetToken.id))
+
+  return c.json({ message: 'Contraseña actualizada correctamente.' }, 200)
 }

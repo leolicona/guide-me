@@ -4,16 +4,20 @@ import { ApiError } from '../../types/errors'
 import {
   acceptInvite,
   completeInvite,
+  forgotPassword,
   login,
   logout,
   register,
+  resetPassword,
   verify,
 } from './handler'
 import {
   acceptInviteQuerySchema,
   completeInviteSchema,
+  forgotPasswordSchema,
   loginSchema,
   registerSchema,
+  resetPasswordSchema,
   verifyQuerySchema,
 } from './schema'
 
@@ -38,6 +42,16 @@ auth.post(
   '/invite/complete',
   zValidator('json', completeInviteSchema, validationHook),
   completeInvite,
+)
+auth.post(
+  '/forgot-password',
+  zValidator('json', forgotPasswordSchema, validationHook),
+  forgotPassword,
+)
+auth.post(
+  '/reset-password',
+  zValidator('json', resetPasswordSchema, validationHook),
+  resetPassword,
 )
 
 export default auth
