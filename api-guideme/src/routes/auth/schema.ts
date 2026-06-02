@@ -15,3 +15,10 @@ export const verifyQuerySchema = z.object({
 })
 
 export type VerifyQuery = z.infer<typeof verifyQuerySchema>
+
+export const loginSchema = z.object({
+  email: z.string().email('Invalid email format'),
+  password: z.string().min(1, 'Password is required'),
+})
+
+export type LoginInput = z.infer<typeof loginSchema>

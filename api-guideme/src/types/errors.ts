@@ -2,6 +2,10 @@ export type ErrorCode =
   | 'VALIDATION_ERROR'
   | 'EMAIL_ALREADY_EXISTS'
   | 'INVALID_TOKEN'
+  | 'INVALID_CREDENTIALS'
+  | 'EMAIL_NOT_VERIFIED'
+  | 'UNAUTHORIZED'
+  | 'FORBIDDEN'
   | 'INTERNAL_ERROR'
 
 export class ApiError extends Error {

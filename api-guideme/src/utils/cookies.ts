@@ -1,5 +1,5 @@
 import type { Context } from 'hono'
-import { setCookie } from 'hono/cookie'
+import { setCookie, deleteCookie } from 'hono/cookie'
 
 interface SessionTokens {
   jwt: string
@@ -28,8 +28,17 @@ export const setSessionCookies = (
     httpOnly: true,
     secure: true,
     sameSite: 'Lax',
-    path: '/api/auth/refresh',
+    path: '/',
     domain,
     maxAge: REFRESH_MAX_AGE,
   })
+}
+
+export const clearSessionCookies = (
+  c: Context<{ Bindings: CloudflareBindings }>,
+): void => {
+  const domain = c.env.COOKIE_DOMAIN || undefined
+
+  deleteCookie(c, 'gm_access', { path: '/', domain })
+  deleteCookie(c, 'gm_refresh', { path: '/', domain })
 }

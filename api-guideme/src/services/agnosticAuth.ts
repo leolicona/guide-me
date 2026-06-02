@@ -56,3 +56,72 @@ export const verifyToken = async (
 
   return json.data
 }
+
+interface VerifyPasswordInput {
+  password: string
+  hash: string
+  salt: string
+  identity: string
+}
+
+export const verifyPassword = async (
+  env: CloudflareBindings,
+  input: VerifyPasswordInput,
+): Promise<{ jwt: string; refreshToken: string }> => {
+  const res = await env.AGNOSTIC_AUTH_API.fetch(
+    'http://auth.local/auth/verify-password',
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        appId: env.AGNOSTIC_AUTH_APP_ID,
+        identity: input.identity,
+        attemptedPassword: input.password,
+        storedHash: input.hash,
+        storedSalt: input.salt,
+      }),
+    },
+  )
+
+  const json = (await res.json()) as AuthResponse<{ jwt: string; refreshToken: string }>
+
+  if (!res.ok || !json.success) {
+    throw new ApiError('INVALID_CREDENTIALS', 401, 'Invalid email or password')
+  }
+
+  return json.data
+}
+
+export const refreshTokens = async (
+  env: CloudflareBindings,
+  refreshToken: string,
+): Promise<{ jwt: string; refreshToken: string }> => {
+  const res = await env.AGNOSTIC_AUTH_API.fetch('http://auth.local/auth/refresh', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ appId: env.AGNOSTIC_AUTH_APP_ID, refreshToken }),
+  })
+
+  const json = (await res.json()) as AuthResponse<{ jwt: string; refreshToken: string }>
+
+  if (!res.ok || !json.success) {
+    throw new ApiError('UNAUTHORIZED', 401, 'Invalid or expired refresh token')
+  }
+
+  return json.data
+}
+
+export const revokeToken = async (
+  env: CloudflareBindings,
+  refreshToken: string,
+): Promise<void> => {
+  try {
+    await env.AGNOSTIC_AUTH_API.fetch('http://auth.local/auth/token/revoke', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ appId: env.AGNOSTIC_AUTH_APP_ID, refreshToken }),
+    })
+  } catch (err) {
+    console.error('Failed to revoke token:', err)
+  }
+}

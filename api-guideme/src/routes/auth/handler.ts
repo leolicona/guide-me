@@ -1,16 +1,20 @@
 import type { Context } from 'hono'
 import { eq } from 'drizzle-orm'
+import { getCookie } from 'hono/cookie'
 import { getDb } from '../../db/client'
 import { organizations, users } from '../../db/schema'
 import {
   hashPassword,
   initiateMagicLink,
+  revokeToken,
+  verifyPassword,
   verifyToken,
 } from '../../services/agnosticAuth'
 import { sendMagicLinkEmail } from '../../services/resend'
-import { setSessionCookies } from '../../utils/cookies'
+import { clearSessionCookies, setSessionCookies } from '../../utils/cookies'
+import { extractIdentity } from '../../utils/jwt'
 import { ApiError } from '../../types/errors'
-import type { RegisterInput, VerifyQuery } from './schema'
+import type { LoginInput, RegisterInput, VerifyQuery } from './schema'
 
 type AuthContext = Context<{ Bindings: CloudflareBindings }>
 
@@ -77,7 +81,7 @@ export const verify = async (c: AuthContext) => {
 
   const db = getDb(c.env)
 
-  const identity = extractIdentityFromJwt(jwt)
+  const identity = extractIdentity(jwt)
   if (!identity) {
     throw new ApiError('INVALID_TOKEN', 400, 'Invalid token payload')
   }
@@ -106,13 +110,48 @@ export const verify = async (c: AuthContext) => {
   )
 }
 
-const extractIdentityFromJwt = (jwt: string): string | null => {
-  const parts = jwt.split('.')
-  if (parts.length !== 3) return null
-  try {
-    const payload = JSON.parse(atob(parts[1].replace(/-/g, '+').replace(/_/g, '/')))
-    return payload.sub ?? payload.identity ?? null
-  } catch {
-    return null
+export const login = async (c: AuthContext) => {
+  const input = (await c.req.json()) as LoginInput
+  const db = getDb(c.env)
+
+  const found = await db
+    .select()
+    .from(users)
+    .where(eq(users.email, input.email))
+    .limit(1)
+
+  const user = found[0]
+  if (!user) {
+    throw new ApiError('INVALID_CREDENTIALS', 401, 'Invalid email or password')
   }
+
+  if (user.status === 'unverified') {
+    throw new ApiError(
+      'EMAIL_NOT_VERIFIED',
+      403,
+      'Please verify your email before logging in',
+    )
+  }
+
+  const { jwt, refreshToken } = await verifyPassword(c.env, {
+    password: input.password,
+    hash: user.passwordHash,
+    salt: user.passwordSalt,
+  })
+
+  setSessionCookies(c, { jwt, refreshToken })
+
+  return c.json({ user: { name: user.name, role: user.role } }, 200)
+}
+
+export const logout = async (c: AuthContext) => {
+  const refreshToken = getCookie(c, 'gm_refresh')
+
+  if (refreshToken) {
+    await revokeToken(c.env, refreshToken)
+  }
+
+  clearSessionCookies(c)
+
+  return c.json({ message: 'Sesión cerrada correctamente.' }, 200)
 }

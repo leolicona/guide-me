@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { env, SELF } from 'cloudflare:test'
+import { buildFakeJwt } from '../helpers/jwt'
 
 const VALID_BODY = {
   name: 'Leo Licona',
@@ -7,18 +8,6 @@ const VALID_BODY = {
   password: 'S3cur3Pass!',
   company_name: 'Empresa S.A.',
   phone: '+52 55 1234 5678',
-}
-
-const buildFakeJwt = (identity: string): string => {
-  const header = btoa(JSON.stringify({ alg: 'HS256', typ: 'JWT' }))
-    .replace(/=/g, '')
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_')
-  const payload = btoa(JSON.stringify({ sub: identity, exp: Date.now() / 1000 + 900 }))
-    .replace(/=/g, '')
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_')
-  return `${header}.${payload}.signature`
 }
 
 const mockAgnosticAuth = (
@@ -238,7 +227,7 @@ describe('Admin Verification — GET /api/auth/verify', () => {
     expect(cookieHeader).toMatch(/HttpOnly/i)
     expect(cookieHeader).toMatch(/Secure/i)
     expect(cookieHeader).toMatch(/SameSite=Lax/i)
-    expect(cookieHeader).toMatch(/Path=\/api\/auth\/refresh/i)
+    expect(cookieHeader).toMatch(/Path=\//i)
 
     const user = await env.DB.prepare('SELECT status FROM users WHERE email = ?')
       .bind(VALID_BODY.email)
