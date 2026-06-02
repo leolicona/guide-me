@@ -1,8 +1,21 @@
 import { Hono } from 'hono'
 import { zValidator } from '@hono/zod-validator'
 import { ApiError } from '../../types/errors'
-import { login, logout, register, verify } from './handler'
-import { loginSchema, registerSchema, verifyQuerySchema } from './schema'
+import {
+  acceptInvite,
+  completeInvite,
+  login,
+  logout,
+  register,
+  verify,
+} from './handler'
+import {
+  acceptInviteQuerySchema,
+  completeInviteSchema,
+  loginSchema,
+  registerSchema,
+  verifyQuerySchema,
+} from './schema'
 
 const auth = new Hono<{ Bindings: CloudflareBindings }>()
 
@@ -16,5 +29,15 @@ auth.post('/register', zValidator('json', registerSchema, validationHook), regis
 auth.get('/verify', zValidator('query', verifyQuerySchema, validationHook), verify)
 auth.post('/login', zValidator('json', loginSchema, validationHook), login)
 auth.post('/logout', logout)
+auth.get(
+  '/invite/accept',
+  zValidator('query', acceptInviteQuerySchema, validationHook),
+  acceptInvite,
+)
+auth.post(
+  '/invite/complete',
+  zValidator('json', completeInviteSchema, validationHook),
+  completeInvite,
+)
 
 export default auth

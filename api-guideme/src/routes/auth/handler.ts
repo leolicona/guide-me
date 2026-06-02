@@ -1,8 +1,8 @@
 import type { Context } from 'hono'
-import { eq } from 'drizzle-orm'
+import { and, eq } from 'drizzle-orm'
 import { getCookie } from 'hono/cookie'
 import { getDb } from '../../db/client'
-import { organizations, users } from '../../db/schema'
+import { invitations, organizations, users } from '../../db/schema'
 import {
   hashPassword,
   initiateMagicLink,
@@ -14,7 +14,13 @@ import { sendMagicLinkEmail } from '../../services/resend'
 import { clearSessionCookies, setSessionCookies } from '../../utils/cookies'
 import { extractIdentity } from '../../utils/jwt'
 import { ApiError } from '../../types/errors'
-import type { LoginInput, RegisterInput, VerifyQuery } from './schema'
+import type {
+  AcceptInviteQuery,
+  CompleteInviteInput,
+  LoginInput,
+  RegisterInput,
+  VerifyQuery,
+} from './schema'
 
 type AuthContext = Context<{ Bindings: CloudflareBindings }>
 
@@ -137,6 +143,7 @@ export const login = async (c: AuthContext) => {
     password: input.password,
     hash: user.passwordHash,
     salt: user.passwordSalt,
+    identity: user.email,
   })
 
   setSessionCookies(c, { jwt, refreshToken })
@@ -154,4 +161,103 @@ export const logout = async (c: AuthContext) => {
   clearSessionCookies(c)
 
   return c.json({ message: 'Sesión cerrada correctamente.' }, 200)
+}
+
+const findValidPendingInvitation = async (
+  c: AuthContext,
+  token: string,
+) => {
+  const db = getDb(c.env)
+  const found = await db
+    .select({
+      id: invitations.id,
+      organizationId: invitations.organizationId,
+      identity: invitations.identity,
+      identityType: invitations.identityType,
+      status: invitations.status,
+      expiresAt: invitations.expiresAt,
+    })
+    .from(invitations)
+    .where(eq(invitations.token, token))
+    .limit(1)
+
+  const invitation = found[0]
+  if (!invitation || invitation.status !== 'pending') {
+    throw new ApiError('INVALID_TOKEN', 400, 'Invalid or expired invitation token')
+  }
+
+  const expiresAtMs =
+    invitation.expiresAt instanceof Date
+      ? invitation.expiresAt.getTime()
+      : Number(invitation.expiresAt) * 1000
+
+  if (expiresAtMs <= Date.now()) {
+    throw new ApiError('INVALID_TOKEN', 400, 'Invalid or expired invitation token')
+  }
+
+  return invitation
+}
+
+export const acceptInvite = async (c: AuthContext) => {
+  const { token } = c.req.query() as AcceptInviteQuery
+
+  const invitation = await findValidPendingInvitation(c, token)
+
+  const db = getDb(c.env)
+  const org = await db
+    .select({ name: organizations.name })
+    .from(organizations)
+    .where(eq(organizations.id, invitation.organizationId))
+    .limit(1)
+
+  return c.json(
+    {
+      invitation: {
+        identity: invitation.identity,
+        identity_type: invitation.identityType,
+        organization_name: org[0]?.name ?? '',
+      },
+    },
+    200,
+  )
+}
+
+export const completeInvite = async (c: AuthContext) => {
+  const input = (await c.req.json()) as CompleteInviteInput
+
+  const invitation = await findValidPendingInvitation(c, input.token)
+
+  const db = getDb(c.env)
+
+  const { hash, salt } = await hashPassword(c.env, input.password)
+
+  const userId = crypto.randomUUID()
+
+  await db.insert(users).values({
+    id: userId,
+    organizationId: invitation.organizationId,
+    name: input.name,
+    email: invitation.identity,
+    passwordHash: hash,
+    passwordSalt: salt,
+    role: 'agent',
+    status: 'active',
+    plan: 'free',
+  })
+
+  await db
+    .update(invitations)
+    .set({ status: 'accepted', updatedAt: new Date() })
+    .where(eq(invitations.id, invitation.id))
+
+  const { jwt, refreshToken } = await verifyPassword(c.env, {
+    password: input.password,
+    hash,
+    salt,
+    identity: invitation.identity,
+  })
+
+  setSessionCookies(c, { jwt, refreshToken })
+
+  return c.json({ user: { name: input.name, role: 'agent' } }, 200)
 }

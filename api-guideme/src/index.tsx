@@ -3,6 +3,7 @@ import { renderer } from './renderer'
 import { errorHandler } from './middleware/errorHandler'
 import { authMiddleware } from './middleware/auth'
 import { requireRole } from './middleware/role'
+import agentsRouter from './routes/agents'
 import authRouter from './routes/auth'
 import type { AppVariables } from './types/context'
 
@@ -14,6 +15,7 @@ const app = new Hono<{
 app.onError(errorHandler)
 
 app.route('/api/auth', authRouter)
+app.route('/api/agents', agentsRouter)
 
 app.get('/api/me', authMiddleware, (c) => c.json({ user: c.get('user') }))
 
