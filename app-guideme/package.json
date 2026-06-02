@@ -12,8 +12,18 @@
     "cf-typegen": "wrangler types"
   },
   "dependencies": {
+    "@emotion/react": "^11.14.0",
+    "@emotion/styled": "^11.14.1",
+    "@hookform/resolvers": "^5.4.0",
+    "@mui/icons-material": "^9.0.1",
+    "@mui/material": "^9.0.1",
+    "@tanstack/react-query": "^5.100.14",
     "react": "^19.2.6",
-    "react-dom": "^19.2.6"
+    "react-dom": "^19.2.6",
+    "react-hook-form": "^7.77.0",
+    "react-router-dom": "^7.16.0",
+    "zod": "^4.4.3",
+    "zustand": "^5.0.14"
   },
   "devDependencies": {
     "@cloudflare/vite-plugin": "^1.39.0",

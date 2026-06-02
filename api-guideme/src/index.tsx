@@ -1,4 +1,5 @@
 import { Hono } from 'hono'
+import { cors } from 'hono/cors'
 import { renderer } from './renderer'
 import { errorHandler } from './middleware/errorHandler'
 import { authMiddleware } from './middleware/auth'
@@ -13,6 +14,16 @@ const app = new Hono<{
 }>()
 
 app.onError(errorHandler)
+
+app.use('/api/*', async (c, next) => {
+  const allowedOrigins = c.env.CORS_ORIGIN.split(',').map((o) => o.trim())
+  return cors({
+    origin: (origin) => (allowedOrigins.includes(origin) ? origin : null),
+    credentials: true,
+    allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowHeaders: ['Content-Type'],
+  })(c, next)
+})
 
 app.route('/api/auth', authRouter)
 app.route('/api/agents', agentsRouter)

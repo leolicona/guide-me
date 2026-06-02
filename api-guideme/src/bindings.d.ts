@@ -5,6 +5,7 @@ interface CloudflareBindings {
   RESEND_API_KEY: string
   RESEND_FROM: string
   API_BASE_URL: string
+  APP_BASE_URL: string
   COOKIE_DOMAIN: string
   CORS_ORIGIN: string
 }

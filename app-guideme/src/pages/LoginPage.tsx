@@ -1,0 +1,10 @@
+import { AuthLayout } from '../layout/AuthLayout';
+import { LoginForm } from '../features/auth/components/LoginForm';
+
+export default function LoginPage() {
+  return (
+    <AuthLayout title="Log in">
+      <LoginForm />
+    </AuthLayout>
+  );
+}

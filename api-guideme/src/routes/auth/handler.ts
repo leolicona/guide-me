@@ -78,7 +78,7 @@ export const register = async (c: AuthContext) => {
   })
 
   const { token } = await initiateMagicLink(c.env, input.email)
-  const magicLink = `${c.env.API_BASE_URL}/api/auth/verify?token=${token}`
+  const magicLink = `${c.env.APP_BASE_URL}/verify?token=${token}`
 
   await sendMagicLinkEmail(c.env, {
     to: input.email,
@@ -335,7 +335,7 @@ export const forgotPassword = async (c: AuthContext) => {
     expiresAt,
   })
 
-  const resetLink = `${c.env.API_BASE_URL}/reset-password?token=${token}`
+  const resetLink = `${c.env.APP_BASE_URL}/reset-password?token=${token}`
 
   await sendPasswordResetEmail(c.env, {
     to: user.email,

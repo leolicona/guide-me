@@ -20,8 +20,9 @@
   "vars": {
     "AGNOSTIC_AUTH_APP_ID": "guide-me",
     "COOKIE_DOMAIN": "",
-    "CORS_ORIGIN": "http://localhost:5173",
+    "CORS_ORIGIN": "http://localhost:5173,https://app-guideme.leolicona-dev.workers.dev",
     "API_BASE_URL": "https://api-guideme.leolicona-dev.workers.dev",
+    "APP_BASE_URL": "https://app-guideme.leolicona-dev.workers.dev",
     "RESEND_FROM": "onboarding@resend.dev"
   }
 }
