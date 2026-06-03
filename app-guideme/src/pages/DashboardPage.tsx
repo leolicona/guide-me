@@ -1,6 +1,9 @@
 import { Box, Typography, Button, Container, AppBar, Toolbar, Fade } from '@mui/material';
+import { PersonAdd } from '@mui/icons-material';
+import { Link as RouterLink } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
 import { useLogout } from '../features/auth/hooks/useLogout';
+import { ROUTES } from '../config/routes';
 
 export default function DashboardPage() {
   const user = useAuthStore((state) => state.user);
@@ -35,6 +38,19 @@ export default function DashboardPage() {
           <Typography color="text.secondary">
             Welcome to your dashboard. This page will be expanded in future iterations.
           </Typography>
+
+          {user?.role === 'admin' && (
+            <Button
+              component={RouterLink}
+              to={ROUTES.INVITE_AGENT}
+              variant="contained"
+              disableElevation
+              startIcon={<PersonAdd />}
+              sx={{ mt: 3 }}
+            >
+              Invite agent
+            </Button>
+          )}
         </Container>
       </Box>
     </Fade>

@@ -6,4 +6,5 @@ export const ROUTES = {
   RESET_PASSWORD: '/reset-password',
   INVITE_ACCEPT: '/invite/accept',
   DASHBOARD: '/dashboard',
+  INVITE_AGENT: '/agents/invite',
 } as const

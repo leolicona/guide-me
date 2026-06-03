@@ -31,7 +31,7 @@ function handleUnauthorized(path: string) {
   }
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+export async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
     ...init,
     credentials: 'include',
@@ -140,8 +140,10 @@ export const completeInvite = (data: CompleteInviteInput) =>
     body: JSON.stringify(data),
   })
 
-export const getMe = () =>
-  request<UserPayload>('/api/me')
+export const getMe = async () => {
+  const res = await request<{ user: UserPayload }>('/api/me')
+  return res.user
+}
 
 export const logout = () =>
   request<MessageResponse>('/api/auth/logout', { method: 'POST' })

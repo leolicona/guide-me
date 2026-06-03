@@ -126,35 +126,41 @@ GuideMe is a multi-tenant, mobile-optimized SaaS platform that centralizes the s
 
 ### Phase 1 — MVP (Initial Scope)
 
-| Module | Included |
-|---|---|
-| Auth (admin & agent via email/password, verification via Resend) | ✅ |
-| Staff management (invite via email, edit, deactivate agents) | ✅ |
-| Service catalog with extras and minimum price | ✅ |
-| Schedules/slots with capacity by date and time | ✅ |
-| Mobile point of sale with controlled discount | ✅ |
-| Bookings/down-payments (partial payment with spot reservation) | ✅ |
-| Folio generation with signed QR code (HMAC) | ✅ |
-| Sending receipt and QR code to client via WhatsApp | ✅ |
-| Offline-capable QR scanner with post-sync | ✅ |
-| Agent's daily cash drawer with operating expenses | ✅ |
-| Occupancy visual dashboard (admin) | ✅ |
-| Commissions: base % per agent + bonus per service | ✅ |
-| Commission report by period | ✅ |
-| Total folio cancellation | ✅ |
-| Multitenancy (isolated organizations) | ✅ |
+#### 🟢 MUST HAVE
+*Critical features required to launch the MVP.*
+- [x] **Auth (admin & agent via email/password, verification via Resend)** *(US-A01, US-A02, US-A03, US-A04, US-AG01, US-AG02, US-AG18)*
+- [ ] **Multitenancy (isolated organizations)** *(Global)* — `docs/multitenancy/multitenancy.spec.md`
+- [ ] **Staff management (invite via email, edit, deactivate agents)** *(US-A05, US-A06, US-A07, US-A08)*
+- [ ] **Service catalog with extras and minimum price** *(US-A09, US-A11, US-A13)*
+- [ ] **Schedules/slots with capacity by date and time** *(US-A10)*
+- [ ] **Mobile point of sale with controlled discount** *(US-AG03, US-AG04, US-AG05, US-AG06, US-AG08)*
+- [ ] **Folio generation with signed QR code (HMAC)** *(US-AG08, US-C02)*
+- [ ] **Agent's daily cash drawer with operating expenses** *(US-AG12, US-AG13, US-AG14, US-A19)*
+- [ ] **Total folio cancellation** *(US-A21)*
+
+#### 🟡 SHOULD HAVE
+*Important features that add great value, but the system could operate manually without them in the very first days.*
+- [ ] **Bookings/down-payments (partial payment with spot reservation)** *(US-AG07)*
+- [ ] **Sending receipt and QR code to client via WhatsApp** *(US-AG09, US-C01, US-C03)*
+- [ ] **Offline-capable QR scanner with post-sync** *(US-AG15, US-AG16, US-AG17)*
+- [ ] **Occupancy visual dashboard (admin)** *(US-A14, US-A15, US-A16)*
+- [ ] **Commissions: base % per agent + bonus per service** *(US-A12)*
+- [ ] **Commission report by period** *(US-A17, US-A18, US-A20)*
 
 ### Out of MVP (Phase 2+)
 
-| Feature | Reason for exclusion |
-|---|---|
-| Integrated card payments (Stripe, Conekta) | Payment integration complexity |
-| Client self-service online purchase | Requires payment gateway and checkout flow |
-| Partial cancellations (per service within the folio) | Simplifies inventory logic in MVP |
-| Native App (iOS / Android) | Mobile-first PWA is sufficient for Phase 1 |
-| Discarded: Bidirectional WhatsApp / Silent client registration | The only WhatsApp API integration is to send tickets to clients |
-| Report export (PDF/CSV) | Phase 2 after verifying on-screen reports |
-| Multiple payment methods (card, wire transfer) | Cash only in Phase 1 |
+#### 🔵 COULD HAVE
+*Nice-to-have features that improve UX if extra time is available.*
+- [ ] **Report export (PDF/CSV)** - *Moved from Out of MVP if time permits.*
+
+#### 🔴 WON'T HAVE THIS TIME
+*Features explicitly discarded for the MVP.*
+- [ ] **Integrated card payments (Stripe, Conekta)** - *Payment integration complexity*
+- [ ] **Client self-service online purchase** - *Requires payment gateway and checkout flow*
+- [ ] **Partial cancellations (per service within the folio)** - *Simplifies inventory logic in MVP*
+- [ ] **Native App (iOS / Android)** - *Mobile-first PWA is sufficient for Phase 1*
+- [ ] **Discarded: Bidirectional WhatsApp / Silent client registration** - *The only WhatsApp API integration is to send tickets to clients*
+- [ ] **Multiple payment methods (card, wire transfer)** - *Cash only in Phase 1*
 
 ---
 

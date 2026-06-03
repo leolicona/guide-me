@@ -19,6 +19,7 @@ const buildUserPayload = async (
   const found = await db
     .select({
       id: users.id,
+      name: users.name,
       email: users.email,
       role: users.role,
       organizationId: users.organizationId,
@@ -32,6 +33,7 @@ const buildUserPayload = async (
 
   return {
     userId: user.id,
+    name: user.name,
     email: user.email,
     role: user.role as UserRole,
     organizationId: user.organizationId,

@@ -15,6 +15,7 @@ Phase 3 → Infrastructure (router, services, store)
 Phase 4 → Shared components
 Phase 5 → Auth screens
 Phase 6 → Polish and review
+Phase 7 → Admin: Send Agent Invitation
 ```
 
 ---
@@ -308,6 +309,72 @@ Review all scenarios from `docs/auth/frontend.spec.md` and check ✅ or ❌.
 
 ---
 
+## Phase 7 — Admin: Send Agent Invitation
+
+> Covers `frontend.spec.md` Screen 7. Frontend half of `docs/auth/agent-invitation.spec.md` (admin side; the agent-acceptance side is Screen 6 / Task 5.6). Lives under `features/agents/`, not `features/auth/`, since the endpoint is `/api/agents/invite` and the action belongs to agent management.
+
+### Task 7.1 — Service (`src/services/agentsService.ts`)
+
+| Function | Endpoint |
+|---|---|
+| `inviteAgent({ identity })` | `POST /api/agents/invite` |
+
+Reuse `ServiceError` + `request()` wrapper from `authService.ts` (extract to `services/http.ts` if duplication grows).
+
+### Task 7.2 — Zod schema (`src/features/agents/schemas.ts`)
+
+```ts
+inviteAgentSchema = z.object({ identity: z.string().email() })
+```
+
+### Task 7.3 — Hook (`src/features/agents/hooks/useInviteAgent.ts`)
+
+`useMutation` wrapping `inviteAgent()`. No cache to invalidate yet (no "list invitations" query in this phase).
+
+### Task 7.4 — `RoleGuard` (`src/features/auth/components/RoleGuard.tsx`)
+
+- Reads `user.role` from `authStore`
+- `role` matches → render `children`
+- mismatch → `<Navigate to={ROUTES.DASHBOARD} replace />`
+- Always composed inside `AuthGuard` so `authStore` is guaranteed populated
+
+### Task 7.5 — Page + Form
+
+Files: `src/pages/InviteAgentPage.tsx` + `src/features/agents/components/InviteAgentForm.tsx`
+
+Field: `identity` (email)
+
+| Response | UI |
+|---|---|
+| 201 | `SuccessScreen` with mail icon + "Send another" action that resets the form |
+| 409 `IDENTITY_ALREADY_EXISTS` | Inline error under email |
+| 403 `FORBIDDEN` (fallback) | Alert + `queryClient.invalidateQueries(['me'])` |
+| 400 | Inline errors |
+
+Route registered in `App.tsx`:
+
+```tsx
+<Route
+  path={ROUTES.INVITE_AGENT}
+  element={
+    <AuthGuard>
+      <RoleGuard role="admin">
+        <InviteAgentPage />
+      </RoleGuard>
+    </AuthGuard>
+  }
+/>
+```
+
+### Task 7.6 — Route constant + dashboard entry point
+
+- Add `INVITE_AGENT: '/agents/invite'` to `src/config/routes.ts`
+- In `DashboardPage.tsx`, render a button "Invite agent" → `/agents/invite` only when `user.role === 'admin'`
+
+**Deliverable:** Admin can navigate to `/agents/invite`, send an invitation, and see the success state. Agents are redirected to `/dashboard` from the route.
+
+---
+
 ## Phase Dependencies
 
 ```mermaid
@@ -317,9 +384,10 @@ graph LR
     F3 --> F4[Phase 4\nComponents]
     F4 --> F5[Phase 5\nScreens]
     F5 --> F6[Phase 6\nPolish]
+    F6 --> F7[Phase 7\nAdmin: Invite Agent]
 ```
 
-Phases must be executed in order. In Phase 5, tasks 5.1–5.7 can be implemented in any sequence.
+Phases must be executed in order. In Phase 5, tasks 5.1–5.7 can be implemented in any sequence. Phase 7 depends on Phase 6 only because it consumes the populated `authStore` + global 401 interceptor.
 
 ---
 
@@ -370,6 +438,16 @@ Phases must be executed in order. In Phase 5, tasks 5.1–5.7 can be implemented
 - [x] Global 401 interceptor (`authService.ts` → clears `authStore`, redirects to `/login?redirect=…`; skips `/api/auth/*` so login's `401 INVALID_CREDENTIALS` stays inline)
 - [x] Basic accessibility (MUI `label` + `helperText` carry `aria-describedby`; `LoginForm` calls `setFocus('password')` on `401`; `PasswordInput` toggle has `aria-label`)
 - [x] Full review against `frontend.spec.md` (see Phase 6 — Spec Review below)
+
+### Phase 7 — Admin: Send Agent Invitation
+- [x] `src/services/agentsService.ts` with `inviteAgent()` (reuses exported `request()` from `authService.ts`)
+- [x] `src/features/agents/schemas.ts` with `inviteAgentSchema`
+- [x] `src/features/agents/hooks/useInviteAgent.ts`
+- [x] `src/features/auth/components/RoleGuard.tsx`
+- [x] `src/pages/InviteAgentPage.tsx` + `src/features/agents/components/InviteAgentForm.tsx`
+- [x] `INVITE_AGENT` constant in `routes.ts`; route wired with `AuthGuard` + `RoleGuard role="admin"`
+- [x] Dashboard renders "Invite agent" entry point for admins only
+- [ ] Spec scenarios 7.1–7.6 manually verified
 
 ---
 

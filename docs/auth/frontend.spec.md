@@ -2,7 +2,7 @@
 
 ## Context
 
-This spec defines the UI screens, navigation flows, component structure, and testable scenarios for all authentication features in `app-guideme`. It covers admin registration, email verification, login, password recovery, agent invitation/onboarding, session management, and logout.
+This spec defines the UI screens, navigation flows, component structure, and testable scenarios for all authentication features in `app-guideme`. It covers admin registration, email verification, login, password recovery, agent invitation/onboarding (both sides — admin sends, agent accepts), session management, and logout.
 
 The UI never handles tokens directly — session cookies (`gm_access`, `gm_refresh`) are `HttpOnly` and managed entirely by the API via `Set-Cookie` headers.
 
@@ -30,38 +30,48 @@ app-guideme/src/
 │   ├── ForgotPasswordPage.tsx
 │   ├── ResetPasswordPage.tsx
 │   ├── InviteAcceptPage.tsx
+│   ├── InviteAgentPage.tsx     # Admin-only: send invitation to agent
 │   └── DashboardPage.tsx
 ├── layout/
 │   └── AuthLayout.tsx          # MUI Container + Card centered layout
 ├── features/
-│   └── auth/
+│   ├── auth/
+│   │   ├── components/
+│   │   │   ├── LoginForm.tsx
+│   │   │   ├── RegisterForm.tsx
+│   │   │   ├── ForgotPasswordForm.tsx
+│   │   │   ├── ResetPasswordForm.tsx
+│   │   │   ├── InviteCompleteForm.tsx
+│   │   │   ├── PasswordInput.tsx
+│   │   │   ├── PasswordStrength.tsx
+│   │   │   ├── SuccessScreen.tsx
+│   │   │   ├── AuthGuard.tsx
+│   │   │   └── RoleGuard.tsx   # Wraps children; reads role from authStore
+│   │   ├── hooks/
+│   │   │   ├── useLogin.ts
+│   │   │   ├── useRegister.ts
+│   │   │   ├── useVerify.ts
+│   │   │   ├── useForgotPassword.ts
+│   │   │   ├── useResetPassword.ts
+│   │   │   ├── useInviteAccept.ts
+│   │   │   ├── useInviteComplete.ts
+│   │   │   ├── useMe.ts
+│   │   │   └── useLogout.ts
+│   │   ├── schemas.ts          # Zod schemas (shared with backend where possible)
+│   │   ├── types.ts
+│   │   └── index.ts
+│   └── agents/
 │       ├── components/
-│       │   ├── LoginForm.tsx
-│       │   ├── RegisterForm.tsx
-│       │   ├── ForgotPasswordForm.tsx
-│       │   ├── ResetPasswordForm.tsx
-│       │   ├── InviteCompleteForm.tsx
-│       │   ├── PasswordInput.tsx
-│       │   ├── PasswordStrength.tsx
-│       │   ├── SuccessScreen.tsx
-│       │   └── AuthGuard.tsx
+│       │   └── InviteAgentForm.tsx
 │       ├── hooks/
-│       │   ├── useLogin.ts
-│       │   ├── useRegister.ts
-│       │   ├── useVerify.ts
-│       │   ├── useForgotPassword.ts
-│       │   ├── useResetPassword.ts
-│       │   ├── useInviteAccept.ts
-│       │   ├── useInviteComplete.ts
-│       │   ├── useMe.ts
-│       │   └── useLogout.ts
-│       ├── schemas.ts          # Zod schemas (shared with backend where possible)
-│       ├── types.ts
+│       │   └── useInviteAgent.ts
+│       ├── schemas.ts          # inviteAgentSchema
 │       └── index.ts
 ├── store/
 │   └── authStore.ts            # Zustand: { user, isAuthenticated, setUser, clear }
 ├── services/
-│   └── authService.ts          # fetch wrappers for /api/auth/* endpoints
+│   ├── authService.ts          # fetch wrappers for /api/auth/* endpoints
+│   └── agentsService.ts        # fetch wrappers for /api/agents/* endpoints
 └── config/
     ├── theme.ts                # MUI createTheme() — elegant minimalist
     └── routes.ts               # Route path constants
@@ -99,6 +109,14 @@ MUI `LinearProgress` with dynamic color (red → yellow → green) based on pass
 
 Reusable screen with MUI `Stack` layout: icon (Material Symbols), `Typography` title + body, and optional `Button`/`Link`. Used after registration, password reset, etc. Rendered inside `AuthLayout`.
 
+### RoleGuard
+
+Route wrapper for role-restricted pages. Reads `user.role` from `authStore` (already populated by `AuthGuard`):
+- **Match** → render `children`
+- **Mismatch** → `<Navigate to="/dashboard" replace />`
+
+Always composes inside `AuthGuard` (auth is checked first, then role).
+
 ---
 
 ## Validation Schemas (`features/auth/schemas.ts`)
@@ -115,6 +133,12 @@ inviteCompleteSchema: { name, password, confirmPassword (refine match) }
 
 > Note: `confirmPassword` is frontend-only — not sent to the API.
 
+### Agents (`features/agents/schemas.ts`)
+
+```ts
+inviteAgentSchema: { identity: z.email() }   // currently email-only
+```
+
 ---
 
 ## Routes
@@ -128,6 +152,7 @@ inviteCompleteSchema: { name, password, confirmPassword (refine match) }
 | `/reset-password` | ResetPasswordPage | Public | AuthLayout |
 | `/invite/accept` | InviteAcceptPage | Public | AuthLayout |
 | `/dashboard` | DashboardPage | Protected | MainLayout (AuthGuard) |
+| `/agents/invite` | InviteAgentPage | Protected — admin only | MainLayout (AuthGuard + RoleGuard) |
 
 ---
 
@@ -360,6 +385,68 @@ inviteCompleteSchema: { name, password, confirmPassword (refine match) }
 
 ---
 
+### Screen 7 — Send Agent Invitation (`/agents/invite`)
+
+> Admin-only screen. The agent-side counterpart is Screen 6. Backed by `docs/auth/agent-invitation.spec.md` Scenarios 1, 3–6.
+
+**API:** `POST /api/agents/invite`  
+**Hook:** `useInviteAgent` → `useMutation`  
+**Form:** `InviteAgentForm` with `react-hook-form` + `inviteAgentSchema`  
+**Guards:** `AuthGuard` + `RoleGuard role="admin"`
+
+#### Scenario 7.1 — Invitation Sent Successfully
+
+**Given** the admin is on `/agents/invite`  
+**When** they enter a valid email that does not exist yet as a user and submit  
+**Then**
+- The submit button shows a spinner and becomes disabled
+- On `201`, the form is replaced by `SuccessScreen`: "Invitation sent. The agent will receive an email with instructions."
+- A mail icon is shown
+- An action button "Send another" resets the form
+
+#### Scenario 7.2 — Identity Already Registered
+
+**Given** the admin is on `/agents/invite`  
+**When** they submit with an email that already belongs to an active user  
+**Then**
+- On `409 IDENTITY_ALREADY_EXISTS`, an inline error appears under the email field: "This email is already registered"
+- The form remains editable
+
+#### Scenario 7.3 — Resending Replaces a Pending Invitation
+
+**Given** a pending invitation already exists for the entered email  
+**When** the admin submits the same email again  
+**Then**
+- On `201`, the success state is shown — same UI as Scenario 7.1
+- The UI does NOT distinguish between "new" and "resent" — both are success cases
+
+#### Scenario 7.4 — Frontend Validation Errors
+
+**Given** the admin is on `/agents/invite`  
+**When** they submit with an empty or malformed email  
+**Then**
+- Client-side Zod validation shows an inline error
+- No API request is made
+
+#### Scenario 7.5 — Role Gate (Agent Tries to Access)
+
+**Given** a user with `role = "agent"` is authenticated  
+**When** they navigate to `/agents/invite`  
+**Then**
+- `AuthGuard` passes (user is authenticated)
+- `RoleGuard` redirects to `/dashboard`
+- No API request is made
+
+#### Scenario 7.6 — Backend Authorization Fallback
+
+**Given** the UI guard was bypassed (e.g. stale role in `authStore`)  
+**When** the form is submitted and the API returns `403 FORBIDDEN`  
+**Then**
+- An alert is shown: "You don't have permission to perform this action"
+- `authStore` is invalidated via `queryClient.invalidateQueries(['me'])` so the next render re-checks the role
+
+---
+
 ## Session Management (Cross-Cutting)
 
 ### Zustand Store (`store/authStore.ts`)
@@ -434,13 +521,30 @@ A fetch wrapper (or TanStack Query `onError` default) that intercepts any `401` 
 
 ## Definition of Done
 
-- [ ] All pages are routed and render within `AuthLayout`
-- [ ] Forms use `react-hook-form` + Zod with client-side validation before API calls
-- [ ] All API calls use TanStack Query (`useMutation` for writes, `useQuery` for reads)
-- [ ] `AuthGuard` protects `/dashboard` and future protected routes
-- [ ] Global 401 interceptor redirects to `/login`
-- [ ] `authStore` (Zustand) is populated on login/verify and cleared on logout/401
-- [ ] Error messages do not leak email existence (login, forgot-password)
-- [ ] `SuccessScreen` is reused across registration, forgot-password, and reset-password
-- [ ] Navigation links connect all auth screens (login ↔ register, login → forgot-password, etc.)
+- [x] All public pages are routed and render within `AuthLayout`
+- [x] Forms use `react-hook-form` + Zod with client-side validation before API calls
+- [x] All API calls use TanStack Query (`useMutation` for writes, `useQuery` for reads)
+- [x] `AuthGuard` protects `/dashboard` and future protected routes
+- [x] `RoleGuard` restricts `/agents/invite` to `role = "admin"`
+- [x] Global 401 interceptor redirects to `/login`
+- [x] `authStore` (Zustand) is populated on login/verify and cleared on logout/401
+- [x] Error messages do not leak email existence (login, forgot-password)
+- [x] `SuccessScreen` is reused across registration, forgot-password, reset-password, and agent-invitation
+- [x] Navigation links connect all auth screens (login ↔ register, login → forgot-password, etc.)
+- [x] Dashboard renders a link/button to `/agents/invite` only when `user.role === "admin"`
 - [ ] All scenarios above have corresponding tests
+
+## Progress Log
+
+### Completed (2026-06-02)
+- **Phase 1** — Dependencies installed: MUI v9, TanStack Query, Zustand, React Hook Form + Zod, React Router v7
+- **Phase 2** — MUI theme (`src/config/theme.ts`): elegant-minimalist palette, Inter typography, component overrides
+- **Phase 3** — Infrastructure: routes constants, lazy-loaded router, `authService.ts`, `authStore.ts`, `types.ts`, `schemas.ts`
+- **Phase 4** — Shared components: `AuthLayout` (Fade transition), `AuthGuard`, `PasswordInput`, `PasswordStrength`, `SuccessScreen`; all 9 TanStack Query hooks (`useLogin`, `useRegister`, `useVerify`, `useForgotPassword`, `useResetPassword`, `useInviteAccept`, `useInviteComplete`, `useMe`, `useLogout`)
+- **Phase 5** — All 7 screens implemented: `/login`, `/register`, `/verify`, `/forgot-password`, `/reset-password`, `/invite/accept`, `/dashboard`
+- **Phase 6** — Polish: page transitions (MUI `Fade`), global 401 interceptor in `authService.ts` (skips `/api/auth/*`), accessibility (MUI `label`/`helperText`, focus on auth error), build clean (zero TS errors)
+
+### Infrastructure fixes applied
+- CORS middleware added to API (`hono/cors`) for `/api/*` routes; `CORS_ORIGIN` supports comma-separated list
+- `APP_BASE_URL` added to API env — email links now point to the frontend (`/verify?token=`, `/reset-password?token=`) instead of the API
+- Open-redirect validation on `?redirect=` param in `LoginForm`

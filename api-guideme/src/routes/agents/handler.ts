@@ -65,7 +65,7 @@ export const inviteAgent = async (c: AgentsContext) => {
     expiresAt,
   })
 
-  const inviteLink = `${c.env.API_BASE_URL}/api/auth/invite/accept?token=${token}`
+  const inviteLink = `${c.env.APP_BASE_URL}/invite/accept?token=${token}`
 
   await sendInvitationEmail(c.env, {
     to: input.identity,
