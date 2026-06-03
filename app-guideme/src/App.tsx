@@ -16,6 +16,8 @@ const InviteAcceptPage = lazy(() => import('./pages/InviteAcceptPage'))
 const DashboardPage = lazy(() => import('./pages/DashboardPage'))
 const AgentsListPage = lazy(() => import('./pages/AgentsListPage'))
 const InviteAgentPage = lazy(() => import('./pages/InviteAgentPage'))
+const CatalogListPage = lazy(() => import('./pages/CatalogListPage'))
+const CatalogDetailPage = lazy(() => import('./pages/CatalogDetailPage'))
 
 function PageLoader() {
   return (
@@ -51,6 +53,22 @@ function App() {
               element={
                 <RoleGuard role="admin">
                   <AgentsListPage />
+                </RoleGuard>
+              }
+            />
+            <Route
+              path={ROUTES.CATALOG}
+              element={
+                <RoleGuard role="admin">
+                  <CatalogListPage />
+                </RoleGuard>
+              }
+            />
+            <Route
+              path={ROUTES.CATALOG_DETAIL}
+              element={
+                <RoleGuard role="admin">
+                  <CatalogDetailPage />
                 </RoleGuard>
               }
             />

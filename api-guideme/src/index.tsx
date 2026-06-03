@@ -7,6 +7,7 @@ import { requireRole } from './middleware/role'
 import agentsRouter from './routes/agents'
 import authRouter from './routes/auth'
 import organizationsRouter from './routes/organizations'
+import servicesRouter from './routes/services'
 import type { AppVariables } from './types/context'
 
 const app = new Hono<{
@@ -29,6 +30,7 @@ app.use('/api/*', async (c, next) => {
 app.route('/api/auth', authRouter)
 app.route('/api/agents', agentsRouter)
 app.route('/api/organizations', organizationsRouter)
+app.route('/api/services', servicesRouter)
 
 app.get('/api/me', authMiddleware, (c) => c.json({ user: c.get('user') }))
 

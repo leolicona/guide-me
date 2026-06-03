@@ -8,4 +8,6 @@ export const ROUTES = {
   DASHBOARD: '/dashboard',
   AGENTS: '/agents',
   INVITE_AGENT: '/agents/invite',
+  CATALOG: '/catalog',
+  CATALOG_DETAIL: '/catalog/:id',
 } as const

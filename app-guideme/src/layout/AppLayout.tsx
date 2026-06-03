@@ -14,6 +14,7 @@ import { alpha, useTheme } from '@mui/material/styles'
 import type { SvgIconComponent } from '@mui/icons-material'
 import DashboardRounded from '@mui/icons-material/DashboardRounded'
 import GroupsRounded from '@mui/icons-material/GroupsRounded'
+import MapRounded from '@mui/icons-material/MapRounded'
 import { useAuthStore } from '../store/authStore'
 import { useLogout } from '../features/auth/hooks/useLogout'
 import { ROUTES } from '../config/routes'
@@ -30,6 +31,7 @@ interface NavItem {
 const NAV_ITEMS: NavItem[] = [
   { label: 'Dashboard', to: ROUTES.DASHBOARD, icon: DashboardRounded },
   { label: 'Agents', to: ROUTES.AGENTS, icon: GroupsRounded, role: 'admin' },
+  { label: 'Catalog', to: ROUTES.CATALOG, icon: MapRounded, role: 'admin' },
 ]
 
 const RAIL_WIDTH = 88
