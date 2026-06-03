@@ -231,6 +231,40 @@ Request
 
 ---
 
+## Multitenancy — Data Isolation Model
+
+**Full spec and test scenarios:** `docs/multitenancy/multitenancy.spec.md`
+
+### Tenancy model
+
+GuideMe uses **shared-database, shared-schema with row-level scoping**: one D1 instance, one set of tables, every tenant-scoped row carries an `organization_id`. Isolation is enforced at the query layer — foreign keys give referential integrity but do not prevent cross-org reads.
+
+### Identity model
+
+`users.email` is **globally unique** across the platform — one email maps to exactly one organization. This is why the auth middleware can resolve a user's `organization_id` from the JWT `sub` (email) alone, without the client ever supplying an org identifier. Lookups keyed by a globally-unique column (`users.email`, `invitations.token`) are inherently global and are the only queries exempt from the org filter.
+
+### Enforcement rules
+
+Every handler that reads or writes tenant-scoped data MUST follow these rules. Violating them causes silent data leakage across organizations.
+
+| # | Rule |
+|---|---|
+| 1 | **`organization_id` always comes from `c.var.user.organizationId`** (set by `authMiddleware`). Never from a body field, query param, or path segment. Zod request schemas must not declare `organizationId`. |
+| 2 | **Every SELECT filters by org:** `.where(eq(table.organizationId, user.organizationId))`. Exception: globally-unique-key lookups (see identity model above). |
+| 3 | **Every INSERT sets `organizationId: user.organizationId`** from context. |
+| 4 | **Every UPDATE/DELETE includes the org filter:** `and(eq(table.id, input.id), eq(table.organizationId, user.organizationId))`. A non-matching row silently returns 0 rows → handler returns `404`. |
+| 5 | **Every new tenant-scoped migration** declares `organization_id TEXT NOT NULL REFERENCES organizations(id)`. Tables scoped transitively (e.g. via `user_id`) are exempt and must say so in the migration. |
+| 6 | **Index `organization_id`** on every tenant-scoped table — standalone or as the leading column in a composite index. |
+
+### Architectural decision
+
+| Decision | Discarded Alternative | Why |
+|---|---|---|
+| Row-level scoping in shared schema | Per-tenant databases or schemas | D1 does not support dynamic database provisioning. Row-level is the only viable model on Cloudflare Workers. |
+| Globally-unique `users.email` | Per-org unique email (one person, multiple orgs) | Lets auth resolve org from identity alone, keeping the JWT and middleware simple. Multi-org membership is explicitly out of scope for MVP. |
+
+---
+
 ## Workers Structure in Cloudflare
 
 ```

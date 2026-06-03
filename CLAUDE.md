@@ -54,6 +54,12 @@ Additional directories:
 - `src/types/` — TypeScript interfaces for data models
 - `src/bindings.d.ts` — Cloudflare env binding type declarations
 
+## Multitenancy
+
+When implementing any tenant-scoped route or migration, follow the data isolation rules in `docs/ARCHITECTURE.md` (§ Multitenancy — Data Isolation Model). Full scenarios and Definition of Done: `docs/multitenancy/multitenancy.spec.md`.
+
+Every new tenant-scoped route MUST include cross-org isolation tests using the `seedTwoOrgs` helper in `test/helpers/tenancy.ts`.
+
 ---
 
 ## Frontend Stack & Architecture
