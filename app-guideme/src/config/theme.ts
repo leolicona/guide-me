@@ -4,6 +4,7 @@ import type { Shadows } from '@mui/material/styles'
 const subtle = '0 2px 8px rgba(0,0,0,0.08)'
 
 export const theme = createTheme({
+  cssVariables: true,
   palette: {
     primary: {
       main: '#1C1C2E',

@@ -26,6 +26,7 @@ export const users = sqliteTable('users', {
   status: text('status', { enum: ['unverified', 'active', 'suspended'] })
     .notNull()
     .default('unverified'),
+  baseCommission: integer('base_commission').notNull().default(0),
   plan: text('plan').notNull().default('free'),
   createdAt: integer('created_at', { mode: 'timestamp' })
     .notNull()

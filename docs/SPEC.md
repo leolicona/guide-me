@@ -130,7 +130,7 @@ GuideMe is a multi-tenant, mobile-optimized SaaS platform that centralizes the s
 *Critical features required to launch the MVP.*
 - [x] **Auth (admin & agent via email/password, verification via Resend)** *(US-A01, US-A02, US-A03, US-A04, US-AG01, US-AG02, US-AG18)*
 - [x] **Multitenancy (isolated organizations)** *(Global)* — `docs/multitenancy/multitenancy.spec.md`
-- [ ] **Staff management (invite via email, edit, deactivate agents)** *(US-A05, US-A06, US-A07, US-A08)*
+- [x] **Staff management (invite via email, edit, deactivate agents)** *(US-A05, US-A06, US-A07, US-A08)* — `docs/staff/staff-management.spec.md`
 - [ ] **Service catalog with extras and minimum price** *(US-A09, US-A11, US-A13)*
 - [ ] **Schedules/slots with capacity by date and time** *(US-A10)*
 - [ ] **Mobile point of sale with controlled discount** *(US-AG03, US-AG04, US-AG05, US-AG06, US-AG08)*

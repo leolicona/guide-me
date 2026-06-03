@@ -11,10 +11,15 @@ import type { AppVariables, UserPayload, UserRole } from '../types/context'
 
 type AuthEnv = { Bindings: CloudflareBindings; Variables: AppVariables }
 
+interface ResolvedUser {
+  payload: UserPayload
+  status: string
+}
+
 const buildUserPayload = async (
   env: CloudflareBindings,
   identity: string,
-): Promise<UserPayload | null> => {
+): Promise<ResolvedUser | null> => {
   const db = getDb(env)
   const found = await db
     .select({
@@ -23,6 +28,7 @@ const buildUserPayload = async (
       email: users.email,
       role: users.role,
       organizationId: users.organizationId,
+      status: users.status,
     })
     .from(users)
     .where(eq(users.email, identity))
@@ -32,11 +38,14 @@ const buildUserPayload = async (
   if (!user) return null
 
   return {
-    userId: user.id,
-    name: user.name,
-    email: user.email,
-    role: user.role as UserRole,
-    organizationId: user.organizationId,
+    payload: {
+      userId: user.id,
+      name: user.name,
+      email: user.email,
+      role: user.role as UserRole,
+      organizationId: user.organizationId,
+    },
+    status: user.status,
   }
 }
 
@@ -53,12 +62,16 @@ export const authMiddleware: MiddlewareHandler<AuthEnv> = async (c, next) => {
   const isExpired = !payload || (payload.exp != null && payload.exp <= nowSeconds)
 
   if (!isExpired && identity) {
-    const userPayload = await buildUserPayload(c.env, identity)
-    if (!userPayload) {
+    const resolved = await buildUserPayload(c.env, identity)
+    if (!resolved) {
       clearSessionCookies(c)
       throw new ApiError('UNAUTHORIZED', 401, 'User no longer exists')
     }
-    c.set('user', userPayload)
+    if (resolved.status === 'suspended') {
+      clearSessionCookies(c)
+      throw new ApiError('ACCOUNT_SUSPENDED', 403, 'Account suspended')
+    }
+    c.set('user', resolved.payload)
     return next()
   }
 
@@ -83,13 +96,17 @@ export const authMiddleware: MiddlewareHandler<AuthEnv> = async (c, next) => {
     throw new ApiError('UNAUTHORIZED', 401, 'Session expired')
   }
 
-  const userPayload = await buildUserPayload(c.env, newIdentity)
-  if (!userPayload) {
+  const resolved = await buildUserPayload(c.env, newIdentity)
+  if (!resolved) {
     clearSessionCookies(c)
     throw new ApiError('UNAUTHORIZED', 401, 'User no longer exists')
   }
+  if (resolved.status === 'suspended') {
+    clearSessionCookies(c)
+    throw new ApiError('ACCOUNT_SUSPENDED', 403, 'Account suspended')
+  }
 
   setSessionCookies(c, newTokens)
-  c.set('user', userPayload)
+  c.set('user', resolved.payload)
   return next()
 }

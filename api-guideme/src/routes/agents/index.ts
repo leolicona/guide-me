@@ -4,8 +4,14 @@ import { authMiddleware } from '../../middleware/auth'
 import { requireRole } from '../../middleware/role'
 import { ApiError } from '../../types/errors'
 import type { AppVariables } from '../../types/context'
-import { inviteAgent } from './handler'
-import { inviteAgentSchema } from './schema'
+import {
+  deactivateAgent,
+  inviteAgent,
+  listAgents,
+  reactivateAgent,
+  updateAgent,
+} from './handler'
+import { inviteAgentSchema, updateAgentSchema } from './schema'
 
 const agents = new Hono<{
   Bindings: CloudflareBindings
@@ -20,10 +26,22 @@ const validationHook = (result: { success: boolean }) => {
 
 agents.use('*', authMiddleware, requireRole('admin'))
 
+agents.get('/', listAgents)
+
 agents.post(
   '/invite',
   zValidator('json', inviteAgentSchema, validationHook),
   inviteAgent,
 )
+
+agents.put(
+  '/:id',
+  zValidator('json', updateAgentSchema, validationHook),
+  updateAgent,
+)
+
+agents.post('/:id/deactivate', deactivateAgent)
+
+agents.post('/:id/reactivate', reactivateAgent)
 
 export default agents

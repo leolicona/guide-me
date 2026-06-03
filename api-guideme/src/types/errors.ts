@@ -5,8 +5,10 @@ export type ErrorCode =
   | 'INVALID_TOKEN'
   | 'INVALID_CREDENTIALS'
   | 'EMAIL_NOT_VERIFIED'
+  | 'ACCOUNT_SUSPENDED'
   | 'UNAUTHORIZED'
   | 'FORBIDDEN'
+  | 'NOT_FOUND'
   | 'INTERNAL_ERROR'
 
 export class ApiError extends Error {

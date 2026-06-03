@@ -31,6 +31,19 @@ function handleUnauthorized(path: string) {
   }
 }
 
+// A suspended account (US-A08) is bounced from anywhere in the app. Unlike an
+// expired session there is no `redirect` back — the user cannot return — so we
+// send them to login with a reason the login screen can explain.
+function handleSuspended() {
+  if (typeof window === 'undefined') return
+
+  useAuthStore.getState().clear()
+
+  if (!window.location.search.includes('reason=suspended')) {
+    window.location.replace('/login?reason=suspended')
+  }
+}
+
 export async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
     ...init,
@@ -57,6 +70,8 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
   if (res.status === 401) {
     handleUnauthorized(path)
+  } else if (res.status === 403 && code === 'ACCOUNT_SUSPENDED') {
+    handleSuspended()
   }
 
   throw new ServiceError(code, res.status, message)

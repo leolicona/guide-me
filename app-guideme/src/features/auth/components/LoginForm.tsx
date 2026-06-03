@@ -21,7 +21,13 @@ export function LoginForm() {
   const loginMutation = useLogin();
   const queryClient = useQueryClient();
 
-  const [authError, setAuthError] = useState<string | null>(null);
+  // Set by the global interceptor when a suspended account is bounced (US-A08).
+  const wasSuspended = searchParams.get('reason') === 'suspended';
+  const [authError, setAuthError] = useState<string | null>(
+    wasSuspended
+      ? 'Your account has been suspended. Contact your administrator.'
+      : null,
+  );
 
   const { control, handleSubmit, setValue, setFocus, formState: { errors } } = useForm<LoginFormData>({
     resolver: zodResolver(loginSchema),

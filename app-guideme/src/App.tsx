@@ -5,6 +5,7 @@ import CircularProgress from '@mui/material/CircularProgress'
 import { ROUTES } from './config/routes'
 import { AuthGuard } from './features/auth/components/AuthGuard'
 import { RoleGuard } from './features/auth/components/RoleGuard'
+import { AppLayout } from './layout/AppLayout'
 
 const LoginPage = lazy(() => import('./pages/LoginPage'))
 const RegisterPage = lazy(() => import('./pages/RegisterPage'))
@@ -13,6 +14,7 @@ const ForgotPasswordPage = lazy(() => import('./pages/ForgotPasswordPage'))
 const ResetPasswordPage = lazy(() => import('./pages/ResetPasswordPage'))
 const InviteAcceptPage = lazy(() => import('./pages/InviteAcceptPage'))
 const DashboardPage = lazy(() => import('./pages/DashboardPage'))
+const AgentsListPage = lazy(() => import('./pages/AgentsListPage'))
 const InviteAgentPage = lazy(() => import('./pages/InviteAgentPage'))
 
 function PageLoader() {
@@ -34,7 +36,27 @@ function App() {
           <Route path={ROUTES.FORGOT_PASSWORD} element={<ForgotPasswordPage />} />
           <Route path={ROUTES.RESET_PASSWORD} element={<ResetPasswordPage />} />
           <Route path={ROUTES.INVITE_ACCEPT} element={<InviteAcceptPage />} />
-          <Route path={ROUTES.DASHBOARD} element={<AuthGuard><DashboardPage /></AuthGuard>} />
+
+          {/* Authenticated app — shares the AppLayout navigation shell */}
+          <Route
+            element={
+              <AuthGuard>
+                <AppLayout />
+              </AuthGuard>
+            }
+          >
+            <Route path={ROUTES.DASHBOARD} element={<DashboardPage />} />
+            <Route
+              path={ROUTES.AGENTS}
+              element={
+                <RoleGuard role="admin">
+                  <AgentsListPage />
+                </RoleGuard>
+              }
+            />
+          </Route>
+
+          {/* Focused form page — uses the centered AuthLayout, not the shell */}
           <Route
             path={ROUTES.INVITE_AGENT}
             element={
