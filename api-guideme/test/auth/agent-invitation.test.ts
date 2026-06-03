@@ -199,7 +199,7 @@ describe('Agent Invitation — POST /api/agents/invite', () => {
     expect(resendCalls.length).toBe(1)
     expect(resendCalls[0].to).toBe(AGENT_EMAIL)
     expect((resendCalls[0].html as string)).toContain(
-      `/api/auth/invite/accept?token=${invitationRow!.token}`,
+      `/invite/accept?token=${invitationRow!.token}`,
     )
   })
 
