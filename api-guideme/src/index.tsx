@@ -7,6 +7,7 @@ import { requireRole } from './middleware/role'
 import agentsRouter from './routes/agents'
 import authRouter from './routes/auth'
 import organizationsRouter from './routes/organizations'
+import posRouter from './routes/pos'
 import servicesRouter from './routes/services'
 import type { AppVariables } from './types/context'
 
@@ -31,6 +32,7 @@ app.route('/api/auth', authRouter)
 app.route('/api/agents', agentsRouter)
 app.route('/api/organizations', organizationsRouter)
 app.route('/api/services', servicesRouter)
+app.route('/api/pos', posRouter)
 
 app.get('/api/me', authMiddleware, (c) => c.json({ user: c.get('user') }))
 

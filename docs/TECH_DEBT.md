@@ -2,6 +2,41 @@
 
 This document tracks known technical debt, deferred tasks, and architectural improvements that are planned for future phases.
 
+## 4. D1 Has No Interactive Transactions — ⚠️ OPEN (accepted trade-off)
+
+**Status:** Accepted limitation, surfaced by the POS sale-confirm
+(`docs/pos/pos-controlled-discount.spec.md`). The Cloudflare D1 Workers binding offers
+`batch()` (all-or-nothing **on error**) but **not** interactive transactions, and a
+conditional `UPDATE` that matches **0 rows is not an error** — so a batch cannot
+conditionally abort when a slot is sold out. `confirmSale`
+(`src/routes/pos/handler.ts`) therefore uses a **validate → conditional-decrement →
+compensate** flow: it decrements each slot with
+`UPDATE slots SET booked = booked + n WHERE … AND capacity - booked >= n RETURNING id`,
+and if any decrement matches 0 rows it re-increments (`booked - n`) the slots already
+decremented in that confirm, then throws `409 SLOT_UNAVAILABLE`. The folio rows are
+written only after all decrements succeed, in a single `db.batch`.
+
+**Why accepted:** the compensation window is sub-millisecond and bounded by cart size;
+the `capacity - booked >= n` guard plus the `slots_active_unique_idx` partial index are
+the DB-level backstops. Covered by `test/pos/pos-controlled-discount.test.ts` Scenario 10
+(roomy slot is rolled back, sold-out slot untouched, **no** folio written).
+
+**Action if revisited:** if D1 gains interactive transactions (or the sale moves to a
+Durable Object for serialized inventory), replace the compensation with a real
+transaction. No schema change is required.
+
+## 3. POS Error Codes (`PRICE_BELOW_MINIMUM`, `SLOT_UNAVAILABLE`) — ✅ INTRODUCED & CONSUMED (no open debt)
+
+**Status:** Introduced and consumed together by the Mobile Point of Sale feature
+(`docs/pos/pos-controlled-discount.spec.md`). Both were added to the `ErrorCode` union in
+`src/types/errors.ts` and are consumed by the POS confirm endpoint
+(`POST /api/pos/folios`): `400 PRICE_BELOW_MINIMUM` when a line's `unit_price` is below the
+snapshot `minimum_price` (US-AG06 controlled-discount floor), and `409 SLOT_UNAVAILABLE`
+when a slot can no longer satisfy the requested quantity at confirm time (US-AG11 race
+protection). Like the `CONFLICT` case (§2), the codes were added at the same time as their
+first use, so no debt is opened. Covered in `test/pos/pos-controlled-discount.test.ts`
+(Scenarios 7 and 10).
+
 ## 2. `CONFLICT` Error Code — ✅ INTRODUCED & CONSUMED (no open debt)
 
 **Status:** Introduced and consumed together by the Schedules & Slots feature

@@ -10,6 +10,8 @@ export type ErrorCode =
   | 'FORBIDDEN'
   | 'NOT_FOUND'
   | 'CONFLICT'
+  | 'PRICE_BELOW_MINIMUM'
+  | 'SLOT_UNAVAILABLE'
   | 'INTERNAL_ERROR'
 
 export class ApiError extends Error {

@@ -18,6 +18,10 @@ const AgentsListPage = lazy(() => import('./pages/AgentsListPage'))
 const InviteAgentPage = lazy(() => import('./pages/InviteAgentPage'))
 const CatalogListPage = lazy(() => import('./pages/CatalogListPage'))
 const CatalogDetailPage = lazy(() => import('./pages/CatalogDetailPage'))
+const PosCatalogPage = lazy(() => import('./pages/PosCatalogPage'))
+const PosServicePage = lazy(() => import('./pages/PosServicePage'))
+const PosCheckoutPage = lazy(() => import('./pages/PosCheckoutPage'))
+const FolioReceiptPage = lazy(() => import('./pages/FolioReceiptPage'))
 
 function PageLoader() {
   return (
@@ -69,6 +73,40 @@ function App() {
               element={
                 <RoleGuard role="admin">
                   <CatalogDetailPage />
+                </RoleGuard>
+              }
+            />
+
+            {/* Agent point of sale (US-AG03–AG08) */}
+            <Route
+              path={ROUTES.POS}
+              element={
+                <RoleGuard role="agent">
+                  <PosCatalogPage />
+                </RoleGuard>
+              }
+            />
+            <Route
+              path={ROUTES.POS_SERVICE}
+              element={
+                <RoleGuard role="agent">
+                  <PosServicePage />
+                </RoleGuard>
+              }
+            />
+            <Route
+              path={ROUTES.POS_CHECKOUT}
+              element={
+                <RoleGuard role="agent">
+                  <PosCheckoutPage />
+                </RoleGuard>
+              }
+            />
+            <Route
+              path={ROUTES.FOLIO}
+              element={
+                <RoleGuard role="agent">
+                  <FolioReceiptPage />
                 </RoleGuard>
               }
             />

@@ -166,6 +166,81 @@ export const slots = sqliteTable('slots', {
     .default(sql`(unixepoch())`),
 })
 
+export const folios = sqliteTable('folios', {
+  id: text('id').primaryKey(),
+  organizationId: text('organization_id')
+    .notNull()
+    .references(() => organizations.id),
+  agentId: text('agent_id')
+    .notNull()
+    .references(() => users.id),
+  customerName: text('customer_name'),
+  customerEmail: text('customer_email'),
+  customerPhone: text('customer_phone'),
+  status: text('status', { enum: ['paid', 'booking', 'cancelled'] })
+    .notNull()
+    .default('paid'),
+  subtotal: integer('subtotal').notNull(),
+  discountTotal: integer('discount_total').notNull().default(0),
+  total: integer('total').notNull(),
+  amountPaid: integer('amount_paid').notNull(),
+  createdAt: integer('created_at', { mode: 'timestamp' })
+    .notNull()
+    .default(sql`(unixepoch())`),
+  updatedAt: integer('updated_at', { mode: 'timestamp' })
+    .notNull()
+    .default(sql`(unixepoch())`),
+})
+
+export const folioLines = sqliteTable('folio_lines', {
+  id: text('id').primaryKey(),
+  organizationId: text('organization_id')
+    .notNull()
+    .references(() => organizations.id),
+  folioId: text('folio_id')
+    .notNull()
+    .references(() => folios.id),
+  serviceId: text('service_id')
+    .notNull()
+    .references(() => services.id),
+  slotId: text('slot_id')
+    .notNull()
+    .references(() => slots.id),
+  serviceName: text('service_name').notNull(), // snapshot at sale time
+  slotDate: text('slot_date').notNull(), // snapshot 'YYYY-MM-DD'
+  slotStartTime: text('slot_start_time').notNull(), // snapshot 'HH:MM'
+  quantity: integer('quantity').notNull(),
+  basePrice: integer('base_price').notNull(), // snapshot unit base price
+  minimumPrice: integer('minimum_price').notNull(), // snapshot unit floor
+  unitPrice: integer('unit_price').notNull(), // sold unit price (post-discount)
+  lineTotal: integer('line_total').notNull(),
+  createdAt: integer('created_at', { mode: 'timestamp' })
+    .notNull()
+    .default(sql`(unixepoch())`),
+})
+
+export const folioLineExtras = sqliteTable('folio_line_extras', {
+  id: text('id').primaryKey(),
+  organizationId: text('organization_id')
+    .notNull()
+    .references(() => organizations.id),
+  folioId: text('folio_id')
+    .notNull()
+    .references(() => folios.id),
+  folioLineId: text('folio_line_id')
+    .notNull()
+    .references(() => folioLines.id),
+  extraId: text('extra_id')
+    .notNull()
+    .references(() => serviceExtras.id),
+  name: text('name').notNull(), // snapshot
+  price: integer('price').notNull(), // snapshot unit price (no discount on extras)
+  quantity: integer('quantity').notNull().default(1),
+  createdAt: integer('created_at', { mode: 'timestamp' })
+    .notNull()
+    .default(sql`(unixepoch())`),
+})
+
 export type Organization = typeof organizations.$inferSelect
 export type NewOrganization = typeof organizations.$inferInsert
 export type User = typeof users.$inferSelect
@@ -182,3 +257,9 @@ export type Schedule = typeof schedules.$inferSelect
 export type NewSchedule = typeof schedules.$inferInsert
 export type Slot = typeof slots.$inferSelect
 export type NewSlot = typeof slots.$inferInsert
+export type Folio = typeof folios.$inferSelect
+export type NewFolio = typeof folios.$inferInsert
+export type FolioLine = typeof folioLines.$inferSelect
+export type NewFolioLine = typeof folioLines.$inferInsert
+export type FolioLineExtra = typeof folioLineExtras.$inferSelect
+export type NewFolioLineExtra = typeof folioLineExtras.$inferInsert

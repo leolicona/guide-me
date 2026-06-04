@@ -11,10 +11,9 @@ GuideMe is a multi-tenant, mobile-optimized SaaS platform that centralizes the s
 ## Design Principles
 
 - **Mobile-first:** The entire agent interface is designed for field use on mobile phones, without relying on a desktop.
-- **Offline-capable QR validation:** The scanner works without internet. Consumed tickets are synchronized with the server once connection is restored.
+- **Online QR validation (MVP):** The scanner requires an internet connection (3G/4G/WiFi) to validate and consume tickets in real-time against the server. Offline capabilities will be introduced post-MVP.
 - **Authentication via email and password for admins and agents:** Both administrators and sales agents log in using their email and password. Clients do not log in directly in this phase.
 - **Email ownership verification:** Account verification for admins (on registration) and agents (on accepting invitations) is done via magic links sent through Resend.
-- **Offline-capable QR validation:** The scanner works without internet. Consumed tickets are synchronized with the server once connection is restored.
 - **Real-time inventory:** No agent can sell more spots than those available at a given time slot.
 - **Multitenancy:** Each organization operates in a completely isolated manner (data, catalog, staff).
 
@@ -26,7 +25,7 @@ GuideMe is a multi-tenant, mobile-optimized SaaS platform that centralizes the s
 |---|---|---|
 | `admin` | Full control of the organization: catalog, staff, reports, finances | Email + password (verification via Resend magic link) |
 | `agent` | Sells services, manages daily cash drawers, scans access QRs | Email + password (onboarding/verification via Resend magic link) |
-| `client` | Receives digital tickets and QR codes via WhatsApp. Does not interact directly with the app in this phase | No authentication |
+| `client` | Receives digital tickets and QR codes via Email. Does not interact directly with the app in this phase | No authentication |
 
 ---
 
@@ -91,7 +90,7 @@ GuideMe is a multi-tenant, mobile-optimized SaaS platform that centralizes the s
 - **US-AG06** — As an agent, I want to apply a manual discount to a service's price, with the limit locked at the minimum price defined by the admin, to avoid selling below the allowed cost.
 - **US-AG07** — As an agent, I want to register a sale as a "booking/down-payment" (apartado) with a partial amount received, to reserve the spots and collect the rest later.
 - **US-AG08** — As an agent, I want to confirm the sale and generate a unique folio containing all services in the cart.
-- **US-AG09** — As an agent, I want the client to automatically receive their purchase receipt, itinerary, and QR code via WhatsApp upon confirming the sale.
+- **US-AG09** — As an agent, I want the client to automatically receive their purchase receipt, itinerary, and QR code via Email upon confirming the sale.
 
 #### Real-Time Availability
 
@@ -106,19 +105,20 @@ GuideMe is a multi-tenant, mobile-optimized SaaS platform that centralizes the s
 
 #### Access Scanner (QR)
 
-- **US-AG15** — As an agent, I want to use my phone's camera to scan a client's QR code and validate their ticket when they access the service.
-- **US-AG16** — As an agent, I want the QR validation to work offline, marking the ticket as consumed on my device and syncing when connection is restored.
-- **US-AG17** — As an agent, I want to see a clear scan result screen: ✓ Valid (client name, service, schedule) or ✗ Invalid (reason: already used, expired, fake).
+- **US-AG15** — As an agent, I want to use my phone's camera to scan a client's QR code and validate their ticket in real-time against the server, decrementing one pass from the total spots purchased on that ticket.
+- **US-AG16** — As an agent, I want the QR validation to work offline, marking the ticket as consumed on my device and syncing when connection is restored. *(Phase 2)*
+- **US-AG17** — As an agent, I want to see a clear scan result screen: ✓ Valid (client name, service, schedule, and redemption progress e.g., "Pass 2 of 5 used") or ✗ Invalid (reason: all passes used, expired, fake).
+- **US-AG19** — As an agent, I want to see a clear error message if I try to scan a QR code without internet connection, indicating that the validation requires network access.
 
 ---
 
 ### Client
 
-> In this phase, the client does not interact directly with the app. Their experience is 100% via WhatsApp.
+> In this phase, the client does not interact directly with the app. Their experience is 100% via Email.
 
-- **US-C01** — As a client, I want to automatically receive a purchase receipt via WhatsApp with details of my service, schedule, and amount paid at the time of sale.
+- **US-C01** — As a client, I want to automatically receive a purchase receipt via Email with details of my service, schedule, and amount paid at the time of sale.
 - **US-C02** — As a client, I want to receive a unique QR code for each purchased service to present as an access ticket.
-- **US-C03** — As a client, I want to receive a WhatsApp notification if my folio is cancelled to know that my booking is no longer active.
+- **US-C03** — As a client, I want to receive an Email notification if my folio is cancelled to know that my booking is no longer active.
 
 ---
 
@@ -133,21 +133,24 @@ GuideMe is a multi-tenant, mobile-optimized SaaS platform that centralizes the s
 - [x] **Staff management (invite via email, edit, deactivate agents)** *(US-A05, US-A06, US-A07, US-A08)* — `docs/staff/staff-management.spec.md`
 - [x] **Service catalog with extras and minimum price** *(US-A09, US-A11, US-A13)* — `docs/catalog/service-catalog.spec.md`
 - [x] **Schedules/slots with capacity by date and time** *(US-A10)* — `docs/schedules/schedules-slots.spec.md`
-- [ ] **Mobile point of sale with controlled discount** *(US-AG03, US-AG04, US-AG05, US-AG06, US-AG08)*
+- [x] **Mobile point of sale with controlled discount** *(US-AG03, US-AG04, US-AG05, US-AG06, US-AG08)* — `docs/pos/pos-controlled-discount.spec.md`
 - [ ] **Folio generation with signed QR code (HMAC)** *(US-AG08, US-C02)*
+- [ ] **Online QR Scanner** *(US-AG15, US-AG17, US-AG19)*
 - [ ] **Agent's daily cash drawer with operating expenses** *(US-AG12, US-AG13, US-AG14, US-A19)*
 - [ ] **Total folio cancellation** *(US-A21)*
 
 #### 🟡 SHOULD HAVE
 *Important features that add great value, but the system could operate manually without them in the very first days.*
 - [ ] **Bookings/down-payments (partial payment with spot reservation)** *(US-AG07)*
-- [ ] **Sending receipt and QR code to client via WhatsApp** *(US-AG09, US-C01, US-C03)*
-- [ ] **Offline-capable QR scanner with post-sync** *(US-AG15, US-AG16, US-AG17)*
+- [ ] **Sending receipt and QR code to client via Email (Resend)** *(US-AG09, US-C01, US-C03)*
 - [ ] **Occupancy visual dashboard (admin)** *(US-A14, US-A15, US-A16)*
 - [ ] **Commissions: base % per agent + bonus per service** *(US-A12)*
 - [ ] **Commission report by period** *(US-A17, US-A18, US-A20)*
 
 ### Out of MVP (Phase 2+)
+
+#### 🚀 PHASE 2: Core Enhancements
+- [ ] **Offline-capable QR validation with post-sync** *(US-AG16)* - *Deferred from MVP to focus on real-time validation.*
 
 #### 🔵 COULD HAVE
 *Nice-to-have features that improve UX if extra time is available.*
@@ -159,7 +162,7 @@ GuideMe is a multi-tenant, mobile-optimized SaaS platform that centralizes the s
 - [ ] **Client self-service online purchase** - *Requires payment gateway and checkout flow*
 - [ ] **Partial cancellations (per service within the folio)** - *Simplifies inventory logic in MVP*
 - [ ] **Native App (iOS / Android)** - *Mobile-first PWA is sufficient for Phase 1*
-- [ ] **Discarded: Bidirectional WhatsApp / Silent client registration** - *The only WhatsApp API integration is to send tickets to clients*
+- [ ] **Discarded: WhatsApp API Integration** - *For cost and speed, ticket delivery is handled via Email instead of WhatsApp.*
 - [ ] **Multiple payment methods (card, wire transfer)** - *Cash only in Phase 1*
 
 ---
@@ -195,12 +198,11 @@ GuideMe is a multi-tenant, mobile-optimized SaaS platform that centralizes the s
 
 ### QR and Access Validation
 
-- The QR contains a JSON payload signed with HMAC-SHA256 using a `QR_SECRET` per organization.
-- The payload includes: `folio_id`, `service_id`, `slot_id`, `client_identity`, `expires_at`.
-- Offline validation verifies the signature locally. If the signature is invalid → ✗ Fake.
-- Consumed tickets are stored in the `localStorage` of the scanning agent's device.
-- Once connection is restored, the device syncs the consumed tickets with the server (`POST /api/tickets/sync`).
-- The server is the single source of truth: if a ticket was already marked as consumed on the server by another device, that state prevails.
+- **Group Tickets (Partial Redemption):** A single QR code is generated per service in a folio, representing the total number of spots purchased (e.g., 5 passes for 5 friends). Each successful scan redeems exactly 1 pass. If the QR is scanned after all passes have been consumed, it throws an "✗ Invalid (All passes consumed)" error.
+- **Prepared for Offline:** The QR contains a JSON payload signed with HMAC-SHA256 using a `QR_SECRET` per organization. This structure guarantees that Phase 2 offline validation can be implemented securely without changing the issued tickets.
+- The payload includes: `folio_id`, `service_id`, `slot_id`, `client_identity`, `expires_at`. (The server knows the total purchased spots based on the folio).
+- **Phase 1 (Strictly Online):** The agent app validates the QR exclusively against the server. The server tracks the redemption count in real-time. If there is no internet connection, the system throws a network error to the agent, refusing the scan.
+- **Phase 2 (Offline capabilities):** Offline validation will verify the signature locally (invalid signature → ✗ Fake). Consumed tickets will be stored in `localStorage` of the scanning agent's device and synced to the server (`POST /api/tickets/sync`) once connection is restored. The server remains the single source of truth.
 
 ### Multitenancy
 
@@ -215,8 +217,7 @@ GuideMe is a multi-tenant, mobile-optimized SaaS platform that centralizes the s
 | Service | Purpose |
 |---|---|
 | **Agnostic Auth** (Cloudflare Worker) | JWT issuance for sessions (internal token generator) |
-| **Resend** | Transactional emails: admin verification (magic link), agent invitation (magic link), password reset |
-| **Meta WhatsApp Cloud API** | Send receipts + QR for clients (the only WhatsApp integration) |
+| **Resend** | Transactional emails: admin verification, agent invitation, password reset, and **client ticket delivery** |
 | **Cloudflare D1** | Primary database (SQLite) |
 | **Cloudflare Workers** | Backend runtime (Hono) |
 

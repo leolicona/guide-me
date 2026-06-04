@@ -10,4 +10,8 @@ export const ROUTES = {
   INVITE_AGENT: '/agents/invite',
   CATALOG: '/catalog',
   CATALOG_DETAIL: '/catalog/:id',
+  POS: '/pos',
+  POS_SERVICE: '/pos/service/:id',
+  POS_CHECKOUT: '/pos/checkout',
+  FOLIO: '/pos/folio/:id',
 } as const
