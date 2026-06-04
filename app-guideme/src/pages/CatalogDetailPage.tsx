@@ -17,6 +17,7 @@ import EditRounded from '@mui/icons-material/EditRounded'
 import { useService } from '../features/catalog/hooks/useService'
 import { ExtrasPanel } from '../features/catalog/components/ExtrasPanel'
 import { ServiceFormDialog } from '../features/catalog/components/ServiceFormDialog'
+import { SchedulesSection } from '../features/schedules/components/SchedulesSection'
 import { formatMoney } from '../features/catalog/types'
 import { ROUTES } from '../config/routes'
 
@@ -99,6 +100,15 @@ export default function CatalogDetailPage() {
                   Extras
                 </Typography>
                 <ExtrasPanel serviceId={service.id} />
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardContent>
+                <SchedulesSection
+                  serviceId={service.id}
+                  defaultCapacity={service.default_capacity}
+                />
               </CardContent>
             </Card>
 

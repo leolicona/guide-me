@@ -8,7 +8,7 @@ import { loginSchema } from '../schemas';
 import type { LoginFormData } from '../schemas';
 import { useLogin } from '../hooks/useLogin';
 import { ROUTES } from '../../../config/routes';
-import { ServiceError } from '../../../services/authService';
+import { ServiceError, getMe } from '../../../services/authService';
 import { PasswordInput } from './PasswordInput';
 
 export function LoginForm() {
@@ -37,8 +37,21 @@ export function LoginForm() {
   const onSubmit = (data: LoginFormData) => {
     setAuthError(null);
     loginMutation.mutate(data, {
-      onSuccess: () => {
-        queryClient.invalidateQueries({ queryKey: ['me'] });
+      onSuccess: async () => {
+        // Resolve the session query BEFORE navigating, so the route guard mounts
+        // on an already-authenticated, success state. Otherwise a stale/empty
+        // ['me'] state (e.g. left over from a prior 401) makes the guard bounce
+        // straight back to /login while the refetch is still in flight.
+        try {
+          await queryClient.fetchQuery({
+            queryKey: ['me'],
+            queryFn: getMe,
+            staleTime: 0,
+          });
+        } catch {
+          // If /api/me fails right after a successful login it's a real session
+          // problem (not a race); let the guard handle the redirect.
+        }
         navigate(redirectPath, { replace: true });
       },
       onError: (error) => {

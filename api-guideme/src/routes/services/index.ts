@@ -21,6 +21,21 @@ import {
   updateExtraSchema,
   updateServiceSchema,
 } from './schema'
+import {
+  createSchedule,
+  createSlot,
+  deactivateSchedule,
+  deactivateSlot,
+  listSchedules,
+  listSlots,
+  reactivateSlot,
+  updateSlot,
+} from './slots.handler'
+import {
+  createScheduleSchema,
+  createSlotSchema,
+  updateSlotSchema,
+} from './slots.schema'
 
 const services = new Hono<{
   Bindings: CloudflareBindings
@@ -61,5 +76,29 @@ services.put(
   updateExtra,
 )
 services.delete('/:id/extras/:extraId', deleteExtra)
+
+// Slots & schedules (US-A10) — nested under a service, admin-only via the `*`
+// middleware above.
+services.post(
+  '/:id/slots',
+  zValidator('json', createSlotSchema, validationHook),
+  createSlot,
+)
+services.get('/:id/slots', listSlots)
+services.put(
+  '/:id/slots/:slotId',
+  zValidator('json', updateSlotSchema, validationHook),
+  updateSlot,
+)
+services.post('/:id/slots/:slotId/deactivate', deactivateSlot)
+services.post('/:id/slots/:slotId/reactivate', reactivateSlot)
+
+services.post(
+  '/:id/schedules',
+  zValidator('json', createScheduleSchema, validationHook),
+  createSchedule,
+)
+services.get('/:id/schedules', listSchedules)
+services.post('/:id/schedules/:scheduleId/deactivate', deactivateSchedule)
 
 export default services

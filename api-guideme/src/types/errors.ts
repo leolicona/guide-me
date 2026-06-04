@@ -9,6 +9,7 @@ export type ErrorCode =
   | 'UNAUTHORIZED'
   | 'FORBIDDEN'
   | 'NOT_FOUND'
+  | 'CONFLICT'
   | 'INTERNAL_ERROR'
 
 export class ApiError extends Error {

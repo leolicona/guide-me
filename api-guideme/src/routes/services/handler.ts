@@ -11,7 +11,7 @@ import type {
   UpdateServiceInput,
 } from './schema'
 
-type ServicesContext = Context<{
+export type ServicesContext = Context<{
   Bindings: CloudflareBindings
   Variables: AppVariables
 }>
@@ -220,13 +220,15 @@ export const reactivateService = (c: ServicesContext) =>
   setServiceStatus(c, 'active')
 
 // Verify the parent service exists in the caller's org. Throws 404 otherwise.
-const requireService = async (
+// Returns the row's id + defaultCapacity so callers (e.g. slots) can seed
+// per-slot capacity without a second query.
+export const requireService = async (
   db: ReturnType<typeof getDb>,
   organizationId: string,
   serviceId: string,
 ) => {
   const result = await db
-    .select({ id: services.id })
+    .select({ id: services.id, defaultCapacity: services.defaultCapacity })
     .from(services)
     .where(
       and(
@@ -239,6 +241,8 @@ const requireService = async (
   if (!result[0]) {
     throw new ApiError('NOT_FOUND', 404, 'Service not found')
   }
+
+  return result[0]
 }
 
 // The triple filter (extraId + serviceId + organizationId) — a wrong parent or

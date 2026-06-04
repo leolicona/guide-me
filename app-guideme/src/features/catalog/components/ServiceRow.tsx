@@ -2,6 +2,7 @@ import { Card, CardContent, Box, Typography, Chip, Button, Stack } from '@mui/ma
 import { Link as RouterLink } from 'react-router-dom'
 import EditRounded from '@mui/icons-material/EditRounded'
 import TuneRounded from '@mui/icons-material/TuneRounded'
+import EventRepeatRounded from '@mui/icons-material/EventRepeatRounded'
 import BlockRounded from '@mui/icons-material/BlockRounded'
 import CheckCircleRounded from '@mui/icons-material/CheckCircleRounded'
 import type { Service } from '../types'
@@ -80,6 +81,14 @@ export function ServiceRow({
               onClick={() => onManageExtras(service)}
             >
               Manage extras
+            </Button>
+            <Button
+              size="small"
+              component={RouterLink}
+              to={`/catalog/${service.id}`}
+              startIcon={<EventRepeatRounded />}
+            >
+              Schedules
             </Button>
             {inactive ? (
               <Button

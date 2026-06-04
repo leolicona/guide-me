@@ -2,6 +2,19 @@
 
 This document tracks known technical debt, deferred tasks, and architectural improvements that are planned for future phases.
 
+## 2. `CONFLICT` Error Code — ✅ INTRODUCED & CONSUMED (no open debt)
+
+**Status:** Introduced and consumed together by the Schedules & Slots feature
+(`docs/schedules/schedules-slots.spec.md`). `'CONFLICT'` was added to the `ErrorCode`
+union in `src/types/errors.ts` and is consumed by the slot/schedule endpoints, which
+return `409 CONFLICT` for: a duplicate active slot at `(service, date, start_time)`, an
+edit/reactivate that would collide with another active slot, and an edit that would set
+`capacity` below the already-booked spots. Unlike the deferred `NOT_FOUND` case (§1),
+this code was added at the same time as its first use, so no debt is opened. A partial
+unique index (`slots_active_unique_idx … WHERE status = 'active'`) backs the handler
+pre-checks at the DB layer. Covered in `test/catalog/schedules-slots.test.ts`
+(Scenarios 4, 7, 9).
+
 ## 1. Deferred `NOT_FOUND` Error Code — ✅ RESOLVED
 
 **Status:** Resolved by the Service Catalog feature (`docs/catalog/service-catalog.spec.md`).

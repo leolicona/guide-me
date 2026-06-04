@@ -8,10 +8,16 @@ interface AuthGuardProps {
 }
 
 export function AuthGuard({ children }: AuthGuardProps) {
-  const { data: user, isLoading, isError } = useMe();
+  const { data: user, isLoading, isFetching, isError } = useMe();
   const location = useLocation();
 
-  if (isLoading) {
+  // Show the loader on the first load AND while a refetch is in flight without a
+  // cached user yet. The latter covers the post-login case: a prior 401 leaves
+  // the ['me'] query in an `error` state, and login success invalidates it.
+  // During that refetch React Query keeps the stale error (isLoading is false),
+  // so without this guard AuthGuard would bounce back to /login on the stale
+  // error before the refetch resolves to the now-authenticated user.
+  if (isLoading || (isFetching && !user)) {
     return (
       <Box sx={{ display: 'flex', minHeight: '100vh', alignItems: 'center', justifyContent: 'center' }}>
         <CircularProgress />

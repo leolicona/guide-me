@@ -115,6 +115,57 @@ export const serviceExtras = sqliteTable('service_extras', {
     .default(sql`(unixepoch())`),
 })
 
+export const schedules = sqliteTable('schedules', {
+  id: text('id').primaryKey(),
+  organizationId: text('organization_id')
+    .notNull()
+    .references(() => organizations.id),
+  serviceId: text('service_id')
+    .notNull()
+    .references(() => services.id),
+  recurrence: text('recurrence', { enum: ['weekly'] })
+    .notNull()
+    .default('weekly'),
+  weekdays: text('weekdays').notNull(), // CSV of 0–6, e.g. "1,3,5"
+  startTime: text('start_time').notNull(), // 'HH:MM'
+  capacity: integer('capacity').notNull(),
+  startDate: text('start_date').notNull(), // 'YYYY-MM-DD'
+  endDate: text('end_date').notNull(), // 'YYYY-MM-DD'
+  status: text('status', { enum: ['active', 'inactive'] })
+    .notNull()
+    .default('active'),
+  createdAt: integer('created_at', { mode: 'timestamp' })
+    .notNull()
+    .default(sql`(unixepoch())`),
+  updatedAt: integer('updated_at', { mode: 'timestamp' })
+    .notNull()
+    .default(sql`(unixepoch())`),
+})
+
+export const slots = sqliteTable('slots', {
+  id: text('id').primaryKey(),
+  organizationId: text('organization_id')
+    .notNull()
+    .references(() => organizations.id),
+  serviceId: text('service_id')
+    .notNull()
+    .references(() => services.id),
+  scheduleId: text('schedule_id').references(() => schedules.id), // nullable
+  date: text('date').notNull(), // 'YYYY-MM-DD'
+  startTime: text('start_time').notNull(), // 'HH:MM'
+  capacity: integer('capacity').notNull(),
+  booked: integer('booked').notNull().default(0),
+  status: text('status', { enum: ['active', 'inactive'] })
+    .notNull()
+    .default('active'),
+  createdAt: integer('created_at', { mode: 'timestamp' })
+    .notNull()
+    .default(sql`(unixepoch())`),
+  updatedAt: integer('updated_at', { mode: 'timestamp' })
+    .notNull()
+    .default(sql`(unixepoch())`),
+})
+
 export type Organization = typeof organizations.$inferSelect
 export type NewOrganization = typeof organizations.$inferInsert
 export type User = typeof users.$inferSelect
@@ -127,3 +178,7 @@ export type Service = typeof services.$inferSelect
 export type NewService = typeof services.$inferInsert
 export type ServiceExtra = typeof serviceExtras.$inferSelect
 export type NewServiceExtra = typeof serviceExtras.$inferInsert
+export type Schedule = typeof schedules.$inferSelect
+export type NewSchedule = typeof schedules.$inferInsert
+export type Slot = typeof slots.$inferSelect
+export type NewSlot = typeof slots.$inferInsert

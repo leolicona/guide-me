@@ -132,7 +132,7 @@ GuideMe is a multi-tenant, mobile-optimized SaaS platform that centralizes the s
 - [x] **Multitenancy (isolated organizations)** *(Global)* — `docs/multitenancy/multitenancy.spec.md`
 - [x] **Staff management (invite via email, edit, deactivate agents)** *(US-A05, US-A06, US-A07, US-A08)* — `docs/staff/staff-management.spec.md`
 - [x] **Service catalog with extras and minimum price** *(US-A09, US-A11, US-A13)* — `docs/catalog/service-catalog.spec.md`
-- [ ] **Schedules/slots with capacity by date and time** *(US-A10)*
+- [x] **Schedules/slots with capacity by date and time** *(US-A10)* — `docs/schedules/schedules-slots.spec.md`
 - [ ] **Mobile point of sale with controlled discount** *(US-AG03, US-AG04, US-AG05, US-AG06, US-AG08)*
 - [ ] **Folio generation with signed QR code (HMAC)** *(US-AG08, US-C02)*
 - [ ] **Agent's daily cash drawer with operating expenses** *(US-AG12, US-AG13, US-AG14, US-A19)*
