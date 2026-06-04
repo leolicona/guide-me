@@ -3,6 +3,12 @@
   "name": "api-guideme",
   "compatibility_date": "2025-08-03",
   "main": "./src/index.tsx",
+  "routes": [
+    {
+      "pattern": "api.turistearya.com",
+      "custom_domain": true
+    }
+  ],
   "d1_databases": [
     {
       "binding": "DB",
@@ -19,10 +25,10 @@
   ],
   "vars": {
     "AGNOSTIC_AUTH_APP_ID": "guide-me",
-    "COOKIE_DOMAIN": "",
-    "CORS_ORIGIN": "http://localhost:5173,https://app-guideme.leolicona-dev.workers.dev",
-    "API_BASE_URL": "https://api-guideme.leolicona-dev.workers.dev",
-    "APP_BASE_URL": "https://app-guideme.leolicona-dev.workers.dev",
-    "RESEND_FROM": "onboarding@resend.dev"
+    "COOKIE_DOMAIN": ".turistearya.com",
+    "CORS_ORIGIN": "http://localhost:5173,https://app.turistearya.com",
+    "API_BASE_URL": "https://api.turistearya.com",
+    "APP_BASE_URL": "https://app.turistearya.com",
+    "RESEND_FROM": "no-reply@turistearya.com"
   }
 }
