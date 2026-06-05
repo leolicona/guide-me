@@ -136,7 +136,7 @@ GuideMe is a multi-tenant, mobile-optimized SaaS platform that centralizes the s
 - [x] **Mobile point of sale with controlled discount** *(US-AG03, US-AG04, US-AG05, US-AG06, US-AG08)* — `docs/pos/pos-controlled-discount.spec.md`
 - [x] **Folio generation with signed QR code (HMAC)** *(US-AG08, US-C02)* — `docs/qr/folio-qr-signing.spec.md`
 - [x] **Online QR Scanner** *(US-AG15, US-AG17, US-AG19)* — `docs/scanner/online-qr-scanner.spec.md`
-- [ ] **Agent's daily cash drawer with operating expenses** *(US-AG12, US-AG13, US-AG14, US-A19)*
+- [x] **Agent's daily cash drawer with operating expenses** *(US-AG12, US-AG13, US-AG14, US-A19)* — `docs/cash-drawer/cash-drawer.spec.md`
 - [ ] **Total folio cancellation** *(US-A21)*
 
 #### 🟡 SHOULD HAVE

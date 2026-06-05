@@ -17,6 +17,8 @@ import GroupsRounded from '@mui/icons-material/GroupsRounded'
 import MapRounded from '@mui/icons-material/MapRounded'
 import PointOfSaleRounded from '@mui/icons-material/PointOfSaleRounded'
 import QrCodeScannerRounded from '@mui/icons-material/QrCodeScannerRounded'
+import AccountBalanceWalletRounded from '@mui/icons-material/AccountBalanceWalletRounded'
+import ReceiptLongRounded from '@mui/icons-material/ReceiptLongRounded'
 import { useAuthStore } from '../store/authStore'
 import { useLogout } from '../features/auth/hooks/useLogout'
 import { ROUTES } from '../config/routes'
@@ -34,8 +36,10 @@ const NAV_ITEMS: NavItem[] = [
   { label: 'Dashboard', to: ROUTES.DASHBOARD, icon: DashboardRounded },
   { label: 'Sell', to: ROUTES.POS, icon: PointOfSaleRounded, role: 'agent' },
   { label: 'Scan', to: ROUTES.SCAN, icon: QrCodeScannerRounded, role: 'agent' },
+  { label: 'Caja', to: ROUTES.CASH_DRAWER, icon: AccountBalanceWalletRounded, role: 'agent' },
   { label: 'Agents', to: ROUTES.AGENTS, icon: GroupsRounded, role: 'admin' },
   { label: 'Catalog', to: ROUTES.CATALOG, icon: MapRounded, role: 'admin' },
+  { label: 'Closures', to: ROUTES.CLOSURES, icon: ReceiptLongRounded, role: 'admin' },
 ]
 
 const RAIL_WIDTH = 88

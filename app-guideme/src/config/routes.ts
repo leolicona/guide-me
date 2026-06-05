@@ -15,4 +15,7 @@ export const ROUTES = {
   POS_CHECKOUT: '/pos/checkout',
   FOLIO: '/pos/folio/:id',
   SCAN: '/scan',
+  CASH_DRAWER: '/cash-drawer',
+  CLOSURES: '/closures',
+  CLOSURE_DETAIL: '/closures/:id',
 } as const

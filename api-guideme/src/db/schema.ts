@@ -243,6 +243,50 @@ export const folioLineExtras = sqliteTable('folio_line_extras', {
     .default(sql`(unixepoch())`),
 })
 
+export const cashDrawers = sqliteTable('cash_drawers', {
+  id: text('id').primaryKey(),
+  organizationId: text('organization_id')
+    .notNull()
+    .references(() => organizations.id),
+  agentId: text('agent_id')
+    .notNull()
+    .references(() => users.id),
+  businessDate: text('business_date').notNull(), // 'YYYY-MM-DD' org-local day
+  status: text('status', { enum: ['open', 'submitted', 'approved', 'rejected'] })
+    .notNull()
+    .default('open'),
+  totalCollected: integer('total_collected'), // snapshot at close
+  pendingBalance: integer('pending_balance'),
+  expenseTotal: integer('expense_total'),
+  netBalance: integer('net_balance'),
+  folioCount: integer('folio_count'),
+  submittedAt: integer('submitted_at', { mode: 'timestamp' }),
+  reviewedBy: text('reviewed_by').references(() => users.id),
+  reviewedAt: integer('reviewed_at', { mode: 'timestamp' }),
+  reviewNote: text('review_note'),
+  createdAt: integer('created_at', { mode: 'timestamp' })
+    .notNull()
+    .default(sql`(unixepoch())`),
+  updatedAt: integer('updated_at', { mode: 'timestamp' })
+    .notNull()
+    .default(sql`(unixepoch())`),
+})
+
+export const cashDrawerExpenses = sqliteTable('cash_drawer_expenses', {
+  id: text('id').primaryKey(),
+  organizationId: text('organization_id')
+    .notNull()
+    .references(() => organizations.id),
+  cashDrawerId: text('cash_drawer_id')
+    .notNull()
+    .references(() => cashDrawers.id),
+  description: text('description').notNull(),
+  amount: integer('amount').notNull(), // minor units, > 0
+  createdAt: integer('created_at', { mode: 'timestamp' })
+    .notNull()
+    .default(sql`(unixepoch())`),
+})
+
 export type Organization = typeof organizations.$inferSelect
 export type NewOrganization = typeof organizations.$inferInsert
 export type User = typeof users.$inferSelect
@@ -265,3 +309,7 @@ export type FolioLine = typeof folioLines.$inferSelect
 export type NewFolioLine = typeof folioLines.$inferInsert
 export type FolioLineExtra = typeof folioLineExtras.$inferSelect
 export type NewFolioLineExtra = typeof folioLineExtras.$inferInsert
+export type CashDrawer = typeof cashDrawers.$inferSelect
+export type NewCashDrawer = typeof cashDrawers.$inferInsert
+export type CashDrawerExpense = typeof cashDrawerExpenses.$inferSelect
+export type NewCashDrawerExpense = typeof cashDrawerExpenses.$inferInsert

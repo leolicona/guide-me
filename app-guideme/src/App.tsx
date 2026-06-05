@@ -23,6 +23,9 @@ const PosServicePage = lazy(() => import('./pages/PosServicePage'))
 const PosCheckoutPage = lazy(() => import('./pages/PosCheckoutPage'))
 const FolioReceiptPage = lazy(() => import('./pages/FolioReceiptPage'))
 const ScannerPage = lazy(() => import('./pages/ScannerPage'))
+const CashDrawerPage = lazy(() => import('./pages/CashDrawerPage'))
+const ClosuresListPage = lazy(() => import('./pages/ClosuresListPage'))
+const ClosureDetailPage = lazy(() => import('./pages/ClosureDetailPage'))
 
 function PageLoader() {
   return (
@@ -118,6 +121,34 @@ function App() {
               element={
                 <RoleGuard role="agent">
                   <ScannerPage />
+                </RoleGuard>
+              }
+            />
+
+            {/* Agent daily cash drawer (US-AG12, AG13, AG14) */}
+            <Route
+              path={ROUTES.CASH_DRAWER}
+              element={
+                <RoleGuard role="agent">
+                  <CashDrawerPage />
+                </RoleGuard>
+              }
+            />
+
+            {/* Admin cash-closure review (US-A19) */}
+            <Route
+              path={ROUTES.CLOSURES}
+              element={
+                <RoleGuard role="admin">
+                  <ClosuresListPage />
+                </RoleGuard>
+              }
+            />
+            <Route
+              path={ROUTES.CLOSURE_DETAIL}
+              element={
+                <RoleGuard role="admin">
+                  <ClosureDetailPage />
                 </RoleGuard>
               }
             />
