@@ -2,6 +2,74 @@
 
 This document tracks known technical debt, deferred tasks, and architectural improvements that are planned for future phases.
 
+## 14. Daily Cash-Drawer Feature Superseded & Removed — ✅ RESOLVED (replaced)
+
+**Status:** The daily cash-closure (*corte de caja*) feature — `cash_drawers` /
+`cash_drawer_expenses` tables, the `/api/cash-drawers` router, its tests, the agent **Caja**
+page and admin **Closures** list/detail UI — was **removed end-to-end** and **replaced** by
+the perpetual *Agent continuous cash balance with cash drops* feature
+(`docs/cash-drops/agent-balance-cash-drops.spec.md`). Migration `0018_drop_cash_drawers.sql`
+drops both tables (expenses → drawers, FK order); the Drizzle defs, routes, services, hooks,
+pages, nav entries and route constants are all gone (verified: no dangling references in
+`api-guideme/src` or `app-guideme/src`).
+
+**Why accepted:** the operationally meaningful number is "how much company cash is this agent
+holding **right now**", not a paper reconciliation pinned to a calendar day. The continuous
+running balance (server-derived from events, never stored) replaces the day snapshot, and the
+cash-drop `pending → confirmed | rejected` machine reuses the closure review pattern — so the
+old model carried no behaviour worth keeping. The drop assumed **no production cash-drawer
+data to preserve** (the daily-closure feature shipped immediately before this pivot).
+
+**Action if revisited:** none — this is a completed replacement, not open debt. The drop
+migration is **destructive**; if a remote D1 ever held real `cash_drawers` rows, that data is
+not recoverable from these migrations (snapshot before applying `0018` remotely).
+
+## 13. Commission Per-Service Bonus Not Manageable (US-A12) — ✅ RESOLVED
+
+**Status:** **Closed** by the *Commissions* feature
+(`docs/commissions/commissions.spec.md`). `services.commission_bonus` now has a full write
+path: it is in `createServiceSchema`/`updateServiceSchema` (integer minor units, ≥ 0, default
+0), persisted by `createService`/`updateService`, returned by `serializeService` on list +
+detail, and editable via a *Commission bonus* field in the catalog service form
+(`ServiceFormDialog`). The read-side was already in place — `confirmSale` snapshots
+`commission_amount = round(total × users.base_commission / 100) +
+Σ(line.quantity × services.commission_bonus)` and the balance derivation deducts it — so both
+halves of US-A12 (base % per agent + bonus per service) now flow end-to-end. Covered by
+`test/catalog/service-catalog.test.ts` (create/default/validation/edit/read + snapshot
+immutability) and `test/pos/pos-controlled-discount.test.ts` (the calc). No schema change was
+needed (the column shipped with migration `0023`).
+
+## 12. Agent Cash-Balance — Deferred Refinements — ⚠️ OPEN (accepted trade-offs)
+
+**Status:** Accepted MVP simplifications in the *Agent continuous cash balance with cash
+drops* feature (`src/routes/cash/handler.ts`). The balance is **derived live** from events on
+every read — correct, but with the trade-offs below.
+
+- **(a) Settled history is not frozen.** An agent can add/delete an expense or have a folio
+  cancelled *behind* an already-confirmed cash drop; because the balance is recomputed from
+  the full event history each read, this silently moves a number the admin already settled
+  against. MVP treats the live balance as the single truth (a deletion simply raises the
+  balance and is visible). *Action:* freeze events behind the last confirmed drop (a
+  settlement watermark) before allowing edits, or refuse edits to pre-watermark rows.
+- **(b) Unbounded derivation sums.** `deriveBalance` re-aggregates **all** of an agent's
+  folios / expenses / drops / payouts on every read — O(history), growing forever. *Action:*
+  carry a `balance_after` snapshot on each confirmed drop and sum only events since the last
+  confirmed drop (snapshot-carry), bounding the per-read work.
+- **(c) No adjust-amount-on-confirm.** A drop is terminal once reviewed; a wrong amount must
+  be **rejected and re-registered** by the agent (no admin "confirm 480 instead of 500").
+  *Action:* allow the admin to confirm with an adjusted `amount` (+ audit of the delta),
+  superseding reject-and-resubmit.
+- **(d) `listBalances` N+1.** The admin balances view derives each agent's balance in a loop
+  (one `deriveBalance` — itself several queries — per agent). Fine at MVP agent counts.
+  *Action:* replace with a single grouped query (folios/expenses/drops/payouts `GROUP BY
+  agent_id` with the cancellation/clawback/payment-method predicates) joined to org agents.
+
+**Why accepted:** all four are scale/edge-case refinements, not correctness bugs — the balance
+math (`cash_collected − commissions − expenses − confirmed_drops + payouts`), the drop machine,
+and multitenancy isolation are fully correct and covered by tests
+(`test/cash/agent-balance-cash-drops.test.ts`). Each is invisible until either history grows
+large (b, d) or an admin settles then an agent back-edits (a, c).
+
 ## 11. Client Cancellation Email Not Sent (US-C03) — ⚠️ OPEN (dependency not built)
 
 **Status:** Deferred by the Total Folio Cancellation feature

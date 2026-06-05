@@ -27,6 +27,7 @@ interface SeedServiceOptions {
   basePrice?: number
   minimumPrice?: number
   defaultCapacity?: number
+  commissionBonus?: number
   status?: 'active' | 'inactive'
   /** Override updated_at (unix seconds) — used to assert it advances on edit. */
   updatedAt?: number
@@ -39,6 +40,7 @@ const seedService = async ({
   basePrice = 150000,
   minimumPrice = 100000,
   defaultCapacity = 10,
+  commissionBonus = 0,
   status = 'active',
   updatedAt,
 }: SeedServiceOptions): Promise<{ serviceId: string }> => {
@@ -46,8 +48,8 @@ const seedService = async ({
   const ts = updatedAt ?? Math.floor(Date.now() / 1000)
   await env.DB.prepare(
     `INSERT INTO services
-       (id, organization_id, name, description, base_price, minimum_price, default_capacity, status, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       (id, organization_id, name, description, base_price, minimum_price, default_capacity, commission_bonus, status, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   )
     .bind(
       serviceId,
@@ -57,6 +59,7 @@ const seedService = async ({
       basePrice,
       minimumPrice,
       defaultCapacity,
+      commissionBonus,
       status,
       ts,
       ts,
@@ -96,7 +99,7 @@ const seedExtra = async ({
 const getServiceRow = (id: string) =>
   env.DB.prepare(
     `SELECT id, organization_id, name, description, base_price, minimum_price,
-            default_capacity, status, updated_at
+            default_capacity, commission_bonus, status, updated_at
        FROM services WHERE id = ?`,
   )
     .bind(id)
@@ -108,6 +111,7 @@ const getServiceRow = (id: string) =>
       base_price: number
       minimum_price: number
       default_capacity: number
+      commission_bonus: number
       status: string
       updated_at: number
     }>()
@@ -134,8 +138,13 @@ const countServices = async () => {
   return r?.c ?? 0
 }
 
-// services / service_extras reference organizations, so clear children first.
+// services / service_extras reference organizations, so clear children first. Folios
+// (sold in the commission-snapshot test) reference users/services — clear them too so the
+// tenancy clear can drop users.
 const clearCatalogDb = async () => {
+  await env.DB.exec('DELETE FROM folio_line_extras')
+  await env.DB.exec('DELETE FROM folio_lines')
+  await env.DB.exec('DELETE FROM folios')
   await env.DB.exec('DELETE FROM service_extras')
   await env.DB.exec('DELETE FROM services')
 }
@@ -605,6 +614,139 @@ describe('US-A11 — service extras', () => {
       expect(res.status, JSON.stringify(payload)).toBe(400)
       expect(((await res.json()) as any).error.code).toBe('VALIDATION_ERROR')
     }
+  })
+})
+
+// ---------------------------------------------------------------------------
+// US-A12 — per-service commission bonus
+// Spec: docs/commissions/commissions.spec.md (Scenarios 1–8)
+// ---------------------------------------------------------------------------
+describe('US-A12 — service commission bonus', () => {
+  const createService = (body: Record<string, unknown>) =>
+    SELF.fetch('http://api.local/api/services', {
+      method: 'POST',
+      headers: jsonAuth(ADMIN_EMAIL),
+      body: JSON.stringify(body),
+    })
+
+  it('Scenario 1 — create with commission_bonus → stored and echoed', async () => {
+    await seedUser({ email: ADMIN_EMAIL, role: 'admin' })
+
+    const res = await createService({
+      name: 'Canyon Tour',
+      base_price: 150000,
+      minimum_price: 100000,
+      default_capacity: 12,
+      commission_bonus: 5000,
+    })
+    expect(res.status).toBe(201)
+    const body = (await res.json()) as { service: any }
+    expect(body.service.commission_bonus).toBe(5000)
+    expect((await getServiceRow(body.service.id))?.commission_bonus).toBe(5000)
+  })
+
+  it('Scenario 2 — commission_bonus defaults to 0 when omitted', async () => {
+    await seedUser({ email: ADMIN_EMAIL, role: 'admin' })
+
+    const res = await createService({
+      name: 'No Bonus Tour',
+      base_price: 150000,
+      minimum_price: 100000,
+      default_capacity: 12,
+    })
+    expect(res.status).toBe(201)
+    const body = (await res.json()) as { service: any }
+    expect(body.service.commission_bonus).toBe(0)
+  })
+
+  it('Scenario 3 — negative / non-integer bonus → 400, no row', async () => {
+    await seedUser({ email: ADMIN_EMAIL, role: 'admin' })
+
+    for (const commission_bonus of [-1, 10.5]) {
+      const res = await createService({
+        name: 'Bad Bonus',
+        base_price: 150000,
+        minimum_price: 100000,
+        default_capacity: 12,
+        commission_bonus,
+      })
+      expect(res.status, String(commission_bonus)).toBe(400)
+      expect(((await res.json()) as any).error.code).toBe('VALIDATION_ERROR')
+    }
+    expect(await countServices()).toBe(0)
+  })
+
+  it('Scenario 4 — PUT replaces the bonus', async () => {
+    const { organizationId } = await seedUser({ email: ADMIN_EMAIL, role: 'admin' })
+    const { serviceId } = await seedService({ organizationId, commissionBonus: 5000 })
+
+    const res = await SELF.fetch(`http://api.local/api/services/${serviceId}`, {
+      method: 'PUT',
+      headers: jsonAuth(ADMIN_EMAIL),
+      body: JSON.stringify({
+        name: 'City Tour',
+        base_price: 150000,
+        minimum_price: 100000,
+        default_capacity: 10,
+        commission_bonus: 8000,
+      }),
+    })
+    expect(res.status).toBe(200)
+    expect(((await res.json()) as { service: any }).service.commission_bonus).toBe(8000)
+    expect((await getServiceRow(serviceId))?.commission_bonus).toBe(8000)
+  })
+
+  it('Scenario 5 — list and detail expose commission_bonus', async () => {
+    const { organizationId } = await seedUser({ email: ADMIN_EMAIL, role: 'admin' })
+    const { serviceId } = await seedService({ organizationId, commissionBonus: 7000 })
+
+    const list = await SELF.fetch('http://api.local/api/services', {
+      headers: jsonAuth(ADMIN_EMAIL),
+    })
+    const listBody = (await list.json()) as { services: any[] }
+    expect(listBody.services[0].commission_bonus).toBe(7000)
+
+    const detail = await SELF.fetch(`http://api.local/api/services/${serviceId}`, {
+      headers: jsonAuth(ADMIN_EMAIL),
+    })
+    expect(((await detail.json()) as { service: any }).service.commission_bonus).toBe(7000)
+  })
+
+  it('Scenario 7 — editing the bonus does not rewrite a sold folio\'s commission_amount', async () => {
+    const { organizationId, userId: agentId } = await seedUser({
+      email: ADMIN_EMAIL,
+      role: 'admin',
+    })
+    const { serviceId } = await seedService({ organizationId, commissionBonus: 5000 })
+
+    // A folio already sold with a snapshotted commission_amount.
+    const folioId = crypto.randomUUID()
+    await env.DB.prepare(
+      `INSERT INTO folios
+         (id, organization_id, agent_id, status, subtotal, discount_total, total, amount_paid, commission_amount)
+       VALUES (?, ?, ?, 'paid', 150000, 0, 150000, 150000, 19500)`,
+    )
+      .bind(folioId, organizationId, agentId)
+      .run()
+
+    await SELF.fetch(`http://api.local/api/services/${serviceId}`, {
+      method: 'PUT',
+      headers: jsonAuth(ADMIN_EMAIL),
+      body: JSON.stringify({
+        name: 'City Tour',
+        base_price: 150000,
+        minimum_price: 100000,
+        default_capacity: 10,
+        commission_bonus: 99000, // bump the rate after the sale
+      }),
+    })
+
+    const folio = await env.DB.prepare(
+      `SELECT commission_amount FROM folios WHERE id = ?`,
+    )
+      .bind(folioId)
+      .first<{ commission_amount: number }>()
+    expect(folio?.commission_amount).toBe(19500) // snapshot unchanged
   })
 })
 

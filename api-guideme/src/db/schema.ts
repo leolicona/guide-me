@@ -83,6 +83,9 @@ export const services = sqliteTable('services', {
   basePrice: integer('base_price').notNull(),
   minimumPrice: integer('minimum_price').notNull(),
   defaultCapacity: integer('default_capacity').notNull(),
+  // Per-service commission bonus (minor units) added per sold pass on top of the agent's
+  // base % — see US-A12 / docs/cash-drops/agent-balance-cash-drops.spec.md.
+  commissionBonus: integer('commission_bonus').notNull().default(0),
   status: text('status', { enum: ['active', 'inactive'] })
     .notNull()
     .default('active'),
@@ -180,13 +183,26 @@ export const folios = sqliteTable('folios', {
   status: text('status', { enum: ['paid', 'booking', 'cancelled'] })
     .notNull()
     .default('paid'),
+  // How the agent collected (US-AG25). Only 'cash' folios add to the agent's cash debt;
+  // 'card' folios still earn commission (US-AG24).
+  paymentMethod: text('payment_method', { enum: ['cash', 'card'] })
+    .notNull()
+    .default('cash'),
   subtotal: integer('subtotal').notNull(),
   discountTotal: integer('discount_total').notNull().default(0),
   total: integer('total').notNull(),
   amountPaid: integer('amount_paid').notNull(),
+  // Commission the agent earns on this sale (minor units), snapshotted at confirm time
+  // (US-AG23). Deducted from the running balance unless clawed back on cancellation.
+  commissionAmount: integer('commission_amount').notNull().default(0),
   cancelledAt: integer('cancelled_at', { mode: 'timestamp' }), // set on total cancellation (US-A21)
   cancelledBy: text('cancelled_by').references(() => users.id), // admin who cancelled
   cancellationReason: text('cancellation_reason'), // optional admin note
+  // On cancellation (US-A26): true → agent loses the commission (clawback); false → the
+  // company absorbs it and the agent keeps the commission. Only meaningful when cancelled.
+  cancellationClawback: integer('cancellation_clawback', { mode: 'boolean' })
+    .notNull()
+    .default(false),
   createdAt: integer('created_at', { mode: 'timestamp' })
     .notNull()
     .default(sql`(unixepoch())`),
@@ -246,7 +262,9 @@ export const folioLineExtras = sqliteTable('folio_line_extras', {
     .default(sql`(unixepoch())`),
 })
 
-export const cashDrawers = sqliteTable('cash_drawers', {
+// Agent operating expenses — perpetual (not day-scoped). Reduce the agent's running
+// balance. See docs/cash-drops/agent-balance-cash-drops.spec.md.
+export const agentExpenses = sqliteTable('agent_expenses', {
   id: text('id').primaryKey(),
   organizationId: text('organization_id')
     .notNull()
@@ -254,16 +272,30 @@ export const cashDrawers = sqliteTable('cash_drawers', {
   agentId: text('agent_id')
     .notNull()
     .references(() => users.id),
-  businessDate: text('business_date').notNull(), // 'YYYY-MM-DD' org-local day
-  status: text('status', { enum: ['open', 'submitted', 'approved', 'rejected'] })
+  description: text('description').notNull(),
+  amount: integer('amount').notNull(), // minor units, > 0
+  createdAt: integer('created_at', { mode: 'timestamp' })
     .notNull()
-    .default('open'),
-  totalCollected: integer('total_collected'), // snapshot at close
-  pendingBalance: integer('pending_balance'),
-  expenseTotal: integer('expense_total'),
-  netBalance: integer('net_balance'),
-  folioCount: integer('folio_count'),
-  submittedAt: integer('submitted_at', { mode: 'timestamp' }),
+    .default(sql`(unixepoch())`),
+})
+
+// Cash drops — settlement events (agent hands physical cash to the admin). A confirmed
+// drop reduces the agent's running balance. `balance_before` is an audit snapshot of the
+// derived balance at creation time.
+export const cashDrops = sqliteTable('cash_drops', {
+  id: text('id').primaryKey(),
+  organizationId: text('organization_id')
+    .notNull()
+    .references(() => organizations.id),
+  agentId: text('agent_id')
+    .notNull()
+    .references(() => users.id),
+  amount: integer('amount').notNull(), // minor units, > 0 — reduces balance once confirmed
+  balanceBefore: integer('balance_before').notNull(), // audit snapshot at creation
+  status: text('status', { enum: ['pending', 'confirmed', 'rejected'] })
+    .notNull()
+    .default('pending'),
+  note: text('note'),
   reviewedBy: text('reviewed_by').references(() => users.id),
   reviewedAt: integer('reviewed_at', { mode: 'timestamp' }),
   reviewNote: text('review_note'),
@@ -275,16 +307,22 @@ export const cashDrawers = sqliteTable('cash_drawers', {
     .default(sql`(unixepoch())`),
 })
 
-export const cashDrawerExpenses = sqliteTable('cash_drawer_expenses', {
+// Payouts — company-to-agent payments (transfer/payroll) that clear a negative running
+// balance (US-A25). Immediate (no review): each payout raises the agent's balance by its
+// amount. `created_by` is the admin who registered it.
+export const payouts = sqliteTable('payouts', {
   id: text('id').primaryKey(),
   organizationId: text('organization_id')
     .notNull()
     .references(() => organizations.id),
-  cashDrawerId: text('cash_drawer_id')
+  agentId: text('agent_id')
     .notNull()
-    .references(() => cashDrawers.id),
-  description: text('description').notNull(),
-  amount: integer('amount').notNull(), // minor units, > 0
+    .references(() => users.id),
+  amount: integer('amount').notNull(), // minor units, > 0 — raises the balance
+  note: text('note'),
+  createdBy: text('created_by')
+    .notNull()
+    .references(() => users.id),
   createdAt: integer('created_at', { mode: 'timestamp' })
     .notNull()
     .default(sql`(unixepoch())`),
@@ -312,7 +350,9 @@ export type FolioLine = typeof folioLines.$inferSelect
 export type NewFolioLine = typeof folioLines.$inferInsert
 export type FolioLineExtra = typeof folioLineExtras.$inferSelect
 export type NewFolioLineExtra = typeof folioLineExtras.$inferInsert
-export type CashDrawer = typeof cashDrawers.$inferSelect
-export type NewCashDrawer = typeof cashDrawers.$inferInsert
-export type CashDrawerExpense = typeof cashDrawerExpenses.$inferSelect
-export type NewCashDrawerExpense = typeof cashDrawerExpenses.$inferInsert
+export type AgentExpense = typeof agentExpenses.$inferSelect
+export type NewAgentExpense = typeof agentExpenses.$inferInsert
+export type CashDrop = typeof cashDrops.$inferSelect
+export type NewCashDrop = typeof cashDrops.$inferInsert
+export type Payout = typeof payouts.$inferSelect
+export type NewPayout = typeof payouts.$inferInsert

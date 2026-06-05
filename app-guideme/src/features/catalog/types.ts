@@ -16,6 +16,8 @@ export interface Service {
   base_price: number
   minimum_price: number
   default_capacity: number
+  /** US-A12 — per-pass commission bonus (minor units) added to the agent's base %. */
+  commission_bonus: number
   status: ServiceStatus
   /** Present on detail (GET /:id), absent on the list. */
   extras?: ServiceExtra[]

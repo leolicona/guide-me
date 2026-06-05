@@ -25,6 +25,7 @@ interface ServiceRow {
   basePrice: number
   minimumPrice: number
   defaultCapacity: number
+  commissionBonus: number
   status: string
 }
 
@@ -52,6 +53,7 @@ const serializeService = (
   base_price: row.basePrice,
   minimum_price: row.minimumPrice,
   default_capacity: row.defaultCapacity,
+  commission_bonus: row.commissionBonus,
   status: row.status,
   ...(extras !== undefined ? { extras: extras.map(serializeExtra) } : {}),
 })
@@ -63,6 +65,7 @@ const serviceColumns = {
   basePrice: services.basePrice,
   minimumPrice: services.minimumPrice,
   defaultCapacity: services.defaultCapacity,
+  commissionBonus: services.commissionBonus,
   status: services.status,
 } as const
 
@@ -103,6 +106,7 @@ export const createService = async (c: ServicesContext) => {
       basePrice: input.base_price,
       minimumPrice: input.minimum_price,
       defaultCapacity: input.default_capacity,
+      commissionBonus: input.commission_bonus ?? 0,
       status: 'active',
     })
     .returning(serviceColumns)
@@ -171,6 +175,7 @@ export const updateService = async (c: ServicesContext) => {
       basePrice: input.base_price,
       minimumPrice: input.minimum_price,
       defaultCapacity: input.default_capacity,
+      commissionBonus: input.commission_bonus ?? 0,
       updatedAt: new Date(),
     })
     .where(

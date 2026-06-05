@@ -6,8 +6,8 @@ import { authMiddleware } from './middleware/auth'
 import { requireRole } from './middleware/role'
 import agentsRouter from './routes/agents'
 import authRouter from './routes/auth'
+import cashRouter from './routes/cash'
 import organizationsRouter from './routes/organizations'
-import cashDrawersRouter from './routes/cash-drawers'
 import foliosRouter from './routes/folios'
 import posRouter from './routes/pos'
 import servicesRouter from './routes/services'
@@ -38,7 +38,7 @@ app.route('/api/services', servicesRouter)
 app.route('/api/pos', posRouter)
 app.route('/api/folios', foliosRouter)
 app.route('/api/tickets', ticketsRouter)
-app.route('/api/cash-drawers', cashDrawersRouter)
+app.route('/api/cash', cashRouter)
 
 app.get('/api/me', authMiddleware, (c) => c.json({ user: c.get('user') }))
 

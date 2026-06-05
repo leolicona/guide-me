@@ -126,8 +126,6 @@ const getFolioRow = (id: string) =>
     }>()
 
 const clearFoliosDb = async () => {
-  await env.DB.exec('DELETE FROM cash_drawer_expenses')
-  await env.DB.exec('DELETE FROM cash_drawers')
   await env.DB.exec('DELETE FROM folio_line_extras')
   await env.DB.exec('DELETE FROM folio_lines')
   await env.DB.exec('DELETE FROM folios')
@@ -275,28 +273,31 @@ describe('Total Folio Cancellation', () => {
     expect((await getFolioRow(folioId))?.status).toBe('cancelled')
   })
 
-  it('Scenario 6 — cancelled cash drops out of a live (open) drawer', async () => {
+  it('Scenario 6 — cancelled folio is excluded from collected-cash derivation', async () => {
     const { organizationId, agentId } = await seedOrgWithStaff()
     const folioId = await seedFolio({ organizationId, agentId, total: 300000, amountPaid: 300000 })
 
-    // Live drawer counts it.
-    const before = await SELF.fetch(`http://api.local/api/cash-drawers/me?date=${DATE}`, {
-      headers: auth(AGENT_EMAIL),
-    })
-    const beforeJson = (await before.json()) as any
-    expect(beforeJson.drawer.income.total_collected).toBe(300000)
-    expect(beforeJson.drawer.income.folio_count).toBe(1)
+    // The cash derivation (shared by the agent balance / cash-drops feature) sums
+    // amount_paid over NON-cancelled folios. Assert at that predicate level so the test
+    // is decoupled from any specific cash endpoint.
+    const collected = async () =>
+      Number(
+        (
+          await env.DB.prepare(
+            `SELECT coalesce(sum(amount_paid), 0) AS c FROM folios
+               WHERE organization_id = ? AND agent_id = ? AND status != 'cancelled'`,
+          )
+            .bind(organizationId, agentId)
+            .first<{ c: number }>()
+        )?.c ?? 0,
+      )
+
+    expect(await collected()).toBe(300000)
 
     const { status } = await cancelFolio(ADMIN_EMAIL, folioId)
     expect(status).toBe(200)
 
-    // Live drawer excludes it.
-    const after = await SELF.fetch(`http://api.local/api/cash-drawers/me?date=${DATE}`, {
-      headers: auth(AGENT_EMAIL),
-    })
-    const afterJson = (await after.json()) as any
-    expect(afterJson.drawer.income.total_collected).toBe(0)
-    expect(afterJson.drawer.income.folio_count).toBe(0)
+    expect(await collected()).toBe(0)
   })
 
   it('Scenario 7 — a cancelled folio\'s QR ticket is rejected by the scanner', async () => {

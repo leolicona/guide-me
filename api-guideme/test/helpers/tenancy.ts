@@ -15,6 +15,8 @@ interface SeedUserOptions {
   name?: string
   role?: 'admin' | 'agent'
   status?: 'unverified' | 'active' | 'suspended'
+  /** Agent base commission as a whole-number percentage (default 0). */
+  baseCommission?: number
   /** Reuse an existing org instead of creating a new one. */
   organizationId?: string
   organizationName?: string
@@ -25,6 +27,7 @@ export const seedUser = async ({
   name = 'Test User',
   role = 'admin',
   status = 'active',
+  baseCommission = 0,
   organizationId,
   organizationName = DEFAULT_ORG_NAME,
 }: SeedUserOptions): Promise<{ userId: string; organizationId: string }> => {
@@ -38,8 +41,8 @@ export const seedUser = async ({
   }
 
   await env.DB.prepare(
-    `INSERT INTO users (id, organization_id, name, email, password_hash, password_salt, phone, role, status, plan)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO users (id, organization_id, name, email, password_hash, password_salt, phone, role, status, base_commission, plan)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   )
     .bind(
       userId,
@@ -51,6 +54,7 @@ export const seedUser = async ({
       '+52 55 1234 5678',
       role,
       status,
+      baseCommission,
       'free',
     )
     .run()

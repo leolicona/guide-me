@@ -15,9 +15,9 @@ export const ROUTES = {
   POS_CHECKOUT: '/pos/checkout',
   FOLIO: '/pos/folio/:id',
   SCAN: '/scan',
-  CASH_DRAWER: '/cash-drawer',
-  CLOSURES: '/closures',
-  CLOSURE_DETAIL: '/closures/:id',
   FOLIOS: '/folios',
   FOLIO_DETAIL: '/folios/:id',
+  BALANCE: '/balance', // agent — running balance, expenses, hand-ins
+  CASH: '/cash', // admin — outstanding balances + drops review queue
+  CASH_DROP_DETAIL: '/cash/drops/:id', // admin — one drop's detail
 } as const

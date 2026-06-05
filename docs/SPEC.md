@@ -65,7 +65,8 @@ GuideMe is a multi-tenant, mobile-optimized SaaS platform that centralizes the s
 
 - **US-A17** — As an admin, I want to generate a commission report per agent for a range of dates, showing total sales, base commission, service bonuses, and total commission to pay.
 - **US-A18** — As an admin, I want to see a performance comparison between agents (folios sold, total amount) in a given period.
-- **US-A19** — As an admin, I want to review and validate the daily cash drawer closures submitted by agents.
+- **US-A19** — As an admin, I want to confirm receipt of the cash that agents hand in (cash drops) and see each agent's current outstanding balance (the company cash they are holding), so a confirmed hand-in reduces that agent's running balance.
+- **US-A25** — As an admin, if an agent has a negative balance (the company owes them money), I want to record a "Payout" (Transfer/Payroll) to return their balance to zero.
 - **US-A20** — As an admin, I want to export sales and commission reports (CSV or PDF) for external processing.
 
 #### Cancellations
@@ -73,6 +74,7 @@ GuideMe is a multi-tenant, mobile-optimized SaaS platform that centralizes the s
 - **US-A21** — As an admin, I want to cancel an entire folio to automatically release the spots for all included services and record the cancellation.
 - **US-A22** — As an admin, I want to partially cancel specific spots/services within a folio, releasing only the corresponding inventory without cancelling the whole group.
 - **US-A23** — As an admin, I want to mark a cancelled folio (or partial cancellation) as "refunded" to track if the physical cash has been returned to the client.
+- **US-A26** — As an admin, when cancelling a folio, I want to choose if the cancellation triggers a "Clawback" (agent loses commission) or if the company absorbs the loss.
 - **US-A24** — As an admin, I want to see an audit timeline on the folio details page showing who created it, when it was cancelled, and by whom, with the associated reason.
 
 ---
@@ -92,6 +94,7 @@ GuideMe is a multi-tenant, mobile-optimized SaaS platform that centralizes the s
 - **US-AG05** — As an agent, I want to add optional extras to the sales cart (e.g., photo, insurance) to increase the average ticket size.
 - **US-AG06** — As an agent, I want to apply a manual discount to a service's price, with the limit locked at the minimum price defined by the admin, to avoid selling below the allowed cost.
 - **US-AG07** — As an agent, I want to register a sale as a "booking/down-payment" (apartado) with a partial amount received, to reserve the spots and collect the rest later.
+- **US-AG25** — As an agent, I want to select the payment method ("Cash" or "Card") at checkout.
 - **US-AG08** — As an agent, I want to confirm the sale and generate a unique folio containing all services in the cart.
 - **US-AG09** — As an agent, I want the client to automatically receive their purchase receipt, itinerary, and QR code via Email upon confirming the sale.
 
@@ -100,11 +103,19 @@ GuideMe is a multi-tenant, mobile-optimized SaaS platform that centralizes the s
 - **US-AG10** — As an agent, I want to see a clear indication of how many spots remain per service/schedule on the sales screen to avoid selling full services.
 - **US-AG11** — As an agent, I want the system to block my sale confirmation if the spot is no longer available at the time of confirmation (protection against race conditions).
 
-#### Daily Cash Drawer
+#### Agent Cash Balance (Continuous "Bolsa" / Cash Drops)
 
-- **US-AG12** — As an agent, I want to see a summary of my daily sales: generated folios, total cash, total pending bookings to be collected.
-- **US-AG13** — As an agent, I want to register daily operating expenses (e.g., gasoline, supplies) with amount and description so my cash drawer's net balance is accurate.
-- **US-AG14** — As an agent, I want to generate my daily cash closure report with the breakdown of income, expenses, and net balance to submit it to the admin.
+> **Model:** instead of a forced daily closure, each agent carries a **perpetual running
+> balance** — the company cash they are currently holding. It rises with every collected
+> sale and falls with every expense and every **cash drop** (hand-in). Settlement happens
+> whenever physical cash moves, not on a clock. This **replaces** the earlier daily
+> cash-closure (*corte de caja*) model.
+
+- **US-AG12** — As an agent, I want to see my current running balance: total cash collected, operating expenses, cash already handed in, and the resulting balance I am still holding, so I always know what I owe the company.
+- **US-AG13** — As an agent, I want to register operating expenses (e.g., gasoline, supplies) with amount and description so my running balance is accurate.
+- **US-AG23** — As an agent, I want the system to calculate my commission per sale and automatically deduct it from my "Debt to Company" (Running Balance), so I keep my earnings immediately.
+- **US-AG24** — As an agent, when I register a sale with a "Card" payment method, I want my commission to be credited to my balance without increasing my cash debt.
+- **US-AG14** — As an agent, I want to register a cash drop (hand-in / *entrega de efectivo*) of a given amount to the admin, which reduces my running balance, so settlement happens whenever I hand over cash — no daily closure required.
 
 #### Access Scanner (QR)
 
@@ -112,6 +123,12 @@ GuideMe is a multi-tenant, mobile-optimized SaaS platform that centralizes the s
 - **US-AG16** — As an agent, I want the QR validation to work offline, marking the ticket as consumed on my device and syncing when connection is restored. *(Phase 2)*
 - **US-AG17** — As an agent, I want to see a clear scan result screen: ✓ Valid (client name, service, schedule, and redemption progress e.g., "Pass 2 of 5 used") or ✗ Invalid (reason: all passes used, expired, fake).
 - **US-AG19** — As an agent, I want to see a clear error message if I try to scan a QR code without internet connection, indicating that the validation requires network access.
+
+#### Folio History
+
+- **US-AG20** — As an agent, I want to see a list of my historical sales (folios) with their status (paid, booking, cancelled) so I can review my past transactions.
+- **US-AG21** — As an agent, I want to view the details of a specific folio I created, including the services sold and amounts, to answer customer queries.
+- **US-AG22** — As an agent, I want to be able to resend the purchase receipt and QR code via email to a customer from my folio history if they lost it. *(Deferred to Phase 2)*
 
 ---
 
@@ -139,7 +156,8 @@ GuideMe is a multi-tenant, mobile-optimized SaaS platform that centralizes the s
 - [x] **Mobile point of sale with controlled discount** *(US-AG03, US-AG04, US-AG05, US-AG06, US-AG08)* — `docs/pos/pos-controlled-discount.spec.md`
 - [x] **Folio generation with signed QR code (HMAC)** *(US-AG08, US-C02)* — `docs/qr/folio-qr-signing.spec.md`
 - [x] **Online QR Scanner** *(US-AG15, US-AG17, US-AG19)* — `docs/scanner/online-qr-scanner.spec.md`
-- [x] **Agent's daily cash drawer with operating expenses** *(US-AG12, US-AG13, US-AG14, US-A19)* — `docs/cash-drawer/cash-drawer.spec.md`
+- [x] **Commissions: base % per agent + bonus per service** *(US-A12)* — `docs/commissions/commissions.spec.md` — *base % is admin-editable per agent; the per-service `commission_bonus` is set in the catalog service form; the per-sale commission is computed and snapshotted at POS (base % × total + Σ per-service bonus) and deducted from the running balance.*
+- [x] **Agent continuous cash balance (Net-remittance) with cash drops** *(US-AG12, US-AG13, US-AG14, US-AG23, US-AG24, US-AG25, US-A19, US-A25, US-A26)* — `docs/cash-drops/agent-balance-cash-drops.spec.md`
 - [x] **Total folio cancellation** *(US-A21)* — `docs/cancellation/total-folio-cancellation.spec.md`
 
 #### 🟡 SHOULD HAVE
@@ -147,8 +165,8 @@ GuideMe is a multi-tenant, mobile-optimized SaaS platform that centralizes the s
 - [ ] **Bookings/down-payments (partial payment with spot reservation)** *(US-AG07)*
 - [ ] **Sending receipt and QR code to client via Email (Resend)** *(US-AG09, US-C01, US-C03)*
 - [ ] **Occupancy visual dashboard (admin)** *(US-A14, US-A15, US-A16)*
-- [ ] **Commissions: base % per agent + bonus per service** *(US-A12)*
 - [ ] **Commission report by period** *(US-A17, US-A18, US-A20)*
+- [ ] **Agent folio history (read-only list and details)** *(US-AG20, US-AG21)*
 
 ### Out of MVP (Phase 2+)
 
@@ -193,7 +211,7 @@ GuideMe is a multi-tenant, mobile-optimized SaaS platform that centralizes the s
 - Each service can have an additional `commission_bonus` (%) defined by the admin.
 - Total commission per sales line = `(sold_price × base_commission) + (sold_price × commission_bonus)`.
 - Commissions are calculated on the final sold price (post-discount), not on the base price.
-- Bookings/down-payments generate commissions only on the amount actually collected until the cash closure.
+- Bookings/down-payments generate commissions only on the amount actually collected (the cumulative cash that has entered the agent's running balance).
 
 ### Bookings (Down-payment / Partial Payment)
 
@@ -236,6 +254,8 @@ GuideMe is a multi-tenant, mobile-optimized SaaS platform that centralizes the s
 | **Slot** | An instance of a service at a specific date and time, with its own maximum capacity. |
 | **Extra** | Optional product or service added to a folio (e.g., photo, insurance). |
 | **Booking (Apartado)** | Folio with a partial payment that reserves capacity but remains pending complete collection. |
-| **Cash closure (Corte de caja)** | Agent's daily summary: sales, operating expenses, and net balance. |
+| **Running balance (Bolsa / Saldo)** | An agent's perpetual balance of company cash held: Σ collected − Σ expenses − Σ confirmed cash drops. No daily boundary. |
+| **Cash drop (Entrega de efectivo)** | An event where an agent hands physical cash to the admin; once the admin confirms receipt it reduces the agent's running balance. |
+| **Cash closure (Corte de caja)** | *Deprecated (Phase-1 pivot).* The earlier daily summary model — replaced by the continuous running balance + cash drops. |
 | **Minimum price (Precio mínimo)** | Price floor per service defined by the admin. The agent cannot sell below it. |
 | **Commission bonus (Bonus de comisión)** | Additional commission percentage defined by the admin for a specific service. |

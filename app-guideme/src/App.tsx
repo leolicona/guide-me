@@ -23,11 +23,11 @@ const PosServicePage = lazy(() => import('./pages/PosServicePage'))
 const PosCheckoutPage = lazy(() => import('./pages/PosCheckoutPage'))
 const FolioReceiptPage = lazy(() => import('./pages/FolioReceiptPage'))
 const ScannerPage = lazy(() => import('./pages/ScannerPage'))
-const CashDrawerPage = lazy(() => import('./pages/CashDrawerPage'))
-const ClosuresListPage = lazy(() => import('./pages/ClosuresListPage'))
-const ClosureDetailPage = lazy(() => import('./pages/ClosureDetailPage'))
 const FoliosListPage = lazy(() => import('./pages/FoliosListPage'))
 const FolioDetailPage = lazy(() => import('./pages/FolioDetailPage'))
+const BalancePage = lazy(() => import('./pages/BalancePage'))
+const CashBalancesPage = lazy(() => import('./pages/CashBalancesPage'))
+const CashDropDetailPage = lazy(() => import('./pages/CashDropDetailPage'))
 
 function PageLoader() {
   return (
@@ -127,30 +127,12 @@ function App() {
               }
             />
 
-            {/* Agent daily cash drawer (US-AG12, AG13, AG14) */}
+            {/* Agent running balance — expenses + cash hand-ins (US-AG12/13/14) */}
             <Route
-              path={ROUTES.CASH_DRAWER}
+              path={ROUTES.BALANCE}
               element={
                 <RoleGuard role="agent">
-                  <CashDrawerPage />
-                </RoleGuard>
-              }
-            />
-
-            {/* Admin cash-closure review (US-A19) */}
-            <Route
-              path={ROUTES.CLOSURES}
-              element={
-                <RoleGuard role="admin">
-                  <ClosuresListPage />
-                </RoleGuard>
-              }
-            />
-            <Route
-              path={ROUTES.CLOSURE_DETAIL}
-              element={
-                <RoleGuard role="admin">
-                  <ClosureDetailPage />
+                  <BalancePage />
                 </RoleGuard>
               }
             />
@@ -169,6 +151,24 @@ function App() {
               element={
                 <RoleGuard role="admin">
                   <FolioDetailPage />
+                </RoleGuard>
+              }
+            />
+
+            {/* Admin cash — outstanding balances, drops review, payouts (US-A19/A25) */}
+            <Route
+              path={ROUTES.CASH}
+              element={
+                <RoleGuard role="admin">
+                  <CashBalancesPage />
+                </RoleGuard>
+              }
+            />
+            <Route
+              path={ROUTES.CASH_DROP_DETAIL}
+              element={
+                <RoleGuard role="admin">
+                  <CashDropDetailPage />
                 </RoleGuard>
               }
             />

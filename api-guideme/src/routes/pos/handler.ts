@@ -9,6 +9,7 @@ import {
   serviceExtras,
   services,
   slots,
+  users,
 } from '../../db/schema'
 import { ApiError } from '../../types/errors'
 import type { AppVariables } from '../../types/context'
@@ -245,6 +246,7 @@ interface PreparedLine {
   minimumPrice: number
   unitPrice: number
   lineTotal: number
+  commissionBonus: number // per-pass service bonus snapshot (US-A12)
   extras: PreparedExtra[]
   // Signed at confirm time, once all decrements succeed (below).
   qrToken?: string
@@ -278,6 +280,7 @@ export const confirmSale = async (c: PosContext) => {
         serviceName: services.name,
         basePrice: services.basePrice,
         minimumPrice: services.minimumPrice,
+        commissionBonus: services.commissionBonus,
       })
       .from(slots)
       .innerJoin(services, eq(slots.serviceId, services.id))
@@ -358,6 +361,7 @@ export const confirmSale = async (c: PosContext) => {
       minimumPrice: slot.minimumPrice,
       unitPrice: line.unit_price,
       lineTotal,
+      commissionBonus: slot.commissionBonus,
       extras: preparedExtras,
     })
   }
@@ -368,6 +372,22 @@ export const confirmSale = async (c: PosContext) => {
     0,
   )
   const total = subtotal
+
+  // COMMISSION (US-AG23 / US-A12): the agent's base % of the folio total plus each line's
+  // per-pass service bonus, snapshotted now so later rate changes don't rewrite history.
+  // base_commission is a whole-number percentage; round half-up to the nearest centavo.
+  const [agentRow] = await db
+    .select({ baseCommission: users.baseCommission })
+    .from(users)
+    .where(and(eq(users.id, agent.userId), eq(users.organizationId, org)))
+    .limit(1)
+  const basePct = agentRow?.baseCommission ?? 0
+  const baseCommission = Math.round((total * basePct) / 100)
+  const bonusTotal = prepared.reduce(
+    (sum, l) => sum + l.commissionBonus * l.quantity,
+    0,
+  )
+  const commissionAmount = baseCommission + bonusTotal
 
   // 2. DECREMENT each slot atomically & conditionally; track successes.
   const applied: { slotId: string; qty: number }[] = []
@@ -441,10 +461,12 @@ export const confirmSale = async (c: PosContext) => {
       customerEmail: input.customer_email ?? null,
       customerPhone: input.customer_phone ?? null,
       status: 'paid',
+      paymentMethod: input.payment_method ?? 'cash',
       subtotal,
       discountTotal,
       total,
       amountPaid: total,
+      commissionAmount,
     }),
   ]
 
@@ -490,6 +512,7 @@ export const confirmSale = async (c: PosContext) => {
       folio: {
         id: folioId,
         status: 'paid',
+        payment_method: input.payment_method ?? 'cash',
         customer_name: input.customer_name ?? null,
         customer_email: input.customer_email ?? null,
         customer_phone: input.customer_phone ?? null,
@@ -497,6 +520,7 @@ export const confirmSale = async (c: PosContext) => {
         discount_total: discountTotal,
         total,
         amount_paid: total,
+        commission_amount: commissionAmount,
         lines: prepared.map((line) => ({
           id: line.id,
           service_id: line.serviceId,
@@ -538,6 +562,7 @@ const readFolio = async (
     .select({
       id: folios.id,
       status: folios.status,
+      paymentMethod: folios.paymentMethod,
       customerName: folios.customerName,
       customerEmail: folios.customerEmail,
       customerPhone: folios.customerPhone,
@@ -545,6 +570,7 @@ const readFolio = async (
       discountTotal: folios.discountTotal,
       total: folios.total,
       amountPaid: folios.amountPaid,
+      commissionAmount: folios.commissionAmount,
       createdAt: folios.createdAt,
     })
     .from(folios)
@@ -639,6 +665,7 @@ const readFolio = async (
   return {
     id: folio.id,
     status: folio.status,
+    payment_method: folio.paymentMethod,
     customer_name: folio.customerName,
     customer_email: folio.customerEmail,
     customer_phone: folio.customerPhone,
@@ -646,6 +673,7 @@ const readFolio = async (
     discount_total: folio.discountTotal,
     total: folio.total,
     amount_paid: folio.amountPaid,
+    commission_amount: folio.commissionAmount,
     created_at: Math.floor(folio.createdAt.getTime() / 1000),
     lines,
   }

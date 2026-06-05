@@ -81,6 +81,9 @@ export default function CatalogDetailPage() {
                       {formatMoney(service.base_price)} · min{' '}
                       {formatMoney(service.minimum_price)} · capacity{' '}
                       {service.default_capacity}
+                      {service.commission_bonus > 0 && (
+                        <> · bonus {formatMoney(service.commission_bonus)}</>
+                      )}
                     </Typography>
                   </Box>
                   <Button

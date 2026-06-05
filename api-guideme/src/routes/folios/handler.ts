@@ -26,6 +26,7 @@ const readFolio = async (db: Db, org: string, folioId: string) => {
       agentId: folios.agentId,
       agentName: users.name,
       status: folios.status,
+      paymentMethod: folios.paymentMethod,
       customerName: folios.customerName,
       customerEmail: folios.customerEmail,
       customerPhone: folios.customerPhone,
@@ -33,9 +34,11 @@ const readFolio = async (db: Db, org: string, folioId: string) => {
       discountTotal: folios.discountTotal,
       total: folios.total,
       amountPaid: folios.amountPaid,
+      commissionAmount: folios.commissionAmount,
       cancelledAt: folios.cancelledAt,
       cancelledBy: folios.cancelledBy,
       cancellationReason: folios.cancellationReason,
+      cancellationClawback: folios.cancellationClawback,
       createdAt: folios.createdAt,
     })
     .from(folios)
@@ -92,6 +95,7 @@ const readFolio = async (db: Db, org: string, folioId: string) => {
     id: folio.id,
     agent: { id: folio.agentId, name: folio.agentName },
     status: folio.status,
+    payment_method: folio.paymentMethod,
     customer_name: folio.customerName,
     customer_email: folio.customerEmail,
     customer_phone: folio.customerPhone,
@@ -99,9 +103,11 @@ const readFolio = async (db: Db, org: string, folioId: string) => {
     discount_total: folio.discountTotal,
     total: folio.total,
     amount_paid: folio.amountPaid,
+    commission_amount: folio.commissionAmount,
     cancelled_at: tsOrNull(folio.cancelledAt),
     cancelled_by: folio.cancelledBy,
     cancellation_reason: folio.cancellationReason,
+    cancellation_clawback: folio.cancellationClawback,
     created_at: Math.floor(folio.createdAt.getTime() / 1000),
     lines: lineRows.map((line) => ({
       id: line.id,
@@ -247,6 +253,7 @@ export const cancelFolio = async (c: FoliosContext) => {
         cancelledAt: now,
         cancelledBy: admin.userId,
         cancellationReason: input.reason ?? null,
+        cancellationClawback: input.clawback ?? false,
         updatedAt: now,
       })
       .where(

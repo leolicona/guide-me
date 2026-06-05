@@ -33,6 +33,7 @@ const EMPTY: ServiceFormData = {
   base_price: 0,
   minimum_price: 0,
   default_capacity: 1,
+  commission_bonus: 0,
 }
 
 export function ServiceFormDialog({
@@ -65,6 +66,7 @@ export function ServiceFormDialog({
         base_price: centsToAmount(service.base_price),
         minimum_price: centsToAmount(service.minimum_price),
         default_capacity: service.default_capacity,
+        commission_bonus: centsToAmount(service.commission_bonus),
       })
     } else {
       reset(EMPTY)
@@ -78,6 +80,7 @@ export function ServiceFormDialog({
       base_price: amountToCents(data.base_price),
       minimum_price: amountToCents(data.minimum_price),
       default_capacity: data.default_capacity,
+      commission_bonus: amountToCents(data.commission_bonus),
     }
 
     const onError = (error: unknown) => {
@@ -170,16 +173,37 @@ export function ServiceFormDialog({
                 {...register('minimum_price', { valueAsNumber: true })}
               />
             </Stack>
-            <TextField
-              label="Default capacity"
-              type="number"
-              fullWidth
-              disabled={isLoading}
-              error={!!errors.default_capacity}
-              helperText={errors.default_capacity?.message}
-              slotProps={{ htmlInput: { step: 1, min: 1 } }}
-              {...register('default_capacity', { valueAsNumber: true })}
-            />
+            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
+              <TextField
+                label="Default capacity"
+                type="number"
+                fullWidth
+                disabled={isLoading}
+                error={!!errors.default_capacity}
+                helperText={errors.default_capacity?.message}
+                slotProps={{ htmlInput: { step: 1, min: 1 } }}
+                {...register('default_capacity', { valueAsNumber: true })}
+              />
+              <TextField
+                label="Commission bonus"
+                type="number"
+                fullWidth
+                disabled={isLoading}
+                error={!!errors.commission_bonus}
+                helperText={
+                  errors.commission_bonus?.message ?? "Added to the agent's % per pass sold"
+                }
+                slotProps={{
+                  input: {
+                    startAdornment: (
+                      <InputAdornment position="start">$</InputAdornment>
+                    ),
+                  },
+                  htmlInput: { step: 0.01, min: 0 },
+                }}
+                {...register('commission_bonus', { valueAsNumber: true })}
+              />
+            </Stack>
           </Stack>
         </DialogContent>
         <DialogActions>

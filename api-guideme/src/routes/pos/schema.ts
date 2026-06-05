@@ -27,6 +27,9 @@ export const confirmSaleSchema = z
     // concern; POS captures them as optional metadata.
     customer_email: z.string().nullable().optional(),
     customer_phone: z.string().nullable().optional(),
+    // US-AG25 — how the cash was collected. Defaults to 'cash' (the common case and the
+    // pre-feature behaviour). 'card' sales still earn commission but add no cash debt.
+    payment_method: z.enum(['cash', 'card']).optional().default('cash'),
     lines: z.array(lineSchema).nonempty('Cart must have at least one line'),
   })
   // Business rule 6 — a slot may appear at most once (the UI merges quantities). This

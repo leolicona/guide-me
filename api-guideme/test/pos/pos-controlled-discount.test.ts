@@ -30,6 +30,7 @@ interface SeedServiceOptions {
   basePrice?: number
   minimumPrice?: number
   defaultCapacity?: number
+  commissionBonus?: number
   status?: 'active' | 'inactive'
 }
 
@@ -39,16 +40,17 @@ const seedService = async ({
   basePrice = 150000,
   minimumPrice = 100000,
   defaultCapacity = 12,
+  commissionBonus = 0,
   status = 'active',
 }: SeedServiceOptions): Promise<{ serviceId: string }> => {
   const serviceId = crypto.randomUUID()
   const ts = Math.floor(Date.now() / 1000)
   await env.DB.prepare(
     `INSERT INTO services
-       (id, organization_id, name, description, base_price, minimum_price, default_capacity, status, created_at, updated_at)
-     VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?, ?)`,
+       (id, organization_id, name, description, base_price, minimum_price, default_capacity, commission_bonus, status, created_at, updated_at)
+     VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?)`,
   )
-    .bind(serviceId, organizationId, name, basePrice, minimumPrice, defaultCapacity, status, ts, ts)
+    .bind(serviceId, organizationId, name, basePrice, minimumPrice, defaultCapacity, commissionBonus, status, ts, ts)
     .run()
   return { serviceId }
 }
@@ -283,6 +285,53 @@ describe('US-AG04 / AG05 / AG06 / AG08 — confirm sale', () => {
       amount_paid: 300000,
     })
     expect((await getSlotRow(slotId))!.booked).toBe(2)
+  })
+
+  it('US-AG23/AG25 — commission = base % + per-service bonus; payment_method stored', async () => {
+    // Agent earns 10% base; the service adds a 5000-per-pass bonus. Card payment.
+    const { organizationId } = await seedUser({
+      email: AGENT_EMAIL,
+      role: 'agent',
+      baseCommission: 10,
+    })
+    const { serviceId } = await seedService({
+      organizationId,
+      basePrice: 150000,
+      minimumPrice: 100000,
+      commissionBonus: 5000,
+    })
+    const { slotId } = await seedSlot({ organizationId, serviceId, capacity: 12, booked: 0 })
+
+    const { status, json } = await confirmOneLine(AGENT_EMAIL, {
+      payment_method: 'card',
+      lines: [{ slot_id: slotId, quantity: 2, unit_price: 150000 }],
+    })
+
+    expect(status).toBe(201)
+    // total = 300000 → base 10% = 30000; bonus = 2 × 5000 = 10000 → commission 40000.
+    expect(json.folio.payment_method).toBe('card')
+    expect(json.folio.commission_amount).toBe(40000)
+
+    const row = await env.DB.prepare(
+      `SELECT payment_method, commission_amount FROM folios WHERE id = ?`,
+    )
+      .bind(json.folio.id)
+      .first<{ payment_method: string; commission_amount: number }>()
+    expect(row?.payment_method).toBe('card')
+    expect(row?.commission_amount).toBe(40000)
+  })
+
+  it('US-AG25 — payment_method defaults to cash; zero base commission → 0', async () => {
+    const { organizationId } = await seedUser({ email: AGENT_EMAIL, role: 'agent' })
+    const { serviceId } = await seedService({ organizationId })
+    const { slotId } = await seedSlot({ organizationId, serviceId, capacity: 12, booked: 0 })
+
+    const { status, json } = await confirmOneLine(AGENT_EMAIL, {
+      lines: [{ slot_id: slotId, quantity: 1, unit_price: 150000 }],
+    })
+    expect(status).toBe(201)
+    expect(json.folio.payment_method).toBe('cash')
+    expect(json.folio.commission_amount).toBe(0)
   })
 
   it('Scenario 5 — extras snapshotted & summed; extra price comes from DB', async () => {

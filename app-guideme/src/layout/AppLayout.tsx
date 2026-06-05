@@ -12,13 +12,13 @@ import {
 } from '@mui/material'
 import { alpha, useTheme } from '@mui/material/styles'
 import type { SvgIconComponent } from '@mui/icons-material'
+import AccountBalanceWalletRounded from '@mui/icons-material/AccountBalanceWalletRounded'
 import DashboardRounded from '@mui/icons-material/DashboardRounded'
 import GroupsRounded from '@mui/icons-material/GroupsRounded'
 import MapRounded from '@mui/icons-material/MapRounded'
+import PaymentsRounded from '@mui/icons-material/PaymentsRounded'
 import PointOfSaleRounded from '@mui/icons-material/PointOfSaleRounded'
 import QrCodeScannerRounded from '@mui/icons-material/QrCodeScannerRounded'
-import AccountBalanceWalletRounded from '@mui/icons-material/AccountBalanceWalletRounded'
-import ReceiptLongRounded from '@mui/icons-material/ReceiptLongRounded'
 import ReceiptRounded from '@mui/icons-material/ReceiptRounded'
 import { useAuthStore } from '../store/authStore'
 import { useLogout } from '../features/auth/hooks/useLogout'
@@ -37,11 +37,11 @@ const NAV_ITEMS: NavItem[] = [
   { label: 'Dashboard', to: ROUTES.DASHBOARD, icon: DashboardRounded },
   { label: 'Sell', to: ROUTES.POS, icon: PointOfSaleRounded, role: 'agent' },
   { label: 'Scan', to: ROUTES.SCAN, icon: QrCodeScannerRounded, role: 'agent' },
-  { label: 'Caja', to: ROUTES.CASH_DRAWER, icon: AccountBalanceWalletRounded, role: 'agent' },
+  { label: 'Balance', to: ROUTES.BALANCE, icon: AccountBalanceWalletRounded, role: 'agent' },
   { label: 'Agents', to: ROUTES.AGENTS, icon: GroupsRounded, role: 'admin' },
   { label: 'Catalog', to: ROUTES.CATALOG, icon: MapRounded, role: 'admin' },
   { label: 'Folios', to: ROUTES.FOLIOS, icon: ReceiptRounded, role: 'admin' },
-  { label: 'Closures', to: ROUTES.CLOSURES, icon: ReceiptLongRounded, role: 'admin' },
+  { label: 'Cash', to: ROUTES.CASH, icon: PaymentsRounded, role: 'admin' },
 ]
 
 const RAIL_WIDTH = 88

@@ -17,6 +17,9 @@ export const serviceFormSchema = z
       .number({ message: 'Ingresa una capacidad válida' })
       .int('La capacidad debe ser un entero')
       .min(1, 'La capacidad mínima es 1'),
+    // US-A12 — per-service commission bonus (major-decimal in the form; converted to minor
+    // units before the API call). Optional → 0.
+    commission_bonus: amount,
   })
   .refine((v) => v.minimum_price <= v.base_price, {
     message: 'El precio mínimo debe ser ≤ al precio base',
