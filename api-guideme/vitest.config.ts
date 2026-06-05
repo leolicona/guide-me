@@ -21,6 +21,7 @@ export default defineConfig({
         bindings: {
           TEST_MIGRATIONS: migrations,
           RESEND_API_KEY: 'test_resend_key',
+          QR_SECRET: 'test_qr_secret',
         },
         serviceBindings: {
           AGNOSTIC_AUTH_API: () =>

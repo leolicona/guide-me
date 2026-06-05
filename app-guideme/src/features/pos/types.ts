@@ -44,6 +44,17 @@ export interface FolioLineExtra {
   quantity: number
 }
 
+/** Signature-free echo of the signed QR ticket payload, for rendering labels. */
+export interface FolioTicket {
+  folio_id: string
+  folio_line_id: string
+  service_id: string
+  slot_id: string
+  client_identity: string
+  passes_total: number
+  expires_at: number
+}
+
 export interface FolioLine {
   id: string
   service_id: string
@@ -56,6 +67,9 @@ export interface FolioLine {
   minimum_price: number
   unit_price: number
   line_total: number
+  /** Signed access ticket; null for folios sold before the QR feature. */
+  qr_token: string | null
+  qr: FolioTicket | null
   extras: FolioLineExtra[]
 }
 

@@ -14,6 +14,7 @@ import {
 } from '@mui/material'
 import CheckCircleRounded from '@mui/icons-material/CheckCircleRounded'
 import { useFolio } from '../features/pos/hooks'
+import { TicketQr } from '../features/pos/components/TicketQr'
 import { formatMoney } from '../features/catalog/types'
 import { ROUTES } from '../config/routes'
 
@@ -120,8 +121,23 @@ export default function FolioReceiptPage() {
               </CardContent>
             </Card>
 
+            <Box>
+              <Typography variant="h6" sx={{ mb: 1.5 }}>
+                Access tickets
+              </Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                One QR per service. The client presents it at the door; an agent scans it
+                to redeem a pass.
+              </Typography>
+              <Stack spacing={2}>
+                {folio.lines.map((line) => (
+                  <TicketQr key={line.id} line={line} />
+                ))}
+              </Stack>
+            </Box>
+
             <Alert severity="info" variant="outlined">
-              QR codes and the email receipt are delivered in a later step.
+              Emailing the receipt and tickets to the client is delivered in a later step.
             </Alert>
 
             <Button

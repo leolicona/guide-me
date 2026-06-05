@@ -2,6 +2,60 @@
 
 This document tracks known technical debt, deferred tasks, and architectural improvements that are planned for future phases.
 
+## 7. Per-Org QR Signing by Key Derivation (no rotation) — ⚠️ OPEN (accepted trade-off)
+
+**Status:** Accepted design, introduced by the signed-QR feature
+(`docs/qr/folio-qr-signing.spec.md`). The SPEC requires each ticket "signed with
+HMAC-SHA256 using a `QR_SECRET` per organization." Rather than store a per-org secret
+column (generation-on-create + a backfill for existing orgs), `src/utils/qr.ts` keeps a
+**single** Worker secret `QR_SECRET` and derives the per-org signing key as
+`orgKey = HMAC-SHA256(QR_SECRET, "guideme:qr:v1:" + organizationId)`. This satisfies "per
+organization" (distinct key per org; a ticket minted for one org cannot verify under
+another's derived key — multitenancy in the signature itself) with **no schema change and
+no backfill**.
+
+**Why accepted:** `QR_SECRET` is a Worker secret (`wrangler secret put QR_SECRET`); only
+the derived key signs, and neither leaves the server. Covered by
+`test/qr/qr.unit.test.ts` (cross-key isolation) and `test/qr/folio-qr-signing.test.ts`
+(Scenarios 4, 11).
+
+**Action if revisited:** **secret rotation is not yet supported** — there is no `kid` and
+rotating `QR_SECRET` would invalidate every already-issued ticket. The payload `v: 1` and
+the `"guideme:qr:v1:"` key label reserve room for a versioned scheme (embed a key id,
+verify against the matching secret) without reissuing tickets. Add it when rotation is
+needed.
+
+## 6. QR `expires_at` Single-Timezone Assumption — ⚠️ OPEN (accepted trade-off)
+
+**Status:** Accepted MVP simplification in `src/routes/pos/handler.ts` (`ticketExpiry`),
+introduced by the signed-QR feature. A ticket's `expires_at` is
+`unixtime(slot_date @ 00:00 UTC) + 48h` — valid through the end of the day after the tour.
+This mirrors the existing naive-calendar assumption already used by Schedules/Slots and
+POS (dates are timezone-less `YYYY-MM-DD` strings).
+
+**Why accepted:** the platform is single-timezone in the MVP; the 48h grace comfortably
+covers late-evening slots and next-morning stragglers regardless of the org's real offset.
+This feature only **stamps** `expires_at`; the *Online QR Scanner* feature enforces it.
+
+**Action if revisited:** when organizations gain a real timezone (a broader change touching
+schedules/slots/POS too), compute `expires_at` from the slot's local datetime rather than
+UTC midnight. No ticket-format change is required — `expires_at` is already an absolute unix
+timestamp.
+
+## 5. `verifyTicket` Shipped Ahead of Its Production Consumer — ✅ INTRODUCED (no open debt)
+
+**Status:** `src/utils/qr.ts` exports `verifyTicket` alongside `signTicket`/`deriveOrgKey`,
+introduced by the signed-QR feature (`docs/qr/folio-qr-signing.spec.md`). Only `signTicket`
+runs in a production request path today (folio confirm). `verifyTicket` is the *Online QR
+Scanner* feature's future production consumer; here it is exercised by this feature's own
+tests (roundtrip, tamper, cross-key, and the read-path integrity check in
+`readFolio`/`getFolio`).
+
+**Why no debt:** unlike a deferred-and-unused code path, a signer is only meaningfully
+testable against its verifier, and `verifyTicket` **is** consumed now — by `getFolio`
+(integrity-checks the stored token before echoing its payload) and by the QR test suites.
+No dead code; the scanner simply becomes its second caller.
+
 ## 4. D1 Has No Interactive Transactions — ⚠️ OPEN (accepted trade-off)
 
 **Status:** Accepted limitation, surfaced by the POS sale-confirm

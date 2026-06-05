@@ -12,6 +12,12 @@ import {
 } from '../../db/schema'
 import { ApiError } from '../../types/errors'
 import type { AppVariables } from '../../types/context'
+import {
+  deriveOrgKey,
+  signTicket,
+  verifyTicket,
+  type TicketPayload,
+} from '../../utils/qr'
 import type { ConfirmSaleInput } from './schema'
 
 export type PosContext = Context<{
@@ -23,6 +29,29 @@ export type PosContext = Context<{
 // dates are naive calendar strings compared lexicographically. A `today` query param
 // lets the client pin the org-local day; otherwise fall back to the server's UTC date.
 const utcToday = () => new Date().toISOString().slice(0, 10)
+
+// --- Signed QR access tickets (docs/qr/folio-qr-signing.spec.md) ---
+
+// MVP single-timezone (mirrors schedules/POS naive calendar): a ticket is valid through
+// the end of the day AFTER the slot date — a deliberate grace for late/next-morning scans.
+const ticketExpiry = (slotDate: string): number =>
+  Math.floor(Date.parse(`${slotDate}T00:00:00Z`) / 1000) + 48 * 3600
+
+// Display/audit identity baked into the ticket: customer name, else email, else folio id.
+const clientIdentity = (input: ConfirmSaleInput, folioId: string): string =>
+  input.customer_name?.trim() || input.customer_email?.trim() || `folio:${folioId}`
+
+// The signature-free subset of a ticket payload echoed on folio responses for the UI
+// (so the client need not base64-decode the token to render labels).
+const qrEcho = (p: TicketPayload) => ({
+  folio_id: p.folio_id,
+  folio_line_id: p.folio_line_id,
+  service_id: p.service_id,
+  slot_id: p.slot_id,
+  client_identity: p.client_identity,
+  passes_total: p.passes_total,
+  expires_at: p.expires_at,
+})
 
 // --- Serializers: DB columns → API shape (snake_case, derived `remaining`) ---
 
@@ -217,6 +246,9 @@ interface PreparedLine {
   unitPrice: number
   lineTotal: number
   extras: PreparedExtra[]
+  // Signed at confirm time, once all decrements succeed (below).
+  qrToken?: string
+  qr?: ReturnType<typeof qrEcho>
 }
 
 // US-AG04 / AG05 / AG06 / AG08 / AG11 — confirm a sale.
@@ -376,8 +408,30 @@ export const confirmSale = async (c: PosContext) => {
     applied.push({ slotId: line.slotId, qty: line.quantity })
   }
 
-  // 4. PERSIST — folio + lines + extras in one atomic batch (D1 batch rolls back on error).
+  // 4. SIGN one QR access ticket per line, from server-owned payload only (org from
+  //    context, passes_total = quantity, identity derived). Per-org derived key; HMAC is
+  //    deterministic so the stored token is stable across later reads.
   const folioId = crypto.randomUUID()
+  const orgKey = await deriveOrgKey(c.env.QR_SECRET, org)
+  const identity = clientIdentity(input, folioId)
+  for (const line of prepared) {
+    const payload: TicketPayload = {
+      v: 1,
+      folio_id: folioId,
+      folio_line_id: line.id,
+      organization_id: org,
+      service_id: line.serviceId,
+      slot_id: line.slotId,
+      client_identity: identity,
+      passes_total: line.quantity,
+      issued_at: Math.floor(Date.now() / 1000),
+      expires_at: ticketExpiry(line.slotDate),
+    }
+    line.qrToken = await signTicket(payload, orgKey)
+    line.qr = qrEcho(payload)
+  }
+
+  // 5. PERSIST — folio + lines + extras in one atomic batch (D1 batch rolls back on error).
   const statements: BatchItem<'sqlite'>[] = [
     db.insert(folios).values({
       id: folioId,
@@ -410,6 +464,7 @@ export const confirmSale = async (c: PosContext) => {
         minimumPrice: line.minimumPrice,
         unitPrice: line.unitPrice,
         lineTotal: line.lineTotal,
+        qrToken: line.qrToken,
       }),
     )
     for (const ex of line.extras) {
@@ -454,6 +509,8 @@ export const confirmSale = async (c: PosContext) => {
           minimum_price: line.minimumPrice,
           unit_price: line.unitPrice,
           line_total: line.lineTotal,
+          qr_token: line.qrToken ?? null,
+          qr: line.qr ?? null,
           extras: line.extras.map((ex) => ({
             id: ex.id,
             extra_id: ex.extraId,
@@ -470,7 +527,13 @@ export const confirmSale = async (c: PosContext) => {
 
 // Re-read a folio (with lines + extras) scoped to the caller agent, for the response
 // shape. Shared by getFolio; returns null when no such folio belongs to the agent.
-const readFolio = async (db: Db, org: string, agentId: string, folioId: string) => {
+const readFolio = async (
+  db: Db,
+  org: string,
+  agentId: string,
+  folioId: string,
+  qrSecret: string,
+) => {
   const folioRows = await db
     .select({
       id: folios.id,
@@ -510,6 +573,7 @@ const readFolio = async (db: Db, org: string, agentId: string, folioId: string) 
       minimumPrice: folioLines.minimumPrice,
       unitPrice: folioLines.unitPrice,
       lineTotal: folioLines.lineTotal,
+      qrToken: folioLines.qrToken,
     })
     .from(folioLines)
     .where(and(eq(folioLines.folioId, folioId), eq(folioLines.organizationId, org)))
@@ -539,6 +603,39 @@ const readFolio = async (db: Db, org: string, agentId: string, folioId: string) 
     extrasByLine.set(ex.folioLineId, list)
   }
 
+  // Decode (and integrity-check) each stored ticket for the UI echo. Tokenless lines
+  // (folios sold before the QR feature) and any corrupt token resolve to qr: null.
+  const orgKey = await deriveOrgKey(qrSecret, org)
+  const lines = await Promise.all(
+    lineRows.map(async (line) => {
+      const payload = line.qrToken
+        ? await verifyTicket(line.qrToken, orgKey)
+        : null
+      return {
+        id: line.id,
+        service_id: line.serviceId,
+        slot_id: line.slotId,
+        service_name: line.serviceName,
+        slot_date: line.slotDate,
+        slot_start_time: line.slotStartTime,
+        quantity: line.quantity,
+        base_price: line.basePrice,
+        minimum_price: line.minimumPrice,
+        unit_price: line.unitPrice,
+        line_total: line.lineTotal,
+        qr_token: line.qrToken ?? null,
+        qr: payload ? qrEcho(payload) : null,
+        extras: (extrasByLine.get(line.id) ?? []).map((ex) => ({
+          id: ex.id,
+          extra_id: ex.extraId,
+          name: ex.name,
+          price: ex.price,
+          quantity: ex.quantity,
+        })),
+      }
+    }),
+  )
+
   return {
     id: folio.id,
     status: folio.status,
@@ -550,26 +647,7 @@ const readFolio = async (db: Db, org: string, agentId: string, folioId: string) 
     total: folio.total,
     amount_paid: folio.amountPaid,
     created_at: Math.floor(folio.createdAt.getTime() / 1000),
-    lines: lineRows.map((line) => ({
-      id: line.id,
-      service_id: line.serviceId,
-      slot_id: line.slotId,
-      service_name: line.serviceName,
-      slot_date: line.slotDate,
-      slot_start_time: line.slotStartTime,
-      quantity: line.quantity,
-      base_price: line.basePrice,
-      minimum_price: line.minimumPrice,
-      unit_price: line.unitPrice,
-      line_total: line.lineTotal,
-      extras: (extrasByLine.get(line.id) ?? []).map((ex) => ({
-        id: ex.id,
-        extra_id: ex.extraId,
-        name: ex.name,
-        price: ex.price,
-        quantity: ex.quantity,
-      })),
-    })),
+    lines,
   }
 }
 
@@ -580,7 +658,13 @@ export const getFolio = async (c: PosContext) => {
   const id = c.req.param('id')
   const db = getDb(c.env)
 
-  const folio = await readFolio(db, agent.organizationId, agent.userId, id)
+  const folio = await readFolio(
+    db,
+    agent.organizationId,
+    agent.userId,
+    id,
+    c.env.QR_SECRET,
+  )
   if (!folio) {
     throw new ApiError('NOT_FOUND', 404, 'Folio not found')
   }

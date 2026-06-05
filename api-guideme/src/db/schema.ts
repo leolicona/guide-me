@@ -214,6 +214,7 @@ export const folioLines = sqliteTable('folio_lines', {
   minimumPrice: integer('minimum_price').notNull(), // snapshot unit floor
   unitPrice: integer('unit_price').notNull(), // sold unit price (post-discount)
   lineTotal: integer('line_total').notNull(),
+  qrToken: text('qr_token'), // signed access ticket; null for folios sold pre-feature
   createdAt: integer('created_at', { mode: 'timestamp' })
     .notNull()
     .default(sql`(unixepoch())`),

@@ -4,6 +4,7 @@ interface CloudflareBindings {
   AGNOSTIC_AUTH_APP_ID: string
   RESEND_API_KEY: string
   RESEND_FROM: string
+  QR_SECRET: string
   API_BASE_URL: string
   APP_BASE_URL: string
   COOKIE_DOMAIN: string
