@@ -58,6 +58,8 @@ export interface FolioDetail {
   cancelled_at: number | null
   cancelled_by: string | null
   cancellation_reason: string | null
+  // US-A26 — true when the agent's commission was clawed back on cancellation.
+  cancellation_clawback: boolean
   created_at: number
   lines: FolioDetailLine[]
 }

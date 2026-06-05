@@ -3,13 +3,15 @@ import { env, SELF } from 'cloudflare:test'
 import { seedUser, seedTwoOrgs, clearTenancyDb } from '../helpers/tenancy'
 import { buildFakeJwt } from '../helpers/jwt'
 
-// Total Folio Cancellation — US-A21.
-// Spec: docs/cancellation/total-folio-cancellation.spec.md (Scenarios 1–11).
+// Total Folio Cancellation — US-A21 / US-A26.
+// Spec: docs/cancellation/total-folio-cancellation.spec.md (Scenarios 1–11, incl. 6b).
 //
-// Cancelling a folio releases every line's spots and records who/when/why, atomically.
-// The scanner's CANCELLED gate and the cash drawer's `cancelled` exclusion are reused
-// (no new code) — asserted here as integration guarantees. Multitenancy (10–11) uses the
-// shared `seedTwoOrgs` helper.
+// Cancelling a folio releases every line's spots and records who/when/why (+ the US-A26
+// clawback flag), atomically. The scanner's CANCELLED gate and the agent cash-balance
+// `cancelled` exclusion are reused (no new code) — asserted here as integration guarantees.
+// The clawback's effect on the commission is owned by the cash suite (Scenario 20);
+// Scenario 6b here asserts only that this handler persists the flag. Multitenancy (10–11)
+// uses the shared `seedTwoOrgs` helper.
 
 const ADMIN_EMAIL = 'admin@empresa.com'
 const AGENT_EMAIL = 'agent@empresa.com'
@@ -113,7 +115,8 @@ const getSlotBooked = async (slotId: string) => {
 
 const getFolioRow = (id: string) =>
   env.DB.prepare(
-    `SELECT status, organization_id, cancelled_at, cancelled_by, cancellation_reason
+    `SELECT status, organization_id, cancelled_at, cancelled_by, cancellation_reason,
+            cancellation_clawback
        FROM folios WHERE id = ?`,
   )
     .bind(id)
@@ -123,6 +126,7 @@ const getFolioRow = (id: string) =>
       cancelled_at: number | null
       cancelled_by: string | null
       cancellation_reason: string | null
+      cancellation_clawback: number
     }>()
 
 const clearFoliosDb = async () => {
@@ -298,6 +302,30 @@ describe('Total Folio Cancellation', () => {
     expect(status).toBe(200)
 
     expect(await collected()).toBe(0)
+  })
+
+  it('Scenario 6b — cancel records the clawback flag (US-A26)', async () => {
+    const { organizationId, agentId } = await seedOrgWithStaff()
+    const serviceId = await seedService(organizationId)
+    const slotId = await seedSlot(organizationId, serviceId, { booked: 2 })
+
+    // clawback: true → persisted as true (the agent forfeits this folio's commission).
+    const clawed = await seedFolio({ organizationId, agentId })
+    await seedFolioLine({ organizationId, folioId: clawed, serviceId, slotId, quantity: 1 })
+    const a = await cancelFolio(ADMIN_EMAIL, clawed, { clawback: true })
+    expect(a.status).toBe(200)
+    expect(a.json.folio.cancellation_clawback).toBe(true)
+
+    // Omitted flag → defaults to false (the company absorbs the loss).
+    const absorbed = await seedFolio({ organizationId, agentId })
+    await seedFolioLine({ organizationId, folioId: absorbed, serviceId, slotId, quantity: 1 })
+    const b = await cancelFolio(ADMIN_EMAIL, absorbed, { reason: 'goodwill' })
+    expect(b.status).toBe(200)
+    expect(b.json.folio.cancellation_clawback).toBe(false)
+
+    // Persisted at the row level (SQLite stores the boolean as 0/1).
+    expect((await getFolioRow(clawed))?.cancellation_clawback).toBe(1)
+    expect((await getFolioRow(absorbed))?.cancellation_clawback).toBe(0)
   })
 
   it('Scenario 7 — a cancelled folio\'s QR ticket is rejected by the scanner', async () => {

@@ -14,8 +14,12 @@ cancelling a folio cancels **all** its lines at once. Per-line / per-service can
 is explicitly **WON'T HAVE THIS TIME** in the SPEC ("Partial cancellations… simplifies
 inventory logic in MVP").
 
-**User Story:** US-A21 — *As an admin, I want to cancel an entire folio to automatically
-release the spots for all included services and record the cancellation.*
+**User Stories:**
+- **US-A21** — *As an admin, I want to cancel an entire folio to automatically release the
+  spots for all included services and record the cancellation.*
+- **US-A26** — *As an admin, when cancelling a folio, I want to choose whether the
+  cancellation triggers a **clawback** (the agent loses the commission booked on that sale)
+  or the company absorbs the loss.*
 
 **Builds on:**
 - **POS / folios** (`docs/pos/pos-controlled-discount.spec.md`) — `folios.status`
@@ -26,9 +30,13 @@ release the spots for all included services and record the cancellation.*
   rejects a cancelled folio's tickets via its `CANCELLED` gate
   (`tickets/handler.ts`), so cancellation invalidates outstanding QR access **for free**;
   this feature adds no scanner code.
-- **Cash drawer** (`docs/cash-drawer/cash-drawer.spec.md`) — `deriveIncome` already
-  **excludes** `status = 'cancelled'` folios from collected cash; a *live* (open) drawer
-  recomputes automatically after a cancellation.
+- **Agent cash balance** (`docs/cash-drops/agent-balance-cash-drops.spec.md`) — the agent's
+  **running balance** is derived from events and **excludes** `cancelled` folios from
+  `cash_collected`, so cancelling a cash sale immediately lowers that agent's collected cash.
+  The commission booked on the folio follows the **clawback** choice (US-A26): on a clawback
+  the agent's `commission_total` drops too (they forfeit it); when the company absorbs it the
+  agent keeps the commission. The balance recomputes automatically — there is no snapshot to
+  rewrite. *(This replaces the retired daily cash-drawer / `deriveIncome` model.)*
 - **Auth & roles** — `authMiddleware`, `requireRole`, the multitenancy Enforcement
   Contract (`docs/multitenancy/multitenancy.spec.md`).
 - **SPEC business rule (Inventory):** *"Upon cancelling a folio, all spots for the involved
@@ -42,9 +50,11 @@ release the spots for all included services and record the cancellation.*
 | **Per-service / partial cancellation** | **WON'T HAVE THIS TIME** (SPEC) — out of scope |
 | **Client email on cancellation** (US-C03) | *Resend ticket delivery* (SHOULD HAVE) — **not built yet**; this feature leaves a single integration seam and a TECH_DEBT note, no email is sent |
 | **QR ticket invalidation** | *Scanner* — already enforced by the `CANCELLED` gate; **no new code** |
-| **Excluding cancelled cash from closures** | *Cash drawer* — already excludes `cancelled`; a **closed (snapshot)** drawer is immutable and intentionally keeps the pre-cancellation figure |
+| **Commission clawback on cancel** (US-A26) | **This feature** sets `cancellation_clawback` from the admin's choice; the *Agent cash balance* derivation reads it to decide whether the agent forfeits or keeps the commission |
+| **Excluding cancelled cash / commission from the balance** | *Agent cash balance* (`docs/cash-drops/…`) — its derivation already excludes `cancelled` folios from `cash_collected` and applies the clawback to `commission_total`; this feature only flips the status + flag, it computes no money |
 | **Admin sales summary / occupancy dashboard** (US-A14–A16) | *Occupancy dashboard* (SHOULD HAVE) — this feature ships only a **lean folio list** sufficient to find a folio to cancel, not a metrics dashboard |
-| **Refund / payment reversal** | Out of MVP (cash-only, no payment gateway) — cancellation is an inventory + record action, not a money movement |
+| **Cash refund tracking & Refund PIN** (US-A23, US-T05) | *Cash refund tracking* + *Tourist Self-Service Portal* (Phase 2) — confirming the **physical cash handed back** (and the tourist-facing **Refund PIN**) is a separate flow that attaches to the cancelled folio. This feature leaves that seam; it moves no money |
+| **Tourist-initiated cancellation request** (US-T04) | *Tourist Self-Service Portal* (Phase 2) — the portal creates a **request** an admin reviews; the actual release still runs through this feature's `cancelFolio` |
 
 **New endpoints:** a new `src/routes/folios/` router mounted at `/api/folios`, **admin-only**
 (`authMiddleware` + `requireRole('admin')` on `*`). The existing agent receipt read stays
@@ -62,7 +72,7 @@ at `GET /api/pos/folios/:id` (agent-scoped) and is untouched.
 
 **No new tables.** Three **additive, nullable** audit columns on the existing `folios`
 table record the cancellation. Additive nullable columns are safe on a populated table
-(no backfill), mirroring `0013`'s `qr_token` and the cash-drawer review fields.
+(no backfill), mirroring `0013`'s `qr_token`.
 
 ### `folios` — new columns
 
@@ -71,11 +81,16 @@ table record the cancellation. Additive nullable columns are safe on a populated
 | `cancelled_at` | `integer` timestamp (nullable) | set when cancelled |
 | `cancelled_by` | `text` → `users(id)` (nullable) | the **admin** who cancelled (from context) |
 | `cancellation_reason` | `text` (nullable) | optional admin note |
+| `cancellation_clawback` | `integer` boolean, default `0` | **US-A26** — `1` = claw back the agent's commission (they forfeit it); `0` (default) = the company absorbs it. Written by `cancelFolio`, **read** by the Agent-cash-balance derivation. |
 
 > The `status` enum already includes `cancelled` — no enum migration. Cancellation is the
-> only writer of these three columns; they stay `null` for every active folio.
+> only writer of the three audit columns; they stay `null` for every active folio.
+> `cancellation_clawback` defaults to `0` for every active folio.
 
-> Migration: `0017_add_cancellation_to_folios.sql`, matching the `0001`–`0016` style.
+> Migrations: `0017_add_cancellation_to_folios.sql` (the three audit columns, matching the
+> `0001`–`0016` style) and `0022_add_commission_to_folios.sql` (adds `cancellation_clawback`
+> alongside the POS `payment_method` / `commission_amount` columns — shipped with the
+> Agent-cash-balance feature, consumed here for US-A26).
 
 ---
 
@@ -101,14 +116,23 @@ table record the cancellation. Additive nullable columns are safe on a populated
 7. **Tickets follow status — no extra work.** Outstanding QR tickets of a cancelled folio
    are rejected by the scanner's existing `CANCELLED` gate. Already-redeemed passes are
    **not** "un-redeemed"; `redeemed_count` is left as-is (historical record).
-8. **Cash drawer interaction.** A cancellation excludes the folio from any **live** (open)
-   drawer's derived income immediately. A folio cancelled **after** its agent's drawer was
-   **closed** does **not** alter that frozen snapshot (the closure is immutable by design);
-   this is expected and acceptable for the MVP.
-9. **Multitenancy & role.** Admin-only. Every query filters `organization_id` from context
-   (Rules 2 & 4). A cross-org or unknown folio id → `404 NOT_FOUND` (no existence leak).
-   `organization_id` / `status` / `cancelled_by` are **never** read from a body (Rules 1 & 3).
-10. **No new `ErrorCode`.** Reuse `409 CONFLICT` (already cancelled), `404 NOT_FOUND`
+8. **Running-balance & commission interaction (US-A26).** The cancel request carries an
+   optional `clawback` boolean; cancelling sets `cancellation_clawback` from it (default
+   `false`). The agent's **running balance** (`docs/cash-drops/…`) is event-derived, so the
+   cancelled folio immediately leaves `cash_collected`. The folio's snapshot
+   `commission_amount` is left **as-is** (historical record), and the derivation applies the
+   clawback: `clawback = true` → the agent **forfeits** that commission (it leaves
+   `commission_total`); `clawback = false` → the company absorbs the loss and the agent
+   **keeps** the commission. This feature writes only the status + flag; it computes no money.
+9. **Refund is a separate flow (US-A23 / US-T05).** Cancellation is an inventory + record
+   action and moves no cash. Tracking that the **physical cash was returned** to the customer
+   (and the tourist-facing **Refund PIN**) is a future flow that will attach to the cancelled
+   folio. This feature leaves the seam and changes no money.
+10. **Multitenancy & role.** Admin-only. Every query filters `organization_id` from context
+    (Rules 2 & 4). A cross-org or unknown folio id → `404 NOT_FOUND` (no existence leak).
+    `organization_id` / `status` / `cancelled_by` are **never** read from a body (Rules 1 & 3);
+    only `reason` and the `clawback` flag are client-supplied.
+11. **No new `ErrorCode`.** Reuse `409 CONFLICT` (already cancelled), `404 NOT_FOUND`
     (unknown/cross-org), `400 VALIDATION_ERROR` (bad body).
 
 ---
@@ -149,14 +173,15 @@ One folio in the caller's org with its lines, extras, totals, customer, agent, a
 cancellation audit (`cancelled_at`, `cancelled_by`, `cancellation_reason`). → `200
 { "folio": { … } }`. `404` cross-org/unknown.
 
-### `POST /api/folios/:id/cancel` — cancel the whole folio (US-A21)
+### `POST /api/folios/:id/cancel` — cancel the whole folio (US-A21, US-A26)
 
 ```json
-{ "reason": "Customer no-show" }
+{ "reason": "Customer no-show", "clawback": true }
 ```
-`reason` optional. Releases every line's spots, sets `status = 'cancelled'`, records the
-audit fields. → `200 { "folio": { …, "status": "cancelled", "cancelled_at", "cancelled_by",
-"cancellation_reason" } }`.
+Both fields optional (`reason` → `null`, `clawback` → `false`). Releases every line's spots,
+sets `status = 'cancelled'`, and records the audit fields + the clawback flag. → `200
+{ "folio": { …, "status": "cancelled", "cancelled_at", "cancelled_by", "cancellation_reason",
+"cancellation_clawback" } }`.
 
 - `404` if unknown / cross-org.
 - `409 CONFLICT` if the folio is **already cancelled**.
@@ -211,12 +236,20 @@ double-released); the audit fields keep their original values.
 **When** the cancellation batch cannot complete (simulated failure)
 **Then** the folio remains `paid` **and** no slot's `booked` changes (all-or-nothing).
 
-#### Scenario 6 — Cancelled cash drops out of a live drawer
-**Given** an `agent` with an **open** drawer and a `paid` folio of 300000 counted in today's
-live `total_collected`
+#### Scenario 6 — Cancelling lowers the agent's running balance
+**Given** an `agent` holding a `paid` **cash** folio of 300000 that is part of their running
+balance (`GET /api/cash/me`)
 **When** the admin cancels that folio
-**Then** the agent's `GET /api/cash-drawers/me` live `total_collected` **excludes** the
-300000 and `folio_count` drops by one.
+**Then** the agent's derived `cash_collected` **excludes** the 300000 and the running
+`balance` drops accordingly.
+
+#### Scenario 6b — Clawback choice is recorded and applied (US-A26)
+**Given** a `paid` folio carrying a booked `commission_amount`
+**When** the admin cancels it with `{ "clawback": true }`
+**Then** `cancellation_clawback = true` on the folio and the agent's derived
+`commission_total` **no longer includes** that folio's commission (they forfeit it).
+Cancelling another folio with `{ "clawback": false }` (or no flag) records
+`cancellation_clawback = false` and the agent **keeps** that commission.
 
 #### Scenario 7 — Cancelled folio's tickets are rejected by the scanner
 **Given** a folio that has been cancelled
@@ -257,23 +290,38 @@ ignored — the cancelled folio's `organization_id` stays `org_a` and `cancelled
 
 ## Definition of Done
 
-- [ ] Migration `0017_add_cancellation_to_folios.sql` adds nullable `cancelled_at`,
+### Shipped (US-A21 + US-A26)
+- [x] Migration `0017_add_cancellation_to_folios.sql` adds nullable `cancelled_at`,
       `cancelled_by` (→ `users.id`), `cancellation_reason` to `folios`
-- [ ] Drizzle schema: the three new `folios` columns + types still infer
-- [ ] New `src/routes/folios/` (`index.ts`, `handler.ts`, `schema.ts`) mounted at
+- [x] Migration `0022_add_commission_to_folios.sql` adds `cancellation_clawback` (boolean,
+      default `0`) — shipped with the Agent-cash-balance feature, written here for US-A26
+- [x] Drizzle schema: the cancellation columns + types infer
+- [x] New `src/routes/folios/` (`index.ts`, `handler.ts`, `schema.ts`) mounted at
       `/api/folios` with `authMiddleware` + `requireRole('admin')` on `*`
-- [ ] `cancelFolio` releases **all** lines' spots (`booked = MAX(0, booked − quantity)`)
+- [x] `cancelFolio` releases **all** lines' spots (`booked = MAX(0, booked − quantity)`)
       and flips status in **one D1 batch**; already-cancelled → `409`; unknown/cross-org →
-      `404`; records `cancelled_at`/`cancelled_by`(context)/`cancellation_reason`
-- [ ] `listFolios` + `getFolioDetail` admin-only, org-scoped; lean list shape
-- [ ] Org filter on every query; `organization_id`/`status`/`cancelled_by` never from body
-      (Rules 1 & 3); **no new `ErrorCode`**
-- [ ] Scenarios 1–9 covered by `test/folios/folio-cancellation.test.ts` (incl. the scanner
-      `CANCELLED` integration assertion and the live-drawer exclusion)
-- [ ] Multitenancy Scenarios 10–11 (B1/B3/B4) covered via `seedTwoOrgs`
-- [ ] Frontend: `foliosService`, `features/folios/` (types/hooks), an admin **Folios** list
+      `404`; records `cancelled_at`/`cancelled_by`(context)/`cancellation_reason` and
+      `cancellation_clawback` from the request's `clawback` flag
+- [x] `listFolios` + `getFolioDetail` admin-only, org-scoped; lean list shape
+- [x] Org filter on every query; `organization_id`/`status`/`cancelled_by` never from body
+      (Rules 1 & 3); only `reason` + `clawback` are client-supplied; **no new `ErrorCode`**
+- [x] Scenarios 1–11 (+ 6b) covered by `test/folios/folio-cancellation.test.ts` — spots,
+      audit, atomicity, the collected-cash exclusion, the **clawback-flag persistence** (6b),
+      scanner `CANCELLED`, roles, multitenancy
+- [x] The clawback's effect on the commission (US-A26) is covered in
+      `test/cash/agent-balance-cash-drops.test.ts` (Scenario 20 drives the real `cancelFolio`
+      API with `clawback:true` and asserts the commission leaves `commission_total`)
+- [x] Frontend: `foliosService`, `features/folios/` (types/hooks), an admin **Folios** list
       page + **Folio detail** page with a guarded **Cancel folio** action (confirm dialog +
-      optional reason); admin-only **Folios** nav destination + routes
-- [ ] `pnpm --filter api-guideme test` green; `pnpm build:app` clean
-- [ ] `docs/SPEC.md` MUST-HAVE item **Total folio cancellation (US-A21)** ticked
-- [ ] `docs/TECH_DEBT.md`: note the deferred **client cancellation email** (US-C03) seam
+      optional reason + a **clawback** switch, US-A26, that threads `clawback` through
+      `foliosService.cancelFolio` / `useCancelFolio`; the cancelled-folio alert states
+      whether the commission was clawed back or absorbed); admin-only **Folios** nav + routes
+- [x] `pnpm --filter api-guideme test` green; `pnpm build:app` clean
+- [x] `docs/SPEC.md` MUST-HAVE item **Total folio cancellation (US-A21)** ticked
+
+### Remaining (future features, not this one)
+- [ ] **Client cancellation email** (US-C03) — the `cancelFolio` handler is the single seam;
+      fires once the Email feature lands (`docs/TECH_DEBT.md`).
+- [ ] **Cash-refund tracking + Refund PIN** (US-A23 / US-T05) — a future flow attaches to the
+      cancelled folio to confirm the physical refund; the Tourist Portal (US-T04) creates the
+      cancellation request that funnels into `cancelFolio`.

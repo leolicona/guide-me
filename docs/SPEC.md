@@ -25,7 +25,7 @@ GuideMe is a multi-tenant, mobile-optimized SaaS platform that centralizes the s
 |---|---|---|
 | `admin` | Full control of the organization: catalog, staff, reports, finances | Email + password (verification via Resend magic link) |
 | `agent` | Sells services, manages daily cash drawers, scans access QRs | Email + password (onboarding/verification via Resend magic link) |
-| `client` | Receives digital tickets and QR codes via Email. Does not interact directly with the app in this phase | No authentication |
+| `client` / `tourist` | Phase 1: receives digital tickets and QR codes via Email, no direct app interaction. Phase 2: self-service booking portal (itinerary, QR download, cancellation request + Refund PIN) | No authentication in Phase 1; passwordless **Magic Link** to the portal in Phase 2 |
 
 ---
 
@@ -142,6 +142,23 @@ GuideMe is a multi-tenant, mobile-optimized SaaS platform that centralizes the s
 
 ---
 
+### Tourist (Self-Service Portal — Phase 2, B2C)
+
+> A post-MVP B2C surface. The tourist accesses a tokenized portal via a **Magic Link**
+> emailed at purchase — no account, no password. It **depends on** the Email feature
+> (US-AG09 / US-C01) for delivery, and its cancellation flow **extends** Total Folio
+> Cancellation (US-A21) and Cash refund tracking (US-A23): US-T04 creates a cancellation
+> **request** an admin reviews (funnelling into the existing `cancelFolio`), and US-T05's
+> **Refund PIN** closes the physical-cash-returned loop.
+
+- **US-T01** — As a tourist, I want to receive a Magic Link via email upon purchase to securely access my booking portal without creating an account or password.
+- **US-T02** — As a tourist, I want to see my full itinerary (services, dates, meeting points) in the portal so I know exactly what I bought.
+- **US-T03** — As a tourist, I want to view and download my digital QR tickets from the portal to present them at the access control.
+- **US-T04** — As a tourist, I want to initiate a cancellation request directly from the portal so the agency is notified automatically without me having to make a phone call.
+- **US-T05** — As a tourist, when my cancellation is approved, I want to see my secure "Refund PIN" in the portal, which I must give to the agent/admin to confirm I received my physical cash back.
+
+---
+
 ## Features by Phase
 
 ### Phase 1 — MVP (Initial Scope)
@@ -173,8 +190,9 @@ GuideMe is a multi-tenant, mobile-optimized SaaS platform that centralizes the s
 #### 🚀 PHASE 2: Core Enhancements
 - [ ] **Offline-capable QR validation with post-sync** *(US-AG16)* - *Deferred from MVP to focus on real-time validation.*
 - [ ] **Partial cancellations (per service within the folio)** *(US-A22)* - *Deferred to simplify inventory logic in MVP.*
-- [ ] **Cash refund tracking** *(US-A23)* - *To ensure the admin can reconcile physical cash returns.*
+- [ ] **Cash refund tracking** *(US-A23)* - *To ensure the admin can reconcile physical cash returns. Pairs with the Tourist Portal's Refund PIN (US-T05) to confirm the customer received the cash.*
 - [ ] **Folio audit timeline** *(US-A24)* - *To track the lifecycle of a sale and resolve internal disputes.*
+- [ ] **Tourist Self-Service Portal (Magic Link, itinerary, QR, cancellation request + Refund PIN)** *(US-T01, US-T02, US-T03, US-T04, US-T05)* - *B2C portal. Depends on the Email feature (US-AG09/US-C01) for the Magic Link; the cancellation-request + Refund-PIN flow extends Total Folio Cancellation (US-A21) and Cash refund tracking (US-A23).*
 
 #### 🔵 COULD HAVE
 *Nice-to-have features that improve UX if extra time is available.*
@@ -259,3 +277,6 @@ GuideMe is a multi-tenant, mobile-optimized SaaS platform that centralizes the s
 | **Cash closure (Corte de caja)** | *Deprecated (Phase-1 pivot).* The earlier daily summary model — replaced by the continuous running balance + cash drops. |
 | **Minimum price (Precio mínimo)** | Price floor per service defined by the admin. The agent cannot sell below it. |
 | **Commission bonus (Bonus de comisión)** | Additional commission percentage defined by the admin for a specific service. |
+| **Clawback** | On cancelling a folio, the admin's choice (US-A26) to make the agent **forfeit** the commission booked on that sale (vs. the company absorbing the loss). Recorded as `cancellation_clawback` on the folio and applied by the running-balance derivation. |
+| **Magic Link** | A signed, time-limited tokenized URL emailed to a tourist that grants passwordless access to their self-service booking portal (Phase 2). |
+| **Refund PIN** | A secure code shown to a tourist in the portal once their cancellation is approved; the tourist gives it to the agent/admin to confirm the physical cash refund was received, closing the cash-refund loop (US-T05 ↔ US-A23). |

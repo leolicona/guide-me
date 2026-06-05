@@ -18,6 +18,8 @@ import {
   DialogContent,
   DialogContentText,
   DialogActions,
+  FormControlLabel,
+  Switch,
 } from '@mui/material'
 import ArrowBackRounded from '@mui/icons-material/ArrowBackRounded'
 import { useFolio, useCancelFolio } from '../features/folios/hooks'
@@ -46,14 +48,21 @@ export default function FolioDetailPage() {
   const cancel = useCancelFolio()
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [reason, setReason] = useState('')
+  const [clawback, setClawback] = useState(false)
 
   const isCancelled = folio?.status === 'cancelled'
+
+  const closeDialog = () => {
+    setConfirmOpen(false)
+    setReason('')
+    setClawback(false)
+  }
 
   const handleCancel = () => {
     if (!id) return
     cancel.mutate(
-      { id, reason: reason.trim() || undefined },
-      { onSuccess: () => setConfirmOpen(false) },
+      { id, reason: reason.trim() || undefined, clawback },
+      { onSuccess: closeDialog },
     )
   }
 
@@ -89,6 +98,9 @@ export default function FolioDetailPage() {
               <Alert severity="error">
                 Cancelled{folio.cancelled_at ? ` on ${formatDate(folio.cancelled_at)}` : ''}
                 {folio.cancellation_reason ? ` — ${folio.cancellation_reason}` : ''}
+                {folio.cancellation_clawback
+                  ? ' · agent commission clawed back'
+                  : ' · company absorbed the commission'}
               </Alert>
             )}
 
@@ -172,7 +184,7 @@ export default function FolioDetailPage() {
           </Stack>
         )}
 
-        <Dialog open={confirmOpen} onClose={() => setConfirmOpen(false)}>
+        <Dialog open={confirmOpen} onClose={closeDialog}>
           <DialogTitle>Cancel this folio?</DialogTitle>
           <DialogContent>
             <DialogContentText sx={{ mb: 2 }}>
@@ -188,9 +200,29 @@ export default function FolioDetailPage() {
               value={reason}
               onChange={(e) => setReason(e.target.value)}
             />
+            <FormControlLabel
+              sx={{ mt: 1, alignItems: 'flex-start' }}
+              control={
+                <Switch
+                  checked={clawback}
+                  onChange={(e) => setClawback(e.target.checked)}
+                  color="error"
+                />
+              }
+              label={
+                <Box sx={{ pt: 0.75 }}>
+                  <Typography variant="body2">Claw back agent commission</Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    {clawback
+                      ? 'The agent forfeits the commission booked on this sale.'
+                      : 'Off: the company absorbs the loss and the agent keeps the commission.'}
+                  </Typography>
+                </Box>
+              }
+            />
           </DialogContent>
           <DialogActions>
-            <Button onClick={() => setConfirmOpen(false)}>Keep folio</Button>
+            <Button onClick={closeDialog}>Keep folio</Button>
             <Button
               variant="contained"
               color="error"

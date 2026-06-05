@@ -19,11 +19,20 @@ export const useFolio = (id: string | undefined) =>
     enabled: !!id,
   })
 
-// US-A21 — cancel the whole folio; refresh both the list and the open detail.
+// US-A21 / US-A26 — cancel the whole folio (optionally clawing back the agent's commission);
+// refresh both the list and the open detail.
 export const useCancelFolio = () => {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: ({ id, reason }: { id: string; reason?: string }) => cancelFolio(id, reason),
+    mutationFn: ({
+      id,
+      reason,
+      clawback,
+    }: {
+      id: string
+      reason?: string
+      clawback?: boolean
+    }) => cancelFolio(id, { reason, clawback }),
     onSuccess: () => qc.invalidateQueries({ queryKey: FOLIOS_KEY }),
   })
 }

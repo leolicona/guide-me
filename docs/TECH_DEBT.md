@@ -92,6 +92,14 @@ batch commits, using the folio's `customer_email` and the recorded
 `cancellation_reason`/`cancelled_at`). No schema or API change is required — the audit
 fields needed for the email body already exist on `folios`.
 
+**Forward seam — Refund PIN (US-A23 / US-T05):** when the Tourist Self-Service Portal
+(Phase 2) and Cash Refund Tracking land, the physical-cash-returned loop closes here too.
+The flow will be: admin approves cancellation → `cancelFolio` generates a secure one-time
+`refund_pin` stored on the folio → tourist portal (US-T05) shows it → agent/admin enters the
+PIN to confirm the cash was handed back (`refund_confirmed_at`). The `folios` table already
+carries the full cancellation audit; the only additions will be two nullable columns
+(`refund_pin`, `refund_confirmed_at`) added when that feature lands.
+
 > **Note — partial cancellation stays out of scope.** Per-service / per-line cancellation is
 > explicitly **WON'T HAVE THIS TIME** in the SPEC; this feature is total-only by design and
 > that is not debt to be paid down in the MVP.
