@@ -26,6 +26,8 @@ const ScannerPage = lazy(() => import('./pages/ScannerPage'))
 const CashDrawerPage = lazy(() => import('./pages/CashDrawerPage'))
 const ClosuresListPage = lazy(() => import('./pages/ClosuresListPage'))
 const ClosureDetailPage = lazy(() => import('./pages/ClosureDetailPage'))
+const FoliosListPage = lazy(() => import('./pages/FoliosListPage'))
+const FolioDetailPage = lazy(() => import('./pages/FolioDetailPage'))
 
 function PageLoader() {
   return (
@@ -149,6 +151,24 @@ function App() {
               element={
                 <RoleGuard role="admin">
                   <ClosureDetailPage />
+                </RoleGuard>
+              }
+            />
+
+            {/* Admin folio management — browse + total cancellation (US-A21) */}
+            <Route
+              path={ROUTES.FOLIOS}
+              element={
+                <RoleGuard role="admin">
+                  <FoliosListPage />
+                </RoleGuard>
+              }
+            />
+            <Route
+              path={ROUTES.FOLIO_DETAIL}
+              element={
+                <RoleGuard role="admin">
+                  <FolioDetailPage />
                 </RoleGuard>
               }
             />

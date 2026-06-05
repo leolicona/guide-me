@@ -2,6 +2,32 @@
 
 This document tracks known technical debt, deferred tasks, and architectural improvements that are planned for future phases.
 
+## 11. Client Cancellation Email Not Sent (US-C03) — ⚠️ OPEN (dependency not built)
+
+**Status:** Deferred by the Total Folio Cancellation feature
+(`docs/cancellation/total-folio-cancellation.spec.md`). US-A21 cancels the folio, releases
+inventory, and records the cancellation; US-C03 ("the client receives an Email notification
+if their folio is cancelled") is **not** wired because the Resend client-ticket-delivery
+feature (SHOULD HAVE — *Sending receipt and QR code to client via Email*, US-AG09/C01/C03)
+is not built yet. `cancelFolio` (`src/routes/folios/handler.ts`) currently has no email side
+effect.
+
+**Why accepted:** cancellation is an inventory + record action and is fully correct without
+the notification; adding a Resend call now would mean standing up the whole email
+integration (templates, sender identity, error handling) ahead of its feature. The
+cancellation already invalidates the client's access (the scanner's `CANCELLED` gate), so
+no stale ticket can be redeemed regardless of whether the email goes out.
+
+**Action if revisited:** when the Resend client-delivery feature lands, hook a
+cancellation-notification send into the single seam at the end of `cancelFolio` (after the
+batch commits, using the folio's `customer_email` and the recorded
+`cancellation_reason`/`cancelled_at`). No schema or API change is required — the audit
+fields needed for the email body already exist on `folios`.
+
+> **Note — partial cancellation stays out of scope.** Per-service / per-line cancellation is
+> explicitly **WON'T HAVE THIS TIME** in the SPEC; this feature is total-only by design and
+> that is not debt to be paid down in the MVP.
+
 ## 10. Strictly-Online QR Scanner (offline sync is Phase 2) — ⚠️ OPEN (by design)
 
 **Status:** Intentional MVP scope, set by the Online QR Scanner feature

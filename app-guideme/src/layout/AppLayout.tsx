@@ -19,6 +19,7 @@ import PointOfSaleRounded from '@mui/icons-material/PointOfSaleRounded'
 import QrCodeScannerRounded from '@mui/icons-material/QrCodeScannerRounded'
 import AccountBalanceWalletRounded from '@mui/icons-material/AccountBalanceWalletRounded'
 import ReceiptLongRounded from '@mui/icons-material/ReceiptLongRounded'
+import ReceiptRounded from '@mui/icons-material/ReceiptRounded'
 import { useAuthStore } from '../store/authStore'
 import { useLogout } from '../features/auth/hooks/useLogout'
 import { ROUTES } from '../config/routes'
@@ -39,6 +40,7 @@ const NAV_ITEMS: NavItem[] = [
   { label: 'Caja', to: ROUTES.CASH_DRAWER, icon: AccountBalanceWalletRounded, role: 'agent' },
   { label: 'Agents', to: ROUTES.AGENTS, icon: GroupsRounded, role: 'admin' },
   { label: 'Catalog', to: ROUTES.CATALOG, icon: MapRounded, role: 'admin' },
+  { label: 'Folios', to: ROUTES.FOLIOS, icon: ReceiptRounded, role: 'admin' },
   { label: 'Closures', to: ROUTES.CLOSURES, icon: ReceiptLongRounded, role: 'admin' },
 ]
 

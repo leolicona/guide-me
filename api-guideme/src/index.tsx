@@ -8,6 +8,7 @@ import agentsRouter from './routes/agents'
 import authRouter from './routes/auth'
 import organizationsRouter from './routes/organizations'
 import cashDrawersRouter from './routes/cash-drawers'
+import foliosRouter from './routes/folios'
 import posRouter from './routes/pos'
 import servicesRouter from './routes/services'
 import ticketsRouter from './routes/tickets'
@@ -35,6 +36,7 @@ app.route('/api/agents', agentsRouter)
 app.route('/api/organizations', organizationsRouter)
 app.route('/api/services', servicesRouter)
 app.route('/api/pos', posRouter)
+app.route('/api/folios', foliosRouter)
 app.route('/api/tickets', ticketsRouter)
 app.route('/api/cash-drawers', cashDrawersRouter)
 

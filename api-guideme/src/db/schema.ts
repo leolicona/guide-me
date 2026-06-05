@@ -184,6 +184,9 @@ export const folios = sqliteTable('folios', {
   discountTotal: integer('discount_total').notNull().default(0),
   total: integer('total').notNull(),
   amountPaid: integer('amount_paid').notNull(),
+  cancelledAt: integer('cancelled_at', { mode: 'timestamp' }), // set on total cancellation (US-A21)
+  cancelledBy: text('cancelled_by').references(() => users.id), // admin who cancelled
+  cancellationReason: text('cancellation_reason'), // optional admin note
   createdAt: integer('created_at', { mode: 'timestamp' })
     .notNull()
     .default(sql`(unixepoch())`),

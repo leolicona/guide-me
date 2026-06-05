@@ -71,6 +71,9 @@ GuideMe is a multi-tenant, mobile-optimized SaaS platform that centralizes the s
 #### Cancellations
 
 - **US-A21** — As an admin, I want to cancel an entire folio to automatically release the spots for all included services and record the cancellation.
+- **US-A22** — As an admin, I want to partially cancel specific spots/services within a folio, releasing only the corresponding inventory without cancelling the whole group.
+- **US-A23** — As an admin, I want to mark a cancelled folio (or partial cancellation) as "refunded" to track if the physical cash has been returned to the client.
+- **US-A24** — As an admin, I want to see an audit timeline on the folio details page showing who created it, when it was cancelled, and by whom, with the associated reason.
 
 ---
 
@@ -137,7 +140,7 @@ GuideMe is a multi-tenant, mobile-optimized SaaS platform that centralizes the s
 - [x] **Folio generation with signed QR code (HMAC)** *(US-AG08, US-C02)* — `docs/qr/folio-qr-signing.spec.md`
 - [x] **Online QR Scanner** *(US-AG15, US-AG17, US-AG19)* — `docs/scanner/online-qr-scanner.spec.md`
 - [x] **Agent's daily cash drawer with operating expenses** *(US-AG12, US-AG13, US-AG14, US-A19)* — `docs/cash-drawer/cash-drawer.spec.md`
-- [ ] **Total folio cancellation** *(US-A21)*
+- [x] **Total folio cancellation** *(US-A21)* — `docs/cancellation/total-folio-cancellation.spec.md`
 
 #### 🟡 SHOULD HAVE
 *Important features that add great value, but the system could operate manually without them in the very first days.*
@@ -151,6 +154,9 @@ GuideMe is a multi-tenant, mobile-optimized SaaS platform that centralizes the s
 
 #### 🚀 PHASE 2: Core Enhancements
 - [ ] **Offline-capable QR validation with post-sync** *(US-AG16)* - *Deferred from MVP to focus on real-time validation.*
+- [ ] **Partial cancellations (per service within the folio)** *(US-A22)* - *Deferred to simplify inventory logic in MVP.*
+- [ ] **Cash refund tracking** *(US-A23)* - *To ensure the admin can reconcile physical cash returns.*
+- [ ] **Folio audit timeline** *(US-A24)* - *To track the lifecycle of a sale and resolve internal disputes.*
 
 #### 🔵 COULD HAVE
 *Nice-to-have features that improve UX if extra time is available.*
@@ -160,7 +166,6 @@ GuideMe is a multi-tenant, mobile-optimized SaaS platform that centralizes the s
 *Features explicitly discarded for the MVP.*
 - [ ] **Integrated card payments (Stripe, Conekta)** - *Payment integration complexity*
 - [ ] **Client self-service online purchase** - *Requires payment gateway and checkout flow*
-- [ ] **Partial cancellations (per service within the folio)** - *Simplifies inventory logic in MVP*
 - [ ] **Native App (iOS / Android)** - *Mobile-first PWA is sufficient for Phase 1*
 - [ ] **Discarded: WhatsApp API Integration** - *For cost and speed, ticket delivery is handled via Email instead of WhatsApp.*
 - [ ] **Multiple payment methods (card, wire transfer)** - *Cash only in Phase 1*

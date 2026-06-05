@@ -18,4 +18,6 @@ export const ROUTES = {
   CASH_DRAWER: '/cash-drawer',
   CLOSURES: '/closures',
   CLOSURE_DETAIL: '/closures/:id',
+  FOLIOS: '/folios',
+  FOLIO_DETAIL: '/folios/:id',
 } as const
