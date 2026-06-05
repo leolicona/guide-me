@@ -22,6 +22,7 @@ const PosCatalogPage = lazy(() => import('./pages/PosCatalogPage'))
 const PosServicePage = lazy(() => import('./pages/PosServicePage'))
 const PosCheckoutPage = lazy(() => import('./pages/PosCheckoutPage'))
 const FolioReceiptPage = lazy(() => import('./pages/FolioReceiptPage'))
+const ScannerPage = lazy(() => import('./pages/ScannerPage'))
 
 function PageLoader() {
   return (
@@ -107,6 +108,16 @@ function App() {
               element={
                 <RoleGuard role="agent">
                   <FolioReceiptPage />
+                </RoleGuard>
+              }
+            />
+
+            {/* Agent access scanner (US-AG15, AG17, AG19) */}
+            <Route
+              path={ROUTES.SCAN}
+              element={
+                <RoleGuard role="agent">
+                  <ScannerPage />
                 </RoleGuard>
               }
             />

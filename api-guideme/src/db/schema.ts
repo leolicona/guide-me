@@ -215,6 +215,7 @@ export const folioLines = sqliteTable('folio_lines', {
   unitPrice: integer('unit_price').notNull(), // sold unit price (post-discount)
   lineTotal: integer('line_total').notNull(),
   qrToken: text('qr_token'), // signed access ticket; null for folios sold pre-feature
+  redeemedCount: integer('redeemed_count').notNull().default(0), // passes redeemed; <= quantity
   createdAt: integer('created_at', { mode: 'timestamp' })
     .notNull()
     .default(sql`(unixepoch())`),

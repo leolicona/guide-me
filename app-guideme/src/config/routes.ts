@@ -14,4 +14,5 @@ export const ROUTES = {
   POS_SERVICE: '/pos/service/:id',
   POS_CHECKOUT: '/pos/checkout',
   FOLIO: '/pos/folio/:id',
+  SCAN: '/scan',
 } as const

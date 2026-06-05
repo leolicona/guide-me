@@ -2,6 +2,60 @@
 
 This document tracks known technical debt, deferred tasks, and architectural improvements that are planned for future phases.
 
+## 10. Strictly-Online QR Scanner (offline sync is Phase 2) — ⚠️ OPEN (by design)
+
+**Status:** Intentional MVP scope, set by the Online QR Scanner feature
+(`docs/scanner/online-qr-scanner.spec.md`) and the SPEC design principle. `POST
+/api/tickets/scan` validates and redeems **only** against the server (the single source of
+truth for `redeemed_count`); the frontend refuses to scan when offline (US-AG19) rather
+than queueing.
+
+**Why accepted:** the MVP gate scenario assumes connectivity (3G/4G/WiFi); real-time
+redemption avoids any reconcile/conflict logic. The signed-token structure
+(`src/utils/qr.ts`) was deliberately built to support offline verification later **without
+reissuing tickets** — the signature can be checked locally against the per-org key.
+
+**Action if revisited:** Phase 2 (US-AG16) adds offline validation — verify the signature
+locally (bad signature → fake), store consumed `folio_line_id`s in `localStorage`, and
+reconcile via `POST /api/tickets/sync`; the server stays authoritative on `redeemed_count`
+(it must clamp at `quantity` when applying a synced batch, surfacing over-redemptions that
+happened across offline devices).
+
+## 9. Ticket Scan Is Not Idempotent — ⚠️ OPEN (accepted trade-off)
+
+**Status:** Accepted limitation of `POST /api/tickets/scan` (Online QR Scanner). Each
+successful call redeems exactly one pass; there is no idempotency key. If the response is
+lost in flight and the agent rescans the same code, a second pass is redeemed.
+
+**Why accepted:** the frontend mitigates the common case by **re-arming** between scans
+(`ScannerPage` pauses the camera after each scan and waits for "Scan next"), so the same
+physical QR fires one request per deliberate scan; a genuine network-loss + rescan is rare
+and visible (the agent sees the progress jump). The atomic `redeemed_count < quantity`
+guard still prevents redeeming **past** the purchased total.
+
+**Action if revisited:** if field data shows duplicate redemptions, accept a
+client-generated `scan_id` (idempotency key) on the scan body and dedupe server-side
+(requires the redemption audit table from §8 to record applied keys). No ticket-format
+change is required.
+
+## 8. Redemption Audit Log Deferred — ⚠️ OPEN (YAGNI)
+
+**Status:** Deferred by the Online QR Scanner feature. Redemption state is a single
+counter, `folio_lines.redeemed_count` (migration `0014`), which is all US-AG17 needs
+("Pass N of M used"). There is **no** per-scan audit table (who scanned, when, which pass,
+on what device).
+
+**Why deferred:** no MVP feature reads per-scan rows — the count alone drives the result
+screen — so adding a `ticket_redemptions` table now would be unused schema (same YAGNI
+discipline as §1). The single atomic `UPDATE … redeemed_count + 1` is sufficient for
+correctness.
+
+**Action if revisited:** the first feature that **reports** on redemptions (cash drawer /
+admin dashboard / commissions, or the §9 idempotency key, or the §10 offline-sync
+reconcile) introduces `ticket_redemptions` (`id`, `organization_id`, `folio_line_id`,
+`scanned_by`, `scanned_at`, `pass_number`) and writes one row per successful scan inside
+the same path that increments `redeemed_count`.
+
 ## 7. Per-Org QR Signing by Key Derivation (no rotation) — ⚠️ OPEN (accepted trade-off)
 
 **Status:** Accepted design, introduced by the signed-QR feature

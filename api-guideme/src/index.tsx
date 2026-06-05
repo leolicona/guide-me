@@ -9,6 +9,7 @@ import authRouter from './routes/auth'
 import organizationsRouter from './routes/organizations'
 import posRouter from './routes/pos'
 import servicesRouter from './routes/services'
+import ticketsRouter from './routes/tickets'
 import type { AppVariables } from './types/context'
 
 const app = new Hono<{
@@ -33,6 +34,7 @@ app.route('/api/agents', agentsRouter)
 app.route('/api/organizations', organizationsRouter)
 app.route('/api/services', servicesRouter)
 app.route('/api/pos', posRouter)
+app.route('/api/tickets', ticketsRouter)
 
 app.get('/api/me', authMiddleware, (c) => c.json({ user: c.get('user') }))
 

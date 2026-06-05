@@ -16,6 +16,7 @@ import DashboardRounded from '@mui/icons-material/DashboardRounded'
 import GroupsRounded from '@mui/icons-material/GroupsRounded'
 import MapRounded from '@mui/icons-material/MapRounded'
 import PointOfSaleRounded from '@mui/icons-material/PointOfSaleRounded'
+import QrCodeScannerRounded from '@mui/icons-material/QrCodeScannerRounded'
 import { useAuthStore } from '../store/authStore'
 import { useLogout } from '../features/auth/hooks/useLogout'
 import { ROUTES } from '../config/routes'
@@ -32,6 +33,7 @@ interface NavItem {
 const NAV_ITEMS: NavItem[] = [
   { label: 'Dashboard', to: ROUTES.DASHBOARD, icon: DashboardRounded },
   { label: 'Sell', to: ROUTES.POS, icon: PointOfSaleRounded, role: 'agent' },
+  { label: 'Scan', to: ROUTES.SCAN, icon: QrCodeScannerRounded, role: 'agent' },
   { label: 'Agents', to: ROUTES.AGENTS, icon: GroupsRounded, role: 'admin' },
   { label: 'Catalog', to: ROUTES.CATALOG, icon: MapRounded, role: 'admin' },
 ]
