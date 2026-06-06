@@ -189,7 +189,7 @@ GuideMe is a multi-tenant, mobile-optimized SaaS platform that centralizes the s
 *Important features that add great value, but the system could operate manually without them in the very first days.*
 - [ ] **Bilingual UI — Spanish (MX) / English with language switcher** *(US-L01, US-L02, US-L03)* — `docs/i18n/i18n.spec.md`
 - [ ] **Bookings/down-payments (partial payment with spot reservation)** *(US-AG07)*
-- [ ] **Sending receipt and QR code to client via Email (Resend)** *(US-AG09, US-C01, US-C03)*
+- [x] **Sending receipt and QR code to client via Email (Resend)** *(US-AG09, US-C01, US-C03)* — `docs/email/client-ticket-delivery.spec.md`
 - [ ] **Occupancy visual dashboard (admin)** *(US-A14, US-A15, US-A16)*
 - [ ] **Commission report by period** *(US-A17, US-A18, US-A20)*
 - [ ] **Agent folio history (read-only list and details)** *(US-AG20, US-AG21)*
@@ -245,6 +245,15 @@ GuideMe is a multi-tenant, mobile-optimized SaaS platform that centralizes the s
 - A booking reserves the slot capacity just like a full sale.
 - The agent registers the received amount (`booking_amount`) and the pending balance is calculated automatically.
 - The folio remains in a `booking` state until the remaining balance is collected, transitioning to `paid`.
+
+### Customer Contact
+
+- A **valid customer email is mandatory** to confirm a sale. In Phase 1, email is the only
+  channel that delivers the ticket + QR to the tourist (the self-service portal is Phase 2),
+  so a sale without a deliverable address would produce an unreachable ticket. The POS
+  rejects a confirmation with a missing or malformed email (`400`), and the agent UI
+  disables the confirm button until a valid email is entered.
+- Customer **name** and **phone** remain optional metadata.
 
 ### QR and Access Validation
 

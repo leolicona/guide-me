@@ -172,10 +172,12 @@ const confirmOneLine = async (
   email: string,
   body: Record<string, unknown>,
 ): Promise<{ status: number; json: any }> => {
+  // customer_email is mandatory at POS; default it so sale bodies that don't exercise
+  // the email field stay valid. Explicit bodies override.
   const res = await SELF.fetch(`${base}/folios`, {
     method: 'POST',
     headers: jsonAuth(email),
-    body: JSON.stringify(body),
+    body: JSON.stringify({ customer_email: 'cliente@example.com', ...body }),
   })
   return { status: res.status, json: await res.json() }
 }

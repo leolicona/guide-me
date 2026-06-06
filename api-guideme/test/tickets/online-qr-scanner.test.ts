@@ -98,6 +98,7 @@ const mintTicket = async (
     method: 'POST',
     headers: jsonAuth(email),
     body: JSON.stringify({
+      customer_email: 'cliente@example.com',
       lines: [{ slot_id: slotId, quantity, unit_price: 150000 }],
     }),
   })

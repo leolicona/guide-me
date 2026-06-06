@@ -64,9 +64,12 @@ room to `ALTER TABLE folio_lines ADD COLUMN qr_token …` later) but this featur
 ever writes a fully-paid (`status = 'paid'`, `amount_paid = total`) folio and never signs
 a QR.
 
-> **Client delivery is via Email (Resend), not WhatsApp** (per the SPEC update). The
-> folio captures an optional `customer_email` for the later Email-delivery feature to
-> consume; `customer_phone` is retained as optional metadata (marketing / future use).
+> **Client delivery is via Email (Resend), not WhatsApp** (per the SPEC update). The folio
+> captures a **mandatory, format-valid** `customer_email` — it is the only ticket+QR
+> delivery channel in Phase 1, so the Email-delivery feature made it required at confirm
+> time (`z.string().trim().email()`); a missing/malformed address returns `400`. See
+> `docs/email/client-ticket-delivery.spec.md` (Business Rule 2). `customer_name` and
+> `customer_phone` remain optional metadata.
 
 **New endpoints (all auth-required, `agent` role):** a new `src/routes/pos/` router.
 
@@ -118,7 +121,7 @@ catalog made for `service_extras` and schedules made for `slots`.
 | `organization_id` | `text NOT NULL` → `organizations(id)` | Rule 5 |
 | `agent_id` | `text NOT NULL` → `users(id)` | the selling agent, from `c.var.user` (Rule 3) |
 | `customer_name` | `text` (nullable) | captured at sale |
-| `customer_email` | `text` (nullable) | Email address; consumed later by Resend delivery |
+| `customer_email` | `text` (nullable column; **required at POS**) | Email address; format-validated at confirm and consumed by Resend delivery. Column stays nullable for legacy/defensive rows. |
 | `customer_phone` | `text` (nullable) | E.164; captured for marketing/future WhatsApp |
 | `status` | `text NOT NULL DEFAULT 'paid'` | enum `['paid','booking','cancelled']`. **This feature only writes `'paid'`.** |
 | `subtotal` | `integer NOT NULL` | Σ line totals (incl. extras), minor units, server-computed |
@@ -339,7 +342,7 @@ active future slots including `remaining = 0` ones so the agent sees "full" expl
 | Field | Rule |
 |---|---|
 | `customer_name` | optional, nullable string |
-| `customer_email` | optional, nullable string (validated as email in later features) |
+| `customer_email` | **required, format-valid email** (`z.string().trim().email()`); missing/malformed → `400` |
 | `customer_phone` | optional, nullable string (E.164-ish) |
 | `lines` | required, non-empty array; **distinct** `slot_id` across lines (rule 6) |
 | `lines[].slot_id` | required string; must resolve to an active slot of an active service in the caller's org |

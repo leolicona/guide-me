@@ -42,9 +42,14 @@ export default function FolioReceiptPage() {
               <Typography variant="h5" component="h1" sx={{ mt: 1 }}>
                 Venta confirmada
               </Typography>
-              <Typography variant="caption" color="text.secondary">
+              <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
                 Folio {folio.id}
               </Typography>
+              {folio.customer_email && (
+                <Typography variant="body2" color="success.main" sx={{ mt: 1 }}>
+                  📧 Recibo enviado a {folio.customer_email}
+                </Typography>
+              )}
             </Box>
 
             <Card>
@@ -136,9 +141,7 @@ export default function FolioReceiptPage() {
               </Stack>
             </Box>
 
-            <Alert severity="info" variant="outlined">
-              El envío del recibo y boletos por email al cliente se realiza en una etapa posterior.
-            </Alert>
+
 
             <Button
               variant="contained"

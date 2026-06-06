@@ -2,10 +2,14 @@ import type { Context } from 'hono'
 import type { BatchItem } from 'drizzle-orm/batch'
 import { and, asc, desc, eq, ne, sql } from 'drizzle-orm'
 import { getDb, type Db } from '../../db/client'
-import { folioLineExtras, folioLines, folios, slots, users } from '../../db/schema'
+import { folioLineExtras, folioLines, folios, organizations, slots, users } from '../../db/schema'
 import { ApiError } from '../../types/errors'
 import type { AppVariables } from '../../types/context'
 import type { CancelFolioInput } from './schema'
+import {
+  sendCancellationEmail,
+  type CancellationEmailInput,
+} from '../../services/resend'
 
 export type FoliosContext = Context<{
   Bindings: CloudflareBindings
@@ -268,5 +272,39 @@ export const cancelFolio = async (c: FoliosContext) => {
   await db.batch(statements as [BatchItem<'sqlite'>, ...BatchItem<'sqlite'>[]])
 
   const folioOut = await readFolio(db, org, id)
+
+  // Fire-and-forget — a Resend failure must never fail a committed cancellation.
+  if (folioOut?.customer_email && c.env.RESEND_API_KEY) {
+    const orgRows = await db
+      .select({ name: organizations.name })
+      .from(organizations)
+      .where(eq(organizations.id, org))
+      .limit(1)
+    const orgName = orgRows[0]?.name ?? 'GuideMe'
+
+    const emailData: CancellationEmailInput = {
+      to: folioOut.customer_email,
+      customerName: folioOut.customer_name,
+      orgName,
+      folioId: id,
+      cancelledAt: new Date(),
+      cancellationReason: folioOut.cancellation_reason,
+      lines: folioOut.lines.map((l) => ({
+        serviceName: l.service_name,
+        slotDate: l.slot_date,
+        slotStartTime: l.slot_start_time,
+        quantity: l.quantity,
+      })),
+    }
+
+    // waitUntil — guarantees the send completes after the 200 returns. A bare floating
+    // promise can be cancelled when the Worker returns, silently dropping the email.
+    c.executionCtx.waitUntil(
+      sendCancellationEmail(c.env, emailData).catch((err) =>
+        console.error('[email] cancellation send failed', id, err),
+      ),
+    )
+  }
+
   return c.json({ folio: folioOut })
 }

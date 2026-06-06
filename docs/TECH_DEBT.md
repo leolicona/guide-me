@@ -2,6 +2,14 @@
 
 This document tracks known technical debt, deferred tasks, and architectural improvements that are planned for future phases.
 
+## 15. External QR-Image Service Dependency — ⚠️ OPEN (accepted trade-off)
+
+**Status:** The Client Ticket Delivery feature (`docs/email/client-ticket-delivery.spec.md`) embeds QR codes in the HTML email using external image tags pointing to `api.qrserver.com/?data=<token>`.
+
+**Why accepted:** Generating raw PNG bytes entirely within a Cloudflare Worker requires either a WebAssembly module (like `qr-wasm`) or a pure JS implementation that does not rely on Node's Canvas/Buffer. Using the external URL is an acceptable MVP shortcut to deliver the email without expanding the build complexity.
+
+**Action if revisited:** If `api.qrserver.com` rate-limits or the privacy of embedding the token in a URL parameter becomes a concern, self-host a `/api/qr/:token.png` endpoint within the Worker (using WASM) and change the Resend template to point to our own domain.
+
 ## 14. Daily Cash-Drawer Feature Superseded & Removed — ✅ RESOLVED (replaced)
 
 **Status:** The daily cash-closure (*corte de caja*) feature — `cash_drawers` /
@@ -70,27 +78,11 @@ and multitenancy isolation are fully correct and covered by tests
 (`test/cash/agent-balance-cash-drops.test.ts`). Each is invisible until either history grows
 large (b, d) or an admin settles then an agent back-edits (a, c).
 
-## 11. Client Cancellation Email Not Sent (US-C03) — ⚠️ OPEN (dependency not built)
+## 11. Client Cancellation Email Not Sent (US-C03) — ✅ RESOLVED
 
-**Status:** Deferred by the Total Folio Cancellation feature
-(`docs/cancellation/total-folio-cancellation.spec.md`). US-A21 cancels the folio, releases
-inventory, and records the cancellation; US-C03 ("the client receives an Email notification
-if their folio is cancelled") is **not** wired because the Resend client-ticket-delivery
-feature (SHOULD HAVE — *Sending receipt and QR code to client via Email*, US-AG09/C01/C03)
-is not built yet. `cancelFolio` (`src/routes/folios/handler.ts`) currently has no email side
-effect.
+**Status:** Closed by the Client Ticket Delivery feature (`docs/email/client-ticket-delivery.spec.md`). `cancelFolio` (`src/routes/folios/handler.ts`) now sends a Resend notification after the batch commits when `folio.customer_email` is set.
 
-**Why accepted:** cancellation is an inventory + record action and is fully correct without
-the notification; adding a Resend call now would mean standing up the whole email
-integration (templates, sender identity, error handling) ahead of its feature. The
-cancellation already invalidates the client's access (the scanner's `CANCELLED` gate), so
-no stale ticket can be redeemed regardless of whether the email goes out.
-
-**Action if revisited:** when the Resend client-delivery feature lands, hook a
-cancellation-notification send into the single seam at the end of `cancelFolio` (after the
-batch commits, using the folio's `customer_email` and the recorded
-`cancellation_reason`/`cancelled_at`). No schema or API change is required — the audit
-fields needed for the email body already exist on `folios`.
+**Why accepted:** This resolves the previous technical debt. The cancellation email effectively notifies users and prevents confusion.
 
 **Forward seam — Refund PIN (US-A23 / US-T05):** when the Tourist Self-Service Portal
 (Phase 2) and Cash Refund Tracking land, the physical-cash-returned loop closes here too.

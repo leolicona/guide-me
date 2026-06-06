@@ -23,9 +23,11 @@ const lineSchema = z.object({
 export const confirmSaleSchema = z
   .object({
     customer_name: z.string().nullable().optional(),
-    // Email/phone validation (format, deliverability) is the Email-delivery feature's
-    // concern; POS captures them as optional metadata.
-    customer_email: z.string().nullable().optional(),
+    // customer_email is MANDATORY: in Phase 1, email is the only delivery channel for the
+    // ticket + QR (the self-service portal is Phase 2), so a sale without a valid address
+    // produces an undeliverable ticket. Format-validated here; reject the sale otherwise.
+    customer_email: z.string().trim().email('A valid customer email is required'),
+    // Phone stays optional metadata (no delivery dependency on it yet).
     customer_phone: z.string().nullable().optional(),
     // US-AG25 — how the cash was collected. Defaults to 'cash' (the common case and the
     // pre-feature behaviour). 'card' sales still earn commission but add no cash debt.

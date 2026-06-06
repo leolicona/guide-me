@@ -6,11 +6,16 @@ import {
   folioLineExtras,
   folioLines,
   folios,
+  organizations,
   serviceExtras,
   services,
   slots,
   users,
 } from '../../db/schema'
+import {
+  sendTicketConfirmationEmail,
+  type TicketConfirmationEmailInput,
+} from '../../services/resend'
 import { ApiError } from '../../types/errors'
 import type { AppVariables } from '../../types/context'
 import {
@@ -506,6 +511,48 @@ export const confirmSale = async (c: PosContext) => {
   }
 
   await db.batch(statements as [BatchItem<'sqlite'>, ...BatchItem<'sqlite'>[]])
+
+  // Fire-and-forget — a Resend failure must never roll back a committed sale.
+  if (input.customer_email && c.env.RESEND_API_KEY) {
+    const orgRows = await db
+      .select({ name: organizations.name })
+      .from(organizations)
+      .where(eq(organizations.id, org))
+      .limit(1)
+    const orgName = orgRows[0]?.name ?? 'GuideMe'
+
+    const emailData: TicketConfirmationEmailInput = {
+      to: input.customer_email,
+      customerName: input.customer_name ?? null,
+      orgName,
+      folioId,
+      createdAt: new Date(),
+      paymentMethod: input.payment_method ?? 'cash',
+      total,
+      lines: prepared.map((line) => ({
+        serviceName: line.serviceName,
+        slotDate: line.slotDate,
+        slotStartTime: line.slotStartTime,
+        quantity: line.quantity,
+        unitPrice: line.unitPrice,
+        lineTotal: line.lineTotal,
+        qrToken: line.qrToken!,
+        extras: line.extras.map((ex) => ({
+          name: ex.name,
+          price: ex.price,
+          quantity: ex.quantity,
+        })),
+      })),
+    }
+
+    // waitUntil — guarantees the send completes after the 201 returns. A bare floating
+    // promise can be cancelled when the Worker returns, silently dropping the email.
+    c.executionCtx.waitUntil(
+      sendTicketConfirmationEmail(c.env, emailData).catch((err) =>
+        console.error('[email] confirmation send failed', folioId, err),
+      ),
+    )
+  }
 
   return c.json(
     {

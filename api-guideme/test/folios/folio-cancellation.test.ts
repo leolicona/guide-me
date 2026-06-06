@@ -336,7 +336,7 @@ describe('Total Folio Cancellation', () => {
     const confirm = await SELF.fetch(`${POS}/folios`, {
       method: 'POST',
       headers: jsonAuth(AGENT_EMAIL),
-      body: JSON.stringify({ lines: [{ slot_id: slotId, quantity: 2, unit_price: 150000 }] }),
+      body: JSON.stringify({ customer_email: 'cliente@example.com', lines: [{ slot_id: slotId, quantity: 2, unit_price: 150000 }] }),
     })
     const body = (await confirm.json()) as any
     const folioId = body.folio.id as string

@@ -29,6 +29,10 @@ import { ServiceError } from '../services/authService'
 import { formatMoney } from '../features/catalog/types'
 import { ROUTES } from '../config/routes'
 
+// customer_email is mandatory at POS — it's the only delivery channel for the ticket + QR
+// in Phase 1. Mirror the backend's validation so the agent gets immediate feedback.
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+
 // Map a confirm error to an actionable banner message.
 function errorMessage(error: unknown): string {
   if (error instanceof ServiceError) {
@@ -57,6 +61,9 @@ export default function PosCheckoutPage() {
 
   const navigate = useNavigate()
   const confirm = useConfirmSale()
+
+  const emailTrimmed = customerEmail.trim()
+  const emailValid = EMAIL_RE.test(emailTrimmed)
 
   const handleConfirm = () => {
     // Read the current state directly so the payload reflects any last edits.
@@ -161,11 +168,11 @@ export default function PosCheckoutPage() {
             <Card>
               <CardContent>
                 <Typography variant="h6" sx={{ mb: 2 }}>
-                  Cliente (opcional)
+                  Cliente
                 </Typography>
                 <Stack spacing={2}>
                   <TextField
-                    label="Nombre"
+                    label="Nombre (opcional)"
                     size="small"
                     value={customerName}
                     onChange={(e) => setCustomer({ name: e.target.value })}
@@ -174,9 +181,15 @@ export default function PosCheckoutPage() {
                     label="Correo electrónico"
                     size="small"
                     type="email"
+                    required
                     value={customerEmail}
                     onChange={(e) => setCustomer({ email: e.target.value })}
-                    helperText="El recibo y el boleto QR se enviarán aquí en un paso posterior."
+                    error={emailTrimmed.length > 0 && !emailValid}
+                    helperText={
+                      emailTrimmed.length > 0 && !emailValid
+                        ? 'Ingresa un correo electrónico válido.'
+                        : 'Obligatorio — el recibo y el boleto QR se envían a este correo.'
+                    }
                   />
                   <TextField
                     label="Teléfono"
@@ -215,10 +228,15 @@ export default function PosCheckoutPage() {
               size="large"
               disableElevation
               onClick={handleConfirm}
-              disabled={confirm.isPending}
+              disabled={confirm.isPending || !emailValid}
             >
               {confirm.isPending ? 'Confirmando…' : 'Confirmar venta'}
             </Button>
+            {!emailValid && (
+              <Typography variant="caption" color="text.secondary" sx={{ textAlign: 'center' }}>
+                Captura el correo del cliente para enviar el boleto y confirmar la venta.
+              </Typography>
+            )}
           </Stack>
         )}
       </Box>

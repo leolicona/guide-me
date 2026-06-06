@@ -103,10 +103,11 @@ const base = 'http://api.local/api/pos'
 const TOKEN_RE = /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/
 
 const confirm = async (email: string, body: Record<string, unknown>) => {
+  // customer_email is mandatory at POS; default it. Explicit bodies override.
   const res = await SELF.fetch(`${base}/folios`, {
     method: 'POST',
     headers: jsonAuth(email),
-    body: JSON.stringify(body),
+    body: JSON.stringify({ customer_email: 'cliente@example.com', ...body }),
   })
   return { status: res.status, json: (await res.json()) as any }
 }
@@ -209,7 +210,11 @@ describe('Folio QR signing', () => {
     expect(await verifyTicket(token, foreignKey)).toBeNull()
   })
 
-  it('Scenario 5 — client_identity falls back name → email → folio:id', async () => {
+  it('Scenario 5 — client_identity falls back name → email', async () => {
+    // customer_email is now mandatory at POS, so the final `folio:<id>` fallback in the
+    // signing code is defensive-only (unreachable from a POS sale: email is always present,
+    // and the identity is baked into the token at confirm time). Cover the two reachable
+    // identities here: full name wins; email is used when no name is given.
     const { organizationId } = await seedUser({ email: AGENT_EMAIL, role: 'agent' })
     const serviceId = await seedService(organizationId)
     const slotId = await seedSlot(organizationId, serviceId, { capacity: 12 })
@@ -224,16 +229,12 @@ describe('Folio QR signing', () => {
       customer_email: 'jane@example.com',
       lines: [{ slot_id: slotId, quantity: 1, unit_price: 150000 }],
     })
-    const anon = await confirm(AGENT_EMAIL, {
-      lines: [{ slot_id: slotId, quantity: 1, unit_price: 150000 }],
-    })
 
     const idOf = async (r: any) =>
       (await verifyTicket(r.json.folio.lines[0].qr_token, key))?.client_identity
 
     expect(await idOf(named)).toBe('Jane Tourist')
     expect(await idOf(emailOnly)).toBe('jane@example.com')
-    expect(await idOf(anon)).toBe(`folio:${anon.json.folio.id}`)
   })
 
   it('Scenario 6 — multi-line folio yields one distinct, verifying token per line', async () => {
