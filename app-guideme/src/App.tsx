@@ -22,6 +22,8 @@ const PosCatalogPage = lazy(() => import('./pages/PosCatalogPage'))
 const PosServicePage = lazy(() => import('./pages/PosServicePage'))
 const PosCheckoutPage = lazy(() => import('./pages/PosCheckoutPage'))
 const FolioReceiptPage = lazy(() => import('./pages/FolioReceiptPage'))
+const FolioHistoryPage = lazy(() => import('./pages/FolioHistoryPage'))
+const FolioHistoryDetailPage = lazy(() => import('./pages/FolioHistoryDetailPage'))
 const ScannerPage = lazy(() => import('./pages/ScannerPage'))
 const FoliosListPage = lazy(() => import('./pages/FoliosListPage'))
 const FolioDetailPage = lazy(() => import('./pages/FolioDetailPage'))
@@ -113,6 +115,24 @@ function App() {
               element={
                 <RoleGuard role="agent">
                   <FolioReceiptPage />
+                </RoleGuard>
+              }
+            />
+
+            {/* Agent folio history — read-only list + detail (US-AG20, US-AG21) */}
+            <Route
+              path={ROUTES.HISTORY}
+              element={
+                <RoleGuard role="agent">
+                  <FolioHistoryPage />
+                </RoleGuard>
+              }
+            />
+            <Route
+              path={ROUTES.HISTORY_DETAIL}
+              element={
+                <RoleGuard role="agent">
+                  <FolioHistoryDetailPage />
                 </RoleGuard>
               }
             />

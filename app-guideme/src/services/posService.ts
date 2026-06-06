@@ -1,5 +1,11 @@
 import { request } from './authService'
-import type { Folio, PosServiceDetail, PosServiceSummary } from '../features/pos/types'
+import type {
+  Folio,
+  FolioHistoryItem,
+  FolioStatus,
+  PosServiceDetail,
+  PosServiceSummary,
+} from '../features/pos/types'
 
 // US-AG03 / AG04 / AG05 / AG06 / AG08 — agent-facing POS. All endpoints require
 // the `agent` role (enforced server-side). Money fields are integer minor units.
@@ -65,8 +71,27 @@ export const confirmSale = async (data: ConfirmSaleInput): Promise<Folio> => {
   return res.folio
 }
 
-// US-AG08 — read back one of the caller agent's own folios (receipt).
+// US-AG08 / AG21 — read back one of the caller agent's own folios (receipt + history detail).
 export const getFolio = async (id: string): Promise<Folio> => {
   const res = await request<{ folio: Folio }>(`/api/pos/folios/${id}`)
   return res.folio
+}
+
+export interface MyFolioFilters {
+  status?: FolioStatus
+  date?: string
+}
+
+// US-AG20 — the caller agent's own folio history. Server scopes to the caller (no agent_id).
+export const listMyFolios = async (
+  filters: MyFolioFilters = {},
+): Promise<FolioHistoryItem[]> => {
+  const params = new URLSearchParams()
+  if (filters.status) params.set('status', filters.status)
+  if (filters.date) params.set('date', filters.date)
+  const qs = params.toString()
+  const res = await request<{ folios: FolioHistoryItem[] }>(
+    `/api/pos/folios${qs ? `?${qs}` : ''}`,
+  )
+  return res.folios
 }

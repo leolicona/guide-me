@@ -1,6 +1,6 @@
 import type { Context } from 'hono'
 import type { BatchItem } from 'drizzle-orm/batch'
-import { and, asc, eq, gte, lte, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, gte, lte, sql } from 'drizzle-orm'
 import { getDb, type Db } from '../../db/client'
 import {
   folioLineExtras,
@@ -618,6 +618,7 @@ const readFolio = async (
       total: folios.total,
       amountPaid: folios.amountPaid,
       commissionAmount: folios.commissionAmount,
+      cancelledAt: folios.cancelledAt,
       createdAt: folios.createdAt,
     })
     .from(folios)
@@ -721,6 +722,9 @@ const readFolio = async (
     total: folio.total,
     amount_paid: folio.amountPaid,
     commission_amount: folio.commissionAmount,
+    cancelled_at: folio.cancelledAt
+      ? Math.floor(folio.cancelledAt.getTime() / 1000)
+      : null,
     created_at: Math.floor(folio.createdAt.getTime() / 1000),
     lines,
   }
@@ -745,4 +749,59 @@ export const getFolio = async (c: PosContext) => {
   }
 
   return c.json({ folio })
+}
+
+// US-AG20 — the caller agent's own folios (their read-only sales history). Caller-scoped:
+// organization_id AND agent_id come from context — there is NO agent_id query param, so an
+// agent can never see another agent's folios (that is the admin org-wide list at
+// GET /api/folios). Optional status / date (created_at UTC day) filters; newest first. A
+// lean row — a history list, not a metrics dashboard.
+export const listAgentFolios = async (c: PosContext) => {
+  const agent = c.get('user')
+  const org = agent.organizationId
+  const db = getDb(c.env)
+
+  const statusQ = c.req.query('status')
+  const dateQ = c.req.query('date')
+
+  const filters = [
+    eq(folios.organizationId, org),
+    eq(folios.agentId, agent.userId), // caller-scoped — never from the request
+  ]
+  if (statusQ === 'paid' || statusQ === 'booking' || statusQ === 'cancelled') {
+    filters.push(eq(folios.status, statusQ))
+  }
+  if (dateQ) {
+    filters.push(
+      sql`strftime('%Y-%m-%d', ${folios.createdAt}, 'unixepoch') = ${dateQ}`,
+    )
+  }
+
+  const rows = await db
+    .select({
+      id: folios.id,
+      customerName: folios.customerName,
+      status: folios.status,
+      total: folios.total,
+      amountPaid: folios.amountPaid,
+      createdAt: folios.createdAt,
+      cancelledAt: folios.cancelledAt,
+    })
+    .from(folios)
+    .where(and(...filters))
+    .orderBy(desc(folios.createdAt))
+
+  return c.json({
+    folios: rows.map((r) => ({
+      id: r.id,
+      customer_name: r.customerName,
+      status: r.status,
+      total: r.total,
+      amount_paid: r.amountPaid,
+      created_at: Math.floor(r.createdAt.getTime() / 1000),
+      cancelled_at: r.cancelledAt
+        ? Math.floor(r.cancelledAt.getTime() / 1000)
+        : null,
+    })),
+  })
 }

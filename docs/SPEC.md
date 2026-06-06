@@ -58,7 +58,7 @@ GuideMe is a multi-tenant, mobile-optimized SaaS platform that centralizes the s
 #### Dashboard and Monitoring
 
 - **US-A14** — As an admin, I want to see a visual occupancy dashboard showing the status (available / close to capacity / full) of all active schedules for the day.
-- **US-A15** — As an admin, I want to see in real-time how many spots remain available per service and schedule.
+- **US-A15** — As an admin, I want to see in real-time how many spots remain available per service and schedule, surfaced both as a count and as the unrealized revenue of the empty seats.
 - **US-A16** — As an admin, I want to see a summary of the day's sales: total collected, number of folios, and sales per agent.
 
 #### Financial Reports and Commissions
@@ -116,6 +116,7 @@ GuideMe is a multi-tenant, mobile-optimized SaaS platform that centralizes the s
 - **US-AG23** — As an agent, I want the system to calculate my commission per sale and automatically deduct it from my "Debt to Company" (Running Balance), so I keep my earnings immediately.
 - **US-AG24** — As an agent, when I register a sale with a "Card" payment method, I want my commission to be credited to my balance without increasing my cash debt.
 - **US-AG14** — As an agent, I want to register a cash drop (hand-in / *entrega de efectivo*) of a given amount to the admin, which reduces my running balance, so settlement happens whenever I hand over cash — no daily closure required.
+- **US-AG26** — As an agent, I want a daily snapshot of my own performance (today's sales and amount collected) alongside my running balance and a quick action to register a cash drop, so I can track my day and settle cash without leaving the home screen.
 
 #### Access Scanner (QR)
 
@@ -190,9 +191,9 @@ GuideMe is a multi-tenant, mobile-optimized SaaS platform that centralizes the s
 - [ ] **Bilingual UI — Spanish (MX) / English with language switcher** *(US-L01, US-L02, US-L03)* — `docs/i18n/i18n.spec.md`
 - [ ] **Bookings/down-payments (partial payment with spot reservation)** *(US-AG07)*
 - [x] **Sending receipt and QR code to client via Email (Resend)** *(US-AG09, US-C01, US-C03)* — `docs/email/client-ticket-delivery.spec.md`
-- [ ] **Occupancy visual dashboard (admin)** *(US-A14, US-A15, US-A16)*
+- [ ] **Occupancy visual dashboard (admin)** *(US-A14, US-A15, US-A16, US-AG26)* — `docs/dashboard/occupancy-dashboard.spec.md` (scoped as the broader **Daily Operations Dashboard**; US-AG26 adds the agent's own daily snapshot)
 - [ ] **Commission report by period** *(US-A17, US-A18, US-A20)*
-- [ ] **Agent folio history (read-only list and details)** *(US-AG20, US-AG21)*
+- [x] **Agent folio history (read-only list and details)** *(US-AG20, US-AG21)* — `docs/folio-history/agent-folio-history.spec.md`
 
 ### Out of MVP (Phase 2+)
 

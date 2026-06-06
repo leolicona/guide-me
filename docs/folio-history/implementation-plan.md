@@ -304,21 +304,22 @@ graph LR
 ## Checklist
 
 ### Backend
-- [ ] `listAgentFolios` in `pos/handler.ts` — caller-scoped (`organization_id` + `agent_id`
+- [x] `listAgentFolios` in `pos/handler.ts` — caller-scoped (`organization_id` + `agent_id`
       from context), `created_at DESC`, optional `status` / `date`, lean row shape
-- [ ] `GET /api/pos/folios` wired in `pos/index.ts` (agent-only via the router)
-- [ ] No `agent_id` query param; no new table/column/migration; no new `ErrorCode`
-- [ ] Detail (`GET /api/pos/folios/:id`, US-AG21) reused unchanged
-- [ ] `test/pos/agent-folio-history.test.ts` Scenarios 1–11 (caller-scope, ordering, filters,
+- [x] `GET /api/pos/folios` wired in `pos/index.ts` (agent-only via the router)
+- [x] No `agent_id` query param; no new table/column/migration; no new `ErrorCode`
+- [x] Detail (`GET /api/pos/folios/:id`, US-AG21) reused unchanged (additive `cancelled_at`
+      added to its response for the cancelled banner)
+- [x] `test/pos/agent-folio-history.test.ts` Scenarios 1–11 (caller-scope, ordering, filters,
       empty, own-detail, other-agent `404`, cancelled read-only, admin `403`, B3/B4)
 
 ### Frontend
-- [ ] `posService.listMyFolios` (1 call)
-- [ ] `FolioHistoryItem` type + `useMyFolios` hook in `features/pos`
-- [ ] `FolioHistoryPage` (status chips + filter + empty state) + `FolioHistoryDetailPage`
+- [x] `posService.listMyFolios` (1 call)
+- [x] `FolioHistoryItem` type + `useMyFolios` hook in `features/pos`
+- [x] `FolioHistoryPage` (status chips + filter + empty state) + `FolioHistoryDetailPage`
       (status-aware, read-only, reuses `useFolio` + `TicketQr`)
-- [ ] Agent-only **Historial** nav + `HISTORY` / `HISTORY_DETAIL` routes
+- [x] Agent-only **Historial** nav + `HISTORY` / `HISTORY_DETAIL` routes
 
 ### Docs
-- [ ] `docs/SPEC.md` SHOULD-HAVE item ticked (US-AG20, US-AG21)
-- [ ] US-AG22 resend noted as a Phase-2 seam
+- [x] `docs/SPEC.md` SHOULD-HAVE item ticked (US-AG20, US-AG21)
+- [x] US-AG22 resend noted as a Phase-2 seam

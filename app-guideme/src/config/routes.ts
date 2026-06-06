@@ -15,6 +15,8 @@ export const ROUTES = {
   POS_CHECKOUT: '/pos/checkout',
   FOLIO: '/pos/folio/:id',
   SCAN: '/scan',
+  HISTORY: '/history', // agent — own folio history list (US-AG20)
+  HISTORY_DETAIL: '/history/:id', // agent — one folio, read-only (US-AG21)
   FOLIOS: '/folios',
   FOLIO_DETAIL: '/folios/:id',
   BALANCE: '/balance', // agent — running balance, expenses, hand-ins

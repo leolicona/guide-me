@@ -4,7 +4,13 @@ import { authMiddleware } from '../../middleware/auth'
 import { requireRole } from '../../middleware/role'
 import { ApiError } from '../../types/errors'
 import type { AppVariables } from '../../types/context'
-import { confirmSale, getFolio, getPosService, listPosServices } from './handler'
+import {
+  confirmSale,
+  getFolio,
+  getPosService,
+  listAgentFolios,
+  listPosServices,
+} from './handler'
 import { confirmSaleSchema } from './schema'
 
 const pos = new Hono<{
@@ -29,6 +35,7 @@ pos.post(
   zValidator('json', confirmSaleSchema, validationHook),
   confirmSale,
 )
+pos.get('/folios', listAgentFolios)
 pos.get('/folios/:id', getFolio)
 
 export default pos

@@ -232,32 +232,33 @@ agent's; no query parameter can widen the scope.
 ## Definition of Done
 
 ### Backend (US-AG20)
-- [ ] `listAgentFolios` added to `src/routes/pos/handler.ts`: caller-scoped
+- [x] `listAgentFolios` added to `src/routes/pos/handler.ts`: caller-scoped
       (`organization_id` + `agent_id` from context), `created_at DESC`, optional `status` /
       `date` filters, lean row shape (`id`, `customer_name`, `status`, `total`, `amount_paid`,
       `created_at`, `cancelled_at`)
-- [ ] Route `GET /api/pos/folios` wired in `src/routes/pos/index.ts` (agent-only, already
+- [x] Route `GET /api/pos/folios` wired in `src/routes/pos/index.ts` (agent-only, already
       enforced by the router's `requireRole('agent')`)
-- [ ] **No** `agent_id` query param (an agent can never widen scope); no new table / column /
+- [x] **No** `agent_id` query param (an agent can never widen scope); no new table / column /
       migration; **no new `ErrorCode`**
-- [ ] The detail read (`GET /api/pos/folios/:id`, US-AG21) is **reused unchanged**
-- [ ] `test/pos/agent-folio-history.test.ts` covers Scenarios 1–11: caller-scoped list,
+- [x] The detail read (`GET /api/pos/folios/:id`, US-AG21) is **reused unchanged** (only an
+      additive `cancelled_at` field added to its response, for the cancelled banner)
+- [x] `test/pos/agent-folio-history.test.ts` covers Scenarios 1–11: caller-scoped list,
       ordering, status + date filters, empty history, own-detail, other-agent `404`, cancelled
       visible read-only, non-agent `403`, and multitenancy B3/B4 (`seedTwoOrgs`)
 
 ### Frontend (US-AG20 + US-AG21)
-- [ ] `posService.listMyFolios({ status?, date? })` → `GET /api/pos/folios`
-- [ ] `FolioHistoryItem` type + `useMyFolios(filters)` hook in `features/pos`
-- [ ] Agent **Historial** list page (status chips, customer, date, total; row → detail) with a
+- [x] `posService.listMyFolios({ status?, date? })` → `GET /api/pos/folios`
+- [x] `FolioHistoryItem` type + `useMyFolios(filters)` hook in `features/pos`
+- [x] Agent **Historial** list page (status chips, customer, date, total; row → detail) with a
       status filter; empty state
-- [ ] Agent folio **detail** page (reuses the existing `useFolio` → `GET /api/pos/folios/:id`):
+- [x] Agent folio **detail** page (reuses the existing `useFolio` → `GET /api/pos/folios/:id`):
       status-aware framing (a `cancelled` banner when applicable), lines/extras/totals,
       customer, per-line QR (`TicketQr`) — **no** cancel/edit affordance
-- [ ] Agent-only **Historial** nav entry + routes (distinct from the admin **Folios** route
+- [x] Agent-only **Historial** nav entry + routes (distinct from the admin **Folios** route
       and the post-sale receipt route)
 
 ### Docs
-- [ ] `docs/SPEC.md` SHOULD-HAVE item **Agent folio history (US-AG20, US-AG21)** ticked with a
+- [x] `docs/SPEC.md` SHOULD-HAVE item **Agent folio history (US-AG20, US-AG21)** ticked with a
       link to this spec
 
 ### Remaining (future, not this feature)

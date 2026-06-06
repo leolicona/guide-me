@@ -83,6 +83,20 @@ export interface Folio {
   discount_total: number
   total: number
   amount_paid: number
+  /** Set when the folio was cancelled by an admin (US-A21); null otherwise. */
+  cancelled_at: number | null
   created_at: number
   lines: FolioLine[]
+}
+
+// US-AG20 — lean row for the agent's own read-only sales history. No `agent` block: every
+// row is the caller's own (that distinguishes it from the admin org-wide list).
+export interface FolioHistoryItem {
+  id: string
+  customer_name: string | null
+  status: FolioStatus
+  total: number
+  amount_paid: number
+  created_at: number
+  cancelled_at: number | null
 }
