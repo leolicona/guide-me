@@ -69,12 +69,12 @@ export function EditAgentDialog({ agent, open, onClose }: EditAgentDialogProps) 
             if (error.status === 404) {
               setError('name', {
                 type: 'manual',
-                message: 'This agent no longer exists.',
+                message: 'Este agente ya no existe.',
               })
             } else if (error.status === 400) {
               setError('commission', {
                 type: 'manual',
-                message: 'Please check the values and try again.',
+                message: 'Revisa los valores e inténtalo de nuevo.',
               })
             }
           }
@@ -87,12 +87,12 @@ export function EditAgentDialog({ agent, open, onClose }: EditAgentDialogProps) 
 
   return (
     <Dialog open={open} onClose={onClose} fullWidth maxWidth="xs">
-      <DialogTitle>Edit agent</DialogTitle>
+      <DialogTitle>Editar agente</DialogTitle>
       <form onSubmit={handleSubmit(onSubmit)} noValidate>
         <DialogContent>
           <Stack spacing={2} sx={{ mt: 0.5 }}>
             <TextField
-              label="Name"
+              label="Nombre"
               fullWidth
               disabled={isLoading}
               error={!!errors.name}
@@ -100,7 +100,7 @@ export function EditAgentDialog({ agent, open, onClose }: EditAgentDialogProps) 
               {...register('name')}
             />
             <TextField
-              label="Phone"
+              label="Teléfono"
               fullWidth
               disabled={isLoading}
               error={!!errors.phone}
@@ -108,7 +108,7 @@ export function EditAgentDialog({ agent, open, onClose }: EditAgentDialogProps) 
               {...register('phone')}
             />
             <TextField
-              label="Base commission"
+              label="Comisión base"
               type="number"
               fullWidth
               disabled={isLoading}
@@ -128,7 +128,7 @@ export function EditAgentDialog({ agent, open, onClose }: EditAgentDialogProps) 
         </DialogContent>
         <DialogActions>
           <Button onClick={onClose} disabled={isLoading}>
-            Cancel
+            Cancelar
           </Button>
           <Button
             type="submit"
@@ -136,7 +136,7 @@ export function EditAgentDialog({ agent, open, onClose }: EditAgentDialogProps) 
             disableElevation
             disabled={isLoading}
           >
-            {isLoading ? <CircularProgress size={22} color="inherit" /> : 'Save'}
+            {isLoading ? <CircularProgress size={22} color="inherit" /> : 'Guardar'}
           </Button>
         </DialogActions>
       </form>

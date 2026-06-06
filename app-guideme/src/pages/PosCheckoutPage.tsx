@@ -33,16 +33,16 @@ import { ROUTES } from '../config/routes'
 function errorMessage(error: unknown): string {
   if (error instanceof ServiceError) {
     if (error.code === 'SLOT_UNAVAILABLE') {
-      return 'A selected time just sold out — please review your cart and try again.'
+      return 'Un horario seleccionado se agotó — por favor revisa tu carrito e inténtalo de nuevo.'
     }
     if (error.code === 'PRICE_BELOW_MINIMUM') {
-      return 'A line is priced below its minimum — adjust the discount and retry.'
+      return 'Un artículo tiene un precio por debajo del mínimo — ajusta el descuento e inténtalo de nuevo.'
     }
     if (error.code === 'NOT_FOUND') {
-      return 'A selected service or time is no longer available. Please rebuild your cart.'
+      return 'Un servicio u horario seleccionado ya no está disponible. Por favor, vuelve a armar tu carrito.'
     }
   }
-  return 'Could not complete the sale. Please try again.'
+  return 'No se pudo completar la venta. Por favor, inténtalo de nuevo.'
 }
 
 export default function PosCheckoutPage() {
@@ -73,17 +73,17 @@ export default function PosCheckoutPage() {
     <Fade in timeout={400}>
       <Box sx={{ maxWidth: 640, mx: 'auto' }}>
         <Button component={RouterLink} to={ROUTES.POS} startIcon={<ArrowBackRounded />} sx={{ mb: 2 }}>
-          Services
+          Servicios
         </Button>
 
         <Typography variant="h4" component="h1" sx={{ mb: 3 }}>
-          Checkout
+          Cobrar
         </Typography>
 
         {lines.length === 0 ? (
           <Typography color="text.secondary">
-            Your cart is empty.{' '}
-            <RouterLink to={ROUTES.POS}>Browse services</RouterLink> to start a sale.
+            Tu carrito está vacío.{' '}
+            <RouterLink to={ROUTES.POS}>Explora los servicios</RouterLink> para iniciar una venta.
           </Typography>
         ) : (
           <Stack spacing={3}>
@@ -105,7 +105,7 @@ export default function PosCheckoutPage() {
                           <Typography variant="subtitle2">{line.service.name}</Typography>
                           <Typography variant="caption" color="text.secondary">
                             {line.slot.date} · {line.slot.start_time} ·{' '}
-                            {formatMoney(line.unit_price)} each
+                            {formatMoney(line.unit_price)} cada uno
                           </Typography>
                           {line.extras.map((e) => (
                             <Typography
@@ -125,7 +125,7 @@ export default function PosCheckoutPage() {
                           <Stack direction="row" spacing={0.5} sx={{ alignItems: 'center' }}>
                             <IconButton
                               size="small"
-                              aria-label="Fewer people"
+                              aria-label="Menos personas"
                               onClick={() => updateQuantity(line.slot.id, line.quantity - 1)}
                               disabled={line.quantity <= 1}
                             >
@@ -136,7 +136,7 @@ export default function PosCheckoutPage() {
                             </Typography>
                             <IconButton
                               size="small"
-                              aria-label="More people"
+                              aria-label="Más personas"
                               onClick={() => updateQuantity(line.slot.id, line.quantity + 1)}
                               disabled={line.quantity >= line.slot.remaining}
                             >
@@ -144,7 +144,7 @@ export default function PosCheckoutPage() {
                             </IconButton>
                             <IconButton
                               size="small"
-                              aria-label="Remove line"
+                              aria-label="Eliminar artículo"
                               onClick={() => removeLine(line.slot.id)}
                             >
                               <DeleteOutlineRounded fontSize="small" />
@@ -161,25 +161,25 @@ export default function PosCheckoutPage() {
             <Card>
               <CardContent>
                 <Typography variant="h6" sx={{ mb: 2 }}>
-                  Customer (optional)
+                  Cliente (opcional)
                 </Typography>
                 <Stack spacing={2}>
                   <TextField
-                    label="Name"
+                    label="Nombre"
                     size="small"
                     value={customerName}
                     onChange={(e) => setCustomer({ name: e.target.value })}
                   />
                   <TextField
-                    label="Email"
+                    label="Correo electrónico"
                     size="small"
                     type="email"
                     value={customerEmail}
                     onChange={(e) => setCustomer({ email: e.target.value })}
-                    helperText="Receipt & QR ticket are delivered here in a later step."
+                    helperText="El recibo y el boleto QR se enviarán aquí en un paso posterior."
                   />
                   <TextField
-                    label="Phone"
+                    label="Teléfono"
                     size="small"
                     value={customerPhone}
                     onChange={(e) => setCustomer({ phone: e.target.value })}
@@ -197,7 +197,7 @@ export default function PosCheckoutPage() {
                   </Stack>
                   {cartDiscountTotal(lines) > 0 && (
                     <Stack direction="row" sx={{ justifyContent: 'space-between' }}>
-                      <Typography color="text.secondary">Discount</Typography>
+                      <Typography color="text.secondary">Descuento</Typography>
                       <Typography>−{formatMoney(cartDiscountTotal(lines))}</Typography>
                     </Stack>
                   )}
@@ -217,7 +217,7 @@ export default function PosCheckoutPage() {
               onClick={handleConfirm}
               disabled={confirm.isPending}
             >
-              {confirm.isPending ? 'Confirming…' : 'Confirm sale'}
+              {confirm.isPending ? 'Confirmando…' : 'Confirmar venta'}
             </Button>
           </Stack>
         )}

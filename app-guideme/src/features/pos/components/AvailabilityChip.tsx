@@ -11,12 +11,12 @@ interface AvailabilityChipProps {
 // sparingly (elegant-minimalist).
 export function AvailabilityChip({ spots }: AvailabilityChipProps) {
   if (spots <= 0) {
-    return <Chip size="small" variant="outlined" label="Full" />
+    return <Chip size="small" variant="outlined" label="Agotado" />
   }
   if (spots <= LOW_THRESHOLD) {
     return (
-      <Chip size="small" color="warning" variant="outlined" label={`${spots} left`} />
+      <Chip size="small" color="warning" variant="outlined" label={`${spots} disponibles`} />
     )
   }
-  return <Chip size="small" color="success" variant="outlined" label="Available" />
+  return <Chip size="small" color="success" variant="outlined" label="Disponible" />
 }

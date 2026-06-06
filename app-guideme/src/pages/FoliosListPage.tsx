@@ -26,6 +26,12 @@ const STATUS_COLOR: Record<FolioStatus, 'success' | 'info' | 'error'> = {
   cancelled: 'error',
 }
 
+const STATUS_LABEL: Record<FolioStatus, string> = {
+  paid: 'Pagado',
+  booking: 'Reserva',
+  cancelled: 'Cancelado',
+}
+
 const formatDate = (unixSeconds: number) =>
   new Date(unixSeconds * 1000).toLocaleString(undefined, {
     year: 'numeric',
@@ -57,10 +63,10 @@ export default function FoliosListPage() {
           onChange={(_, v) => v && setFilter(v)}
           sx={{ mb: 3 }}
         >
-          <ToggleButton value="all">All</ToggleButton>
-          <ToggleButton value="paid">Paid</ToggleButton>
-          <ToggleButton value="booking">Bookings</ToggleButton>
-          <ToggleButton value="cancelled">Cancelled</ToggleButton>
+          <ToggleButton value="all">Todos</ToggleButton>
+          <ToggleButton value="paid">Pagado</ToggleButton>
+          <ToggleButton value="booking">Reservas</ToggleButton>
+          <ToggleButton value="cancelled">Cancelado</ToggleButton>
         </ToggleButtonGroup>
 
         {isLoading && (
@@ -68,10 +74,10 @@ export default function FoliosListPage() {
             <CircularProgress />
           </Box>
         )}
-        {isError && <Alert severity="error">Couldn't load folios. Please try again.</Alert>}
+        {isError && <Alert severity="error">No se pudieron cargar los folios. Inténtalo de nuevo.</Alert>}
 
         {folios && folios.length === 0 && (
-          <Typography color="text.secondary">No folios to show.</Typography>
+          <Typography color="text.secondary">No hay folios para mostrar.</Typography>
         )}
 
         {folios && folios.length > 0 && (
@@ -89,13 +95,13 @@ export default function FoliosListPage() {
                     >
                       <Box sx={{ minWidth: 0 }}>
                         <Typography variant="subtitle1" noWrap>
-                          {f.customer_name ?? 'Walk-in'}
+                          {f.customer_name ?? 'Sin nombre'}
                         </Typography>
                         <Typography variant="caption" color="text.secondary">
                           {formatDate(f.created_at)} · {f.agent.name}
                         </Typography>
                       </Box>
-                      <Chip size="small" color={STATUS_COLOR[f.status]} label={f.status} />
+                      <Chip size="small" color={STATUS_COLOR[f.status]} label={STATUS_LABEL[f.status]} />
                     </Stack>
                     <Divider sx={{ my: 1.5 }} />
                     <Stack direction="row" spacing={3}>
@@ -104,7 +110,7 @@ export default function FoliosListPage() {
                         <Typography variant="body2">{formatMoney(f.total)}</Typography>
                       </Box>
                       <Box>
-                        <Typography variant="caption" color="text.secondary">Paid</Typography>
+                        <Typography variant="caption" color="text.secondary">Pagado</Typography>
                         <Typography variant="body2">{formatMoney(f.amount_paid)}</Typography>
                       </Box>
                     </Stack>

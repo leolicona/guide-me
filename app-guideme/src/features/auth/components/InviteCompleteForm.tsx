@@ -28,7 +28,7 @@ export function InviteCompleteForm({ token }: { token: string }) {
       },
       onError: (error) => {
         if (error instanceof ServiceError && error.status === 400) {
-          setError('root', { type: 'manual', message: 'The invitation is invalid or has expired. Contact your administrator.' });
+          setError('root', { type: 'manual', message: 'La invitación es inválida o ha expirado. Contacta a tu administrador.' });
         }
       }
     });
@@ -49,7 +49,7 @@ export function InviteCompleteForm({ token }: { token: string }) {
           <TextField
             {...field}
             fullWidth
-            label="Name"
+            label="Nombre"
             margin="normal"
             disabled={inviteCompleteMutation.isPending}
             error={!!errors.name}
@@ -61,14 +61,14 @@ export function InviteCompleteForm({ token }: { token: string }) {
       <PasswordInput
         name="password"
         control={control}
-        label="Password"
+        label="Contraseña"
         disabled={inviteCompleteMutation.isPending}
       />
 
       <PasswordInput
         name="confirmPassword"
         control={control}
-        label="Confirm Password"
+        label="Confirmar contraseña"
         disabled={inviteCompleteMutation.isPending}
       />
 
@@ -80,7 +80,7 @@ export function InviteCompleteForm({ token }: { token: string }) {
         disabled={inviteCompleteMutation.isPending}
         sx={{ mt: 3, mb: 1 }}
       >
-        {inviteCompleteMutation.isPending ? <CircularProgress size={24} color="inherit" /> : 'Complete Setup'}
+        {inviteCompleteMutation.isPending ? <CircularProgress size={24} color="inherit" /> : 'Completar registro'}
       </Button>
     </Box>
   );

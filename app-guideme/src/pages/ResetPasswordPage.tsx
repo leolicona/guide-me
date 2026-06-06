@@ -11,19 +11,19 @@ export default function ResetPasswordPage() {
 
   if (!token) {
     return (
-      <AuthLayout title="Reset your password">
+      <AuthLayout title="Recuperar contraseña">
         <SuccessScreen
           icon={<ErrorOutlined sx={{ fontSize: 64 }} color="error" />}
-          title="Invalid link"
-          description="No token provided."
-          action={{ label: 'Back to forgot password', href: ROUTES.FORGOT_PASSWORD }}
+          title="Enlace inválido"
+          description="No se proporcionó un token."
+          action={{ label: 'Volver a recuperar contraseña', href: ROUTES.FORGOT_PASSWORD }}
         />
       </AuthLayout>
     );
   }
 
   return (
-    <AuthLayout title="Reset your password">
+    <AuthLayout title="Restablecer contraseña">
       <ResetPasswordForm token={token} />
     </AuthLayout>
   );

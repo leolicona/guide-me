@@ -30,6 +30,12 @@ const DROP_COLOR: Record<DropStatus, 'warning' | 'success' | 'error'> = {
   rejected: 'error',
 }
 
+const DROP_LABEL: Record<DropStatus, string> = {
+  pending: 'Pendiente',
+  confirmed: 'Confirmado',
+  rejected: 'Rechazado',
+}
+
 const formatDate = (unixSeconds: number) =>
   new Date(unixSeconds * 1000).toLocaleString(undefined, {
     year: 'numeric',
@@ -73,7 +79,7 @@ export default function CashDropDetailPage() {
             <CircularProgress />
           </Box>
         )}
-        {isError && <Alert severity="error">Couldn't load this drop. Please try again.</Alert>}
+        {isError && <Alert severity="error">No se pudo cargar esta entrega. Inténtalo de nuevo.</Alert>}
 
         {drop && (
           <Stack spacing={3}>
@@ -86,21 +92,21 @@ export default function CashDropDetailPage() {
                   {drop.agent?.name} · {formatDate(drop.created_at)}
                 </Typography>
               </Box>
-              <Chip color={DROP_COLOR[drop.status]} label={drop.status} />
+              <Chip color={DROP_COLOR[drop.status]} label={DROP_LABEL[drop.status]} />
             </Stack>
 
             <Card variant="outlined">
               <CardContent>
                 <Stack spacing={1}>
                   <Stack direction="row" sx={{ justifyContent: 'space-between' }}>
-                    <Typography color="text.secondary">Agent's balance at hand-in</Typography>
+                    <Typography color="text.secondary">Saldo del agente al entregar</Typography>
                     <Typography>{formatMoney(drop.balance_before)}</Typography>
                   </Stack>
                   {drop.note && (
                     <>
                       <Divider sx={{ my: 1 }} />
                       <Typography variant="body2" color="text.secondary">
-                        Agent note
+                        Nota del agente
                       </Typography>
                       <Typography variant="body2">{drop.note}</Typography>
                     </>
@@ -112,14 +118,14 @@ export default function CashDropDetailPage() {
             {/* Terminal: show the decision (mirrors the retired closure detail). */}
             {!isPending && (
               <Alert severity={drop.status === 'confirmed' ? 'success' : 'error'}>
-                {drop.status === 'confirmed' ? 'Receipt confirmed' : 'Rejected'}
-                {drop.reviewed_at ? ` on ${formatDate(drop.reviewed_at)}` : ''}
+                {drop.status === 'confirmed' ? 'Recibo confirmado' : 'Rechazado'}
+                {drop.reviewed_at ? ` el ${formatDate(drop.reviewed_at)}` : ''}
                 {drop.review_note ? ` — ${drop.review_note}` : ''}
               </Alert>
             )}
 
             {review.isError && (
-              <Alert severity="error">Couldn't submit your decision. Please try again.</Alert>
+              <Alert severity="error">No se pudo enviar tu decisión. Inténtalo de nuevo.</Alert>
             )}
 
             {isPending && (
@@ -133,7 +139,7 @@ export default function CashDropDetailPage() {
                   onClick={confirm}
                   disabled={review.isPending}
                 >
-                  Confirm receipt
+                  Confirmar recibo
                 </Button>
                 <Button
                   variant="outlined"
@@ -143,7 +149,7 @@ export default function CashDropDetailPage() {
                   onClick={() => setRejectOpen(true)}
                   disabled={review.isPending}
                 >
-                  Reject
+                  Rechazar
                 </Button>
               </Stack>
             )}
@@ -151,14 +157,13 @@ export default function CashDropDetailPage() {
         )}
 
         <Dialog open={rejectOpen} onClose={() => setRejectOpen(false)} fullWidth maxWidth="xs">
-          <DialogTitle>Reject this hand-in?</DialogTitle>
+          <DialogTitle>¿Rechazar esta entrega?</DialogTitle>
           <DialogContent>
             <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-              The agent stays liable for this cash — their balance is unchanged. Add a note
-              explaining why (e.g. an amount mismatch).
+              El agente sigue siendo responsable de este efectivo — su saldo no cambia. Agrega una nota explicando por qué (ej. una diferencia en el monto).
             </Typography>
             <TextField
-              label="Reason (optional)"
+              label="Razón (opcional)"
               fullWidth
               multiline
               minRows={2}
@@ -168,7 +173,7 @@ export default function CashDropDetailPage() {
             />
           </DialogContent>
           <DialogActions>
-            <Button onClick={() => setRejectOpen(false)}>Keep pending</Button>
+            <Button onClick={() => setRejectOpen(false)}>Mantener pendiente</Button>
             <Button
               variant="contained"
               color="error"
@@ -176,7 +181,7 @@ export default function CashDropDetailPage() {
               onClick={reject}
               disabled={review.isPending}
             >
-              {review.isPending ? 'Rejecting…' : 'Reject'}
+              {review.isPending ? 'Rechazando…' : 'Rechazar'}
             </Button>
           </DialogActions>
         </Dialog>

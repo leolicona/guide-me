@@ -82,7 +82,7 @@ export function SchedulesSection({
 
   const handleClose = (slot: Slot) =>
     deactivateSlot.mutate(slot.id, {
-      onError: () => setSnack({ msg: 'Could not close the slot.', severity: 'error' }),
+      onError: () => setSnack({ msg: 'No se pudo cerrar la fecha.', severity: 'error' }),
     })
 
   const handleReopen = (slot: Slot) =>
@@ -90,8 +90,8 @@ export function SchedulesSection({
       onError: (error: unknown) => {
         const msg =
           error instanceof ServiceError && error.status === 409
-            ? 'Another active slot already occupies that date and time.'
-            : 'Could not reopen the slot.'
+            ? 'Ya existe una fecha activa en ese día y hora.'
+            : 'No se pudo reabrir la fecha.'
         setSnack({ msg, severity: 'error' })
       },
     })
@@ -101,13 +101,13 @@ export function SchedulesSection({
     deactivateSchedule.mutate(scheduleToClose.id, {
       onSuccess: (result) => {
         setSnack({
-          msg: `Schedule deactivated · ${result.slots_closed} slot(s) closed.`,
+          msg: `Horario desactivado · ${result.slots_closed} fecha(s) cerrada(s).`,
           severity: 'success',
         })
         setScheduleToClose(null)
       },
       onError: () => {
-        setSnack({ msg: 'Could not deactivate the schedule.', severity: 'error' })
+        setSnack({ msg: 'No se pudo desactivar el horario.', severity: 'error' })
         setScheduleToClose(null)
       },
     })
@@ -127,19 +127,19 @@ export function SchedulesSection({
           mb: 2,
         }}
       >
-        <Typography variant="h6">Schedules &amp; Slots</Typography>
+        <Typography variant="h6">Horarios y fechas</Typography>
         <Stack direction="row" spacing={1} sx={{ flexShrink: 0 }}>
           <Button
             startIcon={<AddRounded />}
             onClick={() => setSlotDialog({ open: true, slot: null })}
           >
-            Add date
+            Agregar fecha
           </Button>
           <Button
             startIcon={<EventRepeatRounded />}
             onClick={() => setScheduleDialogOpen(true)}
           >
-            Recurring
+            Recurrente
           </Button>
         </Stack>
       </Box>
@@ -176,7 +176,7 @@ export function SchedulesSection({
                 onClick={() => setScheduleToClose(s)}
                 sx={{ flexShrink: 0 }}
               >
-                Deactivate
+                Desactivar
               </Button>
             </Box>
           ))}
@@ -186,7 +186,7 @@ export function SchedulesSection({
       {/* Date-range filter */}
       <Stack direction="row" spacing={2} sx={{ mb: 2 }}>
         <TextField
-          label="From"
+          label="Desde"
           type="date"
           size="small"
           value={from}
@@ -194,7 +194,7 @@ export function SchedulesSection({
           slotProps={{ inputLabel: { shrink: true } }}
         />
         <TextField
-          label="To"
+          label="Hasta"
           type="date"
           size="small"
           value={to}
@@ -208,10 +208,10 @@ export function SchedulesSection({
           <CircularProgress />
         </Box>
       )}
-      {slotsError && <Alert severity="error">Couldn't load slots. Please try again.</Alert>}
+      {slotsError && <Alert severity="error">No se pudieron cargar las fechas. Inténtalo de nuevo.</Alert>}
       {slots && slots.length === 0 && (
         <Typography color="text.secondary" variant="body2">
-          No slots in this range — add a date or a recurring schedule.
+          No hay fechas en este rango — agrega una fecha o un horario recurrente.
         </Typography>
       )}
       {slots && slots.length > 0 && (
@@ -237,7 +237,7 @@ export function SchedulesSection({
         open={scheduleDialogOpen}
         onClose={() => setScheduleDialogOpen(false)}
         onCreated={(n) =>
-          setSnack({ msg: `Generated ${n} slot(s).`, severity: 'success' })
+          setSnack({ msg: `Se generaron ${n} fecha(s).`, severity: 'success' })
         }
       />
 
@@ -248,11 +248,11 @@ export function SchedulesSection({
         maxWidth="xs"
         fullWidth
       >
-        <DialogTitle>Deactivate this schedule?</DialogTitle>
+        <DialogTitle>¿Desactivar este horario?</DialogTitle>
         <DialogContent>
           <DialogContentText>
-            Its unbooked slots are closed. Slots with bookings stay active so their
-            tickets remain valid.
+            Las fechas sin reservas se cerrarán. Las fechas con reservas permanecerán
+            activas para que sus boletos sigan siendo válidos.
           </DialogContentText>
         </DialogContent>
         <DialogActions>
@@ -260,7 +260,7 @@ export function SchedulesSection({
             onClick={() => setScheduleToClose(null)}
             disabled={deactivateSchedule.isPending}
           >
-            Cancel
+            Cancelar
           </Button>
           <Button
             variant="contained"
@@ -272,7 +272,7 @@ export function SchedulesSection({
             {deactivateSchedule.isPending ? (
               <CircularProgress size={22} color="inherit" />
             ) : (
-              'Deactivate'
+              'Desactivar'
             )}
           </Button>
         </DialogActions>

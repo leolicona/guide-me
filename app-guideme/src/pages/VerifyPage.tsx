@@ -25,12 +25,12 @@ export default function VerifyPage() {
 
   if (!token) {
     return (
-      <AuthLayout title="Account Verification">
+      <AuthLayout title="Verificación de cuenta">
         <SuccessScreen
           icon={<ErrorOutlined sx={{ fontSize: 64 }} color="error" />}
-          title="Invalid link"
-          description="No verification token was provided."
-          action={{ label: 'Back to login', href: ROUTES.LOGIN }}
+          title="Enlace inválido"
+          description="No se proporcionó un token de verificación."
+          action={{ label: 'Volver al inicio de sesión', href: ROUTES.LOGIN }}
         />
       </AuthLayout>
     );
@@ -38,10 +38,10 @@ export default function VerifyPage() {
 
   if (isLoading) {
     return (
-      <AuthLayout title="Account Verification">
+      <AuthLayout title="Verificación de cuenta">
         <Box sx={{ textAlign: 'center', py: 4 }}>
           <CircularProgress sx={{ mb: 2 }} />
-          <Typography color="text.secondary">Verifying your account...</Typography>
+          <Typography color="text.secondary">Verificando tu cuenta...</Typography>
         </Box>
       </AuthLayout>
     );
@@ -49,23 +49,23 @@ export default function VerifyPage() {
 
   if (isError) {
     return (
-      <AuthLayout title="Account Verification">
+      <AuthLayout title="Verificación de cuenta">
         <SuccessScreen
           icon={<ErrorOutlined sx={{ fontSize: 64 }} color="error" />}
-          title="Verification failed"
-          description="The link is invalid or has expired."
-          action={{ label: 'Sign up', href: ROUTES.REGISTER }}
+          title="Verificación fallida"
+          description="El enlace es inválido o ha expirado."
+          action={{ label: 'Registrarse', href: ROUTES.REGISTER }}
         />
       </AuthLayout>
     );
   }
 
   return (
-    <AuthLayout title="Account Verification">
+    <AuthLayout title="Verificación de cuenta">
       <SuccessScreen
         icon={<CheckCircle sx={{ fontSize: 64 }} color="success" />}
-        title={`Account verified, ${data?.user?.name || 'User'}!`}
-        description="You will be redirected to the dashboard shortly."
+        title={`¡Cuenta verificada, ${data?.user?.name || 'Usuario'}!`}
+        description="Serás redirigido al dashboard en breve."
       />
     </AuthLayout>
   );

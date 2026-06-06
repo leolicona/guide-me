@@ -41,19 +41,19 @@ export function ConfirmServiceStatusDialog({
     <Dialog open={open} onClose={onClose} maxWidth="xs" fullWidth>
       <DialogTitle>
         {isDeactivate
-          ? `Deactivate ${service?.name ?? 'service'}?`
-          : `Reactivate ${service?.name ?? 'service'}?`}
+          ? `¿Desactivar ${service?.name ?? 'servicio'}?`
+          : `¿Reactivar ${service?.name ?? 'servicio'}?`}
       </DialogTitle>
       <DialogContent>
         <DialogContentText>
           {isDeactivate
-            ? 'It is hidden from new bookings, but its extras and history are kept.'
-            : 'It becomes available for new bookings again.'}
+            ? 'Quedará oculto para nuevas reservas, pero se conservarán sus extras e historial.'
+            : 'Volverá a estar disponible para nuevas reservas.'}
         </DialogContentText>
       </DialogContent>
       <DialogActions>
         <Button onClick={onClose} disabled={mutation.isPending}>
-          Cancel
+          Cancelar
         </Button>
         <Button
           variant="contained"
@@ -65,9 +65,9 @@ export function ConfirmServiceStatusDialog({
           {mutation.isPending ? (
             <CircularProgress size={22} color="inherit" />
           ) : isDeactivate ? (
-            'Deactivate'
+            'Desactivar'
           ) : (
-            'Reactivate'
+            'Reactivar'
           )}
         </Button>
       </DialogActions>

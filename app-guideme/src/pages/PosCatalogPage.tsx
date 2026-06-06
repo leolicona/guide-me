@@ -37,7 +37,7 @@ export default function PosCatalogPage() {
           }}
         >
           <Typography variant="h4" component="h1">
-            Sell
+            Vender
           </Typography>
           <Badge badgeContent={count} color="secondary">
             <Button
@@ -59,13 +59,13 @@ export default function PosCatalogPage() {
         )}
 
         {isError && (
-          <Alert severity="error">Couldn't load services. Please try again.</Alert>
+          <Alert severity="error">No se pudieron cargar los servicios. Por favor, inténtalo de nuevo.</Alert>
         )}
 
         {services &&
           (services.length === 0 ? (
             <Typography color="text.secondary">
-              No services available right now.
+              No hay servicios disponibles en este momento.
             </Typography>
           ) : (
             <Box
@@ -104,11 +104,11 @@ export default function PosCatalogPage() {
                         </Typography>
                       )}
                       <Typography variant="body2" sx={{ mt: 1.5, fontWeight: 500 }}>
-                        from {formatMoney(service.base_price)}
+                        desde {formatMoney(service.base_price)}
                       </Typography>
                       {service.next_slot_date && (
                         <Typography variant="caption" color="text.secondary">
-                          Next: {service.next_slot_date}
+                          Próximo: {service.next_slot_date}
                         </Typography>
                       )}
                     </CardContent>

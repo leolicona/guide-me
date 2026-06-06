@@ -41,19 +41,19 @@ export function ConfirmStatusDialog({
     <Dialog open={open} onClose={onClose} maxWidth="xs" fullWidth>
       <DialogTitle>
         {isDeactivate
-          ? `Suspend ${agent?.name ?? 'agent'}?`
-          : `Reactivate ${agent?.name ?? 'agent'}?`}
+          ? `¿Suspender a ${agent?.name ?? 'agente'}?`
+          : `¿Reactivar a ${agent?.name ?? 'agente'}?`}
       </DialogTitle>
       <DialogContent>
         <DialogContentText>
           {isDeactivate
-            ? 'They lose access to the platform immediately, but their sales history is kept.'
-            : 'They regain access to the platform.'}
+            ? 'Perderá el acceso a la plataforma de inmediato, pero se conservará su historial de ventas.'
+            : 'Recuperará el acceso a la plataforma.'}
         </DialogContentText>
       </DialogContent>
       <DialogActions>
         <Button onClick={onClose} disabled={mutation.isPending}>
-          Cancel
+          Cancelar
         </Button>
         <Button
           variant="contained"
@@ -65,9 +65,9 @@ export function ConfirmStatusDialog({
           {mutation.isPending ? (
             <CircularProgress size={22} color="inherit" />
           ) : isDeactivate ? (
-            'Suspend'
+            'Suspender'
           ) : (
-            'Reactivate'
+            'Reactivar'
           )}
         </Button>
       </DialogActions>

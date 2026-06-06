@@ -40,7 +40,7 @@ export function AgentRow({
               {agent.email}
             </Typography>
             <Typography variant="body2" color="text.secondary">
-              Commission: {basisPointsToPercent(agent.base_commission).toFixed(2)}%
+              Comisión: {basisPointsToPercent(agent.base_commission).toFixed(2)}%
             </Typography>
           </Box>
 
@@ -56,14 +56,14 @@ export function AgentRow({
               size="small"
               variant="outlined"
               color={suspended ? 'default' : 'success'}
-              label={suspended ? 'Suspended' : 'Active'}
+              label={suspended ? 'Suspendido' : 'Activo'}
             />
             <Button
               size="small"
               startIcon={<EditRounded />}
               onClick={() => onEdit(agent)}
             >
-              Edit
+              Editar
             </Button>
             {suspended ? (
               <Button
@@ -72,7 +72,7 @@ export function AgentRow({
                 startIcon={<CheckCircleRounded />}
                 onClick={() => onReactivate(agent)}
               >
-                Reactivate
+                Reactivar
               </Button>
             ) : (
               <Button
@@ -81,7 +81,7 @@ export function AgentRow({
                 startIcon={<BlockRounded />}
                 onClick={() => onDeactivate(agent)}
               >
-                Deactivate
+                Desactivar
               </Button>
             )}
           </Box>

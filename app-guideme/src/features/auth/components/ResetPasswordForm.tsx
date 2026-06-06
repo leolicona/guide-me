@@ -38,9 +38,9 @@ export function ResetPasswordForm({ token }: { token: string }) {
     return (
       <SuccessScreen
         icon={<CheckCircle sx={{ fontSize: 64 }} color="success" />}
-        title="Password updated"
-        description="Password updated successfully"
-        action={{ label: 'Log in', href: ROUTES.LOGIN }}
+        title="Contraseña actualizada"
+        description="Tu contraseña fue actualizada exitosamente."
+        action={{ label: 'Iniciar sesión', href: ROUTES.LOGIN }}
       />
     );
   }
@@ -49,9 +49,9 @@ export function ResetPasswordForm({ token }: { token: string }) {
     return (
       <SuccessScreen
         icon={<ErrorOutlined sx={{ fontSize: 64 }} color="error" />}
-        title="Reset failed"
-        description="The link is invalid or has expired"
-        action={{ label: 'Request new link', href: ROUTES.FORGOT_PASSWORD }}
+        title="Error al recuperar"
+        description="El enlace es inválido o ha expirado."
+        action={{ label: 'Solicitar nuevo enlace', href: ROUTES.FORGOT_PASSWORD }}
       />
     );
   }
@@ -61,14 +61,14 @@ export function ResetPasswordForm({ token }: { token: string }) {
       <PasswordInput
         name="password"
         control={control}
-        label="New Password"
+        label="Nueva contraseña"
         disabled={resetPasswordMutation.isPending}
       />
 
       <PasswordInput
         name="confirmPassword"
         control={control}
-        label="Confirm Password"
+        label="Confirmar contraseña"
         disabled={resetPasswordMutation.isPending}
       />
 
@@ -80,7 +80,7 @@ export function ResetPasswordForm({ token }: { token: string }) {
         disabled={resetPasswordMutation.isPending}
         sx={{ mt: 3, mb: 1 }}
       >
-        {resetPasswordMutation.isPending ? <CircularProgress size={24} color="inherit" /> : 'Update Password'}
+        {resetPasswordMutation.isPending ? <CircularProgress size={24} color="inherit" /> : 'Actualizar contraseña'}
       </Button>
     </Box>
   );

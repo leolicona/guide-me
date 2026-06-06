@@ -33,6 +33,12 @@ const STATUS_COLOR: Record<FolioStatus, 'success' | 'info' | 'error'> = {
   cancelled: 'error',
 }
 
+const STATUS_LABEL: Record<FolioStatus, string> = {
+  paid: 'Pagado',
+  booking: 'Reserva',
+  cancelled: 'Cancelado',
+}
+
 const formatDate = (unixSeconds: number) =>
   new Date(unixSeconds * 1000).toLocaleString(undefined, {
     year: 'numeric',
@@ -78,29 +84,29 @@ export default function FolioDetailPage() {
             <CircularProgress />
           </Box>
         )}
-        {isError && <Alert severity="error">Couldn't load this folio. Please try again.</Alert>}
+        {isError && <Alert severity="error">No se pudo cargar este folio. Inténtalo de nuevo.</Alert>}
 
         {folio && (
           <Stack spacing={3}>
             <Stack direction="row" sx={{ justifyContent: 'space-between', alignItems: 'center' }}>
               <Box sx={{ minWidth: 0 }}>
                 <Typography variant="h5" component="h1" noWrap>
-                  {folio.customer_name ?? 'Walk-in'}
+                  {folio.customer_name ?? 'Sin nombre'}
                 </Typography>
                 <Typography variant="caption" color="text.secondary">
                   {formatDate(folio.created_at)} · {folio.agent.name}
                 </Typography>
               </Box>
-              <Chip size="small" color={STATUS_COLOR[folio.status]} label={folio.status} />
+              <Chip size="small" color={STATUS_COLOR[folio.status]} label={STATUS_LABEL[folio.status]} />
             </Stack>
 
             {isCancelled && (
               <Alert severity="error">
-                Cancelled{folio.cancelled_at ? ` on ${formatDate(folio.cancelled_at)}` : ''}
+                Cancelado{folio.cancelled_at ? ` el ${formatDate(folio.cancelled_at)}` : ''}
                 {folio.cancellation_reason ? ` — ${folio.cancellation_reason}` : ''}
                 {folio.cancellation_clawback
-                  ? ' · agent commission clawed back'
-                  : ' · company absorbed the commission'}
+                  ? ' · comisión del agente recuperada'
+                  : ' · comisión absorbida por la empresa'}
               </Alert>
             )}
 
@@ -151,7 +157,7 @@ export default function FolioDetailPage() {
                   </Stack>
                   {folio.discount_total > 0 && (
                     <Stack direction="row" sx={{ justifyContent: 'space-between' }}>
-                      <Typography color="text.secondary">Discount</Typography>
+                      <Typography color="text.secondary">Descuento</Typography>
                       <Typography>−{formatMoney(folio.discount_total)}</Typography>
                     </Stack>
                   )}
@@ -160,7 +166,7 @@ export default function FolioDetailPage() {
                     <Typography variant="h6">{formatMoney(folio.total)}</Typography>
                   </Stack>
                   <Stack direction="row" sx={{ justifyContent: 'space-between' }}>
-                    <Typography color="text.secondary">Paid</Typography>
+                    <Typography color="text.secondary">Pagado</Typography>
                     <Typography>{formatMoney(folio.amount_paid)}</Typography>
                   </Stack>
                 </Stack>
@@ -168,7 +174,7 @@ export default function FolioDetailPage() {
             </Card>
 
             {cancel.isError && (
-              <Alert severity="error">Couldn't cancel this folio. Please try again.</Alert>
+              <Alert severity="error">No se pudo cancelar este folio. Inténtalo de nuevo.</Alert>
             )}
 
             {!isCancelled && (
@@ -178,21 +184,21 @@ export default function FolioDetailPage() {
                 size="large"
                 onClick={() => setConfirmOpen(true)}
               >
-                Cancel folio
+                Cancelar folio
               </Button>
             )}
           </Stack>
         )}
 
         <Dialog open={confirmOpen} onClose={closeDialog}>
-          <DialogTitle>Cancel this folio?</DialogTitle>
+          <DialogTitle>¿Cancelar este folio?</DialogTitle>
           <DialogContent>
             <DialogContentText sx={{ mb: 2 }}>
-              This releases all spots for every service in the folio and can't be undone. The
-              client's access tickets will no longer be valid.
+              Esto libera todos los lugares de cada servicio en el folio y no se puede deshacer.
+              Los boletos de acceso del cliente dejarán de ser válidos.
             </DialogContentText>
             <TextField
-              label="Reason (optional)"
+              label="Motivo (opcional)"
               size="small"
               fullWidth
               multiline
@@ -211,18 +217,18 @@ export default function FolioDetailPage() {
               }
               label={
                 <Box sx={{ pt: 0.75 }}>
-                  <Typography variant="body2">Claw back agent commission</Typography>
+                  <Typography variant="body2">Recuperar comisión del agente</Typography>
                   <Typography variant="caption" color="text.secondary">
                     {clawback
-                      ? 'The agent forfeits the commission booked on this sale.'
-                      : 'Off: the company absorbs the loss and the agent keeps the commission.'}
+                      ? 'El agente pierde la comisión generada en esta venta.'
+                      : 'Desactivado: la empresa absorbe la pérdida y el agente conserva la comisión.'}
                   </Typography>
                 </Box>
               }
             />
           </DialogContent>
           <DialogActions>
-            <Button onClick={closeDialog}>Keep folio</Button>
+            <Button onClick={closeDialog}>Conservar folio</Button>
             <Button
               variant="contained"
               color="error"
@@ -230,7 +236,7 @@ export default function FolioDetailPage() {
               onClick={handleCancel}
               disabled={cancel.isPending}
             >
-              {cancel.isPending ? 'Cancelling…' : 'Cancel folio'}
+              {cancel.isPending ? 'Cancelando…' : 'Cancelar folio'}
             </Button>
           </DialogActions>
         </Dialog>

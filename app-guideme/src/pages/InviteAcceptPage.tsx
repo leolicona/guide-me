@@ -13,11 +13,11 @@ export default function InviteAcceptPage() {
 
   if (!token) {
     return (
-      <AuthLayout title="Accept Invitation">
+      <AuthLayout title="Aceptar invitación">
         <SuccessScreen
           icon={<ErrorOutlined sx={{ fontSize: 64 }} color="error" />}
-          title="Invalid link"
-          description="No token provided."
+          title="Enlace inválido"
+          description="No se proporcionó un token."
         />
       </AuthLayout>
     );
@@ -25,10 +25,10 @@ export default function InviteAcceptPage() {
 
   if (isLoading) {
     return (
-      <AuthLayout title="Accept Invitation">
+      <AuthLayout title="Aceptar invitación">
         <Box sx={{ textAlign: 'center', py: 4 }}>
           <CircularProgress sx={{ mb: 2 }} />
-          <Typography color="text.secondary">Loading invitation...</Typography>
+          <Typography color="text.secondary">Cargando invitación...</Typography>
         </Box>
       </AuthLayout>
     );
@@ -36,11 +36,11 @@ export default function InviteAcceptPage() {
 
   if (isError || !data) {
     return (
-      <AuthLayout title="Accept Invitation">
+      <AuthLayout title="Aceptar invitación">
         <SuccessScreen
           icon={<ErrorOutlined sx={{ fontSize: 64 }} color="error" />}
-          title="Invalid invitation"
-          description="The invitation is invalid, has expired, or has already been used. Contact your administrator."
+          title="Invitación inválida"
+          description="La invitación es inválida, ha expirado o ya fue utilizada. Contacta a tu administrador."
         />
       </AuthLayout>
     );
@@ -49,16 +49,16 @@ export default function InviteAcceptPage() {
   const { identity, organization_name } = data.invitation;
 
   return (
-    <AuthLayout title="Accept Invitation">
+    <AuthLayout title="Aceptar invitación">
       <Paper variant="outlined" sx={{ p: 2, mb: 3, bgcolor: 'background.default' }}>
         <Typography variant="body2" color="text.secondary">
-          Joining organization
+          Unirse a la organización
         </Typography>
         <Typography variant="subtitle1" sx={{ fontWeight: 500 }} gutterBottom>
           {organization_name}
         </Typography>
         <Typography variant="body2" color="text.secondary">
-          Email
+          Correo electrónico
         </Typography>
         <Typography variant="subtitle1" sx={{ fontWeight: 500 }}>
           {identity}

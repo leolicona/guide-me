@@ -32,9 +32,9 @@ export function RegisterForm() {
       onError: (error) => {
         if (error instanceof ServiceError) {
           if (error.status === 409) {
-            setError('email', { type: 'manual', message: 'This email is already registered' });
+            setError('email', { type: 'manual', message: 'Este email ya está registrado' });
           } else if (error.status === 400) {
-            setError('root', { type: 'manual', message: 'Invalid data provided' });
+            setError('root', { type: 'manual', message: 'Los datos proporcionados son inválidos' });
           }
         }
       }
@@ -45,8 +45,8 @@ export function RegisterForm() {
     return (
       <SuccessScreen
         icon={<Email sx={{ fontSize: 64 }} />}
-        title="Registration successful"
-        description="Check your email to verify your account."
+        title="Registro exitoso"
+        description="Revisa tu email para verificar tu cuenta."
       />
     );
   }
@@ -62,7 +62,7 @@ export function RegisterForm() {
           <TextField
             {...field}
             fullWidth
-            label="Name"
+            label="Nombre"
             margin="normal"
             disabled={isLoading}
             error={!!errors.name}
@@ -92,7 +92,7 @@ export function RegisterForm() {
         <PasswordInput
           name="password"
           control={control}
-          label="Password"
+          label="Contraseña"
           disabled={isLoading}
         />
         <PasswordStrength password={passwordValue} />
@@ -105,7 +105,7 @@ export function RegisterForm() {
           <TextField
             {...field}
             fullWidth
-            label="Company Name"
+            label="Nombre de la empresa"
             margin="normal"
             disabled={isLoading}
             error={!!errors.company_name}
@@ -121,7 +121,7 @@ export function RegisterForm() {
           <TextField
             {...field}
             fullWidth
-            label="Phone"
+            label="Teléfono"
             margin="normal"
             disabled={isLoading}
             error={!!errors.phone}
@@ -138,12 +138,12 @@ export function RegisterForm() {
         disabled={isLoading}
         sx={{ mt: 3, mb: 3 }}
       >
-        {isLoading ? <CircularProgress size={24} color="inherit" /> : 'Sign Up'}
+        {isLoading ? <CircularProgress size={24} color="inherit" /> : 'Registrarse'}
       </Button>
 
       <Box sx={{ textAlign: 'center' }}>
         <Link component={RouterLink} to={ROUTES.LOGIN} variant="body2" underline="hover">
-          Already have an account? Log in
+          ¿Ya tienes cuenta? Inicia sesión
         </Link>
       </Box>
     </Box>

@@ -35,7 +35,7 @@ export default function CatalogDetailPage() {
           startIcon={<ArrowBackRounded />}
           sx={{ mb: 2 }}
         >
-          Catalog
+          Catálogo
         </Button>
 
         {isLoading && (
@@ -45,7 +45,7 @@ export default function CatalogDetailPage() {
         )}
 
         {isError && (
-          <Alert severity="error">Couldn't load this service. Please try again.</Alert>
+          <Alert severity="error">No se pudo cargar este servicio. Inténtalo de nuevo.</Alert>
         )}
 
         {service && (
@@ -69,7 +69,7 @@ export default function CatalogDetailPage() {
                         size="small"
                         variant="outlined"
                         color={service.status === 'inactive' ? 'default' : 'success'}
-                        label={service.status === 'inactive' ? 'Inactive' : 'Active'}
+                        label={service.status === 'inactive' ? 'Inactivo' : 'Activo'}
                       />
                     </Stack>
                     {service.description && (
@@ -78,11 +78,11 @@ export default function CatalogDetailPage() {
                       </Typography>
                     )}
                     <Typography variant="body2" color="text.secondary" sx={{ mt: 1.5 }}>
-                      {formatMoney(service.base_price)} · min{' '}
-                      {formatMoney(service.minimum_price)} · capacity{' '}
+                      {formatMoney(service.base_price)} · mín{' '}
+                      {formatMoney(service.minimum_price)} · cap.{' '}
                       {service.default_capacity}
                       {service.commission_bonus > 0 && (
-                        <> · bonus {formatMoney(service.commission_bonus)}</>
+                        <> · bono {formatMoney(service.commission_bonus)}</>
                       )}
                     </Typography>
                   </Box>
@@ -91,7 +91,7 @@ export default function CatalogDetailPage() {
                     onClick={() => setEditing(true)}
                     sx={{ flexShrink: 0 }}
                   >
-                    Edit
+                    Editar
                   </Button>
                 </Box>
               </CardContent>

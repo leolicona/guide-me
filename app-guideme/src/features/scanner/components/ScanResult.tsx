@@ -8,17 +8,17 @@ import type { ScanResult as ScanResultData, ScanReason, ScannedTicket } from '..
 // progress on a valid scan.
 
 const REASON_COPY: Record<ScanReason, string> = {
-  ALREADY_CONSUMED: 'All passes already used.',
-  EXPIRED: 'This ticket has expired.',
-  INVALID_SIGNATURE: 'Not a valid GuideMe ticket.',
-  CANCELLED: 'This folio was cancelled.',
-  NOT_PAID: "This folio isn't fully paid yet.",
-  NOT_FOUND: 'Ticket not found.',
+  ALREADY_CONSUMED: 'Todos los pases ya han sido utilizados.',
+  EXPIRED: 'Este boleto ha expirado.',
+  INVALID_SIGNATURE: 'No es un boleto válido de GuideMe.',
+  CANCELLED: 'Este folio fue cancelado.',
+  NOT_PAID: 'Este folio aún no está totalmente pagado.',
+  NOT_FOUND: 'Boleto no encontrado.',
 }
 
 const reasonCopy = (reason: ScanReason, t: ScannedTicket | null): string => {
   if (reason === 'ALREADY_CONSUMED' && t?.passes_total != null) {
-    return `All passes already used (${t.passes_total} of ${t.passes_total}).`
+    return `Todos los pases ya han sido utilizados (${t.passes_total} de ${t.passes_total}).`
   }
   return REASON_COPY[reason]
 }
@@ -46,7 +46,7 @@ export function ScanResult({ result }: ScanResultProps) {
           )}
 
           <Typography variant="h6">
-            {isValid ? 'Valid ticket' : 'Invalid ticket'}
+            {isValid ? 'Boleto válido' : 'Boleto inválido'}
           </Typography>
 
           {!isValid && result.reason && (
@@ -75,7 +75,7 @@ export function ScanResult({ result }: ScanResultProps) {
 
           {isValid && t?.pass_number != null && t?.passes_total != null && (
             <Typography variant="h5" sx={{ mt: 1 }}>
-              Pass {t.pass_number} of {t.passes_total} used
+              Pase {t.pass_number} de {t.passes_total} utilizado
             </Typography>
           )}
         </Stack>

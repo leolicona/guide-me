@@ -3,7 +3,7 @@ import { RegisterForm } from '../features/auth/components/RegisterForm';
 
 export default function RegisterPage() {
   return (
-    <AuthLayout title="Create an account">
+    <AuthLayout title="Crear cuenta">
       <RegisterForm />
     </AuthLayout>
   );

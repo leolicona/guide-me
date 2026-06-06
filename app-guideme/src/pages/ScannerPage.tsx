@@ -23,17 +23,17 @@ const cameraErrorCopy = (kind: ScannerErrorKind): string => {
   switch (kind) {
     case 'permission-denied':
     case 'security':
-      return 'Camera access denied. Enable it in your browser settings to scan tickets.'
+      return 'Acceso a la cámara denegado. Habilítalo en la configuración de tu navegador para escanear boletos.'
     case 'no-camera':
-      return 'No camera was found on this device.'
+      return 'No se encontró ninguna cámara en este dispositivo.'
     case 'in-use':
-      return 'The camera is being used by another app. Close it and try again.'
+      return 'La cámara está siendo utilizada por otra aplicación. Ciérrala e inténtalo de nuevo.'
     case 'insecure-context':
-      return 'The camera requires a secure (HTTPS) connection.'
+      return 'La cámara requiere una conexión segura (HTTPS).'
     case 'unsupported':
-      return "This browser doesn't support camera scanning."
+      return 'Este navegador no soporta el escaneo con cámara.'
     default:
-      return "Couldn't start the camera. Please try again."
+      return 'No se pudo iniciar la cámara. Por favor, inténtalo de nuevo.'
   }
 }
 
@@ -80,7 +80,7 @@ export default function ScannerPage() {
     <Stack direction="row" spacing={1} sx={{ alignItems: 'center', mb: 3 }}>
       <QrCodeScannerRounded color="primary" />
       <Typography variant="h4" component="h1">
-        Scan ticket
+        Escanear boleto
       </Typography>
     </Stack>
   )
@@ -92,8 +92,8 @@ export default function ScannerPage() {
         <Box sx={{ maxWidth: 480, mx: 'auto' }}>
           {header}
           <Alert severity="warning" icon={<WifiOffRounded />}>
-            Validation requires an internet connection. Reconnect to scan tickets — the
-            scanner verifies every code against the server in real time.
+            La validación requiere una conexión a internet. Reconéctate para escanear boletos — el
+            escáner verifica cada código contra el servidor en tiempo real.
           </Alert>
         </Box>
       </Fade>
@@ -112,12 +112,12 @@ export default function ScannerPage() {
         )}
         {networkError && (
           <Alert severity="warning" icon={<WifiOffRounded />} sx={{ mb: 2 }}>
-            Validation requires an internet connection. Reconnect and scan again.
+            La validación requiere una conexión a internet. Reconéctate y vuelve a escanear.
           </Alert>
         )}
         {scan.isError && !networkError && (
           <Alert severity="error" sx={{ mb: 2 }}>
-            Couldn't validate the ticket. Please try again.
+            No se pudo validar el boleto. Por favor, inténtalo de nuevo.
           </Alert>
         )}
 
@@ -156,7 +156,7 @@ export default function ScannerPage() {
             onClick={scanNext}
             sx={{ mt: 2 }}
           >
-            Scan next
+            Escanear siguiente
           </Button>
         )}
 
@@ -166,7 +166,7 @@ export default function ScannerPage() {
             color="text.secondary"
             sx={{ mt: 2, textAlign: 'center' }}
           >
-            Point the camera at the client's QR code.
+            Apunta la cámara al código QR del cliente.
           </Typography>
         )}
       </Box>

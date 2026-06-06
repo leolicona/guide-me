@@ -11,8 +11,7 @@ export default function DashboardPage() {
           Dashboard
         </Typography>
         <Typography color="text.secondary">
-          Welcome{user?.name ? `, ${user.name}` : ''}. This page will be expanded
-          in future iterations.
+          Bienvenido{user?.name ? `, ${user.name}` : ''}. Esta página se ampliará en futuras versiones.
         </Typography>
       </Box>
     </Fade>

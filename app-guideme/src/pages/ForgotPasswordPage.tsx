@@ -3,7 +3,7 @@ import { ForgotPasswordForm } from '../features/auth/components/ForgotPasswordFo
 
 export default function ForgotPasswordPage() {
   return (
-    <AuthLayout title="Reset your password">
+    <AuthLayout title="Recuperar contraseña">
       <ForgotPasswordForm />
     </AuthLayout>
   );

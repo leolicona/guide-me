@@ -53,10 +53,10 @@ export function ServiceRow({
               {service.name}
             </Typography>
             <Typography variant="body2" color="text.secondary">
-              {formatMoney(service.base_price)} · min {formatMoney(service.minimum_price)}
+              {formatMoney(service.base_price)} · mín {formatMoney(service.minimum_price)}
             </Typography>
             <Typography variant="body2" color="text.secondary">
-              Capacity {service.default_capacity}
+              Cap. {service.default_capacity}
               {extrasCount > 0 ? ` · ${extrasCount} extra${extrasCount > 1 ? 's' : ''}` : ''}
             </Typography>
           </Box>
@@ -70,17 +70,17 @@ export function ServiceRow({
               size="small"
               variant="outlined"
               color={inactive ? 'default' : 'success'}
-              label={inactive ? 'Inactive' : 'Active'}
+              label={inactive ? 'Inactivo' : 'Activo'}
             />
             <Button size="small" startIcon={<EditRounded />} onClick={() => onEdit(service)}>
-              Edit
+              Editar
             </Button>
             <Button
               size="small"
               startIcon={<TuneRounded />}
               onClick={() => onManageExtras(service)}
             >
-              Manage extras
+              Gestionar extras
             </Button>
             <Button
               size="small"
@@ -88,7 +88,7 @@ export function ServiceRow({
               to={`/catalog/${service.id}`}
               startIcon={<EventRepeatRounded />}
             >
-              Schedules
+              Horarios
             </Button>
             {inactive ? (
               <Button
@@ -97,7 +97,7 @@ export function ServiceRow({
                 startIcon={<CheckCircleRounded />}
                 onClick={() => onReactivate(service)}
               >
-                Reactivate
+                Reactivar
               </Button>
             ) : (
               <Button
@@ -106,7 +106,7 @@ export function ServiceRow({
                 startIcon={<BlockRounded />}
                 onClick={() => onDeactivate(service)}
               >
-                Deactivate
+                Desactivar
               </Button>
             )}
           </Stack>

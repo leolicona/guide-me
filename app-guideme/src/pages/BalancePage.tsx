@@ -36,6 +36,12 @@ const DROP_COLOR: Record<DropStatus, 'warning' | 'success' | 'error'> = {
   rejected: 'error',
 }
 
+const DROP_LABEL: Record<DropStatus, string> = {
+  pending: 'Pendiente',
+  confirmed: 'Confirmado',
+  rejected: 'Rechazado',
+}
+
 const formatDate = (unixSeconds: number) =>
   new Date(unixSeconds * 1000).toLocaleString(undefined, {
     month: 'short',
@@ -115,7 +121,7 @@ export default function BalancePage() {
     <Fade in timeout={400}>
       <Box sx={{ maxWidth: 680, mx: 'auto' }}>
         <Typography variant="h4" component="h1" sx={{ mb: 3 }}>
-          My balance
+          Mi saldo
         </Typography>
 
         {isLoading && (
@@ -124,7 +130,7 @@ export default function BalancePage() {
           </Box>
         )}
         {isError && (
-          <Alert severity="error">Couldn't load your balance. Please try again.</Alert>
+          <Alert severity="error">No se pudo cargar tu saldo. Inténtalo de nuevo.</Alert>
         )}
 
         {balance && (
@@ -133,7 +139,7 @@ export default function BalancePage() {
             <Card variant="outlined">
               <CardContent>
                 <Typography variant="overline" color="text.secondary">
-                  {negative ? 'The company owes you' : "Cash you're holding"}
+                  {negative ? 'La empresa te debe' : 'Efectivo que tienes'}
                 </Typography>
                 <Typography
                   variant="h3"
@@ -143,18 +149,18 @@ export default function BalancePage() {
                 </Typography>
                 {balance.pending_drops_total > 0 && (
                   <Typography variant="body2" color="warning.main" sx={{ mt: 0.5 }}>
-                    {formatMoney(balance.pending_drops_total)} handed in, awaiting confirmation
+                    {formatMoney(balance.pending_drops_total)} entregado, pendiente de confirmación
                   </Typography>
                 )}
 
                 <Divider sx={{ my: 2 }} />
                 <Stack spacing={1}>
-                  <BreakdownRow label="Cash collected" value={balance.cash_collected} sign="+" />
-                  <BreakdownRow label="Commission earned" value={balance.commission_total} sign="−" />
-                  <BreakdownRow label="Expenses" value={balance.expense_total} sign="−" />
-                  <BreakdownRow label="Handed in (confirmed)" value={balance.confirmed_drops_total} sign="−" />
+                  <BreakdownRow label="Efectivo cobrado" value={balance.cash_collected} sign="+" />
+                  <BreakdownRow label="Comisión ganada" value={balance.commission_total} sign="−" />
+                  <BreakdownRow label="Gastos" value={balance.expense_total} sign="−" />
+                  <BreakdownRow label="Entregado (confirmado)" value={balance.confirmed_drops_total} sign="−" />
                   {balance.payouts_total > 0 && (
-                    <BreakdownRow label="Payouts received" value={balance.payouts_total} sign="+" />
+                    <BreakdownRow label="Pagos recibidos" value={balance.payouts_total} sign="+" />
                   )}
                 </Stack>
               </CardContent>
@@ -167,26 +173,26 @@ export default function BalancePage() {
               disableElevation
               onClick={() => setDropOpen(true)}
             >
-              Hand in cash
+              Entregar efectivo
             </Button>
 
             {/* Expenses (US-AG13) */}
             <Card variant="outlined">
               <CardContent>
                 <Typography variant="h6" sx={{ mb: 2 }}>
-                  Expenses
+                  Gastos
                 </Typography>
 
                 <Stack direction="row" spacing={1} sx={{ mb: 2 }}>
                   <TextField
-                    label="Description"
+                    label="Descripción"
                     size="small"
                     fullWidth
                     value={description}
                     onChange={(e) => setDescription(e.target.value)}
                   />
                   <TextField
-                    label="Amount"
+                    label="Monto"
                     size="small"
                     type="number"
                     sx={{ width: 130 }}
@@ -195,7 +201,7 @@ export default function BalancePage() {
                   />
                   <IconButton
                     color="primary"
-                    aria-label="Add expense"
+                    aria-label="Agregar gasto"
                     onClick={handleAddExpense}
                     disabled={addExpense.isPending || !description.trim() || !expenseAmount}
                   >
@@ -205,13 +211,13 @@ export default function BalancePage() {
 
                 {addExpense.isError && (
                   <Alert severity="error" sx={{ mb: 2 }}>
-                    Couldn't add that expense. Check the amount and try again.
+                    No se pudo agregar ese gasto. Revisa el monto e inténtalo de nuevo.
                   </Alert>
                 )}
 
                 {balance.expenses.length === 0 ? (
                   <Typography color="text.secondary" variant="body2">
-                    No expenses logged.
+                    No hay gastos registrados.
                   </Typography>
                 ) : (
                   <Stack divider={<Divider flexItem />}>
@@ -233,7 +239,7 @@ export default function BalancePage() {
                           <Typography variant="body2">{formatMoney(ex.amount)}</Typography>
                           <IconButton
                             size="small"
-                            aria-label="Delete expense"
+                            aria-label="Eliminar gasto"
                             onClick={() => deleteExpense.mutate(ex.id)}
                             disabled={deleteExpense.isPending}
                           >
@@ -251,11 +257,11 @@ export default function BalancePage() {
             <Card variant="outlined">
               <CardContent>
                 <Typography variant="h6" sx={{ mb: 2 }}>
-                  Hand-ins
+                  Entregas
                 </Typography>
                 {balance.drops.length === 0 ? (
                   <Typography color="text.secondary" variant="body2">
-                    No cash handed in yet.
+                    Aún no hay entregas de efectivo.
                   </Typography>
                 ) : (
                   <Stack divider={<Divider flexItem />}>
@@ -273,12 +279,12 @@ export default function BalancePage() {
                           </Typography>
                           {drop.status === 'rejected' && drop.review_note && (
                             <Typography variant="caption" color="error" sx={{ display: 'block' }}>
-                              Rejected: {drop.review_note}
+                              Rechazado: {drop.review_note}
                             </Typography>
                           )}
                         </Box>
                         <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
-                          <Chip size="small" color={DROP_COLOR[drop.status]} label={drop.status} />
+                          <Chip size="small" color={DROP_COLOR[drop.status]} label={DROP_LABEL[drop.status]} />
                           {drop.status === 'pending' && (
                             <Button
                               size="small"
@@ -286,7 +292,7 @@ export default function BalancePage() {
                               onClick={() => cancelDrop.mutate(drop.id)}
                               disabled={cancelDrop.isPending}
                             >
-                              Cancel
+                              Cancelar
                             </Button>
                           )}
                         </Stack>
@@ -301,15 +307,14 @@ export default function BalancePage() {
 
         {/* Hand-in dialog */}
         <Dialog open={dropOpen} onClose={() => setDropOpen(false)} fullWidth maxWidth="xs">
-          <DialogTitle>Hand in cash</DialogTitle>
+          <DialogTitle>Entregar efectivo</DialogTitle>
           <DialogContent>
             <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-              Register the cash you're handing to the admin. It stays pending until they
-              confirm receipt — only then does it reduce your balance.
+              Registra el efectivo que vas a entregar al administrador. Permanecerá pendiente hasta que confirmen de recibido — solo entonces se descontará de tu saldo.
             </Typography>
             <Stack spacing={2}>
               <TextField
-                label="Amount"
+                label="Monto"
                 type="number"
                 fullWidth
                 autoFocus
@@ -317,7 +322,7 @@ export default function BalancePage() {
                 onChange={(e) => setDropAmount(e.target.value)}
               />
               <TextField
-                label="Note (optional)"
+                label="Nota (opcional)"
                 fullWidth
                 multiline
                 minRows={2}
@@ -327,19 +332,19 @@ export default function BalancePage() {
             </Stack>
             {createDrop.isError && (
               <Alert severity="error" sx={{ mt: 2 }}>
-                Couldn't register that hand-in. Please try again.
+                No se pudo registrar la entrega. Inténtalo de nuevo.
               </Alert>
             )}
           </DialogContent>
           <DialogActions>
-            <Button onClick={() => setDropOpen(false)}>Cancel</Button>
+            <Button onClick={() => setDropOpen(false)}>Cancelar</Button>
             <Button
               variant="contained"
               disableElevation
               onClick={handleCreateDrop}
               disabled={createDrop.isPending || !dropAmount}
             >
-              {createDrop.isPending ? 'Submitting…' : 'Hand in'}
+              {createDrop.isPending ? 'Enviando…' : 'Entregar'}
             </Button>
           </DialogActions>
         </Dialog>

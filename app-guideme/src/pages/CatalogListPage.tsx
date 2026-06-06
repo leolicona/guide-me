@@ -29,7 +29,7 @@ export default function CatalogListPage() {
           }}
         >
           <Typography variant="h4" component="h1">
-            Catalog
+            Catálogo
           </Typography>
           <Button
             variant="contained"
@@ -37,7 +37,7 @@ export default function CatalogListPage() {
             startIcon={<AddRounded />}
             onClick={() => setCreating(true)}
           >
-            New service
+            Nuevo servicio
           </Button>
         </Box>
 
@@ -48,13 +48,13 @@ export default function CatalogListPage() {
         )}
 
         {isError && (
-          <Alert severity="error">Couldn't load services. Please try again.</Alert>
+          <Alert severity="error">No se pudieron cargar los servicios. Inténtalo de nuevo.</Alert>
         )}
 
         {services &&
           (services.length === 0 ? (
             <Typography color="text.secondary">
-              No services yet — create your first tour.
+              Aún no hay servicios — crea tu primer tour.
             </Typography>
           ) : (
             <ServiceList services={services} />

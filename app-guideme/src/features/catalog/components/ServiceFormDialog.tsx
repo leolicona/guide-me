@@ -88,12 +88,12 @@ export function ServiceFormDialog({
         if (error.status === 404) {
           setError('name', {
             type: 'manual',
-            message: 'This service no longer exists.',
+            message: 'Este servicio ya no existe.',
           })
         } else if (error.status === 400) {
           setError('minimum_price', {
             type: 'manual',
-            message: 'Please check the values and try again.',
+            message: 'Revisa los valores e inténtalo de nuevo.',
           })
         }
       }
@@ -113,12 +113,12 @@ export function ServiceFormDialog({
 
   return (
     <Dialog open={open} onClose={onClose} fullWidth maxWidth="sm">
-      <DialogTitle>{isEdit ? 'Edit service' : 'New service'}</DialogTitle>
+      <DialogTitle>{isEdit ? 'Editar servicio' : 'Nuevo servicio'}</DialogTitle>
       <form onSubmit={handleSubmit(onSubmit)} noValidate>
         <DialogContent>
           <Stack spacing={2} sx={{ mt: 0.5 }}>
             <TextField
-              label="Name"
+              label="Nombre"
               fullWidth
               disabled={isLoading}
               error={!!errors.name}
@@ -126,7 +126,7 @@ export function ServiceFormDialog({
               {...register('name')}
             />
             <TextField
-              label="Description"
+              label="Descripción"
               fullWidth
               multiline
               minRows={2}
@@ -137,7 +137,7 @@ export function ServiceFormDialog({
             />
             <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
               <TextField
-                label="Base price"
+                label="Precio base"
                 type="number"
                 fullWidth
                 disabled={isLoading}
@@ -154,13 +154,13 @@ export function ServiceFormDialog({
                 {...register('base_price', { valueAsNumber: true })}
               />
               <TextField
-                label="Minimum price"
+                label="Precio mínimo"
                 type="number"
                 fullWidth
                 disabled={isLoading}
                 error={!!errors.minimum_price}
                 helperText={
-                  errors.minimum_price?.message ?? 'Must be ≤ base price'
+                  errors.minimum_price?.message ?? 'Debe ser ≤ al precio base'
                 }
                 slotProps={{
                   input: {
@@ -175,7 +175,7 @@ export function ServiceFormDialog({
             </Stack>
             <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
               <TextField
-                label="Default capacity"
+                label="Capacidad por defecto"
                 type="number"
                 fullWidth
                 disabled={isLoading}
@@ -185,13 +185,13 @@ export function ServiceFormDialog({
                 {...register('default_capacity', { valueAsNumber: true })}
               />
               <TextField
-                label="Commission bonus"
+                label="Bono de comisión"
                 type="number"
                 fullWidth
                 disabled={isLoading}
                 error={!!errors.commission_bonus}
                 helperText={
-                  errors.commission_bonus?.message ?? "Added to the agent's % per pass sold"
+                  errors.commission_bonus?.message ?? 'Se suma al % del agente por pase vendido'
                 }
                 slotProps={{
                   input: {
@@ -208,7 +208,7 @@ export function ServiceFormDialog({
         </DialogContent>
         <DialogActions>
           <Button onClick={onClose} disabled={isLoading}>
-            Cancel
+            Cancelar
           </Button>
           <Button
             type="submit"
@@ -216,7 +216,7 @@ export function ServiceFormDialog({
             disableElevation
             disabled={isLoading}
           >
-            {isLoading ? <CircularProgress size={22} color="inherit" /> : 'Save'}
+            {isLoading ? <CircularProgress size={22} color="inherit" /> : 'Guardar'}
           </Button>
         </DialogActions>
       </form>

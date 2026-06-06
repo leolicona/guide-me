@@ -35,11 +35,11 @@ interface NavItem {
 // Single source of truth so the rail and the bottom bar never drift.
 const NAV_ITEMS: NavItem[] = [
   { label: 'Dashboard', to: ROUTES.DASHBOARD, icon: DashboardRounded },
-  { label: 'Sell', to: ROUTES.POS, icon: PointOfSaleRounded, role: 'agent' },
-  { label: 'Scan', to: ROUTES.SCAN, icon: QrCodeScannerRounded, role: 'agent' },
+  { label: 'POS', to: ROUTES.POS, icon: PointOfSaleRounded, role: 'agent' },
+  { label: 'Scanner', to: ROUTES.SCAN, icon: QrCodeScannerRounded, role: 'agent' },
   { label: 'Balance', to: ROUTES.BALANCE, icon: AccountBalanceWalletRounded, role: 'agent' },
-  { label: 'Agents', to: ROUTES.AGENTS, icon: GroupsRounded, role: 'admin' },
-  { label: 'Catalog', to: ROUTES.CATALOG, icon: MapRounded, role: 'admin' },
+  { label: 'Agentes', to: ROUTES.AGENTS, icon: GroupsRounded, role: 'admin' },
+  { label: 'Catálogo', to: ROUTES.CATALOG, icon: MapRounded, role: 'admin' },
   { label: 'Folios', to: ROUTES.FOLIOS, icon: ReceiptRounded, role: 'admin' },
   { label: 'Cash', to: ROUTES.CASH, icon: PaymentsRounded, role: 'admin' },
 ]
@@ -111,7 +111,7 @@ export function AppLayout() {
             onClick={logout}
             disabled={isPending}
           >
-            Log out
+            Cerrar sesión
           </Button>
         </Toolbar>
       </AppBar>

@@ -31,8 +31,8 @@ export function ForgotPasswordForm() {
     return (
       <SuccessScreen
         icon={<Email sx={{ fontSize: 64 }} />}
-        title="Check your email"
-        description="If the email is registered, you will receive instructions to reset your password."
+        title="Revisa tu email"
+        description="Si el email está registrado, recibirás instrucciones para recuperar tu contraseña."
       />
     );
   }
@@ -64,12 +64,12 @@ export function ForgotPasswordForm() {
         disabled={forgotPasswordMutation.isPending}
         sx={{ mt: 3, mb: 3 }}
       >
-        {forgotPasswordMutation.isPending ? <CircularProgress size={24} color="inherit" /> : 'Send Reset Link'}
+        {forgotPasswordMutation.isPending ? <CircularProgress size={24} color="inherit" /> : 'Enviar enlace de recuperación'}
       </Button>
 
       <Box sx={{ textAlign: 'center' }}>
         <Link component={RouterLink} to={ROUTES.LOGIN} variant="body2" underline="hover">
-          Back to login
+          Volver al inicio de sesión
         </Link>
       </Box>
     </Box>

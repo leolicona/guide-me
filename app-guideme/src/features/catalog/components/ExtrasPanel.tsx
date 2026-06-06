@@ -56,7 +56,7 @@ function ExtraForm({
       sx={{ display: 'flex', flexDirection: { xs: 'column', sm: 'row' }, gap: 1.5, alignItems: 'flex-start' }}
     >
       <TextField
-        label="Name"
+        label="Nombre"
         size="small"
         fullWidth
         disabled={isLoading}
@@ -65,7 +65,7 @@ function ExtraForm({
         {...register('name')}
       />
       <TextField
-        label="Price"
+        label="Precio"
         type="number"
         size="small"
         disabled={isLoading}
@@ -85,7 +85,7 @@ function ExtraForm({
         </Button>
         {onCancel && (
           <Button size="small" onClick={onCancel} disabled={isLoading}>
-            Cancel
+            Cancelar
           </Button>
         )}
       </Stack>
@@ -115,7 +115,7 @@ export function ExtrasPanel({ serviceId }: ExtrasPanelProps) {
   }
 
   if (isError || !service) {
-    return <Alert severity="error">Couldn't load extras. Please try again.</Alert>
+    return <Alert severity="error">No se pudieron cargar los extras. Inténtalo de nuevo.</Alert>
   }
 
   const extras = service.extras ?? []
@@ -128,7 +128,7 @@ export function ExtrasPanel({ serviceId }: ExtrasPanelProps) {
         <ExtraForm
           key={extra.id}
           defaultValues={{ name: extra.name, price: centsToAmount(extra.price) }}
-          submitLabel="Save"
+          submitLabel="Guardar"
           isLoading={updateMutation.isPending}
           onCancel={() => setEditingId(null)}
           onSubmit={(data) =>
@@ -159,7 +159,7 @@ export function ExtrasPanel({ serviceId }: ExtrasPanelProps) {
           <Typography sx={{ fontWeight: 500 }} noWrap>
             {extra.name}
             {inactive && (
-              <Chip size="small" variant="outlined" label="Removed" sx={{ ml: 1 }} />
+              <Chip size="small" variant="outlined" label="Eliminado" sx={{ ml: 1 }} />
             )}
           </Typography>
           <Typography variant="body2" color="text.secondary">
@@ -170,7 +170,7 @@ export function ExtrasPanel({ serviceId }: ExtrasPanelProps) {
           <Stack direction="row" spacing={0.5} sx={{ flexShrink: 0 }}>
             <IconButton
               size="small"
-              aria-label={`Edit ${extra.name}`}
+              aria-label={`Editar ${extra.name}`}
               onClick={() => setEditingId(extra.id)}
             >
               <EditRounded fontSize="small" />
@@ -178,7 +178,7 @@ export function ExtrasPanel({ serviceId }: ExtrasPanelProps) {
             <IconButton
               size="small"
               color="error"
-              aria-label={`Remove ${extra.name}`}
+              aria-label={`Eliminar ${extra.name}`}
               disabled={removeMutation.isPending}
               onClick={() => removeMutation.mutate(extra.id)}
             >
@@ -194,7 +194,7 @@ export function ExtrasPanel({ serviceId }: ExtrasPanelProps) {
     <Stack spacing={2} divider={<Divider flexItem />}>
       {extras.length === 0 ? (
         <Typography color="text.secondary" variant="body2">
-          No extras yet.
+          Aún no hay extras.
         </Typography>
       ) : (
         <Stack spacing={1.5} divider={<Divider flexItem />}>
@@ -204,12 +204,12 @@ export function ExtrasPanel({ serviceId }: ExtrasPanelProps) {
 
       <Box>
         <Typography variant="overline" color="text.secondary">
-          Add extra
+          Agregar extra
         </Typography>
         <ExtraForm
           key={addResetKey}
           defaultValues={{ name: '', price: 0 }}
-          submitLabel="Add"
+          submitLabel="Agregar"
           isLoading={addMutation.isPending}
           onSubmit={(data) =>
             addMutation.mutate(

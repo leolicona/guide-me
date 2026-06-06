@@ -132,6 +132,14 @@ GuideMe is a multi-tenant, mobile-optimized SaaS platform that centralizes the s
 
 ---
 
+### Platform & Localization
+
+- **US-L01** — As a user (admin or agent), I want the app to display in Spanish (MX) by default, since it is the primary market language.
+- **US-L02** — As a user (admin or agent), I want to switch the app language between Spanish (MX) and English so I can use the interface in my preferred language.
+- **US-L03** — As a user (admin or agent), I want my language preference to be persisted in the browser so the app loads in my chosen language on every visit without needing to change it again.
+
+---
+
 ### Client
 
 > In this phase, the client does not interact directly with the app. Their experience is 100% via Email.
@@ -179,6 +187,7 @@ GuideMe is a multi-tenant, mobile-optimized SaaS platform that centralizes the s
 
 #### 🟡 SHOULD HAVE
 *Important features that add great value, but the system could operate manually without them in the very first days.*
+- [ ] **Bilingual UI — Spanish (MX) / English with language switcher** *(US-L01, US-L02, US-L03)* — `docs/i18n/i18n.spec.md`
 - [ ] **Bookings/down-payments (partial payment with spot reservation)** *(US-AG07)*
 - [ ] **Sending receipt and QR code to client via Email (Resend)** *(US-AG09, US-C01, US-C03)*
 - [ ] **Occupancy visual dashboard (admin)** *(US-A14, US-A15, US-A16)*

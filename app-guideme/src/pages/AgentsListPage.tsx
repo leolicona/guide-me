@@ -28,7 +28,7 @@ export default function AgentsListPage() {
           }}
         >
           <Typography variant="h4" component="h1">
-            Agents
+            Agentes
           </Typography>
           <Button
             component={RouterLink}
@@ -37,7 +37,7 @@ export default function AgentsListPage() {
             disableElevation
             startIcon={<PersonAddRounded />}
           >
-            Invite agent
+            Invitar agente
           </Button>
         </Box>
 
@@ -49,14 +49,14 @@ export default function AgentsListPage() {
 
         {isError && (
           <Alert severity="error">
-            Couldn't load agents. Please try again.
+            No se pudieron cargar los agentes. Inténtalo de nuevo.
           </Alert>
         )}
 
         {agents &&
           (agents.length === 0 ? (
             <Typography color="text.secondary">
-              No agents yet — invite your first agent.
+              Aún no hay agentes — invita a tu primer agente.
             </Typography>
           ) : (
             <AgentList agents={agents} />

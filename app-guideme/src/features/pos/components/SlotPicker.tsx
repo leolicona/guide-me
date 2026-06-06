@@ -10,7 +10,7 @@ interface SlotPickerProps {
 }
 
 const formatDateHeading = (date: string): string =>
-  new Date(`${date}T00:00:00`).toLocaleDateString(undefined, {
+  new Date(`${date}T00:00:00`).toLocaleDateString('es-MX', {
     weekday: 'short',
     day: 'numeric',
     month: 'short',
@@ -22,7 +22,7 @@ export function SlotPicker({ slots, selectedId, onSelect }: SlotPickerProps) {
   if (slots.length === 0) {
     return (
       <Typography color="text.secondary">
-        No upcoming times available for this service.
+        No hay horarios próximos disponibles para este servicio.
       </Typography>
     )
   }
@@ -75,7 +75,7 @@ export function SlotPicker({ slots, selectedId, onSelect }: SlotPickerProps) {
                       {slot.start_time}
                     </Typography>
                     <Typography variant="caption" color="text.secondary">
-                      {full ? 'Full' : `${slot.remaining} / ${slot.capacity} left`}
+                      {full ? 'Agotado' : `${slot.remaining} / ${slot.capacity} disponibles`}
                     </Typography>
                   </ButtonBase>
                 )

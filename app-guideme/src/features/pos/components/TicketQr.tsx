@@ -40,12 +40,12 @@ export function TicketQr({ line }: TicketQrProps) {
               <Chip
                 size="small"
                 variant="outlined"
-                label={`${passes} ${passes === 1 ? 'pass' : 'passes'}`}
+                label={`${passes} ${passes === 1 ? 'pase' : 'pases'}`}
               />
             </>
           ) : (
             <Typography variant="body2" color="text.secondary">
-              No ticket available for this line.
+              No hay boleto disponible para esta línea.
             </Typography>
           )}
         </Stack>

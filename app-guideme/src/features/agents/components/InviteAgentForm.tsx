@@ -32,12 +32,12 @@ export function InviteAgentForm() {
       onError: (error) => {
         if (error instanceof ServiceError) {
           if (error.status === 409) {
-            setError('identity', { type: 'manual', message: 'This email is already registered' });
+            setError('identity', { type: 'manual', message: 'Este correo electrónico ya está registrado' });
           } else if (error.status === 403) {
             setForbidden(true);
             queryClient.invalidateQueries({ queryKey: ['me'] });
           } else if (error.status === 400) {
-            setError('identity', { type: 'manual', message: 'Invalid email provided' });
+            setError('identity', { type: 'manual', message: 'Correo electrónico inválido' });
           }
         }
       },
@@ -48,10 +48,10 @@ export function InviteAgentForm() {
     return (
       <SuccessScreen
         icon={<Email sx={{ fontSize: 64 }} />}
-        title="Invitation sent"
-        description="The agent will receive an email with instructions."
+        title="Invitación enviada"
+        description="El agente recibirá un correo electrónico con instrucciones."
         action={{
-          label: 'Send another',
+          label: 'Enviar otra',
           onClick: () => {
             reset();
             setIsSuccess(false);
@@ -67,7 +67,7 @@ export function InviteAgentForm() {
     <Box component="form" onSubmit={handleSubmit(onSubmit)} noValidate>
       {forbidden && (
         <Alert severity="error" sx={{ mb: 1 }}>
-          You don't have permission to perform this action.
+          No tienes permiso para realizar esta acción.
         </Alert>
       )}
 
@@ -78,7 +78,7 @@ export function InviteAgentForm() {
           <TextField
             {...field}
             fullWidth
-            label="Agent email"
+            label="Correo electrónico del agente"
             type="email"
             margin="normal"
             disabled={isLoading}
@@ -96,12 +96,12 @@ export function InviteAgentForm() {
         disabled={isLoading}
         sx={{ mt: 3, mb: 3 }}
       >
-        {isLoading ? <CircularProgress size={24} color="inherit" /> : 'Send invitation'}
+        {isLoading ? <CircularProgress size={24} color="inherit" /> : 'Enviar invitación'}
       </Button>
 
       <Box sx={{ textAlign: 'center' }}>
         <Link component={RouterLink} to={ROUTES.DASHBOARD} variant="body2" underline="hover">
-          Back to dashboard
+          Volver al dashboard
         </Link>
       </Box>
     </Box>

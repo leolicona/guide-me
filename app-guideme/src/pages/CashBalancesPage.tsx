@@ -39,6 +39,12 @@ const DROP_COLOR: Record<DropStatus, 'warning' | 'success' | 'error'> = {
   rejected: 'error',
 }
 
+const DROP_LABEL: Record<DropStatus, string> = {
+  pending: 'Pendiente',
+  confirmed: 'Confirmado',
+  rejected: 'Rechazado',
+}
+
 const formatDate = (unixSeconds: number) =>
   new Date(unixSeconds * 1000).toLocaleString(undefined, {
     month: 'short',
@@ -81,10 +87,10 @@ function BalancesTab() {
     )
   }
   if (isError) {
-    return <Alert severity="error">Couldn't load balances. Please try again.</Alert>
+    return <Alert severity="error">No se pudieron cargar los saldos. Inténtalo de nuevo.</Alert>
   }
   if (!balances || balances.length === 0) {
-    return <Typography color="text.secondary">No agents to show.</Typography>
+    return <Typography color="text.secondary">No hay agentes para mostrar.</Typography>
   }
 
   return (
@@ -101,13 +107,13 @@ function BalancesTab() {
                       {row.agent.name}
                     </Typography>
                     <Typography variant="caption" color="text.secondary">
-                      {negative ? 'Company owes agent' : 'Holding company cash'}
+                      {negative ? 'La empresa debe al agente' : 'Tiene efectivo de la empresa'}
                     </Typography>
                   </Box>
                   <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center' }}>
                     {row.pending_drops_count > 0 && (
                       <Badge badgeContent={row.pending_drops_count} color="warning">
-                        <Chip size="small" variant="outlined" label="pending" />
+                        <Chip size="small" variant="outlined" label="pendiente" />
                       </Badge>
                     )}
                     <Typography
@@ -121,16 +127,16 @@ function BalancesTab() {
 
                 <Divider sx={{ my: 1.5 }} />
                 <Stack direction="row" spacing={3} sx={{ flexWrap: 'wrap' }}>
-                  <Metric label="Collected" value={row.cash_collected} />
-                  <Metric label="Commission" value={row.commission_total} />
-                  <Metric label="Expenses" value={row.expense_total} />
-                  <Metric label="Handed in" value={row.confirmed_drops_total} />
-                  {row.payouts_total > 0 && <Metric label="Paid out" value={row.payouts_total} />}
+                  <Metric label="Cobrado" value={row.cash_collected} />
+                  <Metric label="Comisión" value={row.commission_total} />
+                  <Metric label="Gastos" value={row.expense_total} />
+                  <Metric label="Entregado" value={row.confirmed_drops_total} />
+                  {row.payouts_total > 0 && <Metric label="Pagado" value={row.payouts_total} />}
                 </Stack>
 
                 {negative && (
                   <Button size="small" sx={{ mt: 1.5 }} onClick={() => openPayout(row)}>
-                    Record payout
+                    Registrar pago
                   </Button>
                 )}
               </CardContent>
@@ -140,15 +146,14 @@ function BalancesTab() {
       </Stack>
 
       <Dialog open={!!target} onClose={() => setTarget(null)} fullWidth maxWidth="xs">
-        <DialogTitle>Record payout</DialogTitle>
+        <DialogTitle>Registrar pago</DialogTitle>
         <DialogContent>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-            Pay {target?.agent.name} what the company owes them. This raises their balance
-            toward zero.
+            Págale a {target?.agent.name} lo que la empresa le debe. Esto aumentará su saldo hacia cero.
           </Typography>
           <Stack spacing={2}>
             <TextField
-              label="Amount"
+              label="Monto"
               type="number"
               fullWidth
               autoFocus
@@ -156,7 +161,7 @@ function BalancesTab() {
               onChange={(e) => setAmount(e.target.value)}
             />
             <TextField
-              label="Note (optional)"
+              label="Nota (opcional)"
               fullWidth
               multiline
               minRows={2}
@@ -166,19 +171,19 @@ function BalancesTab() {
           </Stack>
           {payout.isError && (
             <Alert severity="error" sx={{ mt: 2 }}>
-              Couldn't record that payout. Please try again.
+              No se pudo registrar ese pago. Inténtalo de nuevo.
             </Alert>
           )}
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setTarget(null)}>Cancel</Button>
+          <Button onClick={() => setTarget(null)}>Cancelar</Button>
           <Button
             variant="contained"
             disableElevation
             onClick={submitPayout}
             disabled={payout.isPending || !amount}
           >
-            {payout.isPending ? 'Recording…' : 'Record payout'}
+            {payout.isPending ? 'Registrando…' : 'Registrar pago'}
           </Button>
         </DialogActions>
       </Dialog>
@@ -211,10 +216,10 @@ function DropsTab() {
         onChange={(_, v) => v && setFilter(v)}
         sx={{ mb: 3 }}
       >
-        <ToggleButton value="pending">Pending</ToggleButton>
-        <ToggleButton value="confirmed">Confirmed</ToggleButton>
-        <ToggleButton value="rejected">Rejected</ToggleButton>
-        <ToggleButton value="all">All</ToggleButton>
+        <ToggleButton value="pending">Pendientes</ToggleButton>
+        <ToggleButton value="confirmed">Confirmadas</ToggleButton>
+        <ToggleButton value="rejected">Rechazadas</ToggleButton>
+        <ToggleButton value="all">Todas</ToggleButton>
       </ToggleButtonGroup>
 
       {isLoading && (
@@ -222,10 +227,10 @@ function DropsTab() {
           <CircularProgress />
         </Box>
       )}
-      {isError && <Alert severity="error">Couldn't load drops. Please try again.</Alert>}
+      {isError && <Alert severity="error">No se pudieron cargar las entregas. Inténtalo de nuevo.</Alert>}
 
       {drops && drops.length === 0 && (
-        <Typography color="text.secondary">No drops to show.</Typography>
+        <Typography color="text.secondary">No hay entregas para mostrar.</Typography>
       )}
 
       {drops && drops.length > 0 && (
@@ -244,7 +249,7 @@ function DropsTab() {
                         {drop.agent?.name} · {formatDate(drop.created_at)}
                       </Typography>
                     </Box>
-                    <Chip size="small" color={DROP_COLOR[drop.status]} label={drop.status} />
+                    <Chip size="small" color={DROP_COLOR[drop.status]} label={DROP_LABEL[drop.status]} />
                   </Stack>
                   {drop.note && (
                     <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
@@ -272,8 +277,8 @@ export default function CashBalancesPage() {
         </Typography>
 
         <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ mb: 3 }}>
-          <Tab label="Balances" />
-          <Tab label="Drops" />
+          <Tab label="Saldos" />
+          <Tab label="Entregas" />
         </Tabs>
 
         {tab === 0 ? <BalancesTab /> : <DropsTab />}

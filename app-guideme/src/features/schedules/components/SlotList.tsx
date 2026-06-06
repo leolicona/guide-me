@@ -14,7 +14,7 @@ interface SlotListProps {
 // Format a 'YYYY-MM-DD' string as a readable local date header.
 const formatDateHeading = (date: string): string => {
   const d = new Date(`${date}T00:00:00`)
-  return d.toLocaleDateString(undefined, {
+  return d.toLocaleDateString('es-MX', {
     weekday: 'short',
     day: 'numeric',
     month: 'short',

@@ -32,7 +32,7 @@ export default function FolioReceiptPage() {
         )}
 
         {isError && (
-          <Alert severity="error">Couldn't load this folio. Please try again.</Alert>
+          <Alert severity="error">No se pudo cargar este folio. Inténtalo de nuevo.</Alert>
         )}
 
         {folio && (
@@ -40,7 +40,7 @@ export default function FolioReceiptPage() {
             <Box sx={{ textAlign: 'center' }}>
               <CheckCircleRounded color="success" sx={{ fontSize: 48 }} />
               <Typography variant="h5" component="h1" sx={{ mt: 1 }}>
-                Sale confirmed
+                Venta confirmada
               </Typography>
               <Typography variant="caption" color="text.secondary">
                 Folio {folio.id}
@@ -53,8 +53,8 @@ export default function FolioReceiptPage() {
                   direction="row"
                   sx={{ justifyContent: 'space-between', alignItems: 'center', mb: 2 }}
                 >
-                  <Typography variant="h6">Receipt</Typography>
-                  <Chip size="small" color="success" variant="outlined" label="Paid" />
+                  <Typography variant="h6">Recibo</Typography>
+                  <Chip size="small" color="success" variant="outlined" label="Pagado" />
                 </Stack>
 
                 {(folio.customer_name || folio.customer_email) && (
@@ -105,7 +105,7 @@ export default function FolioReceiptPage() {
                   </Stack>
                   {folio.discount_total > 0 && (
                     <Stack direction="row" sx={{ justifyContent: 'space-between' }}>
-                      <Typography color="text.secondary">Discount</Typography>
+                      <Typography color="text.secondary">Descuento</Typography>
                       <Typography>−{formatMoney(folio.discount_total)}</Typography>
                     </Stack>
                   )}
@@ -114,7 +114,7 @@ export default function FolioReceiptPage() {
                     <Typography variant="h6">{formatMoney(folio.total)}</Typography>
                   </Stack>
                   <Stack direction="row" sx={{ justifyContent: 'space-between' }}>
-                    <Typography color="text.secondary">Paid</Typography>
+                    <Typography color="text.secondary">Pagado</Typography>
                     <Typography>{formatMoney(folio.amount_paid)}</Typography>
                   </Stack>
                 </Stack>
@@ -123,11 +123,11 @@ export default function FolioReceiptPage() {
 
             <Box>
               <Typography variant="h6" sx={{ mb: 1.5 }}>
-                Access tickets
+                Boletos de acceso
               </Typography>
               <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                One QR per service. The client presents it at the door; an agent scans it
-                to redeem a pass.
+                Un QR por servicio. El cliente lo presenta a la entrada; un agente lo escanea
+                para canjear un pase.
               </Typography>
               <Stack spacing={2}>
                 {folio.lines.map((line) => (
@@ -137,7 +137,7 @@ export default function FolioReceiptPage() {
             </Box>
 
             <Alert severity="info" variant="outlined">
-              Emailing the receipt and tickets to the client is delivered in a later step.
+              El envío del recibo y boletos por email al cliente se realiza en una etapa posterior.
             </Alert>
 
             <Button
@@ -146,7 +146,7 @@ export default function FolioReceiptPage() {
               component={RouterLink}
               to={ROUTES.POS}
             >
-              New sale
+              Nueva venta
             </Button>
           </Stack>
         )}

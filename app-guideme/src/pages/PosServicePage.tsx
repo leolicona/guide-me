@@ -100,7 +100,7 @@ export default function PosServicePage() {
           }}
         >
           <Button component={RouterLink} to={ROUTES.POS} startIcon={<ArrowBackRounded />}>
-            Services
+            Servicios
           </Button>
           <Badge badgeContent={count} color="secondary">
             <Button
@@ -122,7 +122,7 @@ export default function PosServicePage() {
         )}
 
         {isError && (
-          <Alert severity="error">Couldn't load this service. Please try again.</Alert>
+          <Alert severity="error">No se pudo cargar este servicio. Por favor, inténtalo de nuevo.</Alert>
         )}
 
         {service && (
@@ -137,7 +137,7 @@ export default function PosServicePage() {
                 </Typography>
               )}
               <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-                {formatMoney(service.base_price)} · min{' '}
+                {formatMoney(service.base_price)} · mín{' '}
                 {formatMoney(service.minimum_price)}
               </Typography>
             </Box>
@@ -145,7 +145,7 @@ export default function PosServicePage() {
             <Card>
               <CardContent>
                 <Typography variant="h6" sx={{ mb: 2 }}>
-                  Choose a time
+                  Elige un horario
                 </Typography>
                 <SlotPicker
                   slots={service.slots}
@@ -161,12 +161,12 @@ export default function PosServicePage() {
                   <Stack spacing={3}>
                     <Box>
                       <Typography variant="subtitle2" color="text.secondary" sx={{ mb: 1 }}>
-                        People
+                        Personas
                       </Typography>
                       <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
                         <IconButton
                           size="small"
-                          aria-label="Fewer people"
+                          aria-label="Menos personas"
                           onClick={() => setQuantity((q) => Math.max(1, q - 1))}
                           disabled={quantity <= 1}
                         >
@@ -177,7 +177,7 @@ export default function PosServicePage() {
                         </Typography>
                         <IconButton
                           size="small"
-                          aria-label="More people"
+                          aria-label="Más personas"
                           onClick={() =>
                             setQuantity((q) => Math.min(slot.remaining, q + 1))
                           }
@@ -186,14 +186,14 @@ export default function PosServicePage() {
                           <AddRounded />
                         </IconButton>
                         <Typography variant="caption" color="text.secondary" sx={{ ml: 1 }}>
-                          {slot.remaining} available
+                          {slot.remaining} disponibles
                         </Typography>
                       </Stack>
                     </Box>
 
                     <Box>
                       <Typography variant="subtitle2" color="text.secondary" sx={{ mb: 1 }}>
-                        Unit price
+                        Precio unitario
                       </Typography>
                       <TextField
                         type="number"
@@ -203,10 +203,10 @@ export default function PosServicePage() {
                         error={priceInput !== '' && priceInvalid}
                         helperText={
                           belowMin
-                            ? `Minimum ${formatMoney(service.minimum_price)}`
+                            ? `Mínimo ${formatMoney(service.minimum_price)}`
                             : aboveBase
-                              ? `Maximum ${formatMoney(service.base_price)}`
-                              : `Min ${formatMoney(service.minimum_price)} · base ${formatMoney(service.base_price)}`
+                              ? `Máximo ${formatMoney(service.base_price)}`
+                              : `Mín ${formatMoney(service.minimum_price)} · base ${formatMoney(service.base_price)}`
                         }
                         slotProps={{
                           htmlInput: {
@@ -242,7 +242,7 @@ export default function PosServicePage() {
                                 <Stack direction="row" spacing={0.5} sx={{ alignItems: 'center' }}>
                                   <IconButton
                                     size="small"
-                                    aria-label={`Fewer ${extra.name}`}
+                                    aria-label={`Menos ${extra.name}`}
                                     onClick={() =>
                                       setExtraQtys((m) => ({
                                         ...m,
@@ -258,7 +258,7 @@ export default function PosServicePage() {
                                   </Typography>
                                   <IconButton
                                     size="small"
-                                    aria-label={`More ${extra.name}`}
+                                    aria-label={`Más ${extra.name}`}
                                     onClick={() =>
                                       setExtraQtys((m) => ({
                                         ...m,
@@ -282,7 +282,7 @@ export default function PosServicePage() {
                       onClick={handleAdd}
                       disabled={priceInvalid}
                     >
-                      Add to cart
+                      Agregar al carrito
                     </Button>
                   </Stack>
                 </CardContent>
@@ -307,11 +307,11 @@ export default function PosServicePage() {
                 size="small"
                 onClick={() => navigate(ROUTES.POS_CHECKOUT)}
               >
-                View cart
+                Ver carrito
               </Button>
             }
           >
-            Added to cart
+            Agregado al carrito
           </Alert>
         </Snackbar>
       </Box>

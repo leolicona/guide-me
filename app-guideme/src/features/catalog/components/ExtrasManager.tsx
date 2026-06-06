@@ -21,7 +21,7 @@ export function ExtrasManager({ service, open, onClose }: ExtrasManagerProps) {
       <DialogTitle>Extras — {service?.name ?? ''}</DialogTitle>
       <DialogContent>{service && <ExtrasPanel serviceId={service.id} />}</DialogContent>
       <DialogActions>
-        <Button onClick={onClose}>Done</Button>
+        <Button onClick={onClose}>Listo</Button>
       </DialogActions>
     </Dialog>
   )

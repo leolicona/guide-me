@@ -79,7 +79,7 @@ export function ScheduleFormDialog({
         if (error instanceof ServiceError && error.status === 400) {
           setError('end_date', {
             type: 'manual',
-            message: 'Please check the dates (window may not exceed one year).',
+            message: 'Revisa las fechas (el periodo no puede exceder un año).',
           })
         }
       },
@@ -90,13 +90,13 @@ export function ScheduleFormDialog({
 
   return (
     <Dialog open={open} onClose={onClose} fullWidth maxWidth="sm">
-      <DialogTitle>New recurring schedule</DialogTitle>
+      <DialogTitle>Nuevo horario recurrente</DialogTitle>
       <form onSubmit={handleSubmit(onSubmit)} noValidate>
         <DialogContent>
           <Stack spacing={2.5} sx={{ mt: 0.5 }}>
             <div>
               <Typography variant="overline" color="text.secondary">
-                Repeat on
+                Repetir los
               </Typography>
               <Controller
                 control={control}
@@ -123,7 +123,7 @@ export function ScheduleFormDialog({
 
             <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
               <TextField
-                label="Start time"
+                label="Hora de inicio"
                 type="time"
                 fullWidth
                 disabled={isLoading}
@@ -133,7 +133,7 @@ export function ScheduleFormDialog({
                 {...register('start_time')}
               />
               <TextField
-                label="Capacity"
+                label="Capacidad"
                 type="number"
                 fullWidth
                 disabled={isLoading}
@@ -146,7 +146,7 @@ export function ScheduleFormDialog({
 
             <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
               <TextField
-                label="From"
+                label="Desde"
                 type="date"
                 fullWidth
                 disabled={isLoading}
@@ -156,7 +156,7 @@ export function ScheduleFormDialog({
                 {...register('start_date')}
               />
               <TextField
-                label="To"
+                label="Hasta"
                 type="date"
                 fullWidth
                 disabled={isLoading}
@@ -170,10 +170,10 @@ export function ScheduleFormDialog({
         </DialogContent>
         <DialogActions>
           <Button onClick={onClose} disabled={isLoading}>
-            Cancel
+            Cancelar
           </Button>
           <Button type="submit" variant="contained" disableElevation disabled={isLoading}>
-            {isLoading ? <CircularProgress size={22} color="inherit" /> : 'Generate slots'}
+            {isLoading ? <CircularProgress size={22} color="inherit" /> : 'Generar fechas'}
           </Button>
         </DialogActions>
       </form>

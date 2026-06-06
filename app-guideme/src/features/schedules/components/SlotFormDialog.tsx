@@ -70,18 +70,18 @@ export function SlotFormDialog({
         if (error.message.toLowerCase().includes('capacity')) {
           setError('capacity', {
             type: 'manual',
-            message: 'Capacity is below the already-booked spots.',
+            message: 'La capacidad es menor a los lugares ya reservados.',
           })
         } else {
           setError('start_time', {
             type: 'manual',
-            message: 'A slot already exists at that date and time.',
+            message: 'Ya existe una fecha en ese día y hora.',
           })
         }
       } else if (error.status === 404) {
-        setError('date', { type: 'manual', message: 'This slot no longer exists.' })
+        setError('date', { type: 'manual', message: 'Esta fecha ya no existe.' })
       } else if (error.status === 400) {
-        setError('date', { type: 'manual', message: 'Please check the values and try again.' })
+        setError('date', { type: 'manual', message: 'Revisa los valores e inténtalo de nuevo.' })
       }
     }
 
@@ -99,12 +99,12 @@ export function SlotFormDialog({
 
   return (
     <Dialog open={open} onClose={onClose} fullWidth maxWidth="xs">
-      <DialogTitle>{isEdit ? 'Edit slot' : 'Add date'}</DialogTitle>
+      <DialogTitle>{isEdit ? 'Editar fecha' : 'Agregar fecha'}</DialogTitle>
       <form onSubmit={handleSubmit(onSubmit)} noValidate>
         <DialogContent>
           <Stack spacing={2} sx={{ mt: 0.5 }}>
             <TextField
-              label="Date"
+              label="Fecha"
               type="date"
               fullWidth
               disabled={isLoading}
@@ -114,7 +114,7 @@ export function SlotFormDialog({
               {...register('date')}
             />
             <TextField
-              label="Start time"
+              label="Hora de inicio"
               type="time"
               fullWidth
               disabled={isLoading}
@@ -124,7 +124,7 @@ export function SlotFormDialog({
               {...register('start_time')}
             />
             <TextField
-              label="Capacity"
+              label="Capacidad"
               type="number"
               fullWidth
               disabled={isLoading}
@@ -137,10 +137,10 @@ export function SlotFormDialog({
         </DialogContent>
         <DialogActions>
           <Button onClick={onClose} disabled={isLoading}>
-            Cancel
+            Cancelar
           </Button>
           <Button type="submit" variant="contained" disableElevation disabled={isLoading}>
-            {isLoading ? <CircularProgress size={22} color="inherit" /> : 'Save'}
+            {isLoading ? <CircularProgress size={22} color="inherit" /> : 'Guardar'}
           </Button>
         </DialogActions>
       </form>

@@ -32,18 +32,18 @@ export function SlotRow({ slot, onEdit, onClose, onReopen, busy }: SlotRowProps)
           {slot.start_time}
         </Typography>
         <Typography variant="body2" color="text.secondary">
-          {slot.remaining} / {slot.capacity} left
+          {slot.remaining} / {slot.capacity} disponibles
         </Typography>
         {slot.booked > 0 && (
-          <Chip size="small" variant="outlined" label={`${slot.booked} booked`} />
+          <Chip size="small" variant="outlined" label={`${slot.booked} reservados`} />
         )}
         {isRecurring(slot) && (
-          <Tooltip title="From a recurring schedule">
+          <Tooltip title="De un horario recurrente">
             <EventRepeatRounded fontSize="small" color="action" />
           </Tooltip>
         )}
         {inactive && (
-          <Chip size="small" variant="outlined" label="Closed" />
+          <Chip size="small" variant="outlined" label="Cerrado" />
         )}
       </Stack>
 
@@ -52,7 +52,7 @@ export function SlotRow({ slot, onEdit, onClose, onReopen, busy }: SlotRowProps)
           <IconButton
             size="small"
             color="primary"
-            aria-label="Reopen slot"
+            aria-label="Reabrir fecha"
             disabled={busy}
             onClick={() => onReopen(slot)}
           >
@@ -62,7 +62,7 @@ export function SlotRow({ slot, onEdit, onClose, onReopen, busy }: SlotRowProps)
           <>
             <IconButton
               size="small"
-              aria-label="Edit slot"
+              aria-label="Editar fecha"
               disabled={busy}
               onClick={() => onEdit(slot)}
             >
@@ -71,7 +71,7 @@ export function SlotRow({ slot, onEdit, onClose, onReopen, busy }: SlotRowProps)
             <IconButton
               size="small"
               color="error"
-              aria-label="Close slot"
+              aria-label="Cerrar fecha"
               disabled={busy}
               onClick={() => onClose(slot)}
             >

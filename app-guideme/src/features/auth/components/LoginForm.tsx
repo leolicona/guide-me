@@ -25,7 +25,7 @@ export function LoginForm() {
   const wasSuspended = searchParams.get('reason') === 'suspended';
   const [authError, setAuthError] = useState<string | null>(
     wasSuspended
-      ? 'Your account has been suspended. Contact your administrator.'
+      ? 'Tu cuenta ha sido suspendida. Contacta a tu administrador.'
       : null,
   );
 
@@ -57,16 +57,16 @@ export function LoginForm() {
       onError: (error) => {
         if (error instanceof ServiceError) {
           if (error.status === 401) {
-            setAuthError('Incorrect email or password');
+            setAuthError('Email o contraseña incorrectos');
             setValue('password', '');
             setFocus('password');
           } else if (error.status === 403) {
-            setAuthError('Your account has not been verified. Check your email.');
+            setAuthError('Tu cuenta no ha sido verificada. Revisa tu email.');
           } else {
-            setAuthError(error.message || 'An error occurred during login');
+            setAuthError(error.message || 'Ocurrió un error al iniciar sesión');
           }
         } else {
-          setAuthError('An unexpected error occurred');
+          setAuthError('Ocurrió un error inesperado');
         }
       }
     });
@@ -100,13 +100,13 @@ export function LoginForm() {
       <PasswordInput
         name="password"
         control={control}
-        label="Password"
+        label="Contraseña"
         disabled={loginMutation.isPending}
       />
 
       <Box sx={{ mt: 1, mb: 3, display: 'flex', justifyContent: 'flex-end' }}>
         <Link component={RouterLink} to={ROUTES.FORGOT_PASSWORD} variant="body2" underline="hover">
-          Forgot your password?
+          ¿Olvidaste tu contraseña?
         </Link>
       </Box>
 
@@ -118,12 +118,12 @@ export function LoginForm() {
         disabled={loginMutation.isPending}
         sx={{ mb: 3 }}
       >
-        {loginMutation.isPending ? <CircularProgress size={24} color="inherit" /> : 'Log in'}
+        {loginMutation.isPending ? <CircularProgress size={24} color="inherit" /> : 'Iniciar sesión'}
       </Button>
 
       <Box sx={{ textAlign: 'center' }}>
         <Link component={RouterLink} to={ROUTES.REGISTER} variant="body2" underline="hover">
-          Don't have an account? Sign up
+          ¿No tienes cuenta? Regístrate
         </Link>
       </Box>
     </Box>

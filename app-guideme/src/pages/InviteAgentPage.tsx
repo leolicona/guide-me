@@ -3,7 +3,7 @@ import { InviteAgentForm } from '../features/agents/components/InviteAgentForm';
 
 export default function InviteAgentPage() {
   return (
-    <AuthLayout title="Invite an agent">
+    <AuthLayout title="Invitar agente">
       <InviteAgentForm />
     </AuthLayout>
   );
