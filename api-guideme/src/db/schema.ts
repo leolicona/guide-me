@@ -292,6 +292,12 @@ export const cashDrops = sqliteTable('cash_drops', {
     .references(() => users.id),
   amount: integer('amount').notNull(), // minor units, > 0 — reduces balance once confirmed
   balanceBefore: integer('balance_before').notNull(), // audit snapshot at creation
+  // Settlement watermark: the agent's authoritative balance the instant this drop was
+  // confirmed. Set only on confirm; null while pending/rejected (and for pre-0024 rows).
+  balanceAfter: integer('balance_after'),
+  // The agent's originally-registered amount, stashed only when an admin confirms with a
+  // corrected `amount` (adjust-on-confirm); null means "confirmed as requested".
+  amountRequested: integer('amount_requested'),
   status: text('status', { enum: ['pending', 'confirmed', 'rejected'] })
     .notNull()
     .default('pending'),

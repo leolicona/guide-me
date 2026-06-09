@@ -47,56 +47,54 @@ halves of US-A12 (base % per agent + bonus per service) now flow end-to-end. Cov
 immutability) and `test/pos/pos-controlled-discount.test.ts` (the calc). No schema change was
 needed (the column shipped with migration `0023`).
 
-## 12. Agent Cash-Balance — Deferred Refinements — ⚠️ OPEN (accepted trade-offs)
+## 12. Agent Cash-Balance — Deferred Refinements — 🟡 MOSTLY RESOLVED
 
-**Status:** Accepted MVP simplifications in the *Agent continuous cash balance with cash
-drops* feature (`src/routes/cash/handler.ts`). The balance is **derived live** from events on
-every read — correct, but with the trade-offs below. US-AG12 now presents the agent's `/me`
-breakdown **shift-scoped** (only events since the last confirmed drop, with a `carry_forward`
-balancing term); the headline `balance` is still the authoritative all-time figure.
+**Status:** Paid down by the *Agent Cash-Balance Refinements* work
+(`docs/cash-drops/balance-refinements.design.md`). The high-leverage primitive is a
+**settlement watermark** — `cash_drops.balance_after`, stamped at confirm time (migration
+`0024_add_settlement_to_cash_drops.sql`). (a), (b), (d), and the anchor/cancellation parts of
+(e) are **resolved**; (c)'s amount-adjustment mechanics are **shipped** but its
+acknowledgment/signing flow is **still pending** (tied to US-AG27, below); one sub-case of (e)
+is **out of scope** (unreachable). Covered by `test/cash/agent-balance-cash-drops.test.ts`
+(Scenarios 4a, 5a, 10b, 12a, 12b, 14a–14c), with Scenario 12a a **regression gate** proving the
+watermark-anchored headline equals the independent all-time recompute.
 
-- **(a) Settled history is not frozen.** An agent can add/delete an expense or have a folio
-  cancelled *behind* an already-confirmed cash drop; because the balance is recomputed from
-  the full event history each read, this silently moves a number the admin already settled
-  against. MVP treats the live balance as the single truth (a deletion simply raises the
-  balance and is visible). The US-AG12 shift view *softens the symptom* — such pre-anchor
-  movement now lands in `carry_forward` rather than mis-stating the current shift — but the
-  settled number itself still moves. *Action:* freeze events behind the last confirmed drop (a
-  settlement watermark) before allowing edits, or refuse edits to pre-watermark rows.
-- **(b) Unbounded derivation sums.** `deriveBalance` re-aggregates **all** of an agent's
-  folios / expenses / drops / payouts on every read — O(history), growing forever. The
-  US-AG12 shift breakdown (`deriveShiftBreakdown`) does sum only events since the anchor
-  drop, but it runs **in addition to** `deriveBalance` (which still derives the authoritative
-  balance over all history) plus an anchor lookup — so `GET /me` now does *more* per-read
-  work, not less. *Action:* carry a `balance_after` snapshot on each confirmed drop; the
-  authoritative balance reads the snapshot + since-anchor sums (bounding the per-read work),
-  and `carry_forward` is read directly from the snapshot instead of as a balancing term.
-- **(c) No adjust-amount-on-confirm.** A drop is terminal once reviewed; a wrong amount must
-  be **rejected and re-registered** by the agent (no admin "confirm 480 instead of 500").
-  *Action:* allow the admin to confirm with an adjusted `amount` (+ audit of the delta),
-  superseding reject-and-resubmit.
-- **(d) `listBalances` N+1.** The admin balances view derives each agent's balance in a loop
-  (one `deriveBalance` — itself several queries — per agent). Fine at MVP agent counts.
-  *Action:* replace with a single grouped query (folios/expenses/drops/payouts `GROUP BY
-  agent_id` with the cancellation/clawback/payment-method predicates) joined to org agents.
-- **(e) Coarse shift attribution (US-AG12).** The shift breakdown counts events strictly
-  after the anchor drop's `created_at` and folds everything else into `carry_forward`. Two
-  cases therefore land in `carry_forward` rather than the shift they arguably belong to: a
-  **booking whose `amount_paid` grows across a confirmed drop** (the folio is attributed
-  whole, by its `created_at`, not split at the drop), and **out-of-order confirmation of
-  multiple pending drops** (the anchor is the latest drop by `created_at`, which may not be
-  the most recently *confirmed* one). The displayed `balance` is always correct — `carry_forward`
-  reconciles by construction — only the collected-vs-carried split can be coarse. *Action:*
-  attribute partial collections by payment event and anchor on the settlement timeline if
-  finer per-shift reporting is ever needed.
+- **(a) Settled history is now frozen.** ✅ The watermark is the boundary. An expense
+  `created_at <= watermark` refuses deletion (`409 CONFLICT`, `deleteExpense`); a pre-watermark
+  folio cancelled *after* the watermark is no longer silent — `deriveBalance` adds a **reversal
+  term** (`sumCancellationReversal`) that surfaces the reversed cash (and any clawed-back
+  commission) in the **current shift**, leaving the settled `balance_after` frozen. *(This
+  changed Scenario 4's split for the watermarked path — the reversal now lands in the live shift,
+  not `carry_forward`; the legacy/no-watermark path is unchanged and still covered by Scenario 4.)*
+- **(b) Per-read work is now bounded.** ✅ `deriveBalance` has a fast path:
+  `balance = balance_after + Σ(events since the watermark)` — O(shift), not O(history). The shift
+  breakdown and the authoritative balance are one computation, and `carry_forward` is read
+  **directly** from `balance_after`. Confirming is also bounded (new `balance_after` = prior
+  watermark + since-sums − amount). A legacy confirmed drop with no `balance_after` transparently
+  falls back to the full-history derivation.
+- **(c) Adjust-amount-on-confirm — mechanics shipped, acknowledgment pending.** 🟡 `reviewDrop`
+  accepts an optional `amount`; confirming with a corrected value updates the balance immediately,
+  stashes the agent's original into `amount_requested` (new column), and audits the delta in
+  `review_note` (admin UI: `CashDropDetailPage` confirm dialog + a requested-vs-confirmed line).
+  **Still to build:** the "Silent Acknowledgment" / non-blocking notification flow shared with
+  **Admin-Initiated Direct Collection (US-AG27)** — the agent is notified to digitally
+  sign/acknowledge the adjustment, auto-signing after 24h if ignored. Until US-AG27 lands, an
+  adjustment is applied + audited but not agent-acknowledged.
+- **(d) `listBalances` N+1 removed.** ✅ Replaced the per-agent loop with a fixed set of
+  `GROUP BY agent_id` aggregates merged in memory (O(1) queries). The admin `/balances` view
+  stays all-time (company exposure); same result shape and ordering as the loop.
+- **(e) Shift attribution.** ✅ (mostly) The anchor now follows the **settlement timeline**
+  (`reviewed_at`, tiebreak `created_at`), so out-of-order confirmation resolves to the drop
+  confirmed last; post-drop cancellations surface via the (a) reversal. ⚠️ **Out of scope (still
+  deferred):** a **booking whose `amount_paid` grows across a confirmed drop** — *currently
+  unreachable*, because `amount_paid` is written once at folio creation and never grown (no
+  endpoint mutates it). Revisit only if such an endpoint is introduced; the §4.2 reversal pattern
+  then generalises to a signed adjustment ledger keyed on payment events.
 
-**Why accepted:** all are scale/edge-case refinements, not correctness bugs — the balance math
-(`cash_collected − commissions − expenses − confirmed_drops + payouts`), the shift breakdown's
-reconciliation invariant (`balance = carry_forward + collected − commissions − expenses +
-payouts`), the drop machine, and multitenancy isolation are fully correct and covered by tests
-(`test/cash/agent-balance-cash-drops.test.ts`). Each is invisible until either history grows
-large (b, d), an admin settles then an agent back-edits (a, c), or an agent runs partial
-bookings / drops are confirmed out of order (e).
+**Known limitation (accepted, consistent with §6):** timestamps are whole-second, so the fast-
+path boundary `created_at > reviewed_at` is fuzzy for an event landing in the *same wall-clock
+second* as a confirmation. Admins confirm drops seconds/minutes apart, so this is a sub-second
+concurrency edge; the fallback / `/balances` recompute stays exact.
 
 ## 11. Client Cancellation Email Not Sent (US-C03) — ✅ RESOLVED
 

@@ -65,9 +65,11 @@ GuideMe is a multi-tenant, mobile-optimized SaaS platform that centralizes the s
 
 - **US-A17** — As an admin, I want to generate a commission report per agent for a range of dates, showing total sales, base commission, service bonuses, and total commission to pay.
 - **US-A18** — As an admin, I want to see a performance comparison between agents (folios sold, total amount) in a given period.
-- **US-A19** — As an admin, I want to confirm receipt of the cash that agents hand in (cash drops) and see each agent's current outstanding balance (the company cash they are holding), so a confirmed hand-in reduces that agent's running balance.
+- **US-A19** — As an admin, I want to confirm receipt of the cash that agents hand in (cash drops) and see each agent's current outstanding balance (the company cash they are holding). The dashboard must display a shift-scoped breakdown for each agent (calculating collected, commissions, and expenses strictly since their last confirmed drop, plus a carry-forward line) rather than all-time historical totals, enabling clean daily reconciliations.
 - **US-A25** — As an admin, if an agent has a negative balance (the company owes them money), I want to record a "Payout" (Transfer/Payroll) to return their balance to zero.
 - **US-A20** — As an admin, I want to export sales and commission reports (CSV or PDF) for external processing.
+- **US-A27** — As an admin, I want to directly register a cash collection from an agent (face-to-face) so that their running balance is immediately reduced, without requiring the agent to submit a pending request first.
+- **US-A28** — As an admin, when reviewing a pending cash drop from an agent, I want to be able to adjust the received amount before confirming it (adding a mandatory explanatory note), so I can correct discrepancies without having to reject the entire request.
 
 #### Cancellations
 
@@ -117,6 +119,9 @@ GuideMe is a multi-tenant, mobile-optimized SaaS platform that centralizes the s
 - **US-AG24** — As an agent, when I register a sale with a "Card" payment method, I want my commission to be credited to my balance without increasing my cash debt.
 - **US-AG14** — As an agent, I want to register a cash drop (hand-in / *entrega de efectivo*) of a given amount to the admin, which reduces my running balance, so settlement happens whenever I hand over cash — no daily closure required.
 - **US-AG26** — As an agent, I want a daily snapshot of my own performance (today's sales and amount collected) alongside my running balance and a quick action to register a cash drop, so I can track my day and settle cash without leaving the home screen.
+- **US-AG27** — As an agent, I want to receive a notification when the admin registers a direct cash collection from me, so I can review the amount and click "Sign/Acknowledge" to digitally agree. If I don't sign it within 24 hours, the system should auto-sign it to not block the workflow.
+- **US-AG28** — As an agent, if the admin confirms my pending cash drop with an adjusted amount, I want to receive a notification to review the discrepancy and click "Sign/Acknowledge". If I don't sign within 24 hours, the system should auto-sign it to close the audit trail.
+- **US-AG29** — As an agent, I want my balance dashboard to visually separate my Total Sales (cash vs. electronic), my Earned Commissions, and my Physical Cash Box, so I can easily understand how electronic payments (card, wire transfer, link) benefit me without confusing my physical cash-in-hand debt.
 
 #### Access Scanner (QR)
 
@@ -198,6 +203,8 @@ GuideMe is a multi-tenant, mobile-optimized SaaS platform that centralizes the s
 ### Out of MVP (Phase 2+)
 
 #### 🚀 PHASE 2: Core Enhancements
+- [ ] **Advanced Cash Collection (Admin-Initiated & Adjustments)** *(US-A27, US-A28, US-AG27, US-AG28)* - *Enables face-to-face direct collections and adjustments with a non-blocking silent acknowledgment workflow for agents.*
+- [ ] **Agent Balance UX Overhaul (Cash vs Electronic)** *(US-AG29)* - *Redesigns the agent dashboard to visually separate total sales, earned commissions, and physical cash debt, clarifying the impact of non-cash payments.*
 - [ ] **Offline-capable QR validation with post-sync** *(US-AG16)* - *Deferred from MVP to focus on real-time validation.*
 - [ ] **Partial cancellations (per service within the folio)** *(US-A22)* - *Deferred to simplify inventory logic in MVP.*
 - [ ] **Cash refund tracking** *(US-A23)* - *To ensure the admin can reconcile physical cash returns. Pairs with the Tourist Portal's Refund PIN (US-T05) to confirm the customer received the cash.*

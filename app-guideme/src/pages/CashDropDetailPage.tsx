@@ -20,8 +20,8 @@ import {
 } from '@mui/material'
 import ArrowBackRounded from '@mui/icons-material/ArrowBackRounded'
 import { useDrop, useReviewDrop } from '../features/cash/hooks'
-import type { DropStatus } from '../features/cash/types'
-import { formatMoney } from '../features/catalog/types'
+import type { DropStatus, ReviewDropInput } from '../features/cash/types'
+import { formatMoney, amountToCents } from '../features/catalog/types'
 import { ROUTES } from '../config/routes'
 
 const DROP_COLOR: Record<DropStatus, 'warning' | 'success' | 'error'> = {
@@ -50,13 +50,22 @@ export default function CashDropDetailPage() {
   const { data: drop, isLoading, isError } = useDrop(id)
   const review = useReviewDrop()
   const [rejectOpen, setRejectOpen] = useState(false)
+  const [confirmOpen, setConfirmOpen] = useState(false)
+  const [adjustAmount, setAdjustAmount] = useState('')
   const [note, setNote] = useState('')
 
   const isPending = drop?.status === 'pending'
 
   const confirm = () => {
     if (!id) return
-    review.mutate({ id, input: { decision: 'confirmed' } })
+    const trimmed = adjustAmount.trim()
+    const input: ReviewDropInput = { decision: 'confirmed' }
+    // Only send a corrected amount when the admin actually typed a different one.
+    if (trimmed) {
+      const cents = amountToCents(Number(trimmed))
+      if (cents > 0 && cents !== drop?.amount) input.amount = cents
+    }
+    review.mutate({ id, input }, { onSuccess: () => setConfirmOpen(false) })
   }
 
   const reject = () => {
@@ -102,6 +111,14 @@ export default function CashDropDetailPage() {
                     <Typography color="text.secondary">Saldo del agente al entregar</Typography>
                     <Typography>{formatMoney(drop.balance_before)}</Typography>
                   </Stack>
+                  {drop.amount_requested != null && (
+                    <Stack direction="row" sx={{ justifyContent: 'space-between' }}>
+                      <Typography color="text.secondary">Monto solicitado por el agente</Typography>
+                      <Typography sx={{ textDecoration: 'line-through' }} color="text.secondary">
+                        {formatMoney(drop.amount_requested)}
+                      </Typography>
+                    </Stack>
+                  )}
                   {drop.note && (
                     <>
                       <Divider sx={{ my: 1 }} />
@@ -136,7 +153,10 @@ export default function CashDropDetailPage() {
                   size="large"
                   disableElevation
                   fullWidth
-                  onClick={confirm}
+                  onClick={() => {
+                    setAdjustAmount('')
+                    setConfirmOpen(true)
+                  }}
                   disabled={review.isPending}
                 >
                   Confirmar recibo
@@ -155,6 +175,44 @@ export default function CashDropDetailPage() {
             )}
           </Stack>
         )}
+
+        <Dialog open={confirmOpen} onClose={() => setConfirmOpen(false)} fullWidth maxWidth="xs">
+          <DialogTitle>Confirmar recibo</DialogTitle>
+          <DialogContent>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+              Confirma el efectivo que realmente recibiste. Si difiere de lo que el agente
+              registró ({drop ? formatMoney(drop.amount) : ''}), captura el monto corregido —
+              se descontará ese del saldo del agente y se registrará el ajuste.
+            </Typography>
+            <TextField
+              label="Monto corregido (opcional)"
+              type="number"
+              fullWidth
+              autoFocus
+              placeholder={drop ? String(drop.amount / 100) : ''}
+              helperText="Déjalo vacío para confirmar el monto solicitado."
+              value={adjustAmount}
+              onChange={(e) => setAdjustAmount(e.target.value)}
+            />
+            {review.isError && (
+              <Alert severity="error" sx={{ mt: 2 }}>
+                No se pudo confirmar. Inténtalo de nuevo.
+              </Alert>
+            )}
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={() => setConfirmOpen(false)}>Cancelar</Button>
+            <Button
+              variant="contained"
+              color="success"
+              disableElevation
+              onClick={confirm}
+              disabled={review.isPending}
+            >
+              {review.isPending ? 'Confirmando…' : 'Confirmar recibo'}
+            </Button>
+          </DialogActions>
+        </Dialog>
 
         <Dialog open={rejectOpen} onClose={() => setRejectOpen(false)} fullWidth maxWidth="xs">
           <DialogTitle>¿Rechazar esta entrega?</DialogTitle>

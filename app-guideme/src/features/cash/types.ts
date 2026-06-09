@@ -28,6 +28,8 @@ export interface CashExpense {
 export interface CashDrop {
   id: string
   amount: number
+  /** The agent's original ask when an admin confirmed with a corrected amount; null otherwise. */
+  amount_requested: number | null
   balance_before: number
   status: DropStatus
   note: string | null
@@ -97,6 +99,8 @@ export interface CreateDropInput {
 export interface ReviewDropInput {
   decision: 'confirmed' | 'rejected'
   note?: string | null
+  /** Adjust-on-confirm: a corrected amount (minor units). Only honoured when confirming. */
+  amount?: number
 }
 
 export interface CreatePayoutInput {

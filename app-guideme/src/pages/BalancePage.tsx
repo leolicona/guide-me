@@ -28,6 +28,7 @@ import {
   useCancelDrop,
 } from '../features/cash/hooks'
 import type { DropStatus } from '../features/cash/types'
+import { ServiceError } from '../services/authService'
 import { formatMoney, amountToCents } from '../features/catalog/types'
 
 const DROP_COLOR: Record<DropStatus, 'warning' | 'success' | 'error'> = {
@@ -260,6 +261,15 @@ export default function BalancePage() {
                       </Stack>
                     ))}
                   </Stack>
+                )}
+
+                {deleteExpense.isError && (
+                  <Alert severity="error" sx={{ mt: 2 }}>
+                    {deleteExpense.error instanceof ServiceError &&
+                    deleteExpense.error.code === 'CONFLICT'
+                      ? 'Este gasto ya fue liquidado en una entrega confirmada y no se puede eliminar.'
+                      : 'No se pudo eliminar el gasto. Inténtalo de nuevo.'}
+                  </Alert>
                 )}
               </CardContent>
             </Card>

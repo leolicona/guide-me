@@ -18,6 +18,9 @@ export const createDropSchema = z.object({
 export const reviewDropSchema = z.object({
   decision: z.enum(['confirmed', 'rejected']),
   note: z.string().trim().min(1).nullable().optional(),
+  // Adjust-on-confirm: an admin MAY confirm with a corrected amount instead of forcing
+  // reject-and-resubmit. Only honoured when `decision === 'confirmed'`; ignored on reject.
+  amount: z.number().int().positive().optional(),
 })
 
 // US-A25 — admin registers a payout TO an agent. `agent_id` names the recipient (validated
