@@ -111,7 +111,7 @@ GuideMe is a multi-tenant, mobile-optimized SaaS platform that centralizes the s
 > whenever physical cash moves, not on a clock. This **replaces** the earlier daily
 > cash-closure (*corte de caja*) model.
 
-- **US-AG12** — As an agent, I want to see my current running balance: total cash collected, operating expenses, cash already handed in, and the resulting balance I am still holding, so I always know what I owe the company.
+- **US-AG12** — As an agent, I want to see my actual running balance (the exact physical cash I am holding), but with the detailed breakdown (cash collected, commissions, expenses) calculated only since my last confirmed cash drop, including a "carry-forward" line if my previous drop didn't bring my balance to zero, so my daily view is focused on my current shift.
 - **US-AG13** — As an agent, I want to register operating expenses (e.g., gasoline, supplies) with amount and description so my running balance is accurate.
 - **US-AG23** — As an agent, I want the system to calculate my commission per sale and automatically deduct it from my "Debt to Company" (Running Balance), so I keep my earnings immediately.
 - **US-AG24** — As an agent, when I register a sale with a "Card" payment method, I want my commission to be credited to my balance without increasing my cash debt.

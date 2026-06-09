@@ -1,5 +1,5 @@
 import type { Context } from 'hono'
-import { and, desc, eq, ne, or, sql } from 'drizzle-orm'
+import { and, desc, eq, gt, ne, or, sql } from 'drizzle-orm'
 import { getDb, type Db } from '../../db/client'
 import { agentExpenses, cashDrops, folios, payouts, users } from '../../db/schema'
 import { ApiError } from '../../types/errors'
@@ -30,7 +30,15 @@ const tsOrNull = (d: Date | null) => (d ? toSeconds(d) : null)
 // payouts (company→agent) raise the balance. Only confirmed drops reduce the balance;
 // pending drops are reported separately (the agent is still liable until acknowledged).
 
-const sumCashCollected = async (db: Db, org: string, agentId: string) => {
+// Each sum accepts an optional `since` (a Date): when present, only events created strictly
+// after it are counted. This lets the same helpers compute both the all-time balance and the
+// shift-scoped breakdown (events since the agent's last confirmed drop).
+const sumCashCollected = async (
+  db: Db,
+  org: string,
+  agentId: string,
+  since?: Date,
+) => {
   const [row] = await db
     .select({ total: sql<number>`coalesce(sum(${folios.amountPaid}), 0)` })
     .from(folios)
@@ -40,12 +48,18 @@ const sumCashCollected = async (db: Db, org: string, agentId: string) => {
         eq(folios.agentId, agentId),
         ne(folios.status, 'cancelled'),
         eq(folios.paymentMethod, 'cash'),
+        ...(since ? [gt(folios.createdAt, since)] : []),
       ),
     )
   return Number(row?.total ?? 0)
 }
 
-const sumCommissions = async (db: Db, org: string, agentId: string) => {
+const sumCommissions = async (
+  db: Db,
+  org: string,
+  agentId: string,
+  since?: Date,
+) => {
   const [row] = await db
     .select({ total: sql<number>`coalesce(sum(${folios.commissionAmount}), 0)` })
     .from(folios)
@@ -55,26 +69,37 @@ const sumCommissions = async (db: Db, org: string, agentId: string) => {
         eq(folios.agentId, agentId),
         // Kept on any live folio, or on a cancelled folio the company absorbed.
         or(ne(folios.status, 'cancelled'), eq(folios.cancellationClawback, false)),
+        ...(since ? [gt(folios.createdAt, since)] : []),
       ),
     )
   return Number(row?.total ?? 0)
 }
 
-const sumExpenses = async (db: Db, org: string, agentId: string) => {
+const sumExpenses = async (db: Db, org: string, agentId: string, since?: Date) => {
   const [row] = await db
     .select({ total: sql<number>`coalesce(sum(${agentExpenses.amount}), 0)` })
     .from(agentExpenses)
     .where(
-      and(eq(agentExpenses.organizationId, org), eq(agentExpenses.agentId, agentId)),
+      and(
+        eq(agentExpenses.organizationId, org),
+        eq(agentExpenses.agentId, agentId),
+        ...(since ? [gt(agentExpenses.createdAt, since)] : []),
+      ),
     )
   return Number(row?.total ?? 0)
 }
 
-const sumPayouts = async (db: Db, org: string, agentId: string) => {
+const sumPayouts = async (db: Db, org: string, agentId: string, since?: Date) => {
   const [row] = await db
     .select({ total: sql<number>`coalesce(sum(${payouts.amount}), 0)` })
     .from(payouts)
-    .where(and(eq(payouts.organizationId, org), eq(payouts.agentId, agentId)))
+    .where(
+      and(
+        eq(payouts.organizationId, org),
+        eq(payouts.agentId, agentId),
+        ...(since ? [gt(payouts.createdAt, since)] : []),
+      ),
+    )
   return Number(row?.total ?? 0)
 }
 
@@ -120,6 +145,67 @@ const deriveBalance = async (db: Db, org: string, agentId: string) => {
   }
 }
 
+// US-AG12 — re-express the authoritative all-time `balance` as the agent's CURRENT SHIFT.
+// The shift starts at the anchor = the agent's most recent confirmed drop (by created_at);
+// the breakdown counts only events since it. `carry_forward` is the balance carried into the
+// shift — intuitively the residual the anchor drop left behind — computed as the BALANCING
+// TERM so the displayed lines always reconcile to `balance`, even when a pre-anchor folio is
+// cancelled later (that adjustment lands in carry_forward, not the current shift). With no
+// confirmed drop, the shift spans the agent's whole history and carry_forward is 0.
+const deriveShiftBreakdown = async (
+  db: Db,
+  org: string,
+  agentId: string,
+  balance: number,
+) => {
+  const [anchor] = await db
+    .select({
+      id: cashDrops.id,
+      amount: cashDrops.amount,
+      balanceBefore: cashDrops.balanceBefore,
+      reviewedAt: cashDrops.reviewedAt,
+      createdAt: cashDrops.createdAt,
+    })
+    .from(cashDrops)
+    .where(
+      and(
+        eq(cashDrops.organizationId, org),
+        eq(cashDrops.agentId, agentId),
+        eq(cashDrops.status, 'confirmed'),
+      ),
+    )
+    .orderBy(desc(cashDrops.createdAt))
+    .limit(1)
+
+  const since = anchor?.createdAt ?? undefined
+  const cashCollected = await sumCashCollected(db, org, agentId, since)
+  const commissionTotal = await sumCommissions(db, org, agentId, since)
+  const expenseTotal = await sumExpenses(db, org, agentId, since)
+  const payoutsTotal = await sumPayouts(db, org, agentId, since)
+
+  // Balancing term: balance = carry_forward + collected − commissions − expenses + payouts.
+  const carryForward =
+    balance - (cashCollected - commissionTotal - expenseTotal + payoutsTotal)
+
+  return {
+    carryForward,
+    cashCollected,
+    commissionTotal,
+    expenseTotal,
+    payoutsTotal,
+    since,
+    lastDrop: anchor
+      ? {
+          id: anchor.id,
+          amount: anchor.amount,
+          balance_before: anchor.balanceBefore,
+          confirmed_at: tsOrNull(anchor.reviewedAt),
+          created_at: toSeconds(anchor.createdAt),
+        }
+      : null,
+  }
+}
+
 // Shape a cash-drop row for the wire. `agent` is attached only on the admin surface.
 const serializeDrop = (
   d: {
@@ -149,15 +235,24 @@ const serializeDrop = (
 
 // --- Agent surface (/me/*) — scoped to (org, caller) --------------------------
 
-// US-AG12 — the agent's live running balance + breakdown, their expenses, and recent drops
-// (all statuses, newest first) for context.
+// US-AG12 — the agent's running balance presented as their CURRENT SHIFT: the headline
+// `balance` is the full perpetual figure (physical cash held), but the breakdown
+// (carry_forward + cash_collected − commission_total − expense_total) counts only events
+// since the last confirmed drop. `expenses` lists the current-shift expenses; `drops` lists
+// recent drops (all statuses, newest first) for context.
 export const getMyBalance = async (c: CashContext) => {
   const user = c.get('user')
   const org = user.organizationId
   const db = getDb(c.env)
 
   const derived = await deriveBalance(db, org, user.userId)
+  const shift = await deriveShiftBreakdown(db, org, user.userId, derived.balance)
 
+  const expenseFilters = [
+    eq(agentExpenses.organizationId, org),
+    eq(agentExpenses.agentId, user.userId),
+    ...(shift.since ? [gt(agentExpenses.createdAt, shift.since)] : []),
+  ]
   const expenseRows = await db
     .select({
       id: agentExpenses.id,
@@ -166,12 +261,7 @@ export const getMyBalance = async (c: CashContext) => {
       createdAt: agentExpenses.createdAt,
     })
     .from(agentExpenses)
-    .where(
-      and(
-        eq(agentExpenses.organizationId, org),
-        eq(agentExpenses.agentId, user.userId),
-      ),
-    )
+    .where(and(...expenseFilters))
     .orderBy(desc(agentExpenses.createdAt))
 
   const dropRows = await db
@@ -194,13 +284,14 @@ export const getMyBalance = async (c: CashContext) => {
 
   return c.json({
     balance: {
-      cash_collected: derived.cashCollected,
-      commission_total: derived.commissionTotal,
-      expense_total: derived.expenseTotal,
-      confirmed_drops_total: derived.confirmedDropsTotal,
+      carry_forward: shift.carryForward,
+      cash_collected: shift.cashCollected,
+      commission_total: shift.commissionTotal,
+      expense_total: shift.expenseTotal,
+      payouts_total: shift.payoutsTotal,
       pending_drops_total: derived.pendingDropsTotal,
-      payouts_total: derived.payoutsTotal,
       balance: derived.balance,
+      last_drop: shift.lastDrop,
       expenses: expenseRows.map((e) => ({
         id: e.id,
         description: e.description,

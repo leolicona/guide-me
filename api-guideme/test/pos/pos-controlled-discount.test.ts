@@ -289,18 +289,19 @@ describe('US-AG04 / AG05 / AG06 / AG08 — confirm sale', () => {
     expect((await getSlotRow(slotId))!.booked).toBe(2)
   })
 
-  it('US-AG23/AG25 — commission = base % + per-service bonus; payment_method stored', async () => {
-    // Agent earns 10% base; the service adds a 5000-per-pass bonus. Card payment.
+  it('US-AG23/AG25 — commission = base % + per-service bonus %; payment_method stored', async () => {
+    // Agent earns 10% base (1000 bp); the service adds a 5% bonus (500 bp). Card payment.
+    // Both rates are basis points; the bonus stacks on the base → constant 15% combined.
     const { organizationId } = await seedUser({
       email: AGENT_EMAIL,
       role: 'agent',
-      baseCommission: 10,
+      baseCommission: 1000,
     })
     const { serviceId } = await seedService({
       organizationId,
       basePrice: 150000,
       minimumPrice: 100000,
-      commissionBonus: 5000,
+      commissionBonus: 500,
     })
     const { slotId } = await seedSlot({ organizationId, serviceId, capacity: 12, booked: 0 })
 
@@ -310,9 +311,10 @@ describe('US-AG04 / AG05 / AG06 / AG08 — confirm sale', () => {
     })
 
     expect(status).toBe(201)
-    // total = 300000 → base 10% = 30000; bonus = 2 × 5000 = 10000 → commission 40000.
+    // total = 300000 → base 10% = 30000; bonus 5% of line_total 300000 = 15000 →
+    // commission 45000 (a constant 15%).
     expect(json.folio.payment_method).toBe('card')
-    expect(json.folio.commission_amount).toBe(40000)
+    expect(json.folio.commission_amount).toBe(45000)
 
     const row = await env.DB.prepare(
       `SELECT payment_method, commission_amount FROM folios WHERE id = ?`,
@@ -320,7 +322,7 @@ describe('US-AG04 / AG05 / AG06 / AG08 — confirm sale', () => {
       .bind(json.folio.id)
       .first<{ payment_method: string; commission_amount: number }>()
     expect(row?.payment_method).toBe('card')
-    expect(row?.commission_amount).toBe(40000)
+    expect(row?.commission_amount).toBe(45000)
   })
 
   it('US-AG25 — payment_method defaults to cash; zero base commission → 0', async () => {

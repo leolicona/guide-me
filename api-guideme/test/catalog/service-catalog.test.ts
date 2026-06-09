@@ -659,10 +659,11 @@ describe('US-A12 — service commission bonus', () => {
     expect(body.service.commission_bonus).toBe(0)
   })
 
-  it('Scenario 3 — negative / non-integer bonus → 400, no row', async () => {
+  it('Scenario 3 — negative / non-integer / > 10000 bonus → 400, no row', async () => {
     await seedUser({ email: ADMIN_EMAIL, role: 'admin' })
 
-    for (const commission_bonus of [-1, 10.5]) {
+    // commission_bonus is basis points (0–10000): -1, non-integer, and 10001 all reject.
+    for (const commission_bonus of [-1, 10.5, 10001]) {
       const res = await createService({
         name: 'Bad Bonus',
         base_price: 150000,
@@ -737,7 +738,7 @@ describe('US-A12 — service commission bonus', () => {
         base_price: 150000,
         minimum_price: 100000,
         default_capacity: 10,
-        commission_bonus: 99000, // bump the rate after the sale
+        commission_bonus: 800, // bump the rate after the sale (5% → 8%)
       }),
     })
 

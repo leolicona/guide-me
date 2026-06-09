@@ -16,7 +16,8 @@ export interface Service {
   base_price: number
   minimum_price: number
   default_capacity: number
-  /** US-A12 — per-pass commission bonus (minor units) added to the agent's base %. */
+  /** US-A12 — per-service commission bonus in basis points (500 = 5%), stacked on the
+   * agent's base %. Same units as the agent's base_commission. */
   commission_bonus: number
   status: ServiceStatus
   /** Present on detail (GET /:id), absent on the list. */
@@ -40,3 +41,14 @@ const currencyFmt = new Intl.NumberFormat('es-MX', {
 /** minor units (150000) → display string ("$1,500.00"). */
 export const formatMoney = (cents: number): string =>
   currencyFmt.format(centsToAmount(cents))
+
+// commission_bonus is stored as integer basis points; the UI shows/edits percent.
+// (Mirrors features/agents base_commission conversions.)
+
+/** percent (e.g. 5) → basis points (500). */
+export const percentToBasisPoints = (percent: number): number =>
+  Math.round(percent * 100)
+
+/** basis points (500) → percent (5). */
+export const basisPointsToPercent = (basisPoints: number): number =>
+  basisPoints / 100

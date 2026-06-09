@@ -154,11 +154,22 @@ export default function BalancePage() {
                 )}
 
                 <Divider sx={{ my: 2 }} />
+                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+                  {balance.last_drop
+                    ? `Desde tu última entrega · ${formatDate(balance.last_drop.created_at)}`
+                    : 'Toda tu actividad'}
+                </Typography>
                 <Stack spacing={1}>
+                  {balance.carry_forward !== 0 && (
+                    <BreakdownRow
+                      label="Saldo anterior"
+                      value={Math.abs(balance.carry_forward)}
+                      sign={balance.carry_forward < 0 ? '−' : '+'}
+                    />
+                  )}
                   <BreakdownRow label="Efectivo cobrado" value={balance.cash_collected} sign="+" />
                   <BreakdownRow label="Comisión ganada" value={balance.commission_total} sign="−" />
                   <BreakdownRow label="Gastos" value={balance.expense_total} sign="−" />
-                  <BreakdownRow label="Entregado (confirmado)" value={balance.confirmed_drops_total} sign="−" />
                   {balance.payouts_total > 0 && (
                     <BreakdownRow label="Pagos recibidos" value={balance.payouts_total} sign="+" />
                   )}

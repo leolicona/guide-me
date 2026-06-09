@@ -17,9 +17,12 @@ export const serviceFormSchema = z
       .number({ message: 'Ingresa una capacidad válida' })
       .int('La capacidad debe ser un entero')
       .min(1, 'La capacidad mínima es 1'),
-    // US-A12 — per-service commission bonus (major-decimal in the form; converted to minor
-    // units before the API call). Optional → 0.
-    commission_bonus: amount,
+    // US-A12 — per-service commission bonus as a percent (entered 0–100; converted to
+    // basis points before the API call). Stacks on the agent's base %. Optional → 0.
+    commission_bonus: z
+      .number({ message: 'Ingresa un porcentaje válido' })
+      .min(0, 'El porcentaje no puede ser negativo')
+      .max(100, 'El porcentaje máximo es 100'),
   })
   .refine((v) => v.minimum_price <= v.base_price, {
     message: 'El precio mínimo debe ser ≤ al precio base',

@@ -82,7 +82,7 @@ export default function CatalogDetailPage() {
                       {formatMoney(service.minimum_price)} · cap.{' '}
                       {service.default_capacity}
                       {service.commission_bonus > 0 && (
-                        <> · bono {formatMoney(service.commission_bonus)}</>
+                        <> · bono {service.commission_bonus / 100}%</>
                       )}
                     </Typography>
                   </Box>

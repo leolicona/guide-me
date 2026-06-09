@@ -2,9 +2,13 @@
 // All money fields are integer minor units (centavos) — render with the helpers in
 // features/catalog/types. Spec: docs/cash-drops/agent-balance-cash-drops.spec.md
 //
-// Running balance (server-derived, never sent):
+// Running balance (server-derived, never sent). The authoritative all-time figure is:
 //   balance = cash_collected − commission_total − expense_total
-//             − confirmed_drops_total + payouts_total
+//             − confirmed_drops + payouts_total
+// The agent's /me breakdown is SHIFT-SCOPED — its components count only events since the
+// agent's last confirmed drop, and carry_forward (the balancing term) folds in everything
+// before it, so: balance = carry_forward + cash_collected − commission_total − expense_total
+//                          + payouts_total.
 
 export type DropStatus = 'pending' | 'confirmed' | 'rejected'
 export type PaymentMethod = 'cash' | 'card'
@@ -42,17 +46,27 @@ export interface CashPayout {
   created_at: number
 }
 
-// GET /api/cash/me — the agent's live running balance + breakdown.
+// The anchor that defines the current shift: the agent's most recent confirmed drop.
+export interface CashLastDrop {
+  id: string
+  amount: number
+  balance_before: number
+  confirmed_at: number | null
+  created_at: number
+}
+
+// GET /api/cash/me — the agent's running balance (all-time) with a shift-scoped breakdown.
 export interface AgentBalance {
-  cash_collected: number
+  carry_forward: number // balance carried into the current shift (may be negative); 0 if none
+  cash_collected: number // the breakdown components below are scoped to the current shift
   commission_total: number
   expense_total: number
-  confirmed_drops_total: number
   pending_drops_total: number
   payouts_total: number
-  balance: number
-  expenses: CashExpense[]
-  drops: CashDrop[]
+  balance: number // authoritative all-time figure (the physical cash held)
+  last_drop: CashLastDrop | null // anchor; null when no confirmed drop exists yet
+  expenses: CashExpense[] // the current-shift expenses
+  drops: CashDrop[] // recent drops, all statuses, for context
 }
 
 // GET /api/cash/balances — one admin row per agent (company cash exposure).

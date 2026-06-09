@@ -16,7 +16,12 @@ import { serviceFormSchema } from '../schemas'
 import type { ServiceFormData } from '../schemas'
 import { useCreateService } from '../hooks/useCreateService'
 import { useUpdateService } from '../hooks/useUpdateService'
-import { amountToCents, centsToAmount } from '../types'
+import {
+  amountToCents,
+  centsToAmount,
+  basisPointsToPercent,
+  percentToBasisPoints,
+} from '../types'
 import type { Service } from '../types'
 import { ServiceError } from '../../../services/authService'
 
@@ -66,7 +71,7 @@ export function ServiceFormDialog({
         base_price: centsToAmount(service.base_price),
         minimum_price: centsToAmount(service.minimum_price),
         default_capacity: service.default_capacity,
-        commission_bonus: centsToAmount(service.commission_bonus),
+        commission_bonus: basisPointsToPercent(service.commission_bonus),
       })
     } else {
       reset(EMPTY)
@@ -80,7 +85,7 @@ export function ServiceFormDialog({
       base_price: amountToCents(data.base_price),
       minimum_price: amountToCents(data.minimum_price),
       default_capacity: data.default_capacity,
-      commission_bonus: amountToCents(data.commission_bonus),
+      commission_bonus: percentToBasisPoints(data.commission_bonus),
     }
 
     const onError = (error: unknown) => {
@@ -191,15 +196,15 @@ export function ServiceFormDialog({
                 disabled={isLoading}
                 error={!!errors.commission_bonus}
                 helperText={
-                  errors.commission_bonus?.message ?? 'Se suma al % del agente por pase vendido'
+                  errors.commission_bonus?.message ?? 'Se suma al % de comisión del agente'
                 }
                 slotProps={{
                   input: {
-                    startAdornment: (
-                      <InputAdornment position="start">$</InputAdornment>
+                    endAdornment: (
+                      <InputAdornment position="end">%</InputAdornment>
                     ),
                   },
-                  htmlInput: { step: 0.01, min: 0 },
+                  htmlInput: { step: 0.01, min: 0, max: 100 },
                 }}
                 {...register('commission_bonus', { valueAsNumber: true })}
               />

@@ -251,7 +251,7 @@ interface PreparedLine {
   minimumPrice: number
   unitPrice: number
   lineTotal: number
-  commissionBonus: number // per-pass service bonus snapshot (US-A12)
+  commissionBonus: number // service bonus % in basis points, snapshot (US-A12)
   extras: PreparedExtra[]
   // Signed at confirm time, once all decrements succeed (below).
   qrToken?: string
@@ -378,18 +378,20 @@ export const confirmSale = async (c: PosContext) => {
   )
   const total = subtotal
 
-  // COMMISSION (US-AG23 / US-A12): the agent's base % of the folio total plus each line's
-  // per-pass service bonus, snapshotted now so later rate changes don't rewrite history.
-  // base_commission is a whole-number percentage; round half-up to the nearest centavo.
+  // COMMISSION (US-AG23 / US-A12): the agent's base % of the folio total plus each
+  // service's bonus %, both snapshotted now so later rate changes don't rewrite history.
+  // Both base_commission and commission_bonus are in basis points (1000 = 10%,
+  // 10000 = 100%); divide by 10000. The service bonus stacks on the base and applies to
+  // its own line total, so the combined rate is constant regardless of price or passes.
   const [agentRow] = await db
     .select({ baseCommission: users.baseCommission })
     .from(users)
     .where(and(eq(users.id, agent.userId), eq(users.organizationId, org)))
     .limit(1)
   const basePct = agentRow?.baseCommission ?? 0
-  const baseCommission = Math.round((total * basePct) / 100)
+  const baseCommission = Math.round((total * basePct) / 10000)
   const bonusTotal = prepared.reduce(
-    (sum, l) => sum + l.commissionBonus * l.quantity,
+    (sum, l) => sum + Math.round((l.lineTotal * l.commissionBonus) / 10000),
     0,
   )
   const commissionAmount = baseCommission + bonusTotal

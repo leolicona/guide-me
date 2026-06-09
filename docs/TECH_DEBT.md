@@ -51,18 +51,26 @@ needed (the column shipped with migration `0023`).
 
 **Status:** Accepted MVP simplifications in the *Agent continuous cash balance with cash
 drops* feature (`src/routes/cash/handler.ts`). The balance is **derived live** from events on
-every read — correct, but with the trade-offs below.
+every read — correct, but with the trade-offs below. US-AG12 now presents the agent's `/me`
+breakdown **shift-scoped** (only events since the last confirmed drop, with a `carry_forward`
+balancing term); the headline `balance` is still the authoritative all-time figure.
 
 - **(a) Settled history is not frozen.** An agent can add/delete an expense or have a folio
   cancelled *behind* an already-confirmed cash drop; because the balance is recomputed from
   the full event history each read, this silently moves a number the admin already settled
   against. MVP treats the live balance as the single truth (a deletion simply raises the
-  balance and is visible). *Action:* freeze events behind the last confirmed drop (a
+  balance and is visible). The US-AG12 shift view *softens the symptom* — such pre-anchor
+  movement now lands in `carry_forward` rather than mis-stating the current shift — but the
+  settled number itself still moves. *Action:* freeze events behind the last confirmed drop (a
   settlement watermark) before allowing edits, or refuse edits to pre-watermark rows.
 - **(b) Unbounded derivation sums.** `deriveBalance` re-aggregates **all** of an agent's
-  folios / expenses / drops / payouts on every read — O(history), growing forever. *Action:*
-  carry a `balance_after` snapshot on each confirmed drop and sum only events since the last
-  confirmed drop (snapshot-carry), bounding the per-read work.
+  folios / expenses / drops / payouts on every read — O(history), growing forever. The
+  US-AG12 shift breakdown (`deriveShiftBreakdown`) does sum only events since the anchor
+  drop, but it runs **in addition to** `deriveBalance` (which still derives the authoritative
+  balance over all history) plus an anchor lookup — so `GET /me` now does *more* per-read
+  work, not less. *Action:* carry a `balance_after` snapshot on each confirmed drop; the
+  authoritative balance reads the snapshot + since-anchor sums (bounding the per-read work),
+  and `carry_forward` is read directly from the snapshot instead of as a balancing term.
 - **(c) No adjust-amount-on-confirm.** A drop is terminal once reviewed; a wrong amount must
   be **rejected and re-registered** by the agent (no admin "confirm 480 instead of 500").
   *Action:* allow the admin to confirm with an adjusted `amount` (+ audit of the delta),
@@ -71,12 +79,24 @@ every read — correct, but with the trade-offs below.
   (one `deriveBalance` — itself several queries — per agent). Fine at MVP agent counts.
   *Action:* replace with a single grouped query (folios/expenses/drops/payouts `GROUP BY
   agent_id` with the cancellation/clawback/payment-method predicates) joined to org agents.
+- **(e) Coarse shift attribution (US-AG12).** The shift breakdown counts events strictly
+  after the anchor drop's `created_at` and folds everything else into `carry_forward`. Two
+  cases therefore land in `carry_forward` rather than the shift they arguably belong to: a
+  **booking whose `amount_paid` grows across a confirmed drop** (the folio is attributed
+  whole, by its `created_at`, not split at the drop), and **out-of-order confirmation of
+  multiple pending drops** (the anchor is the latest drop by `created_at`, which may not be
+  the most recently *confirmed* one). The displayed `balance` is always correct — `carry_forward`
+  reconciles by construction — only the collected-vs-carried split can be coarse. *Action:*
+  attribute partial collections by payment event and anchor on the settlement timeline if
+  finer per-shift reporting is ever needed.
 
-**Why accepted:** all four are scale/edge-case refinements, not correctness bugs — the balance
-math (`cash_collected − commissions − expenses − confirmed_drops + payouts`), the drop machine,
-and multitenancy isolation are fully correct and covered by tests
+**Why accepted:** all are scale/edge-case refinements, not correctness bugs — the balance math
+(`cash_collected − commissions − expenses − confirmed_drops + payouts`), the shift breakdown's
+reconciliation invariant (`balance = carry_forward + collected − commissions − expenses +
+payouts`), the drop machine, and multitenancy isolation are fully correct and covered by tests
 (`test/cash/agent-balance-cash-drops.test.ts`). Each is invisible until either history grows
-large (b, d) or an admin settles then an agent back-edits (a, c).
+large (b, d), an admin settles then an agent back-edits (a, c), or an agent runs partial
+bookings / drops are confirmed out of order (e).
 
 ## 11. Client Cancellation Email Not Sent (US-C03) — ✅ RESOLVED
 

@@ -83,8 +83,8 @@ export const services = sqliteTable('services', {
   basePrice: integer('base_price').notNull(),
   minimumPrice: integer('minimum_price').notNull(),
   defaultCapacity: integer('default_capacity').notNull(),
-  // Per-service commission bonus (minor units) added per sold pass on top of the agent's
-  // base % — see US-A12 / docs/cash-drops/agent-balance-cash-drops.spec.md.
+  // Per-service commission bonus in basis points (500 = 5%), stacked on the agent's base %
+  // and applied to this service's line total — see US-A12 / docs/commissions/commissions.spec.md.
   commissionBonus: integer('commission_bonus').notNull().default(0),
   status: text('status', { enum: ['active', 'inactive'] })
     .notNull()

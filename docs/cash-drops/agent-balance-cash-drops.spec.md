@@ -20,6 +20,21 @@ settlement event: the agent registers "I'm handing you $X"; the admin **confirms
 view is the list of **outstanding balances** per agent (the company's cash exposure) and the
 queue of **pending drops** to confirm.
 
+**Shift-scoped breakdown (the agent's daily view, US-AG12).** The headline `balance` the
+agent sees is always the **full perpetual figure above** — the exact physical cash they are
+holding right now. But the *breakdown* that explains it (cash collected, commissions,
+expenses) is scoped to the **current shift**: only the events **since the agent's last
+confirmed cash drop**. Whatever balance the previous drop left behind (if it didn't bring the
+agent to zero) appears as a single **carry-forward** line, so the agent reads:
+
+```
+balance = carry_forward + collected_since − commissions_since − expenses_since (+ payouts_since)
+```
+
+The carry-forward absorbs all prior history into one number, keeping the daily view focused on
+the shift in progress without ever changing the true balance. With **no confirmed drop yet**,
+`carry_forward = 0` and "the shift" is simply the agent's whole history.
+
 **User Stories:** US-AG12 (see my running balance), US-AG13 (register operating expenses),
 US-AG14 (register a cash drop / hand-in), US-AG23 (auto-deduct commissions), US-AG24 (card sales credit), US-AG25 (payment methods), US-A19 (admin confirms cash drops), US-A25 (payouts for negative balances), US-A26 (clawbacks on cancellation).
 
@@ -91,6 +106,17 @@ organizations(id)` and carries it directly for org-leading indexes (Rule 6).
 - Only a **confirmed** drop reduces the balance. A `pending` drop is cash physically handed
   over but **not yet acknowledged** by the admin — the agent is still liable for it, so it
   is shown separately (`pending_drops_total`), not netted out of the balance.
+- **The balance value is all-time; only its breakdown is shift-scoped.** The agent's `GET /me`
+  returns the same perpetual `balance` regardless of presentation. The breakdown components
+  (`collected`, `commissions`, `expense_total`) count **only events since the anchor** — the
+  agent's **most recent confirmed drop** (ordered by `created_at`). **`carry_forward`** is the
+  balance the agent carried *into* the current shift — intuitively the residual the anchor drop
+  left behind (≈ `balance_before − amount`), but computed as the **balancing term**
+  `carry_forward = balance − (collected − commissions − expense_total + payouts_since)` so the
+  displayed breakdown **always reconciles** to the authoritative all-time `balance`, even when a
+  pre-anchor folio is cancelled later (that adjustment correctly lands in `carry_forward`, not
+  the current shift). When there is no confirmed drop, the anchor is undefined,
+  `carry_forward = 0`, and the breakdown spans the agent's full history.
 
 ### `agent_expenses` (new table) — operating expenses
 
@@ -140,7 +166,23 @@ CREATE INDEX cash_drops_org_agent_idx  ON cash_drops (organization_id, agent_id)
    `cash_collected = Σ folios.amount_paid` (only `payment_method='cash'` and `status != 'cancelled'`);
    `commissions = Σ folios.commission_amount` (for all payment methods, `status != 'cancelled'` or clawback=false);
    `expenses = Σ agent_expenses.amount`; `confirmed_drops = Σ cash_drops.amount`.
-   All scoped to `(organization_id, agent_id)`. **No day boundary.**
+   All scoped to `(organization_id, agent_id)`, **all-time — no day boundary.** This is the
+   authoritative `balance` value (the physical cash held); the shift-scoped breakdown in Rule 1a
+   only re-expresses it, never changes it.
+1a. **Shift-scoped breakdown (US-AG12).** The `GET /me` breakdown is scoped to the **anchor** —
+   the agent's most recent **confirmed** drop by `created_at`:
+   - `collected`, `commissions`, `expense_total` sum **only** folios/expenses created **after**
+     `anchor.created_at` (full history when no anchor);
+   - `carry_forward = balance − (collected − commissions − expense_total + payouts_since)` — the
+     balance carried into the current shift (≈ the anchor's `balance_before − amount`), computed
+     as the balancing term so the breakdown **always reconciles** to the authoritative `balance`
+     of Rule 1; `0` when no confirmed drop exists;
+   - `pending_drops_total` is unchanged (Σ of all `pending` drops, cross-shift).
+   The invariant `balance == carry_forward + collected − commissions − expense_total
+   (+ payouts_since)` holds by construction. *(Edge cases — bookings whose `amount_paid` grows
+   across a confirmed drop, and out-of-order confirmation of multiple pending drops — fold into
+   `carry_forward` rather than mis-stating the shift; finer attribution is a deferred refinement,
+   see TECH_DEBT.)*
 2. **The balance may be negative** — a cancellation after a confirmed drop, or an agent who
    handed in more than they held, is a valid, meaningful state (the company owes the agent /
    a reconciliation gap), shown plainly (accent/error color in UI).
@@ -179,26 +221,42 @@ All endpoints **auth-required**. A suspended caller is stopped by `authMiddlewar
 
 ### `GET /api/cash/me` — agent running balance (US-AG12)
 
+The headline `balance` is the agent's full perpetual figure (the physical cash held); the
+breakdown (`carry_forward`, `collected`, `commissions`, `expense_total`) is scoped to the
+**current shift** — everything since the agent's last confirmed drop. `last_drop` identifies
+the anchor that defines the shift (omitted/`null` when no confirmed drop exists yet).
+
 ```json
 {
   "balance": {
+    "carry_forward": 13000,
     "collected": 845000,
+    "commissions": 84500,
     "expense_total": 32000,
-    "confirmed_drops_total": 500000,
     "pending_drops_total": 0,
-    "balance": 313000,
+    "balance": 741500,
+    "last_drop": {
+      "id": "dr_1", "amount": 500000, "balance_before": 513000, "confirmed_at": 1750100000,
+      "created_at": 1750090000
+    },
     "expenses": [
       { "id": "ex_1", "description": "Gasoline", "amount": 32000, "created_at": 1750000000 }
     ],
     "drops": [
-      { "id": "dr_1", "amount": 500000, "balance_before": 813000, "status": "confirmed",
+      { "id": "dr_1", "amount": 500000, "balance_before": 513000, "status": "confirmed",
         "note": null, "reviewed_at": 1750100000, "review_note": null, "created_at": 1750090000 }
     ]
   }
 }
 ```
-`balance = collected − expense_total − confirmed_drops_total`. `drops` lists the agent's
-recent drops (all statuses) for context.
+`balance = carry_forward + collected − commissions − expense_total (+ payouts_since)` and is
+identical to the all-time perpetual derivation (Rule 1). `carry_forward` is the anchor drop's
+`balance_before − amount` (here `513000 − 500000 = 13000` — the previous drop left 13000
+behind, so it surfaces instead of resetting the view to zero). `collected`/`commissions`/
+`expense_total` count only events since `last_drop.created_at`; `expenses` lists the
+current-shift expenses; `drops` lists the agent's recent drops (all statuses) for context.
+With no confirmed drop, `carry_forward = 0`, `last_drop = null`, and the breakdown spans the
+agent's whole history.
 
 ### `POST /api/cash/me/expenses` — register an expense (US-AG13)
 
@@ -273,105 +331,118 @@ reviewed_by, reviewed_at, review_note } }`. `409` if the drop is not `pending`.
 
 ## Scenarios
 
-### US-AG12 — Running balance
+### US-AG12 — Running balance (shift-scoped breakdown)
 
-#### Scenario 1 — Balance derives from collected − expenses − confirmed drops
-**Given** an `agent` of `org_a` with non-cancelled folios totalling `amount_paid = 845000`,
-one expense (`Gasoline`, 32000), and one **confirmed** drop of 500000
+#### Scenario 1 — Breakdown is scoped to the current shift, with a carry-forward line
+**Given** an `agent` of `org_a` whose most recent **confirmed** drop was registered with
+`balance_before = 513000`, `amount = 500000` (the anchor — it left 13000 behind), **and since
+that drop** has non-cancelled cash folios totalling `amount_paid = 845000`, commissions of
+84500, and one expense (`Gasoline`, 32000)
 **When** `GET /api/cash/me`
-**Then** Status `200`; `collected = 845000`; `expense_total = 32000`;
-`confirmed_drops_total = 500000`; `pending_drops_total = 0`; `balance = 313000`.
+**Then** Status `200`; `carry_forward = 13000`; `collected = 845000`; `commissions = 84500`;
+`expense_total = 32000`; `pending_drops_total = 0`; `balance = 741500`
+(`13000 + 845000 − 84500 − 32000`); `last_drop` references the anchor.
 
-#### Scenario 2 — A pending drop does not change the balance
-**Given** the same agent with an additional **pending** drop of 100000
+#### Scenario 2 — No confirmed drop yet → carry-forward is zero, breakdown spans all history
+**Given** a fresh `agent` with cash folios totalling 200000, commissions 20000, no confirmed
+drop
 **When** `GET /api/cash/me`
-**Then** `confirmed_drops_total = 500000` (unchanged); `pending_drops_total = 100000`;
-`balance = 313000` (a pending drop is reported, not netted out).
+**Then** `carry_forward = 0`; `last_drop = null`; `collected = 200000`; `commissions = 20000`;
+`balance = 180000` (the whole history is the current shift).
 
-#### Scenario 3 — Cancelled folios are excluded; balance can go negative
-**Given** an agent with a confirmed drop of 200000 and a single folio (200000) that is then
-**cancelled**
+#### Scenario 3 — A pending drop does not change the balance
+**Given** the Scenario 1 agent with an additional **pending** drop of 100000
 **When** `GET /api/cash/me`
-**Then** `collected = 0`; `balance = −200000` (the agent was credited for cash since
-returned/cancelled — a valid reconciliation signal).
+**Then** `pending_drops_total = 100000`; `balance = 741500` (unchanged); the breakdown lines
+are unchanged (a pending drop is reported, not netted out and not a new anchor).
+
+#### Scenario 4 — Cancelling a pre-anchor folio is absorbed by carry-forward; balance can go negative
+**Given** an agent whose anchor drop had `balance_before = 200000`, `amount = 200000`
+(carry-forward 0), whose only collection was a **pre-anchor** folio of 200000 that is then
+**cancelled**, and no activity since the drop
+**When** `GET /api/cash/me`
+**Then** `collected = 0` (nothing this shift); `carry_forward = −200000` (the prior-shift
+cancellation lands here, not in the current shift); `balance = −200000` — a valid
+reconciliation signal that the company owes the agent — and the breakdown still reconciles.
 
 ### US-AG13 — Operating expenses
 
-#### Scenario 4 — Register and delete an expense
+#### Scenario 5 — Register and delete an expense
 **When** the agent `POST /api/cash/me/expenses { "description": "Gasoline", "amount": 32000 }`
 **Then** `201`; a later `GET /me` shows `expense_total = 32000` and `balance` reduced by it.
 **When** the agent `DELETE …/me/expenses/:id`
 **Then** `200`; the expense is gone; `balance` rises back.
 
-#### Scenario 5 — Invalid expense → 400
+#### Scenario 6 — Invalid expense → 400
 **When** `POST …/me/expenses` with `amount = 0`, negative/non-integer, or empty `description`
 **Then** `400 VALIDATION_ERROR`; nothing written.
 
 ### US-AG14 — Cash drops
 
-#### Scenario 6 — Register a drop snapshots the balance and is pending
+#### Scenario 7 — Register a drop snapshots the balance and is pending
 **Given** an agent whose live balance is 813000
 **When** `POST /api/cash/me/drops { "amount": 500000 }`
 **Then** `201`; the drop has `status = "pending"`, `balance_before = 813000`,
 `amount = 500000`; the balance is **still** 813000 (unconfirmed).
 
-#### Scenario 7 — Cancel a pending drop
+#### Scenario 8 — Cancel a pending drop
 **Given** a `pending` drop
 **When** the agent `DELETE …/me/drops/:id`
 **Then** `200`; the drop is removed. A `confirmed`/`rejected` drop → `409`; another agent's
 / unknown drop → `404`.
 
-#### Scenario 8 — Invalid drop → 400
+#### Scenario 9 — Invalid drop → 400
 **When** `POST …/me/drops` with `amount = 0` or negative/non-integer
 **Then** `400 VALIDATION_ERROR`.
 
 ### US-A19 — Admin confirms receipt & sees exposure
 
-#### Scenario 9 — Admin lists outstanding balances in their org
+#### Scenario 10 — Admin lists outstanding balances in their org
 **Given** two `org_a` agents with positive balances and an `org_b` agent with one too
 **When** the `org_a` admin `GET /api/cash/balances`
 **Then** `200`; only `org_a` agents appear, each with `collected`/`expense_total`/
 `confirmed_drops_total`/`balance`/`pending_drops_total`; ordered by `balance` desc; `org_b`
 absent.
 
-#### Scenario 10 — Admin lists and reads the pending drops queue
+#### Scenario 11 — Admin lists and reads the pending drops queue
 **Given** pending drops in `org_a`
 **When** the admin `GET /api/cash/drops` (defaults to `pending`) and `GET /api/cash/drops/:id`
 **Then** `200`; each drop with its agent, `amount`, `balance_before`, `note`; detail returns
 the full drop + agent.
 
-#### Scenario 11 — Admin confirms a drop → balance drops
-**Given** an agent with `balance = 813000` and a `pending` drop of 500000
+#### Scenario 12 — Admin confirms a drop → balance drops, drop becomes the new anchor
+**Given** an agent with `balance = 813000` and a `pending` drop of 500000 (`balance_before = 813000`)
 **When** `POST /api/cash/drops/:id/review { "decision": "confirmed" }`
 **Then** `200`; `status = "confirmed"`, `reviewed_by = admin`, `reviewed_at` set; the
-agent's `GET /me` now shows `confirmed_drops_total = 500000` and `balance = 313000`.
+agent's `GET /me` now anchors on this drop — `last_drop` is it, `carry_forward = 313000`
+(`813000 − 500000`), the shift breakdown resets to zero, and `balance = 313000`.
 
-#### Scenario 12 — Admin rejects a drop with a note → balance unchanged
+#### Scenario 13 — Admin rejects a drop with a note → balance unchanged
 **When** `POST …/review { "decision": "rejected", "note": "Short by 200." }`
 **Then** `200`; `status = "rejected"`; `review_note` stored; the balance is **unchanged**
 (a rejected drop never reduces it).
 
-#### Scenario 13 — Reviewing a non-pending drop → 409
+#### Scenario 14 — Reviewing a non-pending drop → 409
 **When** the admin reviews a drop already `confirmed`/`rejected`
 **Then** `409 CONFLICT`; status unchanged.
 
 ### Roles
 
-#### Scenario 14 — Wrong role → 403
+#### Scenario 15 — Wrong role → 403
 **Given** an `agent` calling an admin route (`GET /api/cash/balances`,
 `GET/POST …/drops…`), **or** an `admin` calling a `/me/*` route
 **Then** `403 FORBIDDEN`.
 
 ### Multitenancy isolation (required — `seedTwoOrgs`)
 
-#### Scenario 15 — B3/B4: cross-org drops/balances invisible and unreachable
+#### Scenario 16 — B3/B4: cross-org drops/balances invisible and unreachable
 **Given** drops/expenses exist in both `org_a` and `org_b`
 **When** the `org_a` admin lists balances/drops, reads/reviews a drop by id, and an `org_a`
 agent reads `/me`
 **Then** only `org_a` rows ever appear; reading/reviewing an `org_b` drop by id →
 `404 NOT_FOUND`; an agent never sees another agent's data.
 
-#### Scenario 16 — B1: injected org/agent/status/snapshot are ignored
+#### Scenario 17 — B1: injected org/agent/status/snapshot are ignored
 **Given** an `org_a` agent registers an expense / a drop with a body that also includes
 `"organizationId": "org_b"`, `"agent_id": "other"`, `"status": "confirmed"`, or a forged
 `balance_before`
@@ -395,14 +466,17 @@ snapshot.
 - [ ] New `src/routes/cash/` (`index.ts`, `handler.ts`, `schema.ts`) mounted at `/api/cash`
       with `authMiddleware` on `*` and per-route `requireRole` (`/me/*` agent, balances/drops
       admin); `/me/*` before any `/:id`
-- [ ] Balance derived server-side (`collected − expenses − confirmed_drops`); pending drops
-      reported, not netted; balance may be negative; client never sends totals/`balance_before`
+- [ ] Balance derived server-side (all-time `collected − commissions − expenses −
+      confirmed_drops + payouts`); agent `GET /me` breakdown **shift-scoped** to the last
+      confirmed drop with a reconciling `carry_forward` line and `last_drop` anchor (admin
+      `/balances` stays all-time exposure); pending drops reported, not netted; balance may be
+      negative; client never sends totals/`balance_before`
 - [ ] Drop machine `pending → confirmed | rejected` (admin review, guarded); agent cancels
       only while `pending`; non-`pending` cancel/review → `409`
 - [ ] All reads/writes filter `organization_id`; `/me/*` filter `agent_id = self`;
       org/agent/status/snapshot never from the body (Rules 1 & 3); **no new `ErrorCode`**
-- [ ] Scenarios 1–14 covered by `test/cash/agent-balance-cash-drops.test.ts`
-- [ ] Multitenancy Scenarios 15–16 (B1/B3/B4) covered using `seedTwoOrgs`
+- [ ] Scenarios 1–15 covered by `test/cash/agent-balance-cash-drops.test.ts`
+- [ ] Multitenancy Scenarios 16–17 (B1/B3/B4) covered using `seedTwoOrgs`
 - [ ] Frontend: `cashService`, `features/cash/` (types/hooks), an agent **Balance** page
       (running balance + expense add/delete + register-drop), and an admin surface
       (**Balances** list + **Drops** review queue with confirm/reject); agent-only **Balance**
@@ -411,4 +485,6 @@ snapshot.
 - [ ] `docs/SPEC.md` MUST-HAVE item **Agent continuous cash balance with cash drops** ticked
 - [ ] `docs/TECH_DEBT.md`: mark the daily cash-drawer feature **superseded**; note the
       deferred refinements (settled-history immutability, unbounded balance sum → snapshot
-      carry, adjust-amount-on-confirm)
+      carry, adjust-amount-on-confirm, and finer shift attribution — bookings whose
+      `amount_paid` grows across a confirmed drop and out-of-order confirmation currently fold
+      into `carry_forward`)

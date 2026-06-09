@@ -16,7 +16,8 @@ export type ServicesContext = Context<{
   Variables: AppVariables
 }>
 
-// --- Serializers: DB columns → API shape (snake_case money/capacity fields) ---
+// --- Serializers: DB columns → API shape (snake_case money/capacity fields).
+// commission_bonus is in basis points (500 = 5%), not money — see services schema. ---
 
 interface ServiceRow {
   id: string

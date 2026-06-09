@@ -3,12 +3,16 @@ import { env, SELF } from 'cloudflare:test'
 import { seedUser, seedTwoOrgs, clearTenancyDb } from '../helpers/tenancy'
 import { buildFakeJwt } from '../helpers/jwt'
 
-// Agent Continuous Cash Balance with Cash Drops — US-AG12, AG13, AG14, A19.
-// Spec: docs/cash-drops/agent-balance-cash-drops.spec.md (Scenarios 1–16).
+// Agent Continuous Cash Balance with Cash Drops — US-AG12, AG13, AG14, A19, AG23/24, A25/26.
+// Spec: docs/cash-drops/agent-balance-cash-drops.spec.md
 //
-// The running balance is server-derived from events (collected − expenses − confirmed
-// drops), never stored. A cash drop is the settlement event (pending → confirmed | rejected).
-// Multitenancy isolation (15–16) uses the shared `seedTwoOrgs` helper.
+// The headline running balance is server-derived from events (collected − commissions −
+// expenses − confirmed drops + payouts), never stored. The AGENT'S /me breakdown is
+// SHIFT-SCOPED: carry_forward + (collected − commissions − expenses) counts only events since
+// the agent's last confirmed drop (the anchor); carry_forward is the balancing term that
+// reconciles the breakdown to the authoritative all-time `balance`. A cash drop is the
+// settlement event (pending → confirmed | rejected). The admin /balances view stays all-time
+// (company exposure). Multitenancy isolation uses the shared `seedTwoOrgs` helper.
 
 const ADMIN_EMAIL = 'admin@empresa.com'
 const AGENT_EMAIL = 'agent@empresa.com'
@@ -18,6 +22,7 @@ const auth = (email: string) => ({ Cookie: `gm_access=${buildFakeJwt(email)}` })
 const jsonAuth = (email: string) => ({ ...auth(email), 'Content-Type': 'application/json' })
 
 const CASH = 'http://api.local/api/cash'
+const nowSec = () => Math.floor(Date.now() / 1000)
 
 // --- Local seeders (raw D1) ------------------------------------------------
 
@@ -29,6 +34,7 @@ interface SeedFolioOptions {
   paymentMethod?: 'cash' | 'card'
   commissionAmount?: number
   cancellationClawback?: boolean
+  createdAt?: number
 }
 
 const seedFolio = async ({
@@ -39,9 +45,10 @@ const seedFolio = async ({
   paymentMethod = 'cash',
   commissionAmount = 0,
   cancellationClawback = false,
+  createdAt,
 }: SeedFolioOptions): Promise<string> => {
   const id = crypto.randomUUID()
-  const ts = Math.floor(Date.now() / 1000)
+  const ts = createdAt ?? nowSec()
   await env.DB.prepare(
     `INSERT INTO folios
        (id, organization_id, agent_id, customer_name, status, payment_method,
@@ -75,7 +82,7 @@ const seedExpense = async (opts: {
   createdAt?: number
 }): Promise<string> => {
   const id = crypto.randomUUID()
-  const ts = opts.createdAt ?? Math.floor(Date.now() / 1000)
+  const ts = opts.createdAt ?? nowSec()
   await env.DB.prepare(
     `INSERT INTO agent_expenses (id, organization_id, agent_id, description, amount, created_at)
      VALUES (?, ?, ?, ?, ?, ?)`,
@@ -98,7 +105,7 @@ const seedDrop = async (opts: {
   createdAt?: number
 }): Promise<string> => {
   const id = crypto.randomUUID()
-  const ts = opts.createdAt ?? Math.floor(Date.now() / 1000)
+  const ts = opts.createdAt ?? nowSec()
   await env.DB.prepare(
     `INSERT INTO cash_drops
        (id, organization_id, agent_id, amount, balance_before, status, note,
@@ -225,6 +232,28 @@ const seedOrgWithStaff = async () => {
   return { organizationId, adminId, agentId }
 }
 
+// A standard "current shift" fixture: a prior shift settled by a confirmed anchor drop that
+// left `carry_forward` behind, then fresh activity since. Returns the anchor's id.
+//   pre-drop cash 513000 → balance 513000 at the drop → drop 500000 confirmed → carry 13000
+//   since: cash 845000 (commission 84500) + expense 32000 → balance 741500
+const seedShiftWithAnchor = async (organizationId: string, adminId: string, agentId: string) => {
+  const t = nowSec()
+  await seedFolio({ organizationId, agentId, amountPaid: 513000, createdAt: t - 200 })
+  const anchorId = await seedDrop({
+    organizationId,
+    agentId,
+    amount: 500000,
+    balanceBefore: 513000,
+    status: 'confirmed',
+    reviewedBy: adminId,
+    reviewedAt: t - 100,
+    createdAt: t - 100,
+  })
+  await seedFolio({ organizationId, agentId, amountPaid: 845000, commissionAmount: 84500, createdAt: t })
+  await seedExpense({ organizationId, agentId, description: 'Gasoline', amount: 32000, createdAt: t })
+  return anchorId
+}
+
 beforeEach(async () => {
   await env.DB.exec('DELETE FROM payouts')
   await env.DB.exec('DELETE FROM cash_drops')
@@ -242,72 +271,86 @@ afterEach(() => vi.restoreAllMocks())
 
 describe('Agent Continuous Cash Balance with Cash Drops', () => {
   // -------------------------------------------------------------------------
-  // US-AG12 — Running balance
+  // US-AG12 — Running balance (shift-scoped breakdown)
   // -------------------------------------------------------------------------
-  it('Scenario 1 — balance = collected − expenses − confirmed drops', async () => {
+  it('Scenario 1 — breakdown is scoped to the current shift, with a carry-forward line', async () => {
     const { organizationId, adminId, agentId } = await seedOrgWithStaff()
-    await seedFolio({ organizationId, agentId, amountPaid: 845000 })
-    await seedExpense({ organizationId, agentId, description: 'Gasoline', amount: 32000 })
-    await seedDrop({
-      organizationId,
-      agentId,
-      amount: 500000,
-      balanceBefore: 813000,
-      status: 'confirmed',
-      reviewedBy: adminId,
-      reviewedAt: Math.floor(Date.now() / 1000),
-    })
+    const anchorId = await seedShiftWithAnchor(organizationId, adminId, agentId)
 
     const { status, json } = await getMyBalance(AGENT_EMAIL)
     expect(status).toBe(200)
-    expect(json.balance.cash_collected).toBe(845000)
+    expect(json.balance.carry_forward).toBe(13000) // 513000 − 500000 left by the anchor
+    expect(json.balance.cash_collected).toBe(845000) // since the anchor only
+    expect(json.balance.commission_total).toBe(84500)
     expect(json.balance.expense_total).toBe(32000)
-    expect(json.balance.confirmed_drops_total).toBe(500000)
     expect(json.balance.pending_drops_total).toBe(0)
-    expect(json.balance.balance).toBe(313000)
-    expect(json.balance.expenses).toHaveLength(1)
+    expect(json.balance.balance).toBe(741500) // 13000 + 845000 − 84500 − 32000
+    // The breakdown reconciles to the authoritative all-time balance.
+    expect(
+      json.balance.carry_forward +
+        json.balance.cash_collected -
+        json.balance.commission_total -
+        json.balance.expense_total,
+    ).toBe(json.balance.balance)
+    // last_drop identifies the anchor; expenses/drops are the shift's.
+    expect(json.balance.last_drop.id).toBe(anchorId)
+    expect(json.balance.last_drop.amount).toBe(500000)
+    expect(json.balance.last_drop.balance_before).toBe(513000)
+    expect(json.balance.expenses).toHaveLength(1) // only the post-anchor expense
     expect(json.balance.drops).toHaveLength(1)
   })
 
-  it('Scenario 2 — a pending drop is reported, not netted out', async () => {
+  it('Scenario 2 — no confirmed drop yet → carry-forward is zero, breakdown spans all history', async () => {
+    const { organizationId, agentId } = await seedOrgWithStaff()
+    await seedFolio({ organizationId, agentId, amountPaid: 200000, commissionAmount: 20000 })
+
+    const { json } = await getMyBalance(AGENT_EMAIL)
+    expect(json.balance.carry_forward).toBe(0)
+    expect(json.balance.last_drop).toBeNull()
+    expect(json.balance.cash_collected).toBe(200000)
+    expect(json.balance.commission_total).toBe(20000)
+    expect(json.balance.balance).toBe(180000) // whole history is the current shift
+  })
+
+  it('Scenario 3 — a pending drop does not change the balance, and is not a new anchor', async () => {
     const { organizationId, adminId, agentId } = await seedOrgWithStaff()
-    await seedFolio({ organizationId, agentId, amountPaid: 845000 })
-    await seedExpense({ organizationId, agentId, amount: 32000 })
-    await seedDrop({
-      organizationId,
-      agentId,
-      amount: 500000,
-      status: 'confirmed',
-      reviewedBy: adminId,
-    })
+    await seedShiftWithAnchor(organizationId, adminId, agentId)
+    // A pending drop registered after the anchor: reported, not netted, not anchoring.
     await seedDrop({ organizationId, agentId, amount: 100000, status: 'pending' })
 
     const { json } = await getMyBalance(AGENT_EMAIL)
-    expect(json.balance.confirmed_drops_total).toBe(500000)
     expect(json.balance.pending_drops_total).toBe(100000)
-    expect(json.balance.balance).toBe(313000)
+    expect(json.balance.balance).toBe(741500) // unchanged by the pending drop
+    expect(json.balance.carry_forward).toBe(13000) // anchor is still the confirmed drop
+    expect(json.balance.cash_collected).toBe(845000)
   })
 
-  it('Scenario 3 — cancelled folios excluded; balance can go negative', async () => {
+  it('Scenario 4 — cancelling a pre-anchor folio is absorbed by carry-forward; balance can go negative', async () => {
     const { organizationId, adminId, agentId } = await seedOrgWithStaff()
-    await seedFolio({ organizationId, agentId, status: 'cancelled', amountPaid: 200000 })
+    const t = nowSec()
+    // The only collection is a pre-anchor folio that is then cancelled; nothing since the drop.
+    await seedFolio({ organizationId, agentId, status: 'cancelled', amountPaid: 200000, createdAt: t - 200 })
     await seedDrop({
       organizationId,
       agentId,
       amount: 200000,
+      balanceBefore: 200000,
       status: 'confirmed',
       reviewedBy: adminId,
+      reviewedAt: t - 100,
+      createdAt: t - 100,
     })
 
     const { json } = await getMyBalance(AGENT_EMAIL)
-    expect(json.balance.cash_collected).toBe(0)
-    expect(json.balance.balance).toBe(-200000)
+    expect(json.balance.cash_collected).toBe(0) // nothing this shift
+    expect(json.balance.carry_forward).toBe(-200000) // prior-shift cancellation lands here
+    expect(json.balance.balance).toBe(-200000) // company owes the agent — valid signal
   })
 
   // -------------------------------------------------------------------------
   // US-AG13 — Operating expenses
   // -------------------------------------------------------------------------
-  it('Scenario 4 — register and delete an expense moves the balance', async () => {
+  it('Scenario 5 — register and delete an expense moves the balance', async () => {
     const { organizationId, agentId } = await seedOrgWithStaff()
     await seedFolio({ organizationId, agentId, amountPaid: 100000 })
 
@@ -333,7 +376,7 @@ describe('Agent Continuous Cash Balance with Cash Drops', () => {
     expect(await countExpenses()).toBe(0)
   })
 
-  it('Scenario 5 — invalid expense → 400, nothing written', async () => {
+  it('Scenario 6 — invalid expense → 400, nothing written', async () => {
     await seedOrgWithStaff()
 
     for (const body of [
@@ -353,7 +396,7 @@ describe('Agent Continuous Cash Balance with Cash Drops', () => {
   // -------------------------------------------------------------------------
   // US-AG14 — Cash drops
   // -------------------------------------------------------------------------
-  it('Scenario 6 — creating a drop snapshots balance_before, stays pending, balance unchanged', async () => {
+  it('Scenario 7 — creating a drop snapshots balance_before, stays pending, balance unchanged', async () => {
     const { organizationId, agentId } = await seedOrgWithStaff()
     await seedFolio({ organizationId, agentId, amountPaid: 813000 })
 
@@ -366,10 +409,12 @@ describe('Agent Continuous Cash Balance with Cash Drops', () => {
     const after = await getMyBalance(AGENT_EMAIL)
     expect(after.json.balance.balance).toBe(813000)
     expect(after.json.balance.pending_drops_total).toBe(500000)
-    expect(after.json.balance.confirmed_drops_total).toBe(0)
+    // A pending drop is not an anchor: still no confirmed drop, so carry_forward is 0.
+    expect(after.json.balance.carry_forward).toBe(0)
+    expect(after.json.balance.last_drop).toBeNull()
   })
 
-  it('Scenario 7 — cancel a pending drop (200); confirmed/rejected → 409; other-agent/unknown → 404', async () => {
+  it('Scenario 8 — cancel a pending drop (200); confirmed/rejected → 409; other-agent/unknown → 404', async () => {
     const { organizationId, adminId, agentId } = await seedOrgWithStaff()
     const { userId: agent2Id } = await seedUser({ email: AGENT2_EMAIL, role: 'agent', organizationId })
 
@@ -410,7 +455,7 @@ describe('Agent Continuous Cash Balance with Cash Drops', () => {
     expect(await countDrops()).toBe(3)
   })
 
-  it('Scenario 8 — invalid drop → 400', async () => {
+  it('Scenario 9 — invalid drop → 400', async () => {
     await seedOrgWithStaff()
     for (const body of [{ amount: 0 }, { amount: -1 }, { amount: 10.5 }, {}]) {
       const res = await createDrop(AGENT_EMAIL, body)
@@ -421,9 +466,9 @@ describe('Agent Continuous Cash Balance with Cash Drops', () => {
   })
 
   // -------------------------------------------------------------------------
-  // US-A19 — Admin confirms receipt & sees exposure
+  // US-A19 — Admin confirms receipt & sees exposure (admin view stays all-time)
   // -------------------------------------------------------------------------
-  it('Scenario 9 — admin lists outstanding balances in their org, ordered, with pending rollup', async () => {
+  it('Scenario 10 — admin lists outstanding balances in their org, ordered, with pending rollup', async () => {
     const { organizationId, agentId } = await seedOrgWithStaff()
     const { userId: agent2Id } = await seedUser({ email: AGENT2_EMAIL, role: 'agent', organizationId })
 
@@ -451,7 +496,7 @@ describe('Agent Continuous Cash Balance with Cash Drops', () => {
     const { status, json } = await listBalances(ADMIN_EMAIL)
     expect(status).toBe(200)
     expect(json.balances).toHaveLength(2) // only org_a agents (admin excluded)
-    // ordered by balance desc
+    // ordered by balance desc — admin exposure is the all-time figure.
     expect(json.balances[0].agent.id).toBe(agentId)
     expect(json.balances[0].balance).toBe(313000)
     expect(json.balances[0].pending_drops_total).toBe(100000)
@@ -462,7 +507,7 @@ describe('Agent Continuous Cash Balance with Cash Drops', () => {
     expect(json.balances.map((b: any) => b.agent.id)).not.toContain(agentBId)
   })
 
-  it('Scenario 10 — admin lists and reads the pending drops queue (default pending)', async () => {
+  it('Scenario 11 — admin lists and reads the pending drops queue (default pending)', async () => {
     const { organizationId, agentId } = await seedOrgWithStaff()
     const older = await seedDrop({
       organizationId,
@@ -470,7 +515,7 @@ describe('Agent Continuous Cash Balance with Cash Drops', () => {
       amount: 100000,
       balanceBefore: 300000,
       note: 'first',
-      createdAt: Math.floor(Date.now() / 1000) - 100,
+      createdAt: nowSec() - 100,
     })
     const newer = await seedDrop({
       organizationId,
@@ -478,7 +523,7 @@ describe('Agent Continuous Cash Balance with Cash Drops', () => {
       amount: 200000,
       balanceBefore: 500000,
       note: 'End of Saturday route',
-      createdAt: Math.floor(Date.now() / 1000),
+      createdAt: nowSec(),
     })
     // A confirmed drop must be hidden by the default pending filter.
     await seedDrop({ organizationId, agentId, amount: 50000, status: 'confirmed' })
@@ -501,9 +546,10 @@ describe('Agent Continuous Cash Balance with Cash Drops', () => {
     expect(detail.json.drop.amount).toBe(200000)
   })
 
-  it('Scenario 11 — admin confirms a drop → balance drops; reviewed_by/at set', async () => {
+  it('Scenario 12 — admin confirms a drop → balance drops, drop becomes the new anchor', async () => {
     const { organizationId, adminId, agentId } = await seedOrgWithStaff()
-    await seedFolio({ organizationId, agentId, amountPaid: 813000 })
+    // The collected cash predates the drop, so confirming it settles that prior shift.
+    await seedFolio({ organizationId, agentId, amountPaid: 813000, createdAt: nowSec() - 100 })
     const dropId = await seedDrop({
       organizationId,
       agentId,
@@ -519,12 +565,15 @@ describe('Agent Continuous Cash Balance with Cash Drops', () => {
     expect(typeof review.json.drop.reviewed_at).toBe('number')
 
     const balance = await getMyBalance(AGENT_EMAIL)
-    expect(balance.json.balance.confirmed_drops_total).toBe(500000)
+    // The confirmed drop is now the anchor: the prior shift's cash folds into carry_forward.
+    expect(balance.json.balance.last_drop.id).toBe(dropId)
+    expect(balance.json.balance.carry_forward).toBe(313000) // 813000 − 500000
+    expect(balance.json.balance.cash_collected).toBe(0) // nothing since the drop
     expect(balance.json.balance.pending_drops_total).toBe(0)
     expect(balance.json.balance.balance).toBe(313000)
   })
 
-  it('Scenario 12 — admin rejects a drop with a note → balance unchanged, note stored', async () => {
+  it('Scenario 13 — admin rejects a drop with a note → balance unchanged, note stored', async () => {
     const { organizationId, agentId } = await seedOrgWithStaff()
     await seedFolio({ organizationId, agentId, amountPaid: 813000 })
     const dropId = await seedDrop({
@@ -548,11 +597,13 @@ describe('Agent Continuous Cash Balance with Cash Drops', () => {
     expect(row?.review_note).toBe('Short by 200.')
 
     const balance = await getMyBalance(AGENT_EMAIL)
-    expect(balance.json.balance.confirmed_drops_total).toBe(0)
+    // A rejected drop is not an anchor and never reduces the balance.
+    expect(balance.json.balance.carry_forward).toBe(0)
+    expect(balance.json.balance.last_drop).toBeNull()
     expect(balance.json.balance.balance).toBe(813000)
   })
 
-  it('Scenario 13 — reviewing a non-pending drop → 409', async () => {
+  it('Scenario 14 — reviewing a non-pending drop → 409', async () => {
     const { organizationId, adminId, agentId } = await seedOrgWithStaff()
     const confirmedId = await seedDrop({
       organizationId,
@@ -584,7 +635,7 @@ describe('Agent Continuous Cash Balance with Cash Drops', () => {
   // -------------------------------------------------------------------------
   // Roles
   // -------------------------------------------------------------------------
-  it('Scenario 14 — wrong role both ways → 403', async () => {
+  it('Scenario 15 — wrong role both ways → 403', async () => {
     const { organizationId, agentId } = await seedOrgWithStaff()
     const dropId = await seedDrop({ organizationId, agentId, amount: 100000 })
 
@@ -603,7 +654,7 @@ describe('Agent Continuous Cash Balance with Cash Drops', () => {
   // -------------------------------------------------------------------------
   // Multitenancy isolation (required — seedTwoOrgs)
   // -------------------------------------------------------------------------
-  it('Scenario 15 — B3/B4: cross-org drops/balances invisible and unreachable', async () => {
+  it('Scenario 16 — B3/B4: cross-org drops/balances invisible and unreachable', async () => {
     const { orgA, orgB } = await seedTwoOrgs()
     const { userId: agentAId } = await seedUser({
       email: 'agent-a@empresa.com',
@@ -645,7 +696,7 @@ describe('Agent Continuous Cash Balance with Cash Drops', () => {
     expect(me.json.balance.drops[0].id).toBe(dropA)
   })
 
-  it('Scenario 16 — B1: injected org/agent/status/balance_before are ignored', async () => {
+  it('Scenario 17 — B1: injected org/agent/status/balance_before are ignored', async () => {
     const { organizationId, agentId } = await seedOrgWithStaff()
     const { organizationId: orgB } = await seedUser({
       email: 'admin-b@empresa.com',
@@ -687,7 +738,7 @@ describe('Agent Continuous Cash Balance with Cash Drops', () => {
   // -------------------------------------------------------------------------
   // US-AG23 / US-AG24 — commissions & payment method in the balance
   // -------------------------------------------------------------------------
-  it('Scenario 17 — commission reduces a cash balance (US-AG23)', async () => {
+  it('Scenario 18 — commission reduces a cash balance (US-AG23)', async () => {
     const { organizationId, agentId } = await seedOrgWithStaff()
     await seedFolio({
       organizationId,
@@ -704,7 +755,7 @@ describe('Agent Continuous Cash Balance with Cash Drops', () => {
     expect(json.balance.balance).toBe(270000)
   })
 
-  it('Scenario 18 — a card sale earns commission but adds no cash debt (US-AG24)', async () => {
+  it('Scenario 19 — a card sale earns commission but adds no cash debt (US-AG24)', async () => {
     const { organizationId, agentId } = await seedOrgWithStaff()
     await seedFolio({
       organizationId,
@@ -725,7 +776,7 @@ describe('Agent Continuous Cash Balance with Cash Drops', () => {
   // -------------------------------------------------------------------------
   // US-A26 — clawback on cancellation
   // -------------------------------------------------------------------------
-  it('Scenario 19 — clawback drops the commission; an absorbed loss keeps it (US-A26)', async () => {
+  it('Scenario 20 — clawback drops the commission; an absorbed loss keeps it (US-A26)', async () => {
     const { organizationId, agentId } = await seedOrgWithStaff()
     // Cancelled folio, commission clawed back → excluded from commissions.
     await seedFolio({
@@ -758,7 +809,7 @@ describe('Agent Continuous Cash Balance with Cash Drops', () => {
     expect(me.json.balance.balance).toBe(-30000)
   })
 
-  it('Scenario 20 — admin cancels with clawback via the API → commission excluded (US-A26)', async () => {
+  it('Scenario 21 — admin cancels with clawback via the API → commission excluded (US-A26)', async () => {
     // Drive the real cancellation handler to assert the clawback flag is persisted and read.
     const { organizationId, agentId } = await seedOrgWithStaff()
     const folioId = await seedFolio({
@@ -790,7 +841,7 @@ describe('Agent Continuous Cash Balance with Cash Drops', () => {
   // -------------------------------------------------------------------------
   // US-A25 — payouts (company → agent)
   // -------------------------------------------------------------------------
-  it('Scenario 21 — a payout raises the balance and clears a negative position', async () => {
+  it('Scenario 22 — a payout raises the balance and clears a negative position', async () => {
     const { organizationId, agentId } = await seedOrgWithStaff()
     // Card sale leaves the agent at −30000 (company owes commission).
     await seedFolio({
@@ -820,7 +871,7 @@ describe('Agent Continuous Cash Balance with Cash Drops', () => {
     expect(row.balance).toBe(0)
   })
 
-  it('Scenario 22 — payout to an unknown/cross-org agent → 404; wrong role → 403', async () => {
+  it('Scenario 23 — payout to an unknown/cross-org agent → 404; wrong role → 403', async () => {
     const { organizationId, agentId } = await seedOrgWithStaff()
     // org_b agent — must be unreachable for the org_a admin.
     const { organizationId: orgB } = await seedUser({

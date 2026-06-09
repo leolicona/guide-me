@@ -13,9 +13,10 @@ export const createServiceSchema = z
     base_price: money,
     minimum_price: money,
     default_capacity: z.number().int().min(1),
-    // US-A12 — per-service commission bonus (minor units, ≥ 0) added to the agent's base %
-    // per pass sold. Optional → 0 (a service with no special bonus).
-    commission_bonus: money.optional().default(0),
+    // US-A12 — per-service commission bonus in basis points (500 = 5%, 0–10000), stacked
+    // on the agent's base % and applied to this service's line total. Same units as
+    // users.base_commission. Optional → 0 (a service with no special bonus).
+    commission_bonus: z.number().int().min(0).max(10000).optional().default(0),
   })
   .refine((v) => v.minimum_price <= v.base_price, {
     message: 'minimum_price must be ≤ base_price',

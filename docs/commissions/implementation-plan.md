@@ -38,12 +38,12 @@ Phases 1→2 are backend (independently shippable). Phase 3 is the UI. Phase 4 c
 Add to `createServiceSchema` (and therefore `updateServiceSchema`, which aliases it):
 
 ```ts
-commission_bonus: money.optional().default(0), // integer minor units ≥ 0 (money = z.number().int().min(0))
+commission_bonus: z.number().int().min(0).max(10000).optional().default(0), // basis points (500 = 5%)
 ```
 
-`money` already enforces integer `≥ 0`. Optional + default `0` keeps create backward-compatible
-and matches "an *additional* bonus". `PUT` is a full replace, so an omitted value resets to `0`
-(Rule 1).
+Integer basis points `0–10000`, same units as `users.base_commission`. Optional + default `0`
+keeps create backward-compatible and matches "an *additional* bonus". `PUT` is a full replace, so
+an omitted value resets to `0` (Rule 1).
 
 ### Task 1.2 — Handler (`handler.ts`)
 
@@ -87,22 +87,24 @@ Extend the existing suite (the `seedService` raw insert already lists explicit c
 
 ### Task 3.1 — Type + schema
 
-- `types.ts` `Service`: add `commission_bonus: number` (minor units).
-- `schemas.ts` `serviceFormSchema`: add `commission_bonus: amount` (major-decimal, `≥ 0`);
+- `types.ts` `Service`: add `commission_bonus: number` (basis points). Add
+  `percentToBasisPoints` / `basisPointsToPercent` helpers (mirror `features/agents`).
+- `schemas.ts` `serviceFormSchema`: add `commission_bonus` as a percent (`0–100`);
   `ServiceFormData` picks it up via `z.infer`.
 
 ### Task 3.2 — `ServiceFormDialog`
 
 - `EMPTY`: `commission_bonus: 0`.
-- Prefill (edit): `commission_bonus: centsToAmount(service.commission_bonus)`.
-- Payload: `commission_bonus: amountToCents(data.commission_bonus)`.
-- A *Commission bonus* `TextField` (number, `$` adornment, `step 0.01 min 0`), next to
-  capacity — helper text e.g. "Added to the agent's % per pass sold."
+- Prefill (edit): `commission_bonus: basisPointsToPercent(service.commission_bonus)`.
+- Payload: `commission_bonus: percentToBasisPoints(data.commission_bonus)`.
+- A *Commission bonus* `TextField` (number, `%` end adornment, `step 0.01 min 0 max 100`), next
+  to capacity — helper text e.g. "Se suma al % de comisión del agente."
 
 ### Task 3.3 — Detail display
 
-`CatalogDetailPage` (or `ServiceRow`/`ServiceList`): show the bonus with `formatMoney` when
-`> 0` (an at-a-glance "this tour pays extra" cue). Elegant-minimalist — a caption, not a card.
+`CatalogDetailPage` (or `ServiceRow`/`ServiceList`): show the bonus as a percent
+(`commission_bonus / 100`%) when `> 0` (an at-a-glance "this tour pays extra" cue).
+Elegant-minimalist — a caption, not a card.
 
 **Deliverable:** an admin sets a per-service bonus in the catalog form; it round-trips and
 shows on the detail; `pnpm build:app` clean.

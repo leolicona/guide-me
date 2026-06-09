@@ -217,8 +217,15 @@ const deriveBalance = async (db, org, agentId) => {
 }
 ```
 
-- **`getMyBalance`** (US-AG12, agent) — `deriveBalance(org, self)` + the agent's expenses +
-  recent drops (all statuses, newest first). Serialize money as-is.
+- **`getMyBalance`** (US-AG12, agent) — `deriveBalance(org, self)` for the authoritative
+  all-time `balance`, then `deriveShiftBreakdown` to re-express it for the **current shift**:
+  find the **anchor** = the agent's most recent `confirmed` drop by `created_at` (none → full
+  history); sum `collected`/`commissions`/`expense_total` over folios/expenses with
+  `created_at > anchor.created_at`; set `carry_forward = balance − (collected − commissions −
+  expense_total + payoutsSince)` (the balancing term, `0`/whole-history when no anchor) so the
+  shift lines always reconcile to `balance`. Return `{ carry_forward, collected, commissions,
+  expense_total, pending_drops_total, balance, last_drop, expenses, drops }` — `expenses` are
+  the current-shift ones, `drops` the recent drops (all statuses, newest first). Money as-is.
 - **`addExpense`** (US-AG13, agent) — insert (`organizationId`/`agentId` from context). → `201`.
 - **`deleteExpense`** (US-AG13, agent) — delete where `id`, `organization_id = org`,
   `agent_id = self`. Not found → `404`. → `200 { ok: true }`.
@@ -291,22 +298,23 @@ folio_lines → folios → slots → schedules → service_extras → services`,
 
 | Test | Spec scenario |
 |---|---|
-| Balance = collected − expenses − confirmed drops | 1 |
-| Pending drop reported, not netted out | 2 |
-| Cancelled folios excluded; balance can go negative | 3 |
-| Add + delete expense moves the balance | 4 |
-| Invalid expense → 400 | 5 |
-| Create drop snapshots `balance_before`, stays pending, balance unchanged | 6 |
-| Cancel pending drop (200); confirmed/rejected → 409; other-agent/unknown → 404 | 7 |
-| Invalid drop → 400 | 8 |
-| Admin balances list: org-scoped, ordered, pending rollup | 9 |
-| Admin drops queue + detail (default pending) | 10 |
-| Confirm a drop → balance drops; reviewed_by/at set | 11 |
-| Reject with note → balance unchanged, note stored | 12 |
-| Review of non-pending → 409 | 13 |
-| Wrong role both ways → 403 | 14 |
-| **B3/B4** cross-org invisible/unreachable (`seedTwoOrgs`) | 15 |
-| **B1** injected org/agent/status/balance_before ignored | 16 |
+| Shift breakdown: carry_forward + collected − commissions − expenses; reconciles to balance | 1 |
+| No confirmed drop → carry_forward 0, last_drop null, full history | 2 |
+| Pending drop reported, not netted out, not a new anchor | 3 |
+| Pre-anchor folio cancelled → absorbed by carry_forward; balance can go negative | 4 |
+| Add + delete expense moves the balance | 5 |
+| Invalid expense → 400 | 6 |
+| Create drop snapshots `balance_before`, stays pending, balance unchanged | 7 |
+| Cancel pending drop (200); confirmed/rejected → 409; other-agent/unknown → 404 | 8 |
+| Invalid drop → 400 | 9 |
+| Admin balances list: org-scoped (all-time exposure), ordered, pending rollup | 10 |
+| Admin drops queue + detail (default pending) | 11 |
+| Confirm a drop → balance drops, becomes new anchor; reviewed_by/at set | 12 |
+| Reject with note → balance unchanged, note stored | 13 |
+| Review of non-pending → 409 | 14 |
+| Wrong role both ways → 403 | 15 |
+| **B3/B4** cross-org invisible/unreachable (`seedTwoOrgs`) | 16 |
+| **B1** injected org/agent/status/balance_before ignored | 17 |
 
 > Scenario 11 is the key end-to-end: derive balance, create+confirm a drop, re-read balance
 > and assert it dropped by exactly the confirmed amount.
@@ -331,8 +339,10 @@ export interface CashDrop {
   agent?: { id: string; name: string } // attached on the admin surface
 }
 export interface AgentBalance {
-  collected: number; expense_total: number
-  confirmed_drops_total: number; pending_drops_total: number; balance: number
+  // breakdown scoped to the current shift (since the last confirmed drop)
+  carry_forward: number; collected: number; commissions: number; expense_total: number
+  pending_drops_total: number; balance: number // balance is the all-time physical-cash figure
+  last_drop: { id: string; amount: number; balance_before: number; confirmed_at: number; created_at: number } | null
   expenses: CashExpense[]; drops: CashDrop[]
 }
 export interface BalanceListItem {
@@ -386,9 +396,11 @@ Nav (`AppLayout`): agent-only **Balance** (`AccountBalanceWalletRounded`) and ad
 
 ### Task 5.1 — `BalancePage` (agent) — US-AG12/AG13/AG14
 
-- `useMyBalance()` summary card: **collected**, **expenses**, **handed in** (confirmed),
-  and a prominent **balance you're holding** (negative shown in error color), plus a
-  **pending hand-ins** line when `pending_drops_total > 0`.
+- `useMyBalance()` summary card scoped to the **current shift**: a **carry-forward** line
+  (only when `carry_forward !== 0`), **collected this shift**, **commissions**, **expenses**,
+  and a prominent **balance you're holding** (the all-time physical cash; negative shown in
+  error color), plus a **pending hand-ins** line when `pending_drops_total > 0`. Caption the
+  shift with `last_drop` ("since your hand-in on …") or "all activity" when none.
 - **Expenses** section: add form (description + amount via `amountToCents`) +
   delete list (`useDeleteExpense`).
 - **Hand in cash** button → dialog (amount + optional note) → `useCreateDrop`; shows the
@@ -416,12 +428,14 @@ Caja/Closures UI is gone.
 
 ## Phase 6 — Review
 
-- Walk spec Scenarios 1–16; mark ✅/❌.
+- Walk spec Scenarios 1–17; mark ✅/❌.
 - Confirm the Enforcement Contract: every query org-filtered; `/me/*` filtered
   `agent_id = self`; no `organizationId`/`agent_id`/`status`/`balance_before` in any Zod
   schema; inserts/updates set them from context; balance derived from events, never the body.
-- Confirm the balance math: `collected − expenses − confirmed_drops`; pending reported not
-  netted; negative allowed; confirming a drop reduces the balance by exactly its amount.
+- Confirm the balance math: authoritative all-time `collected − commissions − expenses −
+  confirmed_drops + payouts`; the agent `/me` shift breakdown (`carry_forward + collected −
+  commissions − expenses`) reconciles to it; pending reported not netted; negative allowed;
+  confirming a drop reduces the balance by exactly its amount and becomes the new shift anchor.
 - Confirm the drop machine: `pending → confirmed | rejected`; cancel guarded to `pending`;
   review guarded to `pending`; conflicts → `409`, unknown/cross-org → `404`; **no new `ErrorCode`**.
 - Confirm the demolition: `/api/cash-drawers` gone, `cash_drawers`/`cash_drawer_expenses`
