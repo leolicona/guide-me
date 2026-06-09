@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import type { PosExtra, PosSlot } from '../features/pos/types'
-import type { ConfirmSaleInput } from '../services/posService'
+import type { ConfirmSaleInput, PaymentMethod } from '../services/posService'
 
 // The cart is client-only state — the server only sees the final cart on confirm
 // (POST /api/pos/folios) and remains the single source of truth for all totals.
@@ -34,6 +34,8 @@ interface PosCartState {
   customerName: string
   customerEmail: string
   customerPhone: string
+  /** How the agent collected payment (US-AG25). Defaults to 'cash'. */
+  paymentMethod: PaymentMethod
 
   /** Add a service/slot. If the slot is already in the cart, quantities merge. */
   addLine: (input: {
@@ -50,6 +52,7 @@ interface PosCartState {
   removeExtra: (slotId: string, extraId: string) => void
   removeLine: (slotId: string) => void
   setCustomer: (fields: Partial<{ name: string; email: string; phone: string }>) => void
+  setPaymentMethod: (method: PaymentMethod) => void
   clear: () => void
 }
 
@@ -61,6 +64,7 @@ export const usePosCart = create<PosCartState>((set) => ({
   customerName: '',
   customerEmail: '',
   customerPhone: '',
+  paymentMethod: 'cash',
 
   addLine: ({ service, slot, quantity = 1, unit_price, extras = [] }) =>
     set((state) => {
@@ -173,8 +177,16 @@ export const usePosCart = create<PosCartState>((set) => ({
       customerPhone: fields.phone ?? state.customerPhone,
     })),
 
+  setPaymentMethod: (method) => set({ paymentMethod: method }),
+
   clear: () =>
-    set({ lines: [], customerName: '', customerEmail: '', customerPhone: '' }),
+    set({
+      lines: [],
+      customerName: '',
+      customerEmail: '',
+      customerPhone: '',
+      paymentMethod: 'cash',
+    }),
 }))
 
 // --- Pure money/selectors (mirror the server math; server remains authoritative) ---
@@ -204,6 +216,7 @@ export const toConfirmPayload = (state: PosCartState): ConfirmSaleInput => ({
   customer_name: state.customerName.trim() || null,
   customer_email: state.customerEmail.trim() || null,
   customer_phone: state.customerPhone.trim() || null,
+  payment_method: state.paymentMethod,
   lines: state.lines.map((l) => ({
     slot_id: l.slot.id,
     quantity: l.quantity,

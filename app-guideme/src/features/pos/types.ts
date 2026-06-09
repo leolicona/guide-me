@@ -36,6 +36,9 @@ export interface PosServiceDetail
 
 export type FolioStatus = 'paid' | 'booking' | 'cancelled'
 
+/** US-AG25 — how the agent collected payment. 'card' earns commission but adds no cash debt. */
+export type PaymentMethod = 'cash' | 'card'
+
 export interface FolioLineExtra {
   id: string
   extra_id: string
@@ -83,6 +86,8 @@ export interface Folio {
   discount_total: number
   total: number
   amount_paid: number
+  /** How payment was collected (US-AG25). */
+  payment_method: PaymentMethod
   /** Set when the folio was cancelled by an admin (US-A21); null otherwise. */
   cancelled_at: number | null
   created_at: number

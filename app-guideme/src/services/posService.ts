@@ -23,10 +23,15 @@ export interface ConfirmLineInput {
   extras?: ConfirmExtraInput[]
 }
 
+/** How the agent collected payment. 'card' earns commission but adds no cash debt (US-AG25). */
+export type PaymentMethod = 'cash' | 'card'
+
 export interface ConfirmSaleInput {
   customer_name?: string | null
   customer_email?: string | null
   customer_phone?: string | null
+  /** US-AG25 — collection channel. Server defaults to 'cash' when omitted. */
+  payment_method?: PaymentMethod
   lines: ConfirmLineInput[]
 }
 

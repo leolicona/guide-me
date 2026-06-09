@@ -122,6 +122,12 @@ export default function FolioReceiptPage() {
                     <Typography color="text.secondary">Pagado</Typography>
                     <Typography>{formatMoney(folio.amount_paid)}</Typography>
                   </Stack>
+                  <Stack direction="row" sx={{ justifyContent: 'space-between' }}>
+                    <Typography color="text.secondary">Método de pago</Typography>
+                    <Typography>
+                      {folio.payment_method === 'card' ? 'Tarjeta' : 'Efectivo'}
+                    </Typography>
+                  </Stack>
                 </Stack>
               </CardContent>
             </Card>

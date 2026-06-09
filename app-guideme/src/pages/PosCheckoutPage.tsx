@@ -11,11 +11,15 @@ import {
   Divider,
   TextField,
   IconButton,
+  ToggleButton,
+  ToggleButtonGroup,
 } from '@mui/material'
 import ArrowBackRounded from '@mui/icons-material/ArrowBackRounded'
 import AddRounded from '@mui/icons-material/AddRounded'
 import RemoveRounded from '@mui/icons-material/RemoveRounded'
 import DeleteOutlineRounded from '@mui/icons-material/DeleteOutlineRounded'
+import PaymentsRounded from '@mui/icons-material/PaymentsRounded'
+import CreditCardRounded from '@mui/icons-material/CreditCardRounded'
 import { useConfirmSale } from '../features/pos/hooks'
 import {
   usePosCart,
@@ -54,7 +58,9 @@ export default function PosCheckoutPage() {
   const customerName = usePosCart((s) => s.customerName)
   const customerEmail = usePosCart((s) => s.customerEmail)
   const customerPhone = usePosCart((s) => s.customerPhone)
+  const paymentMethod = usePosCart((s) => s.paymentMethod)
   const setCustomer = usePosCart((s) => s.setCustomer)
+  const setPaymentMethod = usePosCart((s) => s.setPaymentMethod)
   const updateQuantity = usePosCart((s) => s.updateQuantity)
   const removeLine = usePosCart((s) => s.removeLine)
   const clear = usePosCart((s) => s.clear)
@@ -198,6 +204,39 @@ export default function PosCheckoutPage() {
                     onChange={(e) => setCustomer({ phone: e.target.value })}
                   />
                 </Stack>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardContent>
+                <Typography variant="h6" sx={{ mb: 2 }}>
+                  Método de pago
+                </Typography>
+                <ToggleButtonGroup
+                  exclusive
+                  fullWidth
+                  value={paymentMethod}
+                  onChange={(_, value) => value && setPaymentMethod(value)}
+                  aria-label="Método de pago"
+                >
+                  <ToggleButton value="cash" aria-label="Efectivo">
+                    <PaymentsRounded fontSize="small" sx={{ mr: 1 }} />
+                    Efectivo
+                  </ToggleButton>
+                  <ToggleButton value="card" aria-label="Tarjeta">
+                    <CreditCardRounded fontSize="small" sx={{ mr: 1 }} />
+                    Tarjeta
+                  </ToggleButton>
+                </ToggleButtonGroup>
+                <Typography
+                  variant="caption"
+                  color="text.secondary"
+                  sx={{ display: 'block', mt: 1.5 }}
+                >
+                  {paymentMethod === 'card'
+                    ? 'Cobrado con terminal externa — no suma efectivo a tu saldo, pero sí genera comisión.'
+                    : 'Efectivo recibido — se suma al saldo de caja que entregas a la empresa.'}
+                </Typography>
               </CardContent>
             </Card>
 
