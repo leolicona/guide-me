@@ -6,6 +6,87 @@ Tracks confirmed bugs, root causes, and fixes. Each entry is immutable once clos
 
 ---
 
+## BUG-003 — Back Button After Logout Restores the App from Stale React Query Cache — ✅ FIXED
+
+**Discovered:** 2026-06-09
+**Fixed:** 2026-06-09
+**Reporter:** Leo Licona (manual QA)
+**Affected component:** `app-guideme/src/features/auth/hooks/useLogout.ts`
+**Severity:** Security — a borrowed/shared machine remains fully accessible after a "logout".
+
+### Symptom
+
+Clicking **Log out** correctly redirects to `/login`. But pressing the browser **back button**
+returns the user to `/dashboard` (or any prior protected route) with the session apparently
+active — the entire app is navigable without re-authenticating.
+
+### Root Cause
+
+`useLogout` cleared the Zustand store and navigated to `/login`, but **never evicted the
+`['me']` React Query cache**:
+
+```ts
+// WRONG — cache survives; back-nav re-renders AuthGuard from it
+const handleLogout = () => {
+  clear()                                  // Zustand only
+  navigate(ROUTES.LOGIN, { replace: true })
+  mutation.mutate()                        // logout API fires async
+}
+```
+
+The chain that produced the bug:
+
+1. `useMe` (`useMe.ts:13`) caches the user with `staleTime: 5 * 60 * 1000` — fresh for 5 min.
+2. `BrowserRouter` (History API) handles the back button as a client-side `popstate`, **not** a
+   full page reload, so the in-memory React Query cache survives logout.
+3. On back-nav, `AuthGuard` (`AuthGuard.tsx:11`) calls `useMe()`, gets a **cache hit** (still
+   fresh), and returns the cached user with **no network request** → `isError: false`,
+   `user != null` → it renders the protected page.
+4. The `401` interceptor in `authService.ts` (`handleUnauthorized`) that would have redirected
+   only runs when a request is actually made — the stale cache means `/api/me` is never called,
+   so the safety net is bypassed.
+
+The API side was innocent: `logout()` correctly clears both cookies (`gm_access`,
+`gm_refresh`) via `clearSessionCookies()`. `navigate(..., { replace: true })` was **not** a
+factor either — the back button reaches earlier protected history entries regardless of
+push-vs-replace. The sole cause was the un-evicted `['me']` cache.
+
+### Fix
+
+Evict the `['me']` query in `handleLogout`, before navigating, so the next `useMe()` mount has
+no cache → shows the spinner → hits `/api/me` → gets `401` (cookie already cleared) → `AuthGuard`
+redirects to `/login`:
+
+```ts
+// CORRECT
+const queryClient = useQueryClient()
+
+const handleLogout = () => {
+  clear()
+  queryClient.removeQueries({ queryKey: ['me'] }) // kill cache before nav
+  navigate(ROUTES.LOGIN, { replace: true })
+  mutation.mutate()
+}
+```
+
+`removeQueries` (not `invalidateQueries`) is deliberate: removing the entry forces
+`isLoading: true` and a real refetch on the next mount, rather than serving stale data while a
+background refetch resolves.
+
+### Residual note
+
+A sub-second race remains: if the user presses back **before** the async logout request clears
+the cookies server-side, `/api/me` could still return `200`. The reported scenario (human
+reaction time between clicking logout and pressing back) is fully resolved by the cache
+eviction; closing the race entirely would require awaiting `mutation` before navigating, at the
+cost of logout snappiness — deferred as not worth the UX trade for the MVP.
+
+### Related changes
+
+- `app-guideme/src/features/auth/hooks/useLogout.ts` — `removeQueries(['me'])` before navigate
+
+---
+
 ## BUG-002 — `commission_bonus` Applied as Flat Centavos per Pass Instead of % of Line Total — ✅ FIXED
 
 **Discovered:** 2026-06-08
