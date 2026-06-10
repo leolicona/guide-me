@@ -287,12 +287,20 @@ drop is already `confirmed`/`rejected`.
 ### `GET /api/cash/balances` — admin outstanding balances (US-A19)
 
 Each agent in the caller's org with their live balance and pending rollup, ordered by
-balance desc (largest exposure first). →
+balance desc (largest exposure first). The breakdown is **shift-scoped** — `cash_collected`,
+`commission_total`, `expense_total` and `payouts_total` count only events since the agent's
+last confirmed drop, with `carry_forward` folding in everything before it (mirroring the
+agent's own `/me` view). `balance` stays the authoritative all-time figure (the physical cash
+held); `last_drop` is the anchor (`null` when none). Per-row invariant:
+`balance = carry_forward + cash_collected − commission_total − expense_total + payouts_total`. →
 ```json
 { "balances": [
   { "agent": { "id": "usr_1", "name": "Ana" },
-    "collected": 845000, "expense_total": 32000, "confirmed_drops_total": 500000,
-    "balance": 313000, "pending_drops_total": 0, "pending_drops_count": 0 }
+    "carry_forward": 13000, "cash_collected": 845000, "commission_total": 84500,
+    "expense_total": 32000, "payouts_total": 0, "balance": 741500,
+    "last_drop": { "id": "drp_1", "amount": 500000, "balance_before": 513000,
+                   "confirmed_at": 1700000000, "created_at": 1700000000 },
+    "pending_drops_total": 0, "pending_drops_count": 0 }
 ] }
 ```
 
@@ -400,9 +408,11 @@ reconciliation signal that the company owes the agent — and the breakdown stil
 #### Scenario 10 — Admin lists outstanding balances in their org
 **Given** two `org_a` agents with positive balances and an `org_b` agent with one too
 **When** the `org_a` admin `GET /api/cash/balances`
-**Then** `200`; only `org_a` agents appear, each with `collected`/`expense_total`/
-`confirmed_drops_total`/`balance`/`pending_drops_total`; ordered by `balance` desc; `org_b`
-absent.
+**Then** `200`; only `org_a` agents appear, each with a **shift-scoped** breakdown
+(`carry_forward`/`cash_collected`/`commission_total`/`expense_total`/`payouts_total`) plus the
+all-time `balance` and pending rollup, mirroring that agent's `/me` view; ordered by `balance`
+desc; `org_b` absent. Agents at different shift states do not bleed into one another (each is
+scoped to its own confirmed-drop anchor).
 
 #### Scenario 11 — Admin lists and reads the pending drops queue
 **Given** pending drops in `org_a`

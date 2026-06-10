@@ -71,15 +71,20 @@ export interface AgentBalance {
   drops: CashDrop[] // recent drops, all statuses, for context
 }
 
-// GET /api/cash/balances — one admin row per agent (company cash exposure).
+// GET /api/cash/balances — one admin row per agent (company cash exposure). SHIFT-SCOPED: the
+// breakdown components count only events since the agent's last confirmed drop, with
+// carry_forward folding in everything before it, mirroring the agent's own /me view —
+//   balance = carry_forward + cash_collected − commission_total − expense_total + payouts_total
+// The headline `balance` stays the authoritative all-time figure (the physical cash held).
 export interface BalanceListItem {
   agent: CashAgent
-  cash_collected: number
+  carry_forward: number // balance carried into the current shift (may be negative); 0 if none
+  cash_collected: number // the breakdown components below are scoped to the current shift
   commission_total: number
   expense_total: number
-  confirmed_drops_total: number
   payouts_total: number
-  balance: number
+  balance: number // authoritative all-time figure (the physical cash held)
+  last_drop: CashLastDrop | null // anchor; null when no confirmed drop exists yet
   pending_drops_total: number
   pending_drops_count: number
 }

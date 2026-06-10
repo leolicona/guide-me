@@ -80,9 +80,18 @@ watermark-anchored headline equals the independent all-time recompute.
   **Admin-Initiated Direct Collection (US-AG27)** — the agent is notified to digitally
   sign/acknowledge the adjustment, auto-signing after 24h if ignored. Until US-AG27 lands, an
   adjustment is applied + audited but not agent-acknowledged.
-- **(d) `listBalances` N+1 removed.** ✅ Replaced the per-agent loop with a fixed set of
-  `GROUP BY agent_id` aggregates merged in memory (O(1) queries). The admin `/balances` view
-  stays all-time (company exposure); same result shape and ordering as the loop.
+- **(d) `listBalances` N+1 removed → later superseded by the US-A19 shift-scope upgrade.** ✅
+  Originally replaced the per-agent loop with `GROUP BY agent_id` aggregates merged in memory
+  (O(1) queries, all-time totals). **Superseded:** US-A19 was upgraded to require a per-agent
+  **shift-scoped** breakdown (collected/commissions/expenses since each agent's last confirmed
+  drop, plus a carry-forward line) for clean daily reconciliation — which a single grouped query
+  can't express without a per-agent watermark join. Since the watermark made each `deriveBalance`
+  O(shift), the loop is no longer pathological: `listBalances` now maps every agent through the
+  **canonical `deriveBalance`**, fired concurrently (`Promise.all`), so the admin row mirrors the
+  agent's `/me` view exactly (single source of truth). The headline `balance` stays all-time.
+  Design + regression gate: `docs/cash-drops/admin-shift-scoped-balances.design.md`. O(1) escape
+  hatch (conditional aggregation over a per-agent watermark window) recorded there for if an org
+  ever reaches hundreds of agents.
 - **(e) Shift attribution.** ✅ (mostly) The anchor now follows the **settlement timeline**
   (`reviewed_at`, tiebreak `created_at`), so out-of-order confirmation resolves to the drop
   confirmed last; post-drop cancellations surface via the (a) reversal. ⚠️ **Out of scope (still

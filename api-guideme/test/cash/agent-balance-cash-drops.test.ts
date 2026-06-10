@@ -590,34 +590,52 @@ describe('Agent Continuous Cash Balance with Cash Drops', () => {
     expect(json.balances.map((b: any) => b.agent.id)).not.toContain(agentBId)
   })
 
-  // Phase-1 refinement (TECH_DEBT §12d): /balances is derived with grouped aggregates, not a
-  // per-agent loop. This exercises every term across agents — card exclusion, payouts, a
-  // zero-activity agent, the pending rollup — and asserts the grouped result matches the
-  // formula and ordering exactly.
-  it('Scenario 10b — grouped balances span every term across agents (incl. zero-activity)', async () => {
-    const { organizationId, agentId } = await seedOrgWithStaff()
+  // US-A19 (upgrade): /balances is SHIFT-SCOPED — each agent's breakdown counts only events
+  // since their own last confirmed drop, plus a carry_forward line, mirroring what the agent
+  // sees on /me. The headline `balance` stays the all-time figure. This exercises every term
+  // across agents at DIFFERENT shift states — an anchored agent (card exclusion, pending
+  // rollup), a no-anchor agent with a payout, and a zero-activity agent — and asserts the
+  // per-row reconciliation invariant and ordering. `confirmed_drops_total` is gone (always 0
+  // in a shift scope; folded into carry_forward).
+  it('Scenario 10b — shift-scoped balances span every term across agents (incl. zero-activity)', async () => {
+    const { organizationId, adminId, agentId } = await seedOrgWithStaff()
     const { userId: agent2Id } = await seedUser({ email: AGENT2_EMAIL, role: 'agent', organizationId })
     const { userId: agent3Id } = await seedUser({
       email: 'agent3@empresa.com',
       role: 'agent',
       organizationId,
     })
+    const t = nowSec()
 
-    // agent1: cash + card folios (card earns commission but adds no cash debt), an expense, a
-    // confirmed drop, and a pending drop. balance = 500000 − 60000 − 20000 − 100000 = 320000.
-    await seedFolio({ organizationId, agentId, amountPaid: 500000, commissionAmount: 50000 })
+    // agent1: a prior shift (cash 500000, commission 50000) settled by a confirmed anchor drop
+    // of 300000 (carry_forward = 450000 − 300000 = 150000). Since the anchor: a cash folio, a
+    // card folio (commission only, no cash), an expense, and a pending drop.
+    //   all-time balance = 700000 − 80000 − 20000 − 300000 = 300000
+    await seedFolio({ organizationId, agentId, amountPaid: 500000, commissionAmount: 50000, createdAt: t - 200 })
+    await seedDrop({
+      organizationId,
+      agentId,
+      amount: 300000,
+      balanceBefore: 450000,
+      status: 'confirmed',
+      reviewedBy: adminId,
+      reviewedAt: t - 100,
+      createdAt: t - 100,
+    })
+    await seedFolio({ organizationId, agentId, amountPaid: 200000, commissionAmount: 20000, createdAt: t })
     await seedFolio({
       organizationId,
       agentId,
       amountPaid: 100000,
       paymentMethod: 'card',
       commissionAmount: 10000,
+      createdAt: t,
     })
-    await seedExpense({ organizationId, agentId, amount: 20000 })
-    await seedDrop({ organizationId, agentId, amount: 100000, status: 'confirmed' })
-    await seedDrop({ organizationId, agentId, amount: 80000, status: 'pending' })
+    await seedExpense({ organizationId, agentId, amount: 20000, createdAt: t })
+    await seedDrop({ organizationId, agentId, amount: 80000, status: 'pending', createdAt: t })
 
-    // agent2: a cash folio plus a payout (raises the balance). balance = 200000 + 30000 = 230000.
+    // agent2: no confirmed drop → carry_forward 0, breakdown spans all history. A cash folio
+    // plus a payout (raises the balance). balance = 200000 + 30000 = 230000.
     await seedFolio({ organizationId, agentId: agent2Id, amountPaid: 200000 })
     await registerPayout(ADMIN_EMAIL, { agent_id: agent2Id, amount: 30000 })
 
@@ -630,16 +648,24 @@ describe('Agent Continuous Cash Balance with Cash Drops', () => {
     // Ordered by balance desc.
     const [b1, b2, b3] = json.balances
     expect(b1.agent.id).toBe(agentId)
-    expect(b1.cash_collected).toBe(500000) // card folio excluded
-    expect(b1.commission_total).toBe(60000) // both folios' commission counted
+    expect(b1.carry_forward).toBe(150000) // 450000 left by the prior shift − 300000 dropped
+    expect(b1.cash_collected).toBe(200000) // since the anchor only; card excluded
+    expect(b1.commission_total).toBe(30000) // cash + card folios since the anchor
     expect(b1.expense_total).toBe(20000)
-    expect(b1.confirmed_drops_total).toBe(100000)
     expect(b1.payouts_total).toBe(0)
-    expect(b1.balance).toBe(320000)
+    expect(b1.balance).toBe(300000) // all-time headline, unchanged
+    expect(b1.last_drop.amount).toBe(300000) // the anchor
     expect(b1.pending_drops_total).toBe(80000) // reported, not netted into balance
     expect(b1.pending_drops_count).toBe(1)
+    expect(b1.confirmed_drops_total).toBeUndefined() // retired in the shift scope
+    // Per-row reconciliation: the shift breakdown sums back to the all-time balance.
+    expect(
+      b1.carry_forward + b1.cash_collected - b1.commission_total - b1.expense_total + b1.payouts_total,
+    ).toBe(b1.balance)
 
     expect(b2.agent.id).toBe(agent2Id)
+    expect(b2.carry_forward).toBe(0) // no anchor → whole history is the current shift
+    expect(b2.last_drop).toBeNull()
     expect(b2.cash_collected).toBe(200000)
     expect(b2.payouts_total).toBe(30000)
     expect(b2.balance).toBe(230000)
@@ -647,9 +673,45 @@ describe('Agent Continuous Cash Balance with Cash Drops', () => {
 
     expect(b3.agent.id).toBe(agent3Id)
     expect(b3.balance).toBe(0)
+    expect(b3.carry_forward).toBe(0)
     expect(b3.cash_collected).toBe(0)
-    expect(b3.confirmed_drops_total).toBe(0)
+    expect(b3.last_drop).toBeNull()
     expect(b3.pending_drops_count).toBe(0)
+  })
+
+  // US-A19 (upgrade): each agent's dashboard row is scoped to its OWN watermark — no bleed
+  // across agents at different shift states. Both drops here are confirmed THROUGH the endpoint
+  // (so they carry a balance_after watermark and exercise the fast path via /balances), at
+  // clearly separated instants, with post-watermark activity on each.
+  it('Scenario 10c — each row is scoped to its own watermark; no cross-agent bleed', async () => {
+    const { organizationId, agentId } = await seedOrgWithStaff()
+    const { userId: agent2Id } = await seedUser({ email: AGENT2_EMAIL, role: 'agent', organizationId })
+    const t = nowSec()
+
+    // agent1: collect 400000, drop 250000 (endpoint-confirmed → watermark 150000), then collect
+    // 100000 since. balance = 150000 + 100000 = 250000.
+    await seedFolio({ organizationId, agentId, amountPaid: 400000, createdAt: t - 300 })
+    const d1 = await createDrop(AGENT_EMAIL, { amount: 250000 })
+    expect((await reviewDrop(ADMIN_EMAIL, d1.json.drop.id, { decision: 'confirmed' })).status).toBe(200)
+    await seedFolio({ organizationId, agentId, amountPaid: 100000, createdAt: t + 300 })
+
+    // agent2: collect 600000, drop 600000 (endpoint-confirmed → watermark 0), nothing since.
+    // balance = 0; the breakdown must be empty, NOT show agent1's numbers.
+    await seedFolio({ organizationId, agentId: agent2Id, amountPaid: 600000, createdAt: t - 300 })
+    const d2 = await createDrop(AGENT2_EMAIL, { amount: 600000 })
+    expect((await reviewDrop(ADMIN_EMAIL, d2.json.drop.id, { decision: 'confirmed' })).status).toBe(200)
+
+    const { json } = await listBalances(ADMIN_EMAIL)
+    const r1 = json.balances.find((b: any) => b.agent.id === agentId)
+    const r2 = json.balances.find((b: any) => b.agent.id === agent2Id)
+
+    expect(r1.carry_forward).toBe(150000) // watermark read directly
+    expect(r1.cash_collected).toBe(100000) // only the post-watermark folio
+    expect(r1.balance).toBe(250000)
+
+    expect(r2.carry_forward).toBe(0) // dropped to zero
+    expect(r2.cash_collected).toBe(0) // nothing since its watermark — no bleed from agent1
+    expect(r2.balance).toBe(0)
   })
 
   it('Scenario 11 — admin lists and reads the pending drops queue (default pending)', async () => {
@@ -771,10 +833,19 @@ describe('Agent Continuous Cash Balance with Cash Drops', () => {
     // balance = 70000 + 500000 − 60000 − 40000 = 470000
     expect(me.json.balance.balance).toBe(470000)
 
-    // The gate: watermark headline === independent grouped all-time recompute.
+    // The gate: the admin dashboard row MIRRORS the agent's /me view field-by-field (both now
+    // flow through the canonical deriveBalance), and its balance equals the independent all-time
+    // recompute (cash 800000 − commission 90000 − expense 40000 − dropped 200000 = 470000).
     const balances = await listBalances(ADMIN_EMAIL)
     const row = balances.json.balances.find((b: any) => b.agent.id === agentId)
+    expect(row.balance).toBe(470000) // independent all-time recompute
+    expect(row.carry_forward).toBe(me.json.balance.carry_forward)
+    expect(row.cash_collected).toBe(me.json.balance.cash_collected)
+    expect(row.commission_total).toBe(me.json.balance.commission_total)
+    expect(row.expense_total).toBe(me.json.balance.expense_total)
+    expect(row.payouts_total).toBe(me.json.balance.payouts_total)
     expect(row.balance).toBe(me.json.balance.balance)
+    expect(row.last_drop.id).toBe(me.json.balance.last_drop.id)
   })
 
   // Phase-3 (TECH_DEBT §12e): the anchor follows the SETTLEMENT timeline (reviewed_at), so a

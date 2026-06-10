@@ -126,12 +126,27 @@ function BalancesTab() {
                 </Stack>
 
                 <Divider sx={{ my: 1.5 }} />
-                <Stack direction="row" spacing={3} sx={{ flexWrap: 'wrap' }}>
-                  <Metric label="Cobrado" value={row.cash_collected} />
-                  <Metric label="Comisión" value={row.commission_total} />
-                  <Metric label="Gastos" value={row.expense_total} />
-                  <Metric label="Entregado" value={row.confirmed_drops_total} />
-                  {row.payouts_total > 0 && <Metric label="Pagado" value={row.payouts_total} />}
+                {/* Shift-scoped breakdown (US-A19) — mirrors the agent's own /me view: a
+                    carry-forward line plus the components since their last confirmed drop. */}
+                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+                  {row.last_drop
+                    ? `Desde la última entrega · ${formatDate(row.last_drop.created_at)}`
+                    : 'Toda la actividad'}
+                </Typography>
+                <Stack spacing={0.5}>
+                  {row.carry_forward !== 0 && (
+                    <BreakdownRow
+                      label="Saldo anterior"
+                      value={Math.abs(row.carry_forward)}
+                      sign={row.carry_forward < 0 ? '−' : '+'}
+                    />
+                  )}
+                  <BreakdownRow label="Cobrado" value={row.cash_collected} sign="+" />
+                  <BreakdownRow label="Comisión" value={row.commission_total} sign="−" />
+                  <BreakdownRow label="Gastos" value={row.expense_total} sign="−" />
+                  {row.payouts_total > 0 && (
+                    <BreakdownRow label="Pagado" value={row.payouts_total} sign="+" />
+                  )}
                 </Stack>
 
                 {negative && (
@@ -191,14 +206,28 @@ function BalancesTab() {
   )
 }
 
-function Metric({ label, value }: { label: string; value: number }) {
+// One labelled line in the shift breakdown. `sign` renders the +/− that ties each component to
+// the running-balance formula (mirrors the agent's BalancePage).
+function BreakdownRow({
+  label,
+  value,
+  sign,
+}: {
+  label: string
+  value: number
+  sign?: '+' | '−'
+}) {
   return (
-    <Box>
-      <Typography variant="caption" color="text.secondary">
+    <Stack direction="row" sx={{ justifyContent: 'space-between' }}>
+      <Typography variant="body2" color="text.secondary">
         {label}
       </Typography>
-      <Typography variant="body2">{formatMoney(value)}</Typography>
-    </Box>
+      <Typography variant="body2">
+        {sign === '−' && value > 0 ? '−' : ''}
+        {sign === '+' && value > 0 ? '+' : ''}
+        {formatMoney(value)}
+      </Typography>
+    </Stack>
   )
 }
 

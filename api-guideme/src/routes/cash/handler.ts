@@ -535,11 +535,18 @@ export const cancelDrop = async (c: CashContext) => {
 
 // --- Admin surface (org-wide, agents in the caller's org only) ----------------
 
-// US-A19 — each agent's outstanding balance + pending rollup (the company's cash exposure).
-// Derived org-wide with a fixed set of `GROUP BY agent_id` aggregates (O(1) queries, not the
-// per-agent loop), then merged in memory. Uses the SAME predicates as `deriveBalance`, so the
-// result is identical to the old loop. The /balances view stays ALL-TIME (no watermark) —
-// company exposure, not the agent's shift. Ordered by balance desc (largest exposure first).
+// US-A19 — each agent's outstanding balance + SHIFT-SCOPED breakdown (the company's cash
+// exposure, reconciliation-ready). The headline `balance` is the authoritative all-time figure
+// (the physical cash held); the breakdown (carry_forward + cash_collected − commission_total −
+// expense_total + payouts_total) counts only events since the agent's last confirmed drop — the
+// SAME view the agent sees on their own /me surface. Built by mapping each org agent through the
+// canonical `deriveBalance` (single source of truth), so the dashboard row mirrors /me exactly.
+//
+// The derivations are independent and fired CONCURRENTLY; each is O(shift) via the balance_after
+// watermark (TECH_DEBT §12b), so the dashboard cost is the slowest single derivation, not the
+// sum. (If an org ever grew to hundreds of agents, collapse to O(1) queries with conditional
+// aggregation over a per-agent watermark window — see admin-shift-scoped-balances.design.md.)
+// Ordered by balance desc (largest exposure first).
 export const listBalances = async (c: CashContext) => {
   const admin = c.get('user')
   const org = admin.organizationId
@@ -551,102 +558,23 @@ export const listBalances = async (c: CashContext) => {
     .from(users)
     .where(and(eq(users.organizationId, org), eq(users.role, 'agent')))
 
-  // cash_collected — non-cancelled CASH folios (card sales add no cash debt).
-  const cashRows = await db
-    .select({
-      agentId: folios.agentId,
-      total: sql<number>`coalesce(sum(${folios.amountPaid}), 0)`,
-    })
-    .from(folios)
-    .where(
-      and(
-        eq(folios.organizationId, org),
-        ne(folios.status, 'cancelled'),
-        eq(folios.paymentMethod, 'cash'),
-      ),
-    )
-    .groupBy(folios.agentId)
-
-  // commissions — kept on any live folio, or a cancelled one the company absorbed.
-  const commissionRows = await db
-    .select({
-      agentId: folios.agentId,
-      total: sql<number>`coalesce(sum(${folios.commissionAmount}), 0)`,
-    })
-    .from(folios)
-    .where(
-      and(
-        eq(folios.organizationId, org),
-        or(ne(folios.status, 'cancelled'), eq(folios.cancellationClawback, false)),
-      ),
-    )
-    .groupBy(folios.agentId)
-
-  const expenseRows = await db
-    .select({
-      agentId: agentExpenses.agentId,
-      total: sql<number>`coalesce(sum(${agentExpenses.amount}), 0)`,
-    })
-    .from(agentExpenses)
-    .where(eq(agentExpenses.organizationId, org))
-    .groupBy(agentExpenses.agentId)
-
-  const payoutRows = await db
-    .select({
-      agentId: payouts.agentId,
-      total: sql<number>`coalesce(sum(${payouts.amount}), 0)`,
-    })
-    .from(payouts)
-    .where(eq(payouts.organizationId, org))
-    .groupBy(payouts.agentId)
-
-  // Drops grouped by (agent, status): confirmed reduces the balance; pending is the rollup.
-  const dropRows = await db
-    .select({
-      agentId: cashDrops.agentId,
-      status: cashDrops.status,
-      total: sql<number>`coalesce(sum(${cashDrops.amount}), 0)`,
-      count: sql<number>`count(*)`,
-    })
-    .from(cashDrops)
-    .where(eq(cashDrops.organizationId, org))
-    .groupBy(cashDrops.agentId, cashDrops.status)
-
-  const toMap = (rows: { agentId: string; total: number }[]) =>
-    new Map(rows.map((r) => [r.agentId, Number(r.total)]))
-  const cashMap = toMap(cashRows)
-  const commissionMap = toMap(commissionRows)
-  const expenseMap = toMap(expenseRows)
-  const payoutMap = toMap(payoutRows)
-
-  const confirmedMap = new Map<string, number>()
-  const pendingMap = new Map<string, { total: number; count: number }>()
-  for (const r of dropRows) {
-    if (r.status === 'confirmed') confirmedMap.set(r.agentId, Number(r.total))
-    else if (r.status === 'pending')
-      pendingMap.set(r.agentId, { total: Number(r.total), count: Number(r.count) })
-  }
-
-  const balances = agents.map((agent) => {
-    const cashCollected = cashMap.get(agent.id) ?? 0
-    const commissionTotal = commissionMap.get(agent.id) ?? 0
-    const expenseTotal = expenseMap.get(agent.id) ?? 0
-    const payoutsTotal = payoutMap.get(agent.id) ?? 0
-    const confirmedDropsTotal = confirmedMap.get(agent.id) ?? 0
-    const pending = pendingMap.get(agent.id) ?? { total: 0, count: 0 }
-    return {
-      agent: { id: agent.id, name: agent.name },
-      cash_collected: cashCollected,
-      commission_total: commissionTotal,
-      expense_total: expenseTotal,
-      confirmed_drops_total: confirmedDropsTotal,
-      payouts_total: payoutsTotal,
-      balance:
-        cashCollected - commissionTotal - expenseTotal - confirmedDropsTotal + payoutsTotal,
-      pending_drops_total: pending.total,
-      pending_drops_count: pending.count,
-    }
-  })
+  const balances = await Promise.all(
+    agents.map(async (agent) => {
+      const derived = await deriveBalance(db, org, agent.id)
+      return {
+        agent: { id: agent.id, name: agent.name },
+        cash_collected: derived.cashCollected,
+        commission_total: derived.commissionTotal,
+        expense_total: derived.expenseTotal,
+        payouts_total: derived.payoutsTotal,
+        carry_forward: derived.carryForward,
+        last_drop: derived.lastDrop,
+        balance: derived.balance,
+        pending_drops_total: derived.pendingDropsTotal,
+        pending_drops_count: derived.pendingDropsCount,
+      }
+    }),
+  )
 
   balances.sort((a, b) => b.balance - a.balance)
 
