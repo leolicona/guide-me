@@ -1,8 +1,8 @@
 import { Box, Typography, Fade } from '@mui/material';
-import { useAuthStore } from '../store/authStore';
+import { useCurrentUser } from '../features/auth/CurrentUserContext';
 
 export default function DashboardPage() {
-  const user = useAuthStore((state) => state.user);
+  const user = useCurrentUser();
 
   return (
     <Fade in timeout={400}>
@@ -11,7 +11,7 @@ export default function DashboardPage() {
           Dashboard
         </Typography>
         <Typography color="text.secondary">
-          Bienvenido{user?.name ? `, ${user.name}` : ''}. Esta página se ampliará en futuras versiones.
+          Bienvenido, {user.name}. Esta página se ampliará en futuras versiones.
         </Typography>
       </Box>
     </Fade>

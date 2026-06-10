@@ -31,7 +31,31 @@ export const createPayoutSchema = z.object({
   note: z.string().trim().min(1).nullable().optional(),
 })
 
+// US-A27 — admin direct collection from an agent (face-to-face). `agent_id` names the agent
+// (validated in-org server-side); organization_id / source / status / balance_* come from
+// context or server derivation, never the body.
+export const registerCollectionSchema = z.object({
+  agent_id: z.string().min(1),
+  amount: z.number().int().positive(),
+  note: z.string().trim().min(1).nullable().optional(),
+})
+
+// US-AG27/AG28 — agent disputes a unilateral admin money-move. The reason is REQUIRED so the
+// admin has context to resolve it.
+export const disputeSchema = z.object({
+  note: z.string().trim().min(1, 'A dispute reason is required'),
+})
+
+// US-A27/A28 — admin resolves an agent's dispute. The resolution note is REQUIRED (it closes
+// the audit conversation) and is appended to `review_note`.
+export const resolveDisputeSchema = z.object({
+  note: z.string().trim().min(1, 'A resolution note is required'),
+})
+
 export type AddExpenseInput = z.infer<typeof addExpenseSchema>
 export type CreateDropInput = z.infer<typeof createDropSchema>
 export type ReviewDropInput = z.infer<typeof reviewDropSchema>
 export type CreatePayoutInput = z.infer<typeof createPayoutSchema>
+export type RegisterCollectionInput = z.infer<typeof registerCollectionSchema>
+export type DisputeInput = z.infer<typeof disputeSchema>
+export type ResolveDisputeInput = z.infer<typeof resolveDisputeSchema>

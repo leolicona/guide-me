@@ -27,6 +27,11 @@ import {
   useCreateDrop,
   useCancelDrop,
 } from '../features/cash/hooks'
+import { PendingAcknowledgments } from '../features/cash/components/PendingAcknowledgments'
+import { AckChip } from '../features/cash/components/AckChip'
+import { CashBoxCard } from '../features/cash/components/CashBoxCard'
+import { SalesSummaryCard } from '../features/cash/components/SalesSummaryCard'
+import { CommissionsCard } from '../features/cash/components/CommissionsCard'
 import type { DropStatus } from '../features/cash/types'
 import { ServiceError } from '../services/authService'
 import { formatMoney, amountToCents } from '../features/catalog/types'
@@ -50,29 +55,6 @@ const formatDate = (unixSeconds: number) =>
     hour: '2-digit',
     minute: '2-digit',
   })
-
-// One labelled line in the balance breakdown. `sign` renders the +/− that ties each
-// component to the running-balance formula.
-function BreakdownRow({
-  label,
-  value,
-  sign,
-}: {
-  label: string
-  value: number
-  sign?: '+' | '−'
-}) {
-  return (
-    <Stack direction="row" sx={{ justifyContent: 'space-between' }}>
-      <Typography color="text.secondary">{label}</Typography>
-      <Typography>
-        {sign === '−' && value > 0 ? '−' : ''}
-        {sign === '+' && value > 0 ? '+' : ''}
-        {formatMoney(value)}
-      </Typography>
-    </Stack>
-  )
-}
 
 export default function BalancePage() {
   const { data: balance, isLoading, isError } = useMyBalance()
@@ -116,8 +98,6 @@ export default function BalancePage() {
     )
   }
 
-  const negative = (balance?.balance ?? 0) < 0
-
   return (
     <Fade in timeout={400}>
       <Box sx={{ maxWidth: 680, mx: 'auto' }}>
@@ -136,57 +116,24 @@ export default function BalancePage() {
 
         {balance && (
           <Stack spacing={3}>
-            {/* Headline: the cash the agent is holding (the single accent). */}
-            <Card variant="outlined">
-              <CardContent>
-                <Typography variant="overline" color="text.secondary">
-                  {negative ? 'La empresa te debe' : 'Efectivo que tienes'}
-                </Typography>
-                <Typography
-                  variant="h3"
-                  sx={{ fontWeight: 600, color: negative ? 'error.main' : 'secondary.main' }}
-                >
-                  {formatMoney(Math.abs(balance.balance))}
-                </Typography>
-                {balance.pending_drops_total > 0 && (
-                  <Typography variant="body2" color="warning.main" sx={{ mt: 0.5 }}>
-                    {formatMoney(balance.pending_drops_total)} entregado, pendiente de confirmación
-                  </Typography>
-                )}
+            {/* Admin money-moves awaiting my signature (US-AG27/AG28) — non-blocking, first
+                in view so it can't be missed, but never a modal. */}
+            <PendingAcknowledgments items={balance.pending_acknowledgments} />
 
-                <Divider sx={{ my: 2 }} />
-                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
-                  {balance.last_drop
-                    ? `Desde tu última entrega · ${formatDate(balance.last_drop.created_at)}`
-                    : 'Toda tu actividad'}
-                </Typography>
-                <Stack spacing={1}>
-                  {balance.carry_forward !== 0 && (
-                    <BreakdownRow
-                      label="Saldo anterior"
-                      value={Math.abs(balance.carry_forward)}
-                      sign={balance.carry_forward < 0 ? '−' : '+'}
-                    />
-                  )}
-                  <BreakdownRow label="Efectivo cobrado" value={balance.cash_collected} sign="+" />
-                  <BreakdownRow label="Comisión ganada" value={balance.commission_total} sign="−" />
-                  <BreakdownRow label="Gastos" value={balance.expense_total} sign="−" />
-                  {balance.payouts_total > 0 && (
-                    <BreakdownRow label="Pagos recibidos" value={balance.payouts_total} sign="+" />
-                  )}
-                </Stack>
-              </CardContent>
-            </Card>
-
-            {/* Hand in cash (US-AG14) */}
-            <Button
-              variant="contained"
-              size="large"
-              disableElevation
-              onClick={() => setDropOpen(true)}
-            >
-              Entregar efectivo
-            </Button>
+            {/* US-AG29 — three blocks sharing one shift timeline: the physical cash box
+                (the actionable accent), the sales split, and the earned commissions. */}
+            <Box>
+              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+                {balance.last_drop
+                  ? `Desde tu última entrega · ${formatDate(balance.last_drop.created_at)}`
+                  : 'Toda tu actividad'}
+              </Typography>
+              <Stack spacing={3}>
+                <CashBoxCard balance={balance} onRegisterDrop={() => setDropOpen(true)} />
+                <SalesSummaryCard sales={balance.sales} />
+                <CommissionsCard commissions={balance.commissions} />
+              </Stack>
+            </Box>
 
             {/* Expenses (US-AG13) */}
             <Card variant="outlined">
@@ -293,18 +240,38 @@ export default function BalancePage() {
                         sx={{ justifyContent: 'space-between', alignItems: 'center', py: 1 }}
                       >
                         <Box sx={{ minWidth: 0 }}>
-                          <Typography variant="body2">{formatMoney(drop.amount)}</Typography>
+                          <Typography variant="body2">
+                            {formatMoney(drop.amount)}
+                            {drop.source === 'admin' ? ' · Cobro directo' : ''}
+                          </Typography>
                           <Typography variant="caption" color="text.secondary">
                             {formatDate(drop.created_at)}
                             {drop.note ? ` · ${drop.note}` : ''}
                           </Typography>
+                          {drop.amount_requested != null && (
+                            <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+                              Reportaste {formatMoney(drop.amount_requested)} · registrado{' '}
+                              {formatMoney(drop.amount)}
+                            </Typography>
+                          )}
                           {drop.status === 'rejected' && drop.review_note && (
                             <Typography variant="caption" color="error" sx={{ display: 'block' }}>
                               Rechazado: {drop.review_note}
                             </Typography>
                           )}
+                          {drop.acknowledgment === 'disputed' && drop.ack_note && (
+                            <Typography variant="caption" color="error" sx={{ display: 'block' }}>
+                              Tu disputa: {drop.ack_note}
+                            </Typography>
+                          )}
+                          {drop.acknowledgment === 'resolved' && drop.review_note && (
+                            <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+                              {drop.review_note}
+                            </Typography>
+                          )}
                         </Box>
                         <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+                          <AckChip state={drop.acknowledgment} />
                           <Chip size="small" color={DROP_COLOR[drop.status]} label={DROP_LABEL[drop.status]} />
                           {drop.status === 'pending' && (
                             <Button

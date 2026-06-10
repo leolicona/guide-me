@@ -29,9 +29,10 @@ export const confirmSaleSchema = z
     customer_email: z.string().trim().email('A valid customer email is required'),
     // Phone stays optional metadata (no delivery dependency on it yet).
     customer_phone: z.string().nullable().optional(),
-    // US-AG25 — how the cash was collected. Defaults to 'cash' (the common case and the
-    // pre-feature behaviour). 'card' sales still earn commission but add no cash debt.
-    payment_method: z.enum(['cash', 'card']).optional().default('cash'),
+    // US-AG25/AG29 — how the payment was collected. Defaults to 'cash' (the common case
+    // and the pre-feature behaviour). Every non-cash method is electronic: it still earns
+    // commission but adds no cash debt (US-AG24 path).
+    payment_method: z.enum(['cash', 'card', 'transfer', 'link']).optional().default('cash'),
     lines: z.array(lineSchema).nonempty('Cart must have at least one line'),
   })
   // Business rule 6 — a slot may appear at most once (the UI merges quantities). This

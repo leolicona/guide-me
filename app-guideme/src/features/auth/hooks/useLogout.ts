@@ -1,17 +1,14 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import { logout } from '../../../services/authService'
-import { useAuthStore } from '../../../store/authStore'
 import { ROUTES } from '../../../config/routes'
 
 export function useLogout() {
-  const clear = useAuthStore((s) => s.clear)
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const mutation = useMutation({ mutationFn: logout })
 
   const handleLogout = () => {
-    clear()
     // Evict the ['me'] cache so a back-button nav can't re-render AuthGuard from a
     // stale-but-"fresh" cached user (useMe has a 5-min staleTime). Without this,
     // popstate restores the in-memory cache, no /api/me call fires, and the 401

@@ -8,7 +8,10 @@ import type {
   CashPayout,
   CreateDropInput,
   CreatePayoutInput,
+  DisputeInput,
   DropFilters,
+  RegisterCollectionInput,
+  ResolveDisputeInput,
   ReviewDropInput,
 } from '../features/cash/types'
 
@@ -52,6 +55,29 @@ export const cancelDrop = async (id: string): Promise<void> => {
   await request<{ ok: true }>(`/api/cash/me/drops/${id}`, { method: 'DELETE' })
 }
 
+// US-AG27/AG28 — sign a pending admin money-move (direct collection or adjusted confirm).
+// Financially inert: only the acknowledgment changes.
+export const acknowledgeDrop = async (id: string): Promise<CashDrop> => {
+  const res = await request<{ drop: CashDrop }>(
+    `/api/cash/me/drops/${id}/acknowledge`,
+    { method: 'POST', body: JSON.stringify({}) },
+  )
+  return res.drop
+}
+
+// US-AG27/AG28 — dispute a pending admin money-move with a required reason. Suppresses
+// auto-sign; never reverses money.
+export const disputeDrop = async (
+  id: string,
+  input: DisputeInput,
+): Promise<CashDrop> => {
+  const res = await request<{ drop: CashDrop }>(`/api/cash/me/drops/${id}/dispute`, {
+    method: 'POST',
+    body: JSON.stringify(input),
+  })
+  return res.drop
+}
+
 // --- Admin surface (US-A19/25) ---
 
 // US-A19 — each agent's outstanding balance + pending rollup (company cash exposure).
@@ -60,11 +86,12 @@ export const listBalances = async (): Promise<BalanceListItem[]> => {
   return res.balances
 }
 
-// US-A19 — the drops review queue (defaults to pending; optional status/agent filters).
+// US-A19 — the drops review queue (defaults to pending; optional status/agent/ack filters).
 export const listDrops = async (filters: DropFilters = {}): Promise<CashDrop[]> => {
   const params = new URLSearchParams()
   if (filters.status) params.set('status', filters.status)
   if (filters.agentId) params.set('agent_id', filters.agentId)
+  if (filters.ack) params.set('ack', filters.ack)
   const qs = params.toString()
   const res = await request<{ drops: CashDrop[] }>(`/api/cash/drops${qs ? `?${qs}` : ''}`)
   return res.drops
@@ -97,4 +124,29 @@ export const registerPayout = async (
     body: JSON.stringify(input),
   })
   return res.payout
+}
+
+// US-A27 — direct collection: take cash from an agent face-to-face. Reduces their balance
+// immediately (a confirmed drop, source='admin') and owes them a signature.
+export const registerCollection = async (
+  input: RegisterCollectionInput,
+): Promise<CashDrop> => {
+  const res = await request<{ drop: CashDrop }>('/api/cash/collections', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  })
+  return res.drop
+}
+
+// US-A27/A28 (D5) — resolve an agent's dispute. Audit close only: no amount or balance is
+// changed; a genuine correction is a separate compensating payout/collection.
+export const resolveDispute = async (
+  id: string,
+  input: ResolveDisputeInput,
+): Promise<CashDrop> => {
+  const res = await request<{ drop: CashDrop }>(
+    `/api/cash/drops/${id}/resolve-dispute`,
+    { method: 'POST', body: JSON.stringify(input) },
+  )
+  return res.drop
 }

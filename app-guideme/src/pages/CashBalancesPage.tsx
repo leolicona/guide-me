@@ -27,8 +27,12 @@ import {
 import {
   useBalances,
   useDrops,
+  useRegisterCollection,
   useRegisterPayout,
 } from '../features/cash/hooks'
+import { AckChip } from '../features/cash/components/AckChip'
+import { SOURCE_LABEL } from '../features/cash/components/ackPresentation'
+import { METHOD_LABEL } from '../features/cash/components/paymentPresentation'
 import type { BalanceListItem, DropStatus } from '../features/cash/types'
 import { formatMoney, amountToCents, centsToAmount } from '../features/catalog/types'
 import { ROUTES } from '../config/routes'
@@ -53,15 +57,22 @@ const formatDate = (unixSeconds: number) =>
     minute: '2-digit',
   })
 
-type DropFilter = DropStatus | 'all'
+// 'disputed' is a pseudo-filter: it queries by acknowledgment (any status) so open disputes
+// — which live on already-confirmed drops — surface in one tap.
+type DropFilter = DropStatus | 'all' | 'disputed'
 
-// --- Balances tab: company cash exposure per agent (US-A19) + payouts (US-A25) ---
+// --- Balances tab: company cash exposure per agent (US-A19) + payouts (US-A25)
+//     + direct collections (US-A27) ---
 function BalancesTab() {
   const { data: balances, isLoading, isError } = useBalances()
   const payout = useRegisterPayout()
+  const collection = useRegisterCollection()
   const [target, setTarget] = useState<BalanceListItem | null>(null)
   const [amount, setAmount] = useState('')
   const [note, setNote] = useState('')
+  const [collectTarget, setCollectTarget] = useState<BalanceListItem | null>(null)
+  const [collectAmount, setCollectAmount] = useState('')
+  const [collectNote, setCollectNote] = useState('')
 
   // A negative balance means the company owes the agent — offer to pay it back to zero.
   const openPayout = (row: BalanceListItem) => {
@@ -76,6 +87,23 @@ function BalancesTab() {
     payout.mutate(
       { agent_id: target.agent.id, amount: cents, note: note.trim() || null },
       { onSuccess: () => setTarget(null) },
+    )
+  }
+
+  // US-A27 — record cash taken from the agent face-to-face. Defaults to their full balance
+  // (the common case: settling them to zero on the spot).
+  const openCollection = (row: BalanceListItem) => {
+    setCollectTarget(row)
+    setCollectAmount(row.balance > 0 ? String(centsToAmount(row.balance)) : '')
+    setCollectNote('')
+  }
+
+  const submitCollection = () => {
+    const cents = amountToCents(Number(collectAmount))
+    if (!collectTarget || !Number.isFinite(cents) || cents <= 0) return
+    collection.mutate(
+      { agent_id: collectTarget.agent.id, amount: cents, note: collectNote.trim() || null },
+      { onSuccess: () => setCollectTarget(null) },
     )
   }
 
@@ -149,16 +177,106 @@ function BalancesTab() {
                   )}
                 </Stack>
 
-                {negative && (
-                  <Button size="small" sx={{ mt: 1.5 }} onClick={() => openPayout(row)}>
-                    Registrar pago
+                {/* US-AG29 (D5) — the same cash-vs-electronic split the agent sees on /me. */}
+                <Divider sx={{ my: 1.5 }} />
+                <Stack spacing={0.5}>
+                  <Stack direction="row" sx={{ justifyContent: 'space-between' }}>
+                    <Typography variant="body2" color="text.secondary">
+                      Ventas del turno · {row.sales.cash_count + row.sales.electronic_count}
+                    </Typography>
+                    <Typography variant="body2">{formatMoney(row.sales.total)}</Typography>
+                  </Stack>
+                  <Stack direction="row" sx={{ justifyContent: 'space-between' }}>
+                    <Typography variant="caption" color="text.secondary">
+                      Efectivo {formatMoney(row.sales.cash)} · Electrónico{' '}
+                      {formatMoney(row.sales.electronic)}
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      Comisiones {formatMoney(row.commissions.total)}
+                      {row.commissions.electronic > 0
+                        ? ` (electrónicas ${formatMoney(row.commissions.electronic)})`
+                        : ''}
+                    </Typography>
+                  </Stack>
+                  {row.sales.electronic > 0 && (
+                    <Stack direction="row" sx={{ flexWrap: 'wrap', gap: 0.5, mt: 0.5 }}>
+                      {(['card', 'transfer', 'link'] as const)
+                        .filter((m) => row.sales.by_method[m] > 0)
+                        .map((m) => (
+                          <Chip
+                            key={m}
+                            size="small"
+                            variant="outlined"
+                            label={`${METHOD_LABEL[m]} · ${formatMoney(row.sales.by_method[m])}`}
+                          />
+                        ))}
+                    </Stack>
+                  )}
+                </Stack>
+
+                <Stack direction="row" spacing={1} sx={{ mt: 1.5 }}>
+                  {/* US-A27 — face-to-face collection: reduces the agent's balance NOW and
+                      sends them a signature request (non-blocking). */}
+                  <Button size="small" onClick={() => openCollection(row)}>
+                    Registrar cobro directo
                   </Button>
-                )}
+                  {negative && (
+                    <Button size="small" onClick={() => openPayout(row)}>
+                      Registrar pago
+                    </Button>
+                  )}
+                </Stack>
               </CardContent>
             </Card>
           )
         })}
       </Stack>
+
+      {/* US-A27 — direct collection dialog */}
+      <Dialog open={!!collectTarget} onClose={() => setCollectTarget(null)} fullWidth maxWidth="xs">
+        <DialogTitle>Registrar cobro directo</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            Registra el efectivo que recibiste de {collectTarget?.agent.name} en persona. Su
+            saldo se reduce de inmediato y se le pedirá firmar de conformidad (si no firma,
+            se confirma automáticamente).
+          </Typography>
+          <Stack spacing={2}>
+            <TextField
+              label="Monto recibido"
+              type="number"
+              fullWidth
+              autoFocus
+              value={collectAmount}
+              onChange={(e) => setCollectAmount(e.target.value)}
+            />
+            <TextField
+              label="Nota (opcional)"
+              fullWidth
+              multiline
+              minRows={2}
+              value={collectNote}
+              onChange={(e) => setCollectNote(e.target.value)}
+            />
+          </Stack>
+          {collection.isError && (
+            <Alert severity="error" sx={{ mt: 2 }}>
+              No se pudo registrar el cobro. Inténtalo de nuevo.
+            </Alert>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setCollectTarget(null)}>Cancelar</Button>
+          <Button
+            variant="contained"
+            disableElevation
+            onClick={submitCollection}
+            disabled={collection.isPending || !collectAmount}
+          >
+            {collection.isPending ? 'Registrando…' : 'Registrar cobro'}
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       <Dialog open={!!target} onClose={() => setTarget(null)} fullWidth maxWidth="xs">
         <DialogTitle>Registrar pago</DialogTitle>
@@ -231,10 +349,12 @@ function BreakdownRow({
   )
 }
 
-// --- Drops tab: the review queue (US-A19) ---
+// --- Drops tab: the review queue (US-A19) + open disputes (US-A27/A28) ---
 function DropsTab() {
   const [filter, setFilter] = useState<DropFilter>('pending')
-  const { data: drops, isLoading, isError } = useDrops({ status: filter })
+  const { data: drops, isLoading, isError } = useDrops(
+    filter === 'disputed' ? { status: 'all', ack: 'disputed' } : { status: filter },
+  )
 
   return (
     <Box>
@@ -248,6 +368,7 @@ function DropsTab() {
         <ToggleButton value="pending">Pendientes</ToggleButton>
         <ToggleButton value="confirmed">Confirmadas</ToggleButton>
         <ToggleButton value="rejected">Rechazadas</ToggleButton>
+        <ToggleButton value="disputed">En disputa</ToggleButton>
         <ToggleButton value="all">Todas</ToggleButton>
       </ToggleButtonGroup>
 
@@ -275,14 +396,22 @@ function DropsTab() {
                     <Box sx={{ minWidth: 0 }}>
                       <Typography variant="subtitle1">{formatMoney(drop.amount)}</Typography>
                       <Typography variant="caption" color="text.secondary">
-                        {drop.agent?.name} · {formatDate(drop.created_at)}
+                        {drop.agent?.name} · {SOURCE_LABEL[drop.source]} · {formatDate(drop.created_at)}
                       </Typography>
                     </Box>
-                    <Chip size="small" color={DROP_COLOR[drop.status]} label={DROP_LABEL[drop.status]} />
+                    <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+                      <AckChip state={drop.acknowledgment} />
+                      <Chip size="small" color={DROP_COLOR[drop.status]} label={DROP_LABEL[drop.status]} />
+                    </Stack>
                   </Stack>
                   {drop.note && (
                     <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
                       {drop.note}
+                    </Typography>
+                  )}
+                  {drop.acknowledgment === 'disputed' && drop.ack_note && (
+                    <Typography variant="body2" color="error" sx={{ mt: 1 }}>
+                      Disputa del agente: {drop.ack_note}
                     </Typography>
                   )}
                 </CardContent>

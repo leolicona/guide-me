@@ -70,6 +70,8 @@ GuideMe is a multi-tenant, mobile-optimized SaaS platform that centralizes the s
 - **US-A20** — As an admin, I want to export sales and commission reports (CSV or PDF) for external processing.
 - **US-A27** — As an admin, I want to directly register a cash collection from an agent (face-to-face) so that their running balance is immediately reduced, without requiring the agent to submit a pending request first.
 - **US-A28** — As an admin, when reviewing a pending cash drop from an agent, I want to be able to adjust the received amount before confirming it (adding a mandatory explanatory note), so I can correct discrepancies without having to reject the entire request.
+- **US-A29** — As an admin, I want to configure my organization's **acknowledgment window** — the time my agents have to sign or dispute a direct collection (US-A27) or an adjusted drop (US-A28) before it auto-signs (default 24 hours, allowed range 1–168 h) — so the audit cadence matches my operation's settlement rhythm (e.g. a weekend-route agency widens it to 72 h).
+- **US-A30** — As an admin, when an agent disputes a direct collection or an adjustment, I want to see the open dispute (with the agent's reason) in my cash queue and close it with a mandatory resolution note, so the audit trail is complete without altering settled amounts (a genuine correction is recorded separately as a payout or a new collection).
 
 #### Cancellations
 
@@ -119,8 +121,8 @@ GuideMe is a multi-tenant, mobile-optimized SaaS platform that centralizes the s
 - **US-AG24** — As an agent, when I register a sale with a "Card" payment method, I want my commission to be credited to my balance without increasing my cash debt.
 - **US-AG14** — As an agent, I want to register a cash drop (hand-in / *entrega de efectivo*) of a given amount to the admin, which reduces my running balance, so settlement happens whenever I hand over cash — no daily closure required.
 - **US-AG26** — As an agent, I want a daily snapshot of my own performance (today's sales and amount collected) alongside my running balance and a quick action to register a cash drop, so I can track my day and settle cash without leaving the home screen.
-- **US-AG27** — As an agent, I want to receive a notification when the admin registers a direct cash collection from me, so I can review the amount and click "Sign/Acknowledge" to digitally agree. If I don't sign it within 24 hours, the system should auto-sign it to not block the workflow.
-- **US-AG28** — As an agent, if the admin confirms my pending cash drop with an adjusted amount, I want to receive a notification to review the discrepancy and click "Sign/Acknowledge". If I don't sign within 24 hours, the system should auto-sign it to close the audit trail.
+- **US-AG27** — As an agent, I want to receive a notification when the admin registers a direct cash collection from me, so I can review the amount and click "Sign/Acknowledge" to digitally agree — or raise a dispute with a reason if I disagree. If I do neither within my organization's acknowledgment window (24 h by default, configurable — US-A29), the system should auto-sign it to not block the workflow; an open dispute is never auto-signed.
+- **US-AG28** — As an agent, if the admin confirms my pending cash drop with an adjusted amount, I want to receive a notification to review the discrepancy and click "Sign/Acknowledge" — or dispute it with a reason. If I do neither within my organization's acknowledgment window (24 h by default, configurable — US-A29), the system should auto-sign it to close the audit trail; an open dispute is never auto-signed.
 - **US-AG29** — As an agent, I want my balance dashboard to visually separate my Total Sales (cash vs. electronic), my Earned Commissions, and my Physical Cash Box, so I can easily understand how electronic payments (card, wire transfer, link) benefit me without confusing my physical cash-in-hand debt.
 
 #### Access Scanner (QR)
@@ -203,8 +205,8 @@ GuideMe is a multi-tenant, mobile-optimized SaaS platform that centralizes the s
 ### Out of MVP (Phase 2+)
 
 #### 🚀 PHASE 2: Core Enhancements
-- [ ] **Advanced Cash Collection (Admin-Initiated & Adjustments)** *(US-A27, US-A28, US-AG27, US-AG28)* - *Enables face-to-face direct collections and adjustments with a non-blocking silent acknowledgment workflow for agents.*
-- [ ] **Agent Balance UX Overhaul (Cash vs Electronic)** *(US-AG29)* - *Redesigns the agent dashboard to visually separate total sales, earned commissions, and physical cash debt, clarifying the impact of non-cash payments.*
+- [ ] **Advanced Cash Collection (Admin-Initiated & Adjustments)** *(US-A27, US-A28, US-A29, US-A30, US-AG27, US-AG28)* - *Enables face-to-face direct collections and adjustments with a non-blocking sign-or-dispute acknowledgment workflow for agents, auto-signing after a per-org configurable window.* — `docs/cash-drops/advanced-cash-collection.spec.md`
+- [ ] **Agent Balance UX Overhaul (Cash vs Electronic)** *(US-AG29)* - *Redesigns the agent dashboard to visually separate total sales, earned commissions, and physical cash debt, clarifying the impact of non-cash payments.* — `docs/cash-drops/agent-balance-ux-overhaul.spec.md`
 - [ ] **Offline-capable QR validation with post-sync** *(US-AG16)* - *Deferred from MVP to focus on real-time validation.*
 - [ ] **Partial cancellations (per service within the folio)** *(US-A22)* - *Deferred to simplify inventory logic in MVP.*
 - [ ] **Cash refund tracking** *(US-A23)* - *To ensure the admin can reconcile physical cash returns. Pairs with the Tourist Portal's Refund PIN (US-T05) to confirm the customer received the cash.*
@@ -304,5 +306,7 @@ GuideMe is a multi-tenant, mobile-optimized SaaS platform that centralizes the s
 | **Minimum price (Precio mínimo)** | Price floor per service defined by the admin. The agent cannot sell below it. |
 | **Commission bonus (Bonus de comisión)** | Additional commission percentage defined by the admin for a specific service. |
 | **Clawback** | On cancelling a folio, the admin's choice (US-A26) to make the agent **forfeit** the commission booked on that sale (vs. the company absorbing the loss). Recorded as `cancellation_clawback` on the folio and applied by the running-balance derivation. |
+| **Direct collection (Cobro directo)** | A cash collection the admin records face-to-face (US-A27): a `confirmed` drop created by the admin that reduces the agent's balance immediately and owes the agent a signature. |
+| **Acknowledgment window (Ventana de firma)** | Per-organization period (default 24 h, range 1–168 h — US-A29) during which an agent can sign or dispute a unilateral admin money-move (direct collection / adjusted drop) before it auto-signs. An open dispute is never auto-signed. |
 | **Magic Link** | A signed, time-limited tokenized URL emailed to a tourist that grants passwordless access to their self-service booking portal (Phase 2). |
 | **Refund PIN** | A secure code shown to a tourist in the portal once their cancellation is approved; the tourist gives it to the agent/admin to confirm the physical cash refund was received, closing the cash-refund loop (US-T05 ↔ US-A23). |

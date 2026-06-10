@@ -36,8 +36,11 @@ export interface PosServiceDetail
 
 export type FolioStatus = 'paid' | 'booking' | 'cancelled'
 
-/** US-AG25 — how the agent collected payment. 'card' earns commission but adds no cash debt. */
-export type PaymentMethod = 'cash' | 'card'
+/**
+ * US-AG25/AG29 — how the agent collected payment. Every non-cash method is electronic:
+ * it earns commission but adds no cash debt.
+ */
+export type PaymentMethod = 'cash' | 'card' | 'transfer' | 'link'
 
 export interface FolioLineExtra {
   id: string

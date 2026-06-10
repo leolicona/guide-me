@@ -19,7 +19,9 @@ import {
   DialogActions,
 } from '@mui/material'
 import ArrowBackRounded from '@mui/icons-material/ArrowBackRounded'
-import { useDrop, useReviewDrop } from '../features/cash/hooks'
+import { useDrop, useResolveDispute, useReviewDrop } from '../features/cash/hooks'
+import { AckChip } from '../features/cash/components/AckChip'
+import { SOURCE_LABEL } from '../features/cash/components/ackPresentation'
 import type { DropStatus, ReviewDropInput } from '../features/cash/types'
 import { formatMoney, amountToCents } from '../features/catalog/types'
 import { ROUTES } from '../config/routes'
@@ -49,12 +51,24 @@ export default function CashDropDetailPage() {
   const { id } = useParams<{ id: string }>()
   const { data: drop, isLoading, isError } = useDrop(id)
   const review = useReviewDrop()
+  const resolve = useResolveDispute()
   const [rejectOpen, setRejectOpen] = useState(false)
   const [confirmOpen, setConfirmOpen] = useState(false)
+  const [resolveOpen, setResolveOpen] = useState(false)
   const [adjustAmount, setAdjustAmount] = useState('')
   const [note, setNote] = useState('')
+  const [resolutionNote, setResolutionNote] = useState('')
 
   const isPending = drop?.status === 'pending'
+  const isDisputed = drop?.acknowledgment === 'disputed'
+
+  const submitResolution = () => {
+    if (!id || !resolutionNote.trim()) return
+    resolve.mutate(
+      { id, input: { note: resolutionNote.trim() } },
+      { onSuccess: () => setResolveOpen(false) },
+    )
+  }
 
   const confirm = () => {
     if (!id) return
@@ -98,10 +112,13 @@ export default function CashDropDetailPage() {
                   {formatMoney(drop.amount)}
                 </Typography>
                 <Typography variant="caption" color="text.secondary">
-                  {drop.agent?.name} · {formatDate(drop.created_at)}
+                  {drop.agent?.name} · {SOURCE_LABEL[drop.source]} · {formatDate(drop.created_at)}
                 </Typography>
               </Box>
-              <Chip color={DROP_COLOR[drop.status]} label={DROP_LABEL[drop.status]} />
+              <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+                <AckChip state={drop.acknowledgment} size="medium" />
+                <Chip color={DROP_COLOR[drop.status]} label={DROP_LABEL[drop.status]} />
+              </Stack>
             </Stack>
 
             <Card variant="outlined">
@@ -138,6 +155,39 @@ export default function CashDropDetailPage() {
                 {drop.status === 'confirmed' ? 'Recibo confirmado' : 'Rechazado'}
                 {drop.reviewed_at ? ` el ${formatDate(drop.reviewed_at)}` : ''}
                 {drop.review_note ? ` — ${drop.review_note}` : ''}
+              </Alert>
+            )}
+
+            {/* US-A27/A28 (D5) — an open dispute from the agent. Resolution is audit-only:
+                the money never moves here; a correction is a separate payout/collection. */}
+            {isDisputed && (
+              <Alert
+                severity="warning"
+                action={
+                  <Button
+                    color="inherit"
+                    size="small"
+                    onClick={() => {
+                      setResolutionNote('')
+                      setResolveOpen(true)
+                    }}
+                    disabled={resolve.isPending}
+                  >
+                    Resolver
+                  </Button>
+                }
+              >
+                El agente disputó este movimiento{drop.ack_note ? `: “${drop.ack_note}”` : '.'}
+              </Alert>
+            )}
+            {drop.acknowledgment === 'signed' && drop.acknowledged_at && (
+              <Alert severity="success" icon={false}>
+                Firmado por el agente el {formatDate(drop.acknowledged_at)}
+              </Alert>
+            )}
+            {drop.acknowledgment === 'auto_signed' && drop.acknowledged_at && (
+              <Alert severity="info" icon={false}>
+                Firmado automáticamente el {formatDate(drop.acknowledged_at)} (sin respuesta del agente)
               </Alert>
             )}
 
@@ -210,6 +260,44 @@ export default function CashDropDetailPage() {
               disabled={review.isPending}
             >
               {review.isPending ? 'Confirmando…' : 'Confirmar recibo'}
+            </Button>
+          </DialogActions>
+        </Dialog>
+
+        {/* Resolve-dispute dialog (required note; no money change). */}
+        <Dialog open={resolveOpen} onClose={() => setResolveOpen(false)} fullWidth maxWidth="xs">
+          <DialogTitle>Resolver disputa</DialogTitle>
+          <DialogContent>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+              Cierra la disputa con una explicación para el agente. Esto no cambia ningún
+              monto — si el agente tiene razón, registra después la corrección como un pago
+              o un nuevo cobro.
+            </Typography>
+            <TextField
+              label="Resolución"
+              fullWidth
+              multiline
+              minRows={2}
+              autoFocus
+              required
+              value={resolutionNote}
+              onChange={(e) => setResolutionNote(e.target.value)}
+            />
+            {resolve.isError && (
+              <Alert severity="error" sx={{ mt: 2 }}>
+                No se pudo resolver la disputa. Inténtalo de nuevo.
+              </Alert>
+            )}
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={() => setResolveOpen(false)}>Cancelar</Button>
+            <Button
+              variant="contained"
+              disableElevation
+              onClick={submitResolution}
+              disabled={resolve.isPending || !resolutionNote.trim()}
+            >
+              {resolve.isPending ? 'Resolviendo…' : 'Resolver disputa'}
             </Button>
           </DialogActions>
         </Dialog>

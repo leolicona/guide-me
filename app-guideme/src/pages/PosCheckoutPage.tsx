@@ -20,6 +20,8 @@ import RemoveRounded from '@mui/icons-material/RemoveRounded'
 import DeleteOutlineRounded from '@mui/icons-material/DeleteOutlineRounded'
 import PaymentsRounded from '@mui/icons-material/PaymentsRounded'
 import CreditCardRounded from '@mui/icons-material/CreditCardRounded'
+import AccountBalanceRounded from '@mui/icons-material/AccountBalanceRounded'
+import LinkRounded from '@mui/icons-material/LinkRounded'
 import { useConfirmSale } from '../features/pos/hooks'
 import {
   usePosCart,
@@ -212,30 +214,50 @@ export default function PosCheckoutPage() {
                 <Typography variant="h6" sx={{ mb: 2 }}>
                   Método de pago
                 </Typography>
-                <ToggleButtonGroup
-                  exclusive
-                  fullWidth
-                  value={paymentMethod}
-                  onChange={(_, value) => value && setPaymentMethod(value)}
-                  aria-label="Método de pago"
-                >
-                  <ToggleButton value="cash" aria-label="Efectivo">
-                    <PaymentsRounded fontSize="small" sx={{ mr: 1 }} />
-                    Efectivo
-                  </ToggleButton>
-                  <ToggleButton value="card" aria-label="Tarjeta">
-                    <CreditCardRounded fontSize="small" sx={{ mr: 1 }} />
-                    Tarjeta
-                  </ToggleButton>
-                </ToggleButtonGroup>
+                {/* US-AG29 — four methods; everything except Efectivo is electronic (no
+                    cash debt, commission still earned). Two rows so each stays tappable. */}
+                <Stack spacing={1}>
+                  <ToggleButtonGroup
+                    exclusive
+                    fullWidth
+                    value={paymentMethod}
+                    onChange={(_, value) => value && setPaymentMethod(value)}
+                    aria-label="Método de pago"
+                  >
+                    <ToggleButton value="cash" aria-label="Efectivo">
+                      <PaymentsRounded fontSize="small" sx={{ mr: 1 }} />
+                      Efectivo
+                    </ToggleButton>
+                    <ToggleButton value="card" aria-label="Tarjeta">
+                      <CreditCardRounded fontSize="small" sx={{ mr: 1 }} />
+                      Tarjeta
+                    </ToggleButton>
+                  </ToggleButtonGroup>
+                  <ToggleButtonGroup
+                    exclusive
+                    fullWidth
+                    value={paymentMethod}
+                    onChange={(_, value) => value && setPaymentMethod(value)}
+                    aria-label="Método de pago electrónico"
+                  >
+                    <ToggleButton value="transfer" aria-label="Transferencia">
+                      <AccountBalanceRounded fontSize="small" sx={{ mr: 1 }} />
+                      Transferencia
+                    </ToggleButton>
+                    <ToggleButton value="link" aria-label="Link de pago">
+                      <LinkRounded fontSize="small" sx={{ mr: 1 }} />
+                      Link de pago
+                    </ToggleButton>
+                  </ToggleButtonGroup>
+                </Stack>
                 <Typography
                   variant="caption"
                   color="text.secondary"
                   sx={{ display: 'block', mt: 1.5 }}
                 >
-                  {paymentMethod === 'card'
-                    ? 'Cobrado con terminal externa — no suma efectivo a tu saldo, pero sí genera comisión.'
-                    : 'Efectivo recibido — se suma al saldo de caja que entregas a la empresa.'}
+                  {paymentMethod === 'cash'
+                    ? 'Efectivo recibido — se suma al saldo de caja que entregas a la empresa.'
+                    : 'Cobro electrónico — lo recibe la empresa: no suma efectivo a tu caja, pero sí genera comisión.'}
                 </Typography>
               </CardContent>
             </Card>

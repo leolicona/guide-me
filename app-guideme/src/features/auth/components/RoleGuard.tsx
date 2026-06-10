@@ -1,6 +1,6 @@
 import { type ReactNode } from 'react'
 import { Navigate } from 'react-router-dom'
-import { useAuthStore } from '../../../store/authStore'
+import { useCurrentUser } from '../CurrentUserContext'
 import { ROUTES } from '../../../config/routes'
 
 interface RoleGuardProps {
@@ -8,11 +8,11 @@ interface RoleGuardProps {
   children: ReactNode
 }
 
-// Composes inside AuthGuard, which guarantees authStore.user is populated.
+// Composes inside AuthGuard, which guarantees the current user is available.
 export function RoleGuard({ role, children }: RoleGuardProps) {
-  const user = useAuthStore((state) => state.user)
+  const user = useCurrentUser()
 
-  if (!user || user.role !== role) {
+  if (user.role !== role) {
     return <Navigate to={ROUTES.DASHBOARD} replace />
   }
 

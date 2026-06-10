@@ -1,5 +1,5 @@
 import type { UserPayload } from '../features/auth/types'
-import { useAuthStore } from '../store/authStore'
+import { queryClient } from '../config/queryClient'
 
 const API_BASE = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? ''
 
@@ -23,7 +23,7 @@ function handleUnauthorized(path: string) {
   if (path.startsWith(AUTH_PUBLIC_PREFIX)) return
   if (typeof window === 'undefined') return
 
-  useAuthStore.getState().clear()
+  queryClient.removeQueries({ queryKey: ['me'] })
 
   if (!window.location.pathname.startsWith('/login')) {
     const redirect = window.location.pathname + window.location.search
@@ -37,7 +37,7 @@ function handleUnauthorized(path: string) {
 function handleSuspended() {
   if (typeof window === 'undefined') return
 
-  useAuthStore.getState().clear()
+  queryClient.removeQueries({ queryKey: ['me'] })
 
   if (!window.location.search.includes('reason=suspended')) {
     window.location.replace('/login?reason=suspended')

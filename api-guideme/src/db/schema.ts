@@ -4,6 +4,9 @@ import { sqliteTable, text, integer } from 'drizzle-orm/sqlite-core'
 export const organizations = sqliteTable('organizations', {
   id: text('id').primaryKey(),
   name: text('name').notNull(),
+  // Hours an admin money-move (direct collection / adjusted confirm) stays awaiting the
+  // agent's signature before it auto-signs (US-AG27/AG28). Per-org configurable; default 24.
+  ackWindowHours: integer('ack_window_hours').notNull().default(24),
   createdAt: integer('created_at', { mode: 'timestamp' })
     .notNull()
     .default(sql`(unixepoch())`),
@@ -183,9 +186,10 @@ export const folios = sqliteTable('folios', {
   status: text('status', { enum: ['paid', 'booking', 'cancelled'] })
     .notNull()
     .default('paid'),
-  // How the agent collected (US-AG25). Only 'cash' folios add to the agent's cash debt;
-  // 'card' folios still earn commission (US-AG24).
-  paymentMethod: text('payment_method', { enum: ['cash', 'card'] })
+  // How the agent collected (US-AG25/AG29). Only 'cash' folios add to the agent's cash
+  // debt; every other method is electronic — it still earns commission (US-AG24) but the
+  // money goes to the company. App-level enum (the column is plain text, no CHECK).
+  paymentMethod: text('payment_method', { enum: ['cash', 'card', 'transfer', 'link'] })
     .notNull()
     .default('cash'),
   subtotal: integer('subtotal').notNull(),
@@ -301,6 +305,26 @@ export const cashDrops = sqliteTable('cash_drops', {
   status: text('status', { enum: ['pending', 'confirmed', 'rejected'] })
     .notNull()
     .default('pending'),
+  // Who created this row: 'agent' (filed a hand-in, baseline) or 'admin' (direct collection,
+  // US-A27). Financially inert — drives labelling/audit only.
+  source: text('source', { enum: ['agent', 'admin'] })
+    .notNull()
+    .default('agent'),
+  // The agent's signature lifecycle for a unilateral admin money-move (US-AG27/AG28).
+  // Orthogonal to `status`; NEVER affects the balance. `auto_signed` may also be DERIVED at
+  // read time once `reviewed_at + org.ack_window_hours` has elapsed (persisted opportunistically).
+  acknowledgment: text('acknowledgment', {
+    enum: ['not_required', 'pending', 'signed', 'auto_signed', 'disputed', 'resolved'],
+  })
+    .notNull()
+    .default('not_required'),
+  // Terminal instant of the acknowledgment lifecycle (signed / auto_signed / resolved); null
+  // while pending/disputed/not_required.
+  acknowledgedAt: integer('acknowledged_at', { mode: 'timestamp' }),
+  // The agent's dispute reason (required on dispute); null otherwise.
+  ackNote: text('ack_note'),
+  // The admin who resolved a dispute; null otherwise.
+  ackResolvedBy: text('ack_resolved_by').references(() => users.id),
   note: text('note'),
   reviewedBy: text('reviewed_by').references(() => users.id),
   reviewedAt: integer('reviewed_at', { mode: 'timestamp' }),

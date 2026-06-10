@@ -1,3 +1,4 @@
+import { Suspense } from 'react'
 import { Outlet, Link as RouterLink, useLocation } from 'react-router-dom'
 import {
   AppBar,
@@ -5,9 +6,11 @@ import {
   Typography,
   Button,
   Box,
+  Badge,
   ButtonBase,
   BottomNavigation,
   BottomNavigationAction,
+  CircularProgress,
   useMediaQuery,
 } from '@mui/material'
 import { alpha, useTheme } from '@mui/material/styles'
@@ -21,8 +24,9 @@ import PointOfSaleRounded from '@mui/icons-material/PointOfSaleRounded'
 import QrCodeScannerRounded from '@mui/icons-material/QrCodeScannerRounded'
 import ReceiptRounded from '@mui/icons-material/ReceiptRounded'
 import ReceiptLongRounded from '@mui/icons-material/ReceiptLongRounded'
-import { useAuthStore } from '../store/authStore'
+import { useCurrentUser } from '../features/auth/CurrentUserContext'
 import { useLogout } from '../features/auth/hooks/useLogout'
+import { usePendingAckCount } from '../features/cash/hooks'
 import { ROUTES } from '../config/routes'
 
 interface NavItem {
@@ -58,12 +62,16 @@ export function AppLayout() {
   const theme = useTheme()
   const isDesktop = useMediaQuery(theme.breakpoints.up('md'))
   const location = useLocation()
-  const user = useAuthStore((s) => s.user)
+  const user = useCurrentUser()
   const { logout, isPending } = useLogout()
+  // US-AG27/AG28 — admin money-moves awaiting the agent's signature, surfaced on the Balance
+  // destination so the obligation is visible without opening the screen. Agents only.
+  const { data: pendingAckCount = 0 } = usePendingAckCount(user.role === 'agent')
 
-  const items = NAV_ITEMS.filter((i) => !i.role || i.role === user?.role)
+  const items = NAV_ITEMS.filter((i) => !i.role || i.role === user.role)
   const isActive = (to: string) => location.pathname.startsWith(to)
   const activeValue = items.find((i) => isActive(i.to))?.to ?? false
+  const badgeFor = (to: string) => (to === ROUTES.BALANCE ? pendingAckCount : 0)
 
   return (
     <Box
@@ -98,15 +106,13 @@ export function AppLayout() {
           >
             GuideMe
           </Typography>
-          {user && (
-            <Typography
-              variant="body2"
-              color="text.secondary"
-              sx={{ mr: 2, display: { xs: 'none', sm: 'block' } }}
-            >
-              {user.name} ({user.role})
-            </Typography>
-          )}
+          <Typography
+            variant="body2"
+            color="text.secondary"
+            sx={{ mr: 2, display: { xs: 'none', sm: 'block' } }}
+          >
+            {user.name} ({user.role})
+          </Typography>
           <Button
             variant="outlined"
             size="small"
@@ -178,7 +184,9 @@ export function AppLayout() {
                         transition: 'background-color 160ms ease',
                       }}
                     >
-                      <Icon fontSize="small" />
+                      <Badge badgeContent={badgeFor(item.to)} color="warning">
+                        <Icon fontSize="small" />
+                      </Badge>
                     </Box>
                     <Typography
                       variant="caption"
@@ -202,7 +210,17 @@ export function AppLayout() {
             pb: { xs: 12, md: 4 },
           }}
         >
-          <Outlet />
+          {/* Boundary lives *inside* the shell so lazy page chunks load without
+              tearing down the nav — only the content area shows the loader. */}
+          <Suspense
+            fallback={
+              <Box sx={{ display: 'flex', justifyContent: 'center', pt: 8 }}>
+                <CircularProgress />
+              </Box>
+            }
+          >
+            <Outlet />
+          </Suspense>
         </Box>
       </Box>
 
@@ -228,7 +246,11 @@ export function AppLayout() {
                 key={item.to}
                 label={item.label}
                 value={item.to}
-                icon={<Icon />}
+                icon={
+                  <Badge badgeContent={badgeFor(item.to)} color="warning">
+                    <Icon />
+                  </Badge>
+                }
                 component={RouterLink}
                 to={item.to}
                 sx={{

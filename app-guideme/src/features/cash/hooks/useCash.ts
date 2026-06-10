@@ -1,21 +1,28 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
+  acknowledgeDrop,
   addExpense,
   cancelDrop,
   createDrop,
   deleteExpense,
+  disputeDrop,
   getDrop,
   getMyBalance,
   listBalances,
   listDrops,
+  registerCollection,
   registerPayout,
+  resolveDispute,
   reviewDrop,
 } from '../../../services/cashService'
 import type {
   AddExpenseInput,
   CreateDropInput,
   CreatePayoutInput,
+  DisputeInput,
   DropFilters,
+  RegisterCollectionInput,
+  ResolveDisputeInput,
   ReviewDropInput,
 } from '../types'
 
@@ -64,6 +71,36 @@ export const useCancelDrop = () => {
   })
 }
 
+// US-AG27/AG28 — sign a pending admin money-move; refresh my balance (the item leaves the
+// pending-signatures list; the balance itself never changes).
+export const useAcknowledgeDrop = () => {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) => acknowledgeDrop(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ME_KEY }),
+  })
+}
+
+// US-AG27/AG28 — dispute a pending admin money-move (required reason).
+export const useDisputeDrop = () => {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, input }: { id: string; input: DisputeInput }) =>
+      disputeDrop(id, input),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ME_KEY }),
+  })
+}
+
+// Badge feed for the nav (agents only — pass `enabled: role === 'agent'`). Shares the
+// ['cash','me'] cache with BalancePage, so it adds no extra request when both are mounted.
+export const usePendingAckCount = (enabled: boolean) =>
+  useQuery({
+    queryKey: ME_KEY,
+    queryFn: getMyBalance,
+    enabled,
+    select: (b) => b.pending_acknowledgments_count,
+  })
+
 // --- Admin surface ---
 
 // US-A19 — outstanding balances per agent (company cash exposure).
@@ -100,6 +137,25 @@ export const useRegisterPayout = () => {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (input: CreatePayoutInput) => registerPayout(input),
+    onSuccess: () => qc.invalidateQueries({ queryKey: CASH_KEY }),
+  })
+}
+
+// US-A27 — direct collection from an agent; refresh the whole cash surface.
+export const useRegisterCollection = () => {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (input: RegisterCollectionInput) => registerCollection(input),
+    onSuccess: () => qc.invalidateQueries({ queryKey: CASH_KEY }),
+  })
+}
+
+// US-A27/A28 (D5) — resolve an agent's dispute; refresh the queue + detail.
+export const useResolveDispute = () => {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, input }: { id: string; input: ResolveDisputeInput }) =>
+      resolveDispute(id, input),
     onSuccess: () => qc.invalidateQueries({ queryKey: CASH_KEY }),
   })
 }

@@ -2,6 +2,7 @@ import { type ReactNode } from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
 import { Box, CircularProgress } from '@mui/material';
 import { useMe } from '../hooks/useMe';
+import { CurrentUserProvider } from '../CurrentUserContext';
 
 interface AuthGuardProps {
   children: ReactNode;
@@ -29,5 +30,7 @@ export function AuthGuard({ children }: AuthGuardProps) {
     return <Navigate to={`/login?redirect=${encodeURIComponent(location.pathname + location.search)}`} replace />;
   }
 
-  return <>{children}</>;
+  // Publish the resolved user so descendants (RoleGuard, AppLayout, pages) read
+  // the exact value gated on here — no separately-synced store, no one-tick lag.
+  return <CurrentUserProvider value={user}>{children}</CurrentUserProvider>;
 }

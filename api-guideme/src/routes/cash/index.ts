@@ -5,21 +5,28 @@ import { requireRole } from '../../middleware/role'
 import { ApiError } from '../../types/errors'
 import type { AppVariables } from '../../types/context'
 import {
+  acknowledgeDrop,
   addExpense,
   cancelDrop,
   createDrop,
   deleteExpense,
+  disputeDrop,
   getDropDetail,
   getMyBalance,
   listBalances,
   listDrops,
+  registerCollection,
   registerPayout,
+  resolveDispute,
   reviewDrop,
 } from './handler'
 import {
   addExpenseSchema,
   createDropSchema,
   createPayoutSchema,
+  disputeSchema,
+  registerCollectionSchema,
+  resolveDisputeSchema,
   reviewDropSchema,
 } from './schema'
 
@@ -59,6 +66,14 @@ cash.post(
   createDrop,
 )
 cash.delete('/me/drops/:id', agent, cancelDrop)
+// US-AG27/AG28 — sign or dispute a unilateral admin money-move (acknowledgment, non-blocking).
+cash.post('/me/drops/:id/acknowledge', agent, acknowledgeDrop)
+cash.post(
+  '/me/drops/:id/dispute',
+  agent,
+  zValidator('json', disputeSchema, validationHook),
+  disputeDrop,
+)
 
 // Admin surface — org-wide (agents in the caller's org only).
 cash.get('/balances', admin, listBalances)
@@ -69,6 +84,20 @@ cash.post(
   admin,
   zValidator('json', reviewDropSchema, validationHook),
   reviewDrop,
+)
+// US-A27 — admin-initiated direct collection (immediate, owes signature).
+cash.post(
+  '/collections',
+  admin,
+  zValidator('json', registerCollectionSchema, validationHook),
+  registerCollection,
+)
+// US-A27/A28 (D5) — admin resolves an agent's dispute (audit close; no money change).
+cash.post(
+  '/drops/:id/resolve-dispute',
+  admin,
+  zValidator('json', resolveDisputeSchema, validationHook),
+  resolveDispute,
 )
 cash.post(
   '/payouts',
