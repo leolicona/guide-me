@@ -60,6 +60,15 @@ export interface FolioDetail {
   cancellation_reason: string | null
   // US-A26 — true when the agent's commission was clawed back on cancellation.
   cancellation_clawback: boolean
+  // US-A23 / US-T05 — cash refund tracking. `pending` once a tourist's cancellation request
+  // is approved on a paid folio; `refunded` after the admin confirms the hand-back. The
+  // refund PIN itself is NEVER serialized here — it lives only in the tourist's portal, and
+  // the admin learns it from the tourist in person (that is the proof of hand-back).
+  refund_status: RefundStatus
+  refund_amount: number | null
+  refund_note: string | null // the admin's audit note on a no-PIN override confirm
+  refunded_at: number | null
+  refunded_by: string | null
   created_at: number
   lines: FolioDetailLine[]
 }
@@ -68,4 +77,47 @@ export interface FolioFilters {
   status?: FolioStatus
   date?: string
   agentId?: string
+}
+
+// --- Tourist cancellation requests + refund tracking (US-T04/T05, US-A23) ---
+// Spec: docs/tourist-portal/tourist-self-service-portal.spec.md
+
+export type RefundStatus = 'none' | 'pending' | 'refunded'
+export type CancellationRequestStatus = 'pending' | 'approved' | 'rejected'
+
+// One row in the admin review queue: the tourist's request plus enough folio context to
+// decide without opening the detail.
+export interface CancellationRequest {
+  id: string
+  folio_id: string
+  status: CancellationRequestStatus
+  reason: string | null // the tourist's stated reason
+  resolution_note: string | null // the admin's note (required on reject)
+  resolved_by: string | null
+  resolved_at: number | null
+  created_at: number
+  folio: {
+    id: string
+    customer_name: string | null
+    status: FolioStatus
+    total: number
+    amount_paid: number
+  }
+}
+
+// US-A26 still applies on a tourist-initiated cancellation: the admin chooses whether the
+// agent's commission is clawed back when approving.
+export interface ApproveCancellationRequestInput {
+  clawback?: boolean
+}
+
+export interface RejectCancellationRequestInput {
+  note: string
+}
+
+// Exactly one of `pin` (the tourist's portal PIN — primary) or `override_note`
+// (lost-link escape hatch, audited).
+export interface ConfirmRefundInput {
+  pin?: string
+  override_note?: string
 }

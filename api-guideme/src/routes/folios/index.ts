@@ -4,8 +4,20 @@ import { authMiddleware } from '../../middleware/auth'
 import { requireRole } from '../../middleware/role'
 import { ApiError } from '../../types/errors'
 import type { AppVariables } from '../../types/context'
-import { cancelFolio, getFolioDetail, listFolios } from './handler'
-import { cancelFolioSchema } from './schema'
+import {
+  approveCancellationRequest,
+  cancelFolio,
+  confirmRefund,
+  getFolioDetail,
+  listCancellationRequests,
+  listFolios,
+  rejectCancellationRequest,
+} from './handler'
+import {
+  cancelFolioSchema,
+  confirmRefundSchema,
+  rejectCancellationRequestSchema,
+} from './schema'
 
 const foliosRouter = new Hono<{
   Bindings: CloudflareBindings
@@ -23,11 +35,28 @@ const validationHook = (result: { success: boolean }) => {
 foliosRouter.use('*', authMiddleware, requireRole('admin'))
 
 foliosRouter.get('/', listFolios)
+
+// US-T04 — tourist cancellation requests (review queue + approve/reject). Literal routes
+// registered BEFORE /:id so the param route can never shadow them.
+foliosRouter.get('/cancellation-requests', listCancellationRequests)
+foliosRouter.post('/cancellation-requests/:requestId/approve', approveCancellationRequest)
+foliosRouter.post(
+  '/cancellation-requests/:requestId/reject',
+  zValidator('json', rejectCancellationRequestSchema, validationHook),
+  rejectCancellationRequest,
+)
+
 foliosRouter.get('/:id', getFolioDetail)
 foliosRouter.post(
   '/:id/cancel',
   zValidator('json', cancelFolioSchema, validationHook),
   cancelFolio,
+)
+// US-A23 / US-T05 — confirm the physical cash refund (PIN or override).
+foliosRouter.post(
+  '/:id/refund/confirm',
+  zValidator('json', confirmRefundSchema, validationHook),
+  confirmRefund,
 )
 
 export default foliosRouter

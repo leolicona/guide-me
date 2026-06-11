@@ -3,6 +3,7 @@ import { Link as RouterLink } from 'react-router-dom'
 import {
   Box,
   Typography,
+  Badge,
   Card,
   CardActionArea,
   CardContent,
@@ -12,10 +13,13 @@ import {
   Stack,
   Divider,
   Chip,
+  Tab,
+  Tabs,
   ToggleButton,
   ToggleButtonGroup,
 } from '@mui/material'
-import { useFolios } from '../features/folios/hooks'
+import { useFolios, usePendingCancellationCount } from '../features/folios/hooks'
+import { CancellationRequestsTab } from '../features/folios/components/CancellationRequestsTab'
 import type { FolioStatus } from '../features/folios/types'
 import { formatMoney } from '../features/catalog/types'
 import { ROUTES } from '../config/routes'
@@ -43,19 +47,15 @@ const formatDate = (unixSeconds: number) =>
 
 type Filter = 'all' | FolioStatus
 
-export default function FoliosListPage() {
+// The browse-and-cancel list (US-A21), unchanged — now one tab of the Folios screen.
+function FoliosTab() {
   const [filter, setFilter] = useState<Filter>('all')
   const { data: folios, isLoading, isError } = useFolios(
     filter === 'all' ? {} : { status: filter },
   )
 
   return (
-    <Fade in timeout={400}>
-      <Box sx={{ maxWidth: 760, mx: 'auto' }}>
-        <Typography variant="h4" component="h1" sx={{ mb: 3 }}>
-          Folios
-        </Typography>
-
+    <Box>
         <ToggleButtonGroup
           size="small"
           exclusive
@@ -120,6 +120,35 @@ export default function FoliosListPage() {
             ))}
           </Stack>
         )}
+    </Box>
+  )
+}
+
+export default function FoliosListPage() {
+  const [tab, setTab] = useState(0)
+  // US-T04 (D7) — pending tourists' cancellation requests surface as a badge so the
+  // queue can't be missed without polluting the main list.
+  const { data: pendingCount = 0 } = usePendingCancellationCount(true)
+
+  return (
+    <Fade in timeout={400}>
+      <Box sx={{ maxWidth: 760, mx: 'auto' }}>
+        <Typography variant="h4" component="h1" sx={{ mb: 2 }}>
+          Folios
+        </Typography>
+
+        <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ mb: 3 }}>
+          <Tab label="Folios" />
+          <Tab
+            label={
+              <Badge badgeContent={pendingCount} color="warning" sx={{ '& .MuiBadge-badge': { right: -12 } }}>
+                Solicitudes
+              </Badge>
+            }
+          />
+        </Tabs>
+
+        {tab === 0 ? <FoliosTab /> : <CancellationRequestsTab />}
       </Box>
     </Fade>
   )

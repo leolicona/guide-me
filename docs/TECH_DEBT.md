@@ -2,6 +2,23 @@
 
 This document tracks known technical debt, deferred tasks, and architectural improvements that are planned for future phases.
 
+## 16. Tourist Portal — Deferred Notifications & Electronic Refund Movement — ⚠️ OPEN (by design)
+
+**Status:** The Tourist Self-Service Portal (`docs/tourist-portal/tourist-self-service-portal.spec.md`)
+shipped with two deliberate deferrals:
+
+1. **No admin email on a new cancellation request (spec D7).** The request surfaces via the
+   in-app queue + nav badge only (the same precedent as Advanced Cash Collection's D1 — no
+   admin-facing event-email infra exists). Layerable on Resend later with no model change.
+2. **No electronic money movement on refunds.** There is no payment gateway (Phase-1 pivot),
+   so `POST /api/folios/:id/refund/confirm` *records* that a refund happened — for cash it is
+   the physical hand-back (proven by the portal PIN), for card/transfer/link the admin
+   processes the return out-of-band and records it here (typically via the override-note path).
+
+**Action if revisited:** (1) add a `sendCancellationRequestEmail` to `services/resend.ts` and
+fire it from `submitCancellationRequest` via `waitUntil`; (2) when a gateway lands, hang the
+actual refund call off the same `pending → refunded` transition.
+
 ## 15. External QR-Image Service Dependency — ⚠️ OPEN (accepted trade-off)
 
 **Status:** The Client Ticket Delivery feature (`docs/email/client-ticket-delivery.spec.md`) embeds QR codes in the HTML email using external image tags pointing to `api.qrserver.com/?data=<token>`.

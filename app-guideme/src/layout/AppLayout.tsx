@@ -27,6 +27,7 @@ import ReceiptLongRounded from '@mui/icons-material/ReceiptLongRounded'
 import { useCurrentUser } from '../features/auth/CurrentUserContext'
 import { useLogout } from '../features/auth/hooks/useLogout'
 import { usePendingAckCount } from '../features/cash/hooks'
+import { usePendingCancellationCount } from '../features/folios/hooks'
 import { ROUTES } from '../config/routes'
 
 interface NavItem {
@@ -67,11 +68,20 @@ export function AppLayout() {
   // US-AG27/AG28 — admin money-moves awaiting the agent's signature, surfaced on the Balance
   // destination so the obligation is visible without opening the screen. Agents only.
   const { data: pendingAckCount = 0 } = usePendingAckCount(user.role === 'agent')
+  // US-T04 — tourists' cancellation requests awaiting review, surfaced on the Folios
+  // destination. Admins only.
+  const { data: pendingCancellationCount = 0 } = usePendingCancellationCount(
+    user.role === 'admin',
+  )
 
   const items = NAV_ITEMS.filter((i) => !i.role || i.role === user.role)
   const isActive = (to: string) => location.pathname.startsWith(to)
   const activeValue = items.find((i) => isActive(i.to))?.to ?? false
-  const badgeFor = (to: string) => (to === ROUTES.BALANCE ? pendingAckCount : 0)
+  const badgeFor = (to: string) => {
+    if (to === ROUTES.BALANCE) return pendingAckCount
+    if (to === ROUTES.FOLIOS) return pendingCancellationCount
+    return 0
+  }
 
   return (
     <Box

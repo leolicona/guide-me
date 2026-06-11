@@ -209,9 +209,9 @@ GuideMe is a multi-tenant, mobile-optimized SaaS platform that centralizes the s
 - [ ] **Agent Balance UX Overhaul (Cash vs Electronic)** *(US-AG29)* - *Redesigns the agent dashboard to visually separate total sales, earned commissions, and physical cash debt, clarifying the impact of non-cash payments.* — `docs/cash-drops/agent-balance-ux-overhaul.spec.md`
 - [ ] **Offline-capable QR validation with post-sync** *(US-AG16)* - *Deferred from MVP to focus on real-time validation.*
 - [ ] **Partial cancellations (per service within the folio)** *(US-A22)* - *Deferred to simplify inventory logic in MVP.*
-- [ ] **Cash refund tracking** *(US-A23)* - *To ensure the admin can reconcile physical cash returns. Pairs with the Tourist Portal's Refund PIN (US-T05) to confirm the customer received the cash.*
+- [x] **Cash refund tracking** *(US-A23)* - *To ensure the admin can reconcile physical cash returns. Pairs with the Tourist Portal's Refund PIN (US-T05) to confirm the customer received the cash.* — **delivered with** `docs/tourist-portal/tourist-self-service-portal.spec.md` (the request→approve→PIN→confirm loop ships as one feature).
 - [ ] **Folio audit timeline** *(US-A24)* - *To track the lifecycle of a sale and resolve internal disputes.*
-- [ ] **Tourist Self-Service Portal (Magic Link, itinerary, QR, cancellation request + Refund PIN)** *(US-T01, US-T02, US-T03, US-T04, US-T05)* - *B2C portal. Depends on the Email feature (US-AG09/US-C01) for the Magic Link; the cancellation-request + Refund-PIN flow extends Total Folio Cancellation (US-A21) and Cash refund tracking (US-A23).*
+- [x] **Tourist Self-Service Portal (Magic Link, itinerary, QR, cancellation request + Refund PIN)** *(US-T01, US-T02, US-T03, US-T04, US-T05)* - *B2C portal. Depends on the Email feature (US-AG09/US-C01) for the Magic Link; the cancellation-request + Refund-PIN flow extends Total Folio Cancellation (US-A21) and Cash refund tracking (US-A23).* — `docs/tourist-portal/tourist-self-service-portal.spec.md` (bundles US-A23 refund tracking).
 
 #### 🔵 COULD HAVE
 *Nice-to-have features that improve UX if extra time is available.*

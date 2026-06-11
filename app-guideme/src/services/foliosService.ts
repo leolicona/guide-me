@@ -1,5 +1,14 @@
 import { request } from './authService'
-import type { FolioDetail, FolioFilters, FolioListItem } from '../features/folios/types'
+import type {
+  ApproveCancellationRequestInput,
+  CancellationRequest,
+  CancellationRequestStatus,
+  ConfirmRefundInput,
+  FolioDetail,
+  FolioFilters,
+  FolioListItem,
+  RejectCancellationRequestInput,
+} from '../features/folios/types'
 
 // Admin folio management (US-A21): browse folios and cancel one in full. All calls require
 // the admin role (enforced server-side). Money is integer minor units.
@@ -40,5 +49,54 @@ export const cancelFolio = async (
     method: 'POST',
     body: JSON.stringify(body),
   })
+  return res.folio
+}
+
+// --- Tourist cancellation requests + refund tracking (US-T04/T05, US-A23) ---
+// Spec: docs/tourist-portal/tourist-self-service-portal.spec.md
+
+// US-T04 — the admin review queue. Defaults to the actionable `pending` set.
+export const listCancellationRequests = async (
+  status: CancellationRequestStatus | 'all' = 'pending',
+): Promise<CancellationRequest[]> => {
+  const res = await request<{ requests: CancellationRequest[] }>(
+    `/api/folios/cancellation-requests?status=${status}`,
+  )
+  return res.requests
+}
+
+// US-T04 → US-A21 — approve: cancels the folio (seats released, client emailed) and, when
+// it was paid, opens the refund obligation + issues the tourist's portal PIN.
+export const approveCancellationRequest = async (
+  requestId: string,
+  input: ApproveCancellationRequestInput = {},
+): Promise<{ request: CancellationRequest; folio: FolioDetail }> =>
+  request<{ request: CancellationRequest; folio: FolioDetail }>(
+    `/api/folios/cancellation-requests/${requestId}/approve`,
+    { method: 'POST', body: JSON.stringify(input) },
+  )
+
+// US-T04 — reject with a required note (the tourist reads it in their portal). Folio untouched.
+export const rejectCancellationRequest = async (
+  requestId: string,
+  input: RejectCancellationRequestInput,
+): Promise<CancellationRequest> => {
+  const res = await request<{ request: CancellationRequest }>(
+    `/api/folios/cancellation-requests/${requestId}/reject`,
+    { method: 'POST', body: JSON.stringify(input) },
+  )
+  return res.request
+}
+
+// US-A23 / US-T05 — confirm the physical cash refund: the tourist's PIN (primary) or an
+// override note (lost-link escape hatch).
+export const confirmRefund = async (
+  folioId: string,
+  input: ConfirmRefundInput,
+): Promise<FolioDetail> => {
+  const res = await request<{ folio: FolioDetail }>(
+    `/api/folios/${folioId}/refund/confirm`,
+    { method: 'POST', body: JSON.stringify(input) },
+  )
   return res.folio
 }
