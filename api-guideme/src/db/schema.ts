@@ -207,6 +207,21 @@ export const folios = sqliteTable('folios', {
   cancellationClawback: integer('cancellation_clawback', { mode: 'boolean' })
     .notNull()
     .default(false),
+  // Cash refund tracking (US-A23 / US-T05). `pending` is set when a PAID folio is cancelled
+  // via an approved tourist cancellation request; `refunded` once the admin confirms the
+  // physical hand-back (PIN or override). `none` = no refund obligation.
+  refundStatus: text('refund_status', { enum: ['none', 'pending', 'refunded'] })
+    .notNull()
+    .default('none'),
+  refundAmount: integer('refund_amount'), // snapshot of amount_paid owed back
+  // 6-digit crypto-random PIN shown ONLY in the tourist portal (never emailed). The tourist
+  // hands it to the agent/admin to prove they were present to receive the cash.
+  refundPin: text('refund_pin'),
+  refundPinAttempts: integer('refund_pin_attempts').notNull().default(0),
+  // The admin's audit note when confirming WITHOUT the PIN (lost-link override).
+  refundNote: text('refund_note'),
+  refundedAt: integer('refunded_at', { mode: 'timestamp' }),
+  refundedBy: text('refunded_by').references(() => users.id),
   createdAt: integer('created_at', { mode: 'timestamp' })
     .notNull()
     .default(sql`(unixepoch())`),
@@ -358,6 +373,52 @@ export const payouts = sqliteTable('payouts', {
     .default(sql`(unixepoch())`),
 })
 
+// Tourist portal magic-link tokens (US-T01). A folio-scoped CAPABILITY token — not a user
+// identity/session (tourists have no `users` row). 32 random bytes base64url in the URL;
+// valid through the trip (end-of-day of the last slot + 7d, capped at 90d).
+// Spec: docs/tourist-portal/tourist-self-service-portal.spec.md
+export const folioAccessTokens = sqliteTable('folio_access_tokens', {
+  id: text('id').primaryKey(),
+  organizationId: text('organization_id')
+    .notNull()
+    .references(() => organizations.id),
+  folioId: text('folio_id')
+    .notNull()
+    .references(() => folios.id),
+  token: text('token').notNull().unique(),
+  expiresAt: integer('expires_at', { mode: 'timestamp' }).notNull(),
+  lastAccessedAt: integer('last_accessed_at', { mode: 'timestamp' }),
+  createdAt: integer('created_at', { mode: 'timestamp' })
+    .notNull()
+    .default(sql`(unixepoch())`),
+})
+
+// Tourist-initiated cancellation requests (US-T04). A REQUEST, never a cancel: it touches no
+// inventory or folio status — only an admin approval funnels into the existing cancelFolio
+// path (US-A21). At most one open `pending` row per folio (partial unique index).
+export const cancellationRequests = sqliteTable('cancellation_requests', {
+  id: text('id').primaryKey(),
+  organizationId: text('organization_id')
+    .notNull()
+    .references(() => organizations.id),
+  folioId: text('folio_id')
+    .notNull()
+    .references(() => folios.id),
+  status: text('status', { enum: ['pending', 'approved', 'rejected'] })
+    .notNull()
+    .default('pending'),
+  reason: text('reason'), // the tourist's stated reason (optional)
+  resolutionNote: text('resolution_note'), // admin's note — required on reject
+  resolvedBy: text('resolved_by').references(() => users.id),
+  resolvedAt: integer('resolved_at', { mode: 'timestamp' }),
+  createdAt: integer('created_at', { mode: 'timestamp' })
+    .notNull()
+    .default(sql`(unixepoch())`),
+  updatedAt: integer('updated_at', { mode: 'timestamp' })
+    .notNull()
+    .default(sql`(unixepoch())`),
+})
+
 export type Organization = typeof organizations.$inferSelect
 export type NewOrganization = typeof organizations.$inferInsert
 export type User = typeof users.$inferSelect
@@ -386,3 +447,7 @@ export type CashDrop = typeof cashDrops.$inferSelect
 export type NewCashDrop = typeof cashDrops.$inferInsert
 export type Payout = typeof payouts.$inferSelect
 export type NewPayout = typeof payouts.$inferInsert
+export type FolioAccessToken = typeof folioAccessTokens.$inferSelect
+export type NewFolioAccessToken = typeof folioAccessTokens.$inferInsert
+export type CancellationRequest = typeof cancellationRequests.$inferSelect
+export type NewCancellationRequest = typeof cancellationRequests.$inferInsert

@@ -3,6 +3,7 @@ import type { BatchItem } from 'drizzle-orm/batch'
 import { and, asc, desc, eq, gte, lte, sql } from 'drizzle-orm'
 import { getDb, type Db } from '../../db/client'
 import {
+  folioAccessTokens,
   folioLineExtras,
   folioLines,
   folios,
@@ -24,6 +25,7 @@ import {
   verifyTicket,
   type TicketPayload,
 } from '../../utils/qr'
+import { generatePortalToken, portalTokenExpiry } from '../../utils/portal'
 import type { ConfirmSaleInput } from './schema'
 
 export type PosContext = Context<{
@@ -514,6 +516,24 @@ export const confirmSale = async (c: PosContext) => {
 
   await db.batch(statements as [BatchItem<'sqlite'>, ...BatchItem<'sqlite'>[]])
 
+  // US-T01 — mint the tourist portal magic-link token (folio-scoped capability; spec D2/D3).
+  // Best-effort: a failure here must never fail the committed sale — the tourist still gets
+  // the ticket email, just without the portal link.
+  let portalLink: string | undefined
+  try {
+    const portalToken = generatePortalToken()
+    await db.insert(folioAccessTokens).values({
+      id: crypto.randomUUID(),
+      organizationId: org,
+      folioId,
+      token: portalToken,
+      expiresAt: portalTokenExpiry(prepared.map((l) => l.slotDate)),
+    })
+    portalLink = `${c.env.API_BASE_URL}/portal/${portalToken}`
+  } catch (err) {
+    console.error('[portal] token issuance failed', folioId, err)
+  }
+
   // Fire-and-forget — a Resend failure must never roll back a committed sale.
   if (input.customer_email && c.env.RESEND_API_KEY) {
     const orgRows = await db
@@ -531,6 +551,7 @@ export const confirmSale = async (c: PosContext) => {
       createdAt: new Date(),
       paymentMethod: input.payment_method ?? 'cash',
       total,
+      portalLink,
       lines: prepared.map((line) => ({
         serviceName: line.serviceName,
         slotDate: line.slotDate,

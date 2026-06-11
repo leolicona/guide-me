@@ -142,8 +142,12 @@ const countServices = async () => {
 // (sold in the commission-snapshot test) reference users/services — clear them too so the
 // tenancy clear can drop users.
 const clearCatalogDb = async () => {
+  await env.DB.exec('DELETE FROM cancellation_requests')
+  await env.DB.exec('DELETE FROM folio_access_tokens')
   await env.DB.exec('DELETE FROM folio_line_extras')
   await env.DB.exec('DELETE FROM folio_lines')
+  await env.DB.exec('DELETE FROM cancellation_requests')
+  await env.DB.exec('DELETE FROM folio_access_tokens')
   await env.DB.exec('DELETE FROM folios')
   await env.DB.exec('DELETE FROM service_extras')
   await env.DB.exec('DELETE FROM services')

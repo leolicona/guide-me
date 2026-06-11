@@ -178,6 +178,9 @@ beforeEach(async () => {
   await env.DB.exec('DELETE FROM payouts')
   await env.DB.exec('DELETE FROM cash_drops')
   await env.DB.exec('DELETE FROM agent_expenses')
+  // Portal rows reference folios — clear them first (POS confirm mints a token per sale).
+  await env.DB.exec('DELETE FROM cancellation_requests')
+  await env.DB.exec('DELETE FROM folio_access_tokens')
   await env.DB.exec('DELETE FROM folio_line_extras')
   await env.DB.exec('DELETE FROM folio_lines')
   await env.DB.exec('DELETE FROM folios')

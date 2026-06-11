@@ -131,8 +131,11 @@ export interface TicketConfirmationEmailInput {
   orgName: string
   folioId: string
   createdAt: Date
-  paymentMethod: 'cash' | 'card'
+  paymentMethod: 'cash' | 'card' | 'transfer' | 'link'
   total: number
+  // US-T01 — Magic Link into the tourist self-service portal (itinerary, QR, cancellation
+  // request). Absent when token issuance failed (best-effort; never blocks the sale).
+  portalLink?: string
   lines: Array<{
     serviceName: string
     slotDate: string        // 'YYYY-MM-DD'
@@ -181,7 +184,12 @@ export const sendTicketConfirmationEmail = async (
       </div>`
   }).join('')
 
-  const paymentLabel = data.paymentMethod === 'card' ? 'Tarjeta' : 'Efectivo'
+  const paymentLabel = {
+    cash: 'Efectivo',
+    card: 'Tarjeta',
+    transfer: 'Transferencia',
+    link: 'Link de pago',
+  }[data.paymentMethod]
   const orgName = escapeHtml(data.orgName)
   const greeting = data.customerName ? `Hola ${escapeHtml(data.customerName)},` : 'Hola,'
   const dateStr = data.createdAt.toLocaleDateString('es-MX', {
@@ -206,6 +214,27 @@ export const sendTicketConfirmationEmail = async (
       <p style="font-size:18px;font-weight:600;border-top:1px solid #e0e0e0;padding-top:12px;margin-top:4px;">
         Total pagado: ${formatAmount(data.total)}
       </p>
+
+      ${
+        data.portalLink
+          ? `
+      <div style="margin:24px 0;padding:16px;background:#f5f5f7;border-radius:8px;text-align:center;">
+        <p style="margin:0 0 12px;font-weight:600;">Gestiona tu reserva en línea</p>
+        <p style="margin:0 0 16px;font-size:14px;color:#555;">
+          Consulta tu itinerario, descarga tus códigos QR o solicita una cancelación
+          desde tu portal personal — sin crear cuenta.
+        </p>
+        <a href="${data.portalLink}"
+           style="display:inline-block;background:#1a1a2e;color:#ffffff;text-decoration:none;
+                  padding:10px 24px;border-radius:8px;font-size:14px;">
+          Abrir mi portal
+        </a>
+        <p style="margin:12px 0 0;font-size:11px;color:#999;">
+          Este enlace es personal — no lo compartas.
+        </p>
+      </div>`
+          : ''
+      }
 
       <p style="font-size:12px;color:#777;margin-top:24px;">
         ${orgName} — Gestión de reservas con GuideMe.

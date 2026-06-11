@@ -1,3 +1,177 @@
 h1 {
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/* --- Tourist self-service portal (US-T01–T05) ---------------------------------
+   Mobile-first, elegant-minimalist B2C surface (spec D1): off-white background,
+   charcoal text, generous whitespace, thin borders, one accent reserved for the
+   refund PIN. No client JS — plain HTML rendered by the Worker. */
+
+.portal {
+  font-family:
+    'Inter',
+    -apple-system,
+    'Segoe UI',
+    Roboto,
+    sans-serif;
+  max-width: 560px;
+  margin: 0 auto;
+  padding: 24px 16px 48px;
+  color: #26262e;
+  background: #fafafa;
+  line-height: 1.6;
+}
+
+.portal h1 {
+  font-family: inherit;
+  font-size: 1.6rem;
+  font-weight: 600;
+  margin: 4px 0;
+}
+
+.portal h2 {
+  font-size: 1.1rem;
+  font-weight: 600;
+  margin: 0 0 8px;
+}
+
+.portal h3 {
+  font-size: 1rem;
+  font-weight: 600;
+  margin: 0 0 4px;
+}
+
+.portal p {
+  margin: 4px 0;
+  font-weight: 400;
+}
+
+.portal-header {
+  margin-bottom: 24px;
+}
+
+.portal-org {
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 0.75rem;
+  color: #6b6b76;
+  margin: 0;
+}
+
+.portal-muted {
+  color: #6b6b76;
+  font-size: 0.85rem;
+}
+
+.portal-section-title {
+  margin: 24px 0 12px;
+}
+
+.portal-card {
+  background: #ffffff;
+  border: 1px solid #e6e6ea;
+  border-radius: 12px;
+  padding: 20px;
+  margin: 0 0 16px;
+}
+
+.portal-banner {
+  background: #fdecea;
+  color: #c62828;
+  border: 1px solid #f5c6c0;
+  border-radius: 8px;
+  padding: 10px 16px;
+  font-weight: 500;
+  margin: 0 0 16px;
+}
+
+.portal-qr {
+  text-align: center;
+  margin-top: 16px;
+}
+
+.portal-qr img {
+  border-radius: 8px;
+  max-width: 100%;
+  height: auto;
+}
+
+.portal-cancelled h2 {
+  color: #c62828;
+}
+
+.portal-pin {
+  margin-top: 16px;
+  padding: 16px;
+  border: 1px dashed #b9b9c2;
+  border-radius: 8px;
+  text-align: center;
+}
+
+.portal-pin-code {
+  font-size: 2.2rem;
+  font-weight: 600;
+  letter-spacing: 0.35em;
+  margin: 8px 0;
+  color: #1a1a2e;
+}
+
+.portal-refunded {
+  color: #2e7d32;
+  font-weight: 500;
+  margin-top: 12px;
+}
+
+.portal-rejected {
+  color: #c62828;
+  font-size: 0.9rem;
+  margin-bottom: 12px;
+}
+
+.portal details summary {
+  cursor: pointer;
+  font-weight: 500;
+}
+
+.portal form {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.portal label {
+  font-size: 0.85rem;
+  color: #6b6b76;
+}
+
+.portal textarea {
+  font-family: inherit;
+  font-size: 0.95rem;
+  border: 1px solid #d6d6dd;
+  border-radius: 8px;
+  padding: 10px 12px;
+  resize: vertical;
+}
+
+.portal button {
+  font-family: inherit;
+  font-size: 0.95rem;
+  font-weight: 500;
+  background: #1a1a2e;
+  color: #ffffff;
+  border: none;
+  border-radius: 8px;
+  padding: 12px 20px;
+  cursor: pointer;
+}
+
+.portal-error h1 {
+  font-size: 1.3rem;
+}
+
+.portal-footer {
+  margin-top: 32px;
+  border-top: 1px solid #e6e6ea;
+  padding-top: 16px;
+}

@@ -9,6 +9,7 @@ import authRouter from './routes/auth'
 import cashRouter from './routes/cash'
 import organizationsRouter from './routes/organizations'
 import foliosRouter from './routes/folios'
+import portalRouter from './routes/portal'
 import posRouter from './routes/pos'
 import servicesRouter from './routes/services'
 import ticketsRouter from './routes/tickets'
@@ -47,6 +48,11 @@ app.post('/api/admin-only', authMiddleware, requireRole('admin'), (c) =>
 )
 
 app.use(renderer)
+
+// Tourist self-service portal (US-T01–T05) — PUBLIC SSR pages. Registered after the
+// renderer so c.render is available; outside /api/* so CORS/auth never apply (the
+// folio-scoped token in the URL is the credential).
+app.route('/portal', portalRouter)
 
 app.get('/', (c) => {
   return c.render(<h1>Hello!</h1>)
