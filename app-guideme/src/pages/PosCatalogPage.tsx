@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { useNavigate, Link as RouterLink } from 'react-router-dom'
 import {
   Box,
@@ -11,18 +12,36 @@ import {
   Fade,
   Stack,
   Badge,
+  Chip,
 } from '@mui/material'
 import ShoppingCartRounded from '@mui/icons-material/ShoppingCartRounded'
 import { usePosServices } from '../features/pos/hooks'
 import { AvailabilityChip } from '../features/pos/components/AvailabilityChip'
 import { usePosCart, cartCount } from '../store/posCart'
 import { formatMoney } from '../features/catalog/types'
+import {
+  SERVICE_CATEGORIES,
+  categoryLabel,
+  type ServiceCategory,
+} from '../features/catalog/categories'
 import { ROUTES } from '../config/routes'
 
 export default function PosCatalogPage() {
   const { data: services, isLoading, isError } = usePosServices()
   const count = usePosCart((s) => cartCount(s.lines))
   const navigate = useNavigate()
+
+  // US-A37 — single-tap catalog filter. Derive the categories actually present (distinct,
+  // non-null, in canonical order); a chip appears only for a category that has a service.
+  // Selection is local — it resets on navigation, the desired POS behaviour.
+  const [activeCategory, setActiveCategory] = useState<ServiceCategory | null>(null)
+  const presentCategories = SERVICE_CATEGORIES.filter((c) =>
+    (services ?? []).some((s) => s.category === c),
+  )
+  const visibleServices =
+    activeCategory === null
+      ? (services ?? [])
+      : (services ?? []).filter((s) => s.category === activeCategory)
 
   return (
     <Fade in timeout={400}>
@@ -52,6 +71,33 @@ export default function PosCatalogPage() {
           </Badge>
         </Box>
 
+        {/* US-A37 — filter chips, shown only when ≥ 1 service carries a category. */}
+        {presentCategories.length > 0 && (
+          <Stack
+            direction="row"
+            spacing={1}
+            sx={{ mb: 3, flexWrap: 'wrap', rowGap: 1 }}
+          >
+            <Chip
+              label="Todos"
+              color={activeCategory === null ? 'secondary' : 'default'}
+              variant={activeCategory === null ? 'filled' : 'outlined'}
+              onClick={() => setActiveCategory(null)}
+            />
+            {presentCategories.map((c) => (
+              <Chip
+                key={c}
+                label={categoryLabel(c)}
+                color={activeCategory === c ? 'secondary' : 'default'}
+                variant={activeCategory === c ? 'filled' : 'outlined'}
+                onClick={() =>
+                  setActiveCategory((prev) => (prev === c ? null : c))
+                }
+              />
+            ))}
+          </Stack>
+        )}
+
         {isLoading && (
           <Box sx={{ display: 'flex', justifyContent: 'center', py: 6 }}>
             <CircularProgress />
@@ -75,7 +121,7 @@ export default function PosCatalogPage() {
                 gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))',
               }}
             >
-              {services.map((service) => (
+              {visibleServices.map((service) => (
                 <Card key={service.id}>
                   <CardActionArea
                     onClick={() =>

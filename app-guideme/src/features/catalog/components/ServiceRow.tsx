@@ -7,6 +7,7 @@ import BlockRounded from '@mui/icons-material/BlockRounded'
 import CheckCircleRounded from '@mui/icons-material/CheckCircleRounded'
 import type { Service } from '../types'
 import { formatMoney } from '../types'
+import { categoryLabel } from '../categories'
 
 interface ServiceRowProps {
   service: Service
@@ -72,6 +73,23 @@ export function ServiceRow({
               color={inactive ? 'default' : 'success'}
               label={inactive ? 'Inactivo' : 'Activo'}
             />
+            {service.category && (
+              // US-A37 — primary category (none shown for a legacy null service).
+              <Chip
+                size="small"
+                variant="outlined"
+                label={categoryLabel(service.category)}
+              />
+            )}
+            {service.is_flexible && (
+              // US-A36 — Soft Cap services allow a small overbooking margin.
+              <Chip
+                size="small"
+                variant="outlined"
+                color="warning"
+                label={`Flexible +${service.flex_capacity_pct}%`}
+              />
+            )}
             <Button size="small" startIcon={<EditRounded />} onClick={() => onEdit(service)}>
               Editar
             </Button>
