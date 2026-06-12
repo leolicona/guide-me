@@ -16,10 +16,12 @@ import {
   TextField,
   FormControlLabel,
   Switch,
+  Snackbar,
 } from '@mui/material'
 import ShoppingCartRounded from '@mui/icons-material/ShoppingCartRounded'
 import { usePosServices } from '../features/pos/hooks'
 import { AvailabilityChip } from '../features/pos/components/AvailabilityChip'
+import { ServiceSheet } from '../features/pos/components/ServiceSheet'
 import { usePosCart, cartCount } from '../store/posCart'
 import { usePosFilters } from '../store/posFilters'
 import { formatMoney } from '../features/catalog/types'
@@ -51,6 +53,10 @@ export default function PosCatalogPage() {
 
   const [hideSoldOut, setHideSoldOut] = useState(true)
   const [activeCategory, setActiveCategory] = useState<ServiceCategory | null>(null)
+  // US-AG31 — tapping a card opens this service in the Bottom Sheet (no navigation, the
+  // catalog stays mounted). `added` drives the success Snackbar lifted up from the sheet.
+  const [openServiceId, setOpenServiceId] = useState<string | null>(null)
+  const [added, setAdded] = useState(false)
 
   // Filter precedence (all client-side over the loaded list): hide-sold-out → derive the
   // present categories from what survives → category chip → render grid. Deriving the chip
@@ -182,9 +188,7 @@ export default function PosCatalogPage() {
               {visibleServices.map((service) => (
                 <Card key={service.id}>
                   <CardActionArea
-                    onClick={() =>
-                      navigate(ROUTES.POS_SERVICE.replace(':id', service.id))
-                    }
+                    onClick={() => setOpenServiceId(service.id)}
                     sx={{ height: '100%' }}
                   >
                     <CardContent>
@@ -221,6 +225,40 @@ export default function PosCatalogPage() {
               ))}
             </Box>
           ))}
+
+        {/* US-AG31 — Bottom Sheet for fast sale config; closes + snackbars on add. */}
+        <ServiceSheet
+          serviceId={openServiceId}
+          onClose={() => setOpenServiceId(null)}
+          onAdded={() => {
+            setOpenServiceId(null)
+            setAdded(true)
+          }}
+        />
+
+        <Snackbar
+          open={added}
+          autoHideDuration={2500}
+          onClose={() => setAdded(false)}
+          anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+        >
+          <Alert
+            severity="success"
+            variant="filled"
+            onClose={() => setAdded(false)}
+            action={
+              <Button
+                color="inherit"
+                size="small"
+                onClick={() => navigate(ROUTES.POS_CHECKOUT)}
+              >
+                Ver carrito
+              </Button>
+            }
+          >
+            Agregado al carrito
+          </Alert>
+        </Snackbar>
       </Box>
     </Fade>
   )
