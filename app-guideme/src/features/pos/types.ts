@@ -15,10 +15,11 @@ export interface PosServiceSummary {
   flex_capacity_pct: number
   /** US-A37 — primary category (null for a pre-migration service); seeds the POS filter chips. */
   category: ServiceCategory | null
-  /** US-A36 — Σ EFFECTIVE remaining over active, future slots: raw remaining plus each Soft
-   * Cap slot's flexible margin, so a fully-booked-but-flexible service still reads available. */
-  available_spots: number
-  /** Earliest active future slot date, or null when none. */
+  /** US-AG30 — lightweight availability flag: true when ≥ 1 active slot inside the availability
+   * window (a rolling 3-day span or the selected date) has effective remaining > 0. Replaces the
+   * Σ-remaining count — the per-slot count lives on the service-detail read. */
+  has_availability: boolean
+  /** Earliest active slot date inside the availability window, or null when none. */
   next_slot_date: string | null
 }
 
@@ -38,7 +39,7 @@ export interface PosExtra {
 }
 
 export interface PosServiceDetail
-  extends Omit<PosServiceSummary, 'available_spots' | 'next_slot_date'> {
+  extends Omit<PosServiceSummary, 'has_availability' | 'next_slot_date'> {
   extras: PosExtra[]
   slots: PosSlot[]
 }

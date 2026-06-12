@@ -40,14 +40,20 @@ export interface ServiceDetailRange {
   to?: string
 }
 
-// US-AG03 / AG10 — POS catalog with availability rollup. `today` pins the org-local
-// availability horizon (defaults server-side to the server's UTC date).
+// US-AG03 / AG10 / AG30 — POS catalog with a lightweight windowed availability flag.
+// `today` pins the org-local anchor (defaults server-side to the server's UTC date);
+// `date` collapses the availability window to that single day (omit for the default
+// rolling 3-day window).
 export const listPosServices = async (
   today?: string,
+  date?: string,
 ): Promise<PosServiceSummary[]> => {
-  const query = today ? `?today=${encodeURIComponent(today)}` : ''
+  const params = new URLSearchParams()
+  if (today) params.set('today', today)
+  if (date) params.set('date', date)
+  const qs = params.toString()
   const res = await request<{ services: PosServiceSummary[] }>(
-    `/api/pos/services${query}`,
+    `/api/pos/services${qs ? `?${qs}` : ''}`,
   )
   return res.services
 }

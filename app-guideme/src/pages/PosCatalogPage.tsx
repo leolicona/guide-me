@@ -13,11 +13,15 @@ import {
   Stack,
   Badge,
   Chip,
+  TextField,
+  FormControlLabel,
+  Switch,
 } from '@mui/material'
 import ShoppingCartRounded from '@mui/icons-material/ShoppingCartRounded'
 import { usePosServices } from '../features/pos/hooks'
 import { AvailabilityChip } from '../features/pos/components/AvailabilityChip'
 import { usePosCart, cartCount } from '../store/posCart'
+import { usePosFilters } from '../store/posFilters'
 import { formatMoney } from '../features/catalog/types'
 import {
   SERVICE_CATEGORIES,
@@ -26,22 +30,41 @@ import {
 } from '../features/catalog/categories'
 import { ROUTES } from '../config/routes'
 
+// Org-local "today" (naive calendar string), the anchor for the default 3-day window
+// and the floor for the date picker. MVP single-timezone model (mirrors the API).
+const todayStr = () => new Date().toISOString().slice(0, 10)
+
 export default function PosCatalogPage() {
-  const { data: services, isLoading, isError } = usePosServices()
+  // US-AG30 — the selected day is global (inherited by the detail view); null = "Hoy"
+  // (the default rolling 3-day window). The hide-sold-out toggle and category chip stay
+  // local — they reset on navigation.
+  const selectedDate = usePosFilters((s) => s.selectedDate)
+  const setSelectedDate = usePosFilters((s) => s.setSelectedDate)
+  const today = todayStr()
+
+  const { data: services, isLoading, isError } = usePosServices(
+    today,
+    selectedDate ?? undefined,
+  )
   const count = usePosCart((s) => cartCount(s.lines))
   const navigate = useNavigate()
 
-  // US-A37 — single-tap catalog filter. Derive the categories actually present (distinct,
-  // non-null, in canonical order); a chip appears only for a category that has a service.
-  // Selection is local — it resets on navigation, the desired POS behaviour.
+  const [hideSoldOut, setHideSoldOut] = useState(true)
   const [activeCategory, setActiveCategory] = useState<ServiceCategory | null>(null)
+
+  // Filter precedence (all client-side over the loaded list): hide-sold-out → derive the
+  // present categories from what survives → category chip → render grid. Deriving the chip
+  // set from the availability-filtered list keeps US-A37's promise (a chip only for a
+  // category with ≥ 1 available service) honest while the toggle is on.
+  const all = services ?? []
+  const byAvailability = hideSoldOut ? all.filter((s) => s.has_availability) : all
   const presentCategories = SERVICE_CATEGORIES.filter((c) =>
-    (services ?? []).some((s) => s.category === c),
+    byAvailability.some((s) => s.category === c),
   )
   const visibleServices =
     activeCategory === null
-      ? (services ?? [])
-      : (services ?? []).filter((s) => s.category === activeCategory)
+      ? byAvailability
+      : byAvailability.filter((s) => s.category === activeCategory)
 
   return (
     <Fade in timeout={400}>
@@ -71,7 +94,42 @@ export default function PosCatalogPage() {
           </Badge>
         </Box>
 
-        {/* US-A37 — filter chips, shown only when ≥ 1 service carries a category. */}
+        {/* US-AG30 — filter bar: Date (default "Hoy") + "Ocultar agotados" toggle. */}
+        <Stack
+          direction="row"
+          spacing={1.5}
+          sx={{ mb: 2, flexWrap: 'wrap', rowGap: 1.5, alignItems: 'center' }}
+        >
+          <Chip
+            label="Hoy"
+            color={selectedDate === null ? 'secondary' : 'default'}
+            variant={selectedDate === null ? 'filled' : 'outlined'}
+            onClick={() => setSelectedDate(null)}
+          />
+          <TextField
+            type="date"
+            size="small"
+            label="Fecha"
+            value={selectedDate ?? ''}
+            onChange={(e) => setSelectedDate(e.target.value || null)}
+            slotProps={{
+              inputLabel: { shrink: true },
+              htmlInput: { min: today },
+            }}
+          />
+          <Box sx={{ flexGrow: 1 }} />
+          <FormControlLabel
+            control={
+              <Switch
+                checked={hideSoldOut}
+                onChange={(e) => setHideSoldOut(e.target.checked)}
+              />
+            }
+            label="Ocultar agotados"
+          />
+        </Stack>
+
+        {/* US-A37 — category chips, derived from the availability-filtered set. */}
         {presentCategories.length > 0 && (
           <Stack
             direction="row"
@@ -109,7 +167,7 @@ export default function PosCatalogPage() {
         )}
 
         {services &&
-          (services.length === 0 ? (
+          (visibleServices.length === 0 ? (
             <Typography color="text.secondary">
               No hay servicios disponibles en este momento.
             </Typography>
@@ -138,7 +196,7 @@ export default function PosCatalogPage() {
                         <Typography variant="h6" component="h2" sx={{ minWidth: 0 }}>
                           {service.name}
                         </Typography>
-                        <AvailabilityChip spots={service.available_spots} />
+                        <AvailabilityChip available={service.has_availability} />
                       </Stack>
                       {service.description && (
                         <Typography

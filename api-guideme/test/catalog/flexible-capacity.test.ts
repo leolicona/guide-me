@@ -325,7 +325,8 @@ describe('US-A36 §5 — POS payload exposes raw capacity-mode fields', () => {
     await seedSlot({ organizationId, serviceId: flex.serviceId, capacity: 10, booked: 0 })
     await seedSlot({ organizationId, serviceId: hard.serviceId, capacity: 10, booked: 0 })
 
-    const res = await SELF.fetch(`${POS}/services?today=2026-06-01`, {
+    // US-AG30 — default slot date 2026-06-15 sits in the today…today+2 window; anchor there.
+    const res = await SELF.fetch(`${POS}/services?today=2026-06-15`, {
       headers: auth(AGENT_EMAIL),
     })
     expect(res.status).toBe(200)
@@ -333,15 +334,14 @@ describe('US-A36 §5 — POS payload exposes raw capacity-mode fields', () => {
     const byName = Object.fromEntries(services.map((s) => [s.name, s]))
     expect(byName['Flexible Tour']).toMatchObject({ is_flexible: true, flex_capacity_pct: 20 })
     expect(byName['Strict Tour']).toMatchObject({ is_flexible: false, flex_capacity_pct: 0 })
-    // available_spots is the Σ EFFECTIVE remaining: Flexible adds floor(10×20/100)=2 → 12;
-    // Strict (Hard Cap) is unchanged at its raw 10.
-    expect(byName['Flexible Tour'].available_spots).toBe(12)
-    expect(byName['Strict Tour'].available_spots).toBe(10)
+    // US-AG30 — both have a sellable in-window slot, so both read available (boolean, no count).
+    expect(byName['Flexible Tour'].has_availability).toBe(true)
+    expect(byName['Strict Tour'].has_availability).toBe(true)
   })
 
-  it('Scenario 8b — a Soft Cap service booked to strict capacity still advertises its flex spots (not "Agotado")', async () => {
-    // Regression: available_spots must include the flexible margin so a fully-booked-but-
-    // flexible service does not read as sold out on the catalog card.
+  it('Scenario 8b — a Soft Cap service booked to strict capacity still reads available via its flex margin (not "Agotado")', async () => {
+    // Regression (US-A36 × US-AG30): has_availability must count the flexible margin so a
+    // fully-booked-but-flexible service does not read as sold out on the catalog card.
     const { organizationId } = await seedUser({ email: AGENT_EMAIL, role: 'agent' })
     const { serviceId } = await seedService({
       organizationId,
@@ -351,13 +351,13 @@ describe('US-A36 §5 — POS payload exposes raw capacity-mode fields', () => {
     })
     await seedSlot({ organizationId, serviceId, capacity: 12, booked: 12 }) // raw remaining 0
 
-    const res = await SELF.fetch(`${POS}/services?today=2026-06-01`, {
+    const res = await SELF.fetch(`${POS}/services?today=2026-06-15`, {
       headers: auth(AGENT_EMAIL),
     })
     expect(res.status).toBe(200)
     const { services } = (await res.json()) as { services: any[] }
-    // raw remaining 0 + floor(12×25/100)=3 → 3 effective spots still sellable.
-    expect(services[0].available_spots).toBe(3)
+    // raw remaining 0 + floor(12×25/100)=3 → 3 effective spots still sellable → available.
+    expect(services[0].has_availability).toBe(true)
   })
 })
 

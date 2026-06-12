@@ -192,14 +192,15 @@ const confirmOneLine = async (
 // US-AG03 / US-AG10 — browse catalog with live availability
 // ---------------------------------------------------------------------------
 describe('US-AG03 / AG10 — POS catalog & availability', () => {
-  it('Scenario 1 — lists active services with availability rollup', async () => {
+  it('Scenario 1 — lists active services with a windowed availability flag (US-AG30)', async () => {
     const { organizationId } = await seedUser({ email: AGENT_EMAIL, role: 'agent' })
     const { serviceId } = await seedService({ organizationId, name: 'Canyon Tour' })
-    await seedSlot({ organizationId, serviceId, date: '2026-06-15', startTime: '06:00', capacity: 12, booked: 2 }) // remaining 10
-    await seedSlot({ organizationId, serviceId, date: '2026-06-20', startTime: '06:00', capacity: 12, booked: 0 }) // remaining 12
+    await seedSlot({ organizationId, serviceId, date: '2026-06-15', startTime: '06:00', capacity: 12, booked: 2 }) // remaining 10, in window
+    await seedSlot({ organizationId, serviceId, date: '2026-06-20', startTime: '06:00', capacity: 12, booked: 0 }) // remaining 12, out of window
     await seedService({ organizationId, name: 'Hidden Tour', status: 'inactive' })
 
-    const res = await SELF.fetch(`${base}/services?today=2026-06-01`, {
+    // US-AG30 — default window is today … today+2; anchor on 06-15 so the first slot is in-window.
+    const res = await SELF.fetch(`${base}/services?today=2026-06-15`, {
       headers: auth(AGENT_EMAIL),
     })
     expect(res.status).toBe(200)
@@ -208,9 +209,12 @@ describe('US-AG03 / AG10 — POS catalog & availability', () => {
     expect(body.services[0]).toMatchObject({
       id: serviceId,
       name: 'Canyon Tour',
-      available_spots: 22,
+      has_availability: true,
       next_slot_date: '2026-06-15',
     })
+    // Lightweight payload: no spot count, no slot list in the catalog read.
+    expect(body.services[0]).not.toHaveProperty('available_spots')
+    expect(body.services[0]).not.toHaveProperty('slots')
   })
 
   it('Scenario 2 — service detail: active extras + active future slots (incl remaining 0)', async () => {

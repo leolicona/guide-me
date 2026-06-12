@@ -25,6 +25,7 @@ import { SlotPicker } from '../features/pos/components/SlotPicker'
 import { effectiveRemaining } from '../features/pos/capacity'
 import type { PosSlot } from '../features/pos/types'
 import { usePosCart, cartCount, type CartExtra } from '../store/posCart'
+import { usePosFilters } from '../store/posFilters'
 import {
   amountToCents,
   centsToAmount,
@@ -34,7 +35,13 @@ import { ROUTES } from '../config/routes'
 
 export default function PosServicePage() {
   const { id } = useParams<{ id: string }>()
-  const { data: service, isLoading, isError } = usePosService(id)
+  // US-AG30 — inherit the catalog's selected day: an explicit date scopes the slot list to
+  // that day; the "Hoy" anchor (null) shows today onward (the default, unregressed).
+  const selectedDate = usePosFilters((s) => s.selectedDate)
+  const range = selectedDate
+    ? { from: selectedDate, to: selectedDate }
+    : undefined
+  const { data: service, isLoading, isError } = usePosService(id, range)
   const navigate = useNavigate()
 
   const addLine = usePosCart((s) => s.addLine)

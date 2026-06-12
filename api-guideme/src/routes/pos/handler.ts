@@ -37,6 +37,17 @@ export type PosContext = Context<{
 // lets the client pin the org-local day; otherwise fall back to the server's UTC date.
 const utcToday = () => new Date().toISOString().slice(0, 10)
 
+// Add `n` whole days to a naive YYYY-MM-DD calendar string (UTC midnight arithmetic —
+// no timezone math, matching the single-timezone model). Used for the catalog's rolling
+// availability window (US-AG30).
+const addDays = (date: string, n: number): string =>
+  new Date(Date.parse(`${date}T00:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10)
+
+// US-AG30 — the default catalog availability window spans `today` + the next 2 days
+// (3 calendar days inclusive). When the agent selects an explicit date the window
+// collapses to that single day.
+const AVAILABILITY_WINDOW_DAYS = 2
+
 // --- Signed QR access tickets (docs/qr/folio-qr-signing.spec.md) ---
 
 // MVP single-timezone (mirrors schedules/POS naive calendar): a ticket is valid through
@@ -97,12 +108,20 @@ const extraReadColumns = {
   price: serviceExtras.price,
 } as const
 
-// US-AG03 / US-AG10 — POS catalog: active services with an availability rollup over
-// their active, future slots (today or later). `available_spots` = Σ remaining;
-// `next_slot_date` = earliest active future slot date (or null).
+// US-AG03 / US-AG10 / US-AG30 — POS catalog: active services with a LIGHTWEIGHT,
+// windowed availability flag (no slot details, no spot count). `has_availability` is
+// true when the service has ≥ 1 active slot with effective remaining > 0 inside the
+// availability window; `next_slot_date` = earliest active slot date in that window
+// (or null). The window is a rolling 3-day span (today … today + 2) by default, or the
+// single `date` the agent selected (US-AG30).
 export const listPosServices = async (c: PosContext) => {
   const agent = c.get('user')
   const today = c.req.query('today') ?? utcToday()
+  // US-AG30 — an explicit selected date collapses the window to that single day; absent,
+  // the window is today … today + AVAILABILITY_WINDOW_DAYS (the default "next 3 days").
+  const selectedDate = c.req.query('date')
+  const windowFrom = selectedDate ?? today
+  const windowTo = selectedDate ?? addDays(today, AVAILABILITY_WINDOW_DAYS)
   const db = getDb(c.env)
 
   const serviceRows = await db
@@ -147,7 +166,9 @@ export const listPosServices = async (c: PosContext) => {
       and(
         eq(slots.organizationId, agent.organizationId),
         eq(slots.status, 'active'),
-        gte(slots.date, today),
+        // US-AG30 — bound to the availability window [windowFrom, windowTo].
+        gte(slots.date, windowFrom),
+        lte(slots.date, windowTo),
       ),
     )
     .groupBy(slots.serviceId)
@@ -172,7 +193,10 @@ export const listPosServices = async (c: PosContext) => {
       // US-A37 — primary category (or null for a pre-migration service); drives the POS
       // filter chips, which the client derives from the present, non-null categories.
       category: s.category,
-      available_spots: a ? Number(a.availableSpots) : 0,
+      // US-AG30 — lightweight boolean (no count): true when any in-window slot is sellable.
+      // availableSpots is the Σ EFFECTIVE remaining over the window; since effective
+      // remaining is always ≥ 0, sum > 0 ⟺ ≥ 1 slot has a sellable spot.
+      has_availability: a ? Number(a.availableSpots) > 0 : false,
       next_slot_date: a ? a.nextSlotDate : null,
     }
   })

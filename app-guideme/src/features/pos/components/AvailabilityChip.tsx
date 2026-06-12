@@ -1,22 +1,17 @@
 import { Chip } from '@mui/material'
 
-// Below this many remaining spots a service reads as "close to capacity" (US-AG10).
-const LOW_THRESHOLD = 5
-
 interface AvailabilityChipProps {
-  spots: number
+  /** US-AG30 — the catalog read returns a windowed boolean, not a count. */
+  available: boolean
 }
 
-// available / close-to-capacity / full hint, using the single accent palette
-// sparingly (elegant-minimalist).
-export function AvailabilityChip({ spots }: AvailabilityChipProps) {
-  if (spots <= 0) {
-    return <Chip size="small" variant="outlined" label="Agotado" />
-  }
-  if (spots <= LOW_THRESHOLD) {
-    return (
-      <Chip size="small" color="warning" variant="outlined" label={`${spots} disponibles`} />
-    )
-  }
-  return <Chip size="small" color="success" variant="outlined" label="Disponible" />
+// Available / sold-out hint for a catalog card, using the single accent palette
+// sparingly (elegant-minimalist). The per-slot remaining count lives on the detail
+// screen — the catalog payload is intentionally count-free (US-AG30).
+export function AvailabilityChip({ available }: AvailabilityChipProps) {
+  return available ? (
+    <Chip size="small" color="success" variant="outlined" label="Disponible" />
+  ) : (
+    <Chip size="small" variant="outlined" label="Agotado" />
+  )
 }
