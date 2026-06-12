@@ -29,6 +29,9 @@ interface ServiceRow {
   defaultCapacity: number
   commissionType: 'percent' | 'fixed'
   commissionValue: number
+  isFlexible: boolean
+  flexCapacityPct: number
+  category: 'lodging' | 'tours' | 'dining' | 'adventure' | 'culture' | null
   status: string
 }
 
@@ -58,6 +61,9 @@ const serializeService = (
   default_capacity: row.defaultCapacity,
   commission_type: row.commissionType,
   commission_value: row.commissionValue,
+  is_flexible: row.isFlexible,
+  flex_capacity_pct: row.flexCapacityPct,
+  category: row.category,
   status: row.status,
   ...(extras !== undefined ? { extras: extras.map(serializeExtra) } : {}),
 })
@@ -71,6 +77,9 @@ const serviceColumns = {
   defaultCapacity: services.defaultCapacity,
   commissionType: services.commissionType,
   commissionValue: services.commissionValue,
+  isFlexible: services.isFlexible,
+  flexCapacityPct: services.flexCapacityPct,
+  category: services.category,
   status: services.status,
 } as const
 
@@ -113,6 +122,11 @@ export const createService = async (c: ServicesContext) => {
       defaultCapacity: input.default_capacity,
       commissionType: input.commission_type ?? 'percent',
       commissionValue: input.commission_value ?? 0,
+      isFlexible: input.is_flexible ?? false,
+      // US-A36 — a Hard Cap service stores 0 tolerance regardless of any value sent.
+      flexCapacityPct: input.is_flexible ? (input.flex_capacity_pct ?? 0) : 0,
+      // US-A37 — required category (the schema rejects a category-less create).
+      category: input.category,
       status: 'active',
     })
     .returning(serviceColumns)
@@ -183,6 +197,11 @@ export const updateService = async (c: ServicesContext) => {
       defaultCapacity: input.default_capacity,
       commissionType: input.commission_type ?? 'percent',
       commissionValue: input.commission_value ?? 0,
+      isFlexible: input.is_flexible ?? false,
+      // US-A36 — toggling back to Hard Cap clears the margin.
+      flexCapacityPct: input.is_flexible ? (input.flex_capacity_pct ?? 0) : 0,
+      // US-A37 — full-replace edit always re-sets the (required) category.
+      category: input.category,
       updatedAt: new Date(),
     })
     .where(

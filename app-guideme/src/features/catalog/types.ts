@@ -1,3 +1,5 @@
+import type { ServiceCategory } from './categories'
+
 export type ServiceStatus = 'active' | 'inactive'
 
 export interface ServiceExtra {
@@ -23,10 +25,22 @@ export interface Service {
    * basis points (1000 = 10%); `fixed` → minor units per spot, capped at minimum_price. */
   commission_type: CommissionType
   commission_value: number
+  /** US-A36 — capacity mode. false → Hard Cap (strict); true → Soft Cap (controlled
+   * overbooking up to `flex_capacity_pct`% extra spots per slot). */
+  is_flexible: boolean
+  /** Overbooking tolerance as a whole-number percent; 0 (and ignored) for Hard Cap. */
+  flex_capacity_pct: number
+  /** US-A37 — primary category. null only for pre-migration (legacy) services. */
+  category: ServiceCategory | null
   status: ServiceStatus
   /** Present on detail (GET /:id), absent on the list. */
   extras?: ServiceExtra[]
 }
+
+/** US-A36 — largest overbooking tolerance (%) a Soft Cap service may set. Mirrors the
+ * backend's services/schema.ts FLEX_CAP_MAX_PCT; keep both in sync until it becomes an
+ * org setting (see that file's TODO). */
+export const FLEX_CAP_MAX_PCT = 30
 
 // The API stores money as integer minor units; the UI shows/edits a major
 // decimal. Keep both conversions here so the round-trip never drifts.

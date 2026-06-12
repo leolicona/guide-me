@@ -112,6 +112,9 @@ export const listPosServices = async (c: PosContext) => {
       description: services.description,
       basePrice: services.basePrice,
       minimumPrice: services.minimumPrice,
+      isFlexible: services.isFlexible,
+      flexCapacityPct: services.flexCapacityPct,
+      category: services.category,
     })
     .from(services)
     .where(
@@ -122,13 +125,24 @@ export const listPosServices = async (c: PosContext) => {
     )
     .orderBy(asc(services.name))
 
+  // US-A36 — availability is the Σ EFFECTIVE remaining: each slot's raw remaining plus its
+  // flexible margin (floor(capacity × pct / 100)) for a Soft Cap service. pct is constant per
+  // service and we group per service, so SQLite's per-row integer division yields each slot's
+  // floored margin and the sum is exact — a fully-booked-but-flexible service still advertises
+  // its sellable last-minute spots instead of reading "Agotado".
   const availabilityRows = await db
     .select({
       serviceId: slots.serviceId,
-      availableSpots: sql<number>`sum(${slots.capacity} - ${slots.booked})`,
+      availableSpots: sql<number>`sum(
+        (${slots.capacity} - ${slots.booked})
+        + (CASE WHEN ${services.isFlexible}
+                THEN (${slots.capacity} * ${services.flexCapacityPct}) / 100
+                ELSE 0 END)
+      )`,
       nextSlotDate: sql<string>`min(${slots.date})`,
     })
     .from(slots)
+    .innerJoin(services, eq(slots.serviceId, services.id))
     .where(
       and(
         eq(slots.organizationId, agent.organizationId),
@@ -150,6 +164,14 @@ export const listPosServices = async (c: PosContext) => {
       description: s.description,
       base_price: s.basePrice,
       minimum_price: s.minimumPrice,
+      // US-A36 — capacity-mode flags let the client badge a flexible service and compute the
+      // effective margin per slot on the detail screen. available_spots already reflects the
+      // effective Σ remaining (see the availability query above).
+      is_flexible: s.isFlexible,
+      flex_capacity_pct: s.flexCapacityPct,
+      // US-A37 — primary category (or null for a pre-migration service); drives the POS
+      // filter chips, which the client derives from the present, non-null categories.
+      category: s.category,
       available_spots: a ? Number(a.availableSpots) : 0,
       next_slot_date: a ? a.nextSlotDate : null,
     }
@@ -173,6 +195,9 @@ export const getPosService = async (c: PosContext) => {
       description: services.description,
       basePrice: services.basePrice,
       minimumPrice: services.minimumPrice,
+      isFlexible: services.isFlexible,
+      flexCapacityPct: services.flexCapacityPct,
+      category: services.category,
     })
     .from(services)
     .where(
@@ -225,6 +250,14 @@ export const getPosService = async (c: PosContext) => {
       description: service.description,
       base_price: service.basePrice,
       minimum_price: service.minimumPrice,
+      // US-A36 — raw capacity-mode fields. The client computes Effective Capacity per slot
+      // (capacity + floor(capacity × pct / 100) for Soft Cap) so it can drive UI states such
+      // as highlighting a slot once the agent dips into the flexible margin. The server still
+      // enforces this ceiling atomically at confirmSale; these fields are display-only.
+      is_flexible: service.isFlexible,
+      flex_capacity_pct: service.flexCapacityPct,
+      // US-A37 — echoed for a consistent service shape (the detail screen doesn't filter).
+      category: service.category,
       extras: extras.map(serializeExtra),
       slots: slotRows.map(serializeSlot),
     },
@@ -256,6 +289,9 @@ interface PreparedLine {
   // line total; fixed → value is minor units per spot (× quantity).
   commissionType: 'percent' | 'fixed'
   commissionValue: number
+  // US-A36 — capacity mode, used to build the effective-capacity guard at decrement time.
+  isFlexible: boolean
+  flexCapacityPct: number
   extras: PreparedExtra[]
   // Signed at confirm time, once all decrements succeed (below).
   qrToken?: string
@@ -291,6 +327,8 @@ export const confirmSale = async (c: PosContext) => {
         minimumPrice: services.minimumPrice,
         commissionType: services.commissionType,
         commissionValue: services.commissionValue,
+        isFlexible: services.isFlexible,
+        flexCapacityPct: services.flexCapacityPct,
       })
       .from(slots)
       .innerJoin(services, eq(slots.serviceId, services.id))
@@ -373,6 +411,8 @@ export const confirmSale = async (c: PosContext) => {
       lineTotal,
       commissionType: slot.commissionType,
       commissionValue: slot.commissionValue,
+      isFlexible: slot.isFlexible,
+      flexCapacityPct: slot.flexCapacityPct,
       extras: preparedExtras,
     })
   }
@@ -403,6 +443,14 @@ export const confirmSale = async (c: PosContext) => {
   // 2. DECREMENT each slot atomically & conditionally; track successes.
   const applied: { slotId: string; qty: number }[] = []
   for (const line of prepared) {
+    // US-A36 — guard against EFFECTIVE capacity, not the raw cap. For a Soft Cap service the
+    // ceiling is capacity + floor(capacity × pct / 100); SQLite integer division truncates
+    // toward zero, so `capacity * pct / 100` is exactly that floor (pct ≥ 0). Hard Cap
+    // (isFlexible=false) adds 0 — byte-identical to the previous `capacity - booked` guard.
+    const flexMargin =
+      line.isFlexible && line.flexCapacityPct > 0
+        ? sql`((${slots.capacity} * ${line.flexCapacityPct}) / 100)`
+        : sql`0`
     const decremented = await db
       .update(slots)
       .set({
@@ -414,7 +462,7 @@ export const confirmSale = async (c: PosContext) => {
           eq(slots.id, line.slotId),
           eq(slots.organizationId, org),
           eq(slots.status, 'active'),
-          gte(sql`${slots.capacity} - ${slots.booked}`, line.quantity),
+          gte(sql`${slots.capacity} + ${flexMargin} - ${slots.booked}`, line.quantity),
         ),
       )
       .returning({ id: slots.id })

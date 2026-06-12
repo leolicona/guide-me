@@ -97,6 +97,19 @@ export const services = sqliteTable('services', {
     .notNull()
     .default('percent'),
   commissionValue: integer('commission_value').notNull().default(0),
+  // Flexible capacity / overbooking tolerance (US-A36 — docs/catalog/flexible-capacity.spec.md).
+  // isFlexible=false → Hard Cap (strict). true → Soft Cap: the POS allows up to flexCapacityPct
+  // extra spots per slot (floor(slot.capacity × pct / 100)), enforced atomically in confirmSale.
+  // The POS read exposes these raw fields so the client computes Effective Capacity live (and
+  // can highlight slots once an agent dips into the flex margin). pct is 0 for Hard Cap services.
+  isFlexible: integer('is_flexible', { mode: 'boolean' }).notNull().default(false),
+  flexCapacityPct: integer('flex_capacity_pct').notNull().default(0),
+  // US-A37 — primary category (docs/catalog/service-categories.spec.md). A closed enum,
+  // nullable only to absorb pre-migration rows (NULL = uncategorized); the API requires it
+  // on every create/edit, so all new/re-saved rows carry a value. Drives the POS filter chips.
+  category: text('category', {
+    enum: ['lodging', 'tours', 'dining', 'adventure', 'culture'],
+  }),
   status: text('status', { enum: ['active', 'inactive'] })
     .notNull()
     .default('active'),

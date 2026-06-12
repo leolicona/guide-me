@@ -1,13 +1,22 @@
 // POS (agent point of sale) types. All money fields are integer minor units
 // (centavos) — render with the helpers in features/catalog/types.
 
+import type { ServiceCategory } from '../catalog/categories'
+
 export interface PosServiceSummary {
   id: string
   name: string
   description: string | null
   base_price: number
   minimum_price: number
-  /** Σ remaining over active, future slots. */
+  /** US-A36 — capacity mode. When true the client may sell up to `flex_capacity_pct`% extra
+   * spots per slot (Effective Capacity); the server enforces the same ceiling at confirm. */
+  is_flexible: boolean
+  flex_capacity_pct: number
+  /** US-A37 — primary category (null for a pre-migration service); seeds the POS filter chips. */
+  category: ServiceCategory | null
+  /** US-A36 — Σ EFFECTIVE remaining over active, future slots: raw remaining plus each Soft
+   * Cap slot's flexible margin, so a fully-booked-but-flexible service still reads available. */
   available_spots: number
   /** Earliest active future slot date, or null when none. */
   next_slot_date: string | null

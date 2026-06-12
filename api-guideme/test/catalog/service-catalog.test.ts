@@ -179,6 +179,7 @@ describe('US-A09 — create service (POST /api/services)', () => {
         base_price: 200000,
         minimum_price: 150000,
         default_capacity: 12,
+        category: 'tours',
       }),
     })
 
@@ -190,6 +191,7 @@ describe('US-A09 — create service (POST /api/services)', () => {
       base_price: 200000,
       minimum_price: 150000,
       default_capacity: 12,
+      category: 'tours',
       status: 'active',
       extras: [],
     })
@@ -321,6 +323,7 @@ describe('list & detail (GET /api/services[/:id])', () => {
         base_price: 1000,
         minimum_price: 500,
         default_capacity: 1,
+        category: 'tours',
       }),
     })
     const deact = await SELF.fetch(
@@ -366,6 +369,7 @@ describe('US-A13 — edit & (de)activate service', () => {
         base_price: 250000,
         minimum_price: 200000,
         default_capacity: 20,
+        category: 'tours',
       }),
     })
 
@@ -634,7 +638,8 @@ describe('US-A12 — service-based commission (percent | fixed)', () => {
     SELF.fetch('http://api.local/api/services', {
       method: 'POST',
       headers: jsonAuth(ADMIN_EMAIL),
-      body: JSON.stringify(body),
+      // US-A37 — category is now required; default it so these commission-focused cases pass.
+      body: JSON.stringify({ category: 'tours', ...body }),
     })
 
   it('Scenario 1 — create with a percent commission → stored and echoed', async () => {
@@ -720,6 +725,7 @@ describe('US-A12 — service-based commission (percent | fixed)', () => {
         base_price: 150000,
         minimum_price: 100000,
         default_capacity: 10,
+        category: 'tours',
         commission_type: 'fixed',
         commission_value: 30000,
       }),
@@ -777,6 +783,7 @@ describe('US-A12 — service-based commission (percent | fixed)', () => {
         base_price: 150000,
         minimum_price: 100000,
         default_capacity: 10,
+        category: 'tours',
         commission_type: 'fixed',
         commission_value: 50000, // re-type the commission after the sale
       }),
@@ -844,6 +851,7 @@ describe('Multitenancy isolation', () => {
         base_price: 1,
         minimum_price: 1,
         default_capacity: 1,
+        category: 'tours',
       }),
     })
     const deact = await SELF.fetch(
@@ -898,6 +906,7 @@ describe('Multitenancy isolation', () => {
         base_price: 100000,
         minimum_price: 50000,
         default_capacity: 5,
+        category: 'tours',
         organizationId: orgB.organizationId, // must be stripped by Zod
       }),
     })
@@ -918,6 +927,7 @@ describe('Multitenancy isolation', () => {
           base_price: 120000,
           minimum_price: 60000,
           default_capacity: 6,
+          category: 'tours',
           organizationId: orgB.organizationId, // must be stripped by Zod
         }),
       },

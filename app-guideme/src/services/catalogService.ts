@@ -1,5 +1,6 @@
 import { request } from './authService'
 import type { Service, ServiceExtra, ServiceStatus } from '../features/catalog/types'
+import type { ServiceCategory } from '../features/catalog/categories'
 
 // All money fields below are in minor units (centavos) — the caller converts
 // from major-unit form values with amountToCents (features/catalog/types).
@@ -10,6 +11,11 @@ export interface ServiceInput {
   base_price: number
   minimum_price: number
   default_capacity: number
+  /** US-A36 — capacity mode + overbooking tolerance (%). Hard Cap sends false / 0. */
+  is_flexible?: boolean
+  flex_capacity_pct?: number
+  /** US-A37 — required primary category. */
+  category: ServiceCategory
 }
 
 export interface ExtraInput {

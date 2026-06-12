@@ -22,6 +22,7 @@ import AddRounded from '@mui/icons-material/AddRounded'
 import RemoveRounded from '@mui/icons-material/RemoveRounded'
 import { usePosService } from '../features/pos/hooks'
 import { SlotPicker } from '../features/pos/components/SlotPicker'
+import { effectiveRemaining } from '../features/pos/capacity'
 import type { PosSlot } from '../features/pos/types'
 import { usePosCart, cartCount, type CartExtra } from '../store/posCart'
 import {
@@ -73,7 +74,9 @@ export default function PosServicePage() {
         base_price: service.base_price,
         minimum_price: service.minimum_price,
       },
-      slot,
+      // US-A36 — the cart caps quantity at `remaining`; for a Soft Cap service that ceiling
+      // is the Effective Capacity (raw + flexible margin), so pass the effective figure.
+      slot: { ...slot, remaining: flexRemaining },
       quantity,
       unit_price: unitCents,
       extras,
@@ -87,6 +90,15 @@ export default function PosServicePage() {
   const belowMin = service ? priceCents < service.minimum_price : false
   const aboveBase = service ? priceCents > service.base_price : false
   const priceInvalid = Number.isNaN(priceCents) || belowMin || aboveBase
+
+  // US-A36 — the sellable ceiling for the selected slot: raw remaining for a Hard Cap
+  // service, raw + flexible margin for a Soft Cap one. `inFlexZone` is true once the counter
+  // crosses the strict capacity into the overbooking margin, so the UI can flag it.
+  const flexRemaining =
+    service && slot
+      ? effectiveRemaining(slot, service.is_flexible, service.flex_capacity_pct)
+      : (slot?.remaining ?? 0)
+  const inFlexZone = !!slot && quantity > slot.remaining
 
   return (
     <Fade in timeout={400}>
@@ -151,6 +163,8 @@ export default function PosServicePage() {
                   slots={service.slots}
                   selectedId={slot?.id ?? null}
                   onSelect={handleSelectSlot}
+                  isFlexible={service.is_flexible}
+                  flexCapacityPct={service.flex_capacity_pct}
                 />
               </CardContent>
             </Card>
@@ -179,14 +193,20 @@ export default function PosServicePage() {
                           size="small"
                           aria-label="Más personas"
                           onClick={() =>
-                            setQuantity((q) => Math.min(slot.remaining, q + 1))
+                            setQuantity((q) => Math.min(flexRemaining, q + 1))
                           }
-                          disabled={quantity >= slot.remaining}
+                          disabled={quantity >= flexRemaining}
                         >
                           <AddRounded />
                         </IconButton>
-                        <Typography variant="caption" color="text.secondary" sx={{ ml: 1 }}>
-                          {slot.remaining} disponibles
+                        <Typography
+                          variant="caption"
+                          color={inFlexZone ? 'warning.main' : 'text.secondary'}
+                          sx={{ ml: 1, fontWeight: inFlexZone ? 600 : 400 }}
+                        >
+                          {inFlexZone
+                            ? `Usando cupo flexible · ${flexRemaining} máx.`
+                            : `${slot.remaining} disponibles`}
                         </Typography>
                       </Stack>
                     </Box>
