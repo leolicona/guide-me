@@ -22,16 +22,26 @@ import {
 
 interface ServiceSelectionPanelProps {
   service: PosServiceDetail
+  /** US-AG33 — the day axis to render (from the owner): 3 days on the "Hoy" anchor, 1 for
+   * an explicit catalog date. */
+  days: string[]
+  /** Real org-local today, for the "Hoy" relative label. */
+  today: string
   /** Fired after a line is successfully staged in the cart — the owner (sheet / page)
    * decides what happens next (close + snackbar, or its own snackbar). */
   onAdded: () => void
 }
 
-// US-AG31/AG32 — the shared sale-configuration body, re-ordered **people → filtered
-// slots → price/extras → confirm**. Re-homed verbatim from PosServicePage; the only new
-// behaviour is the people-first reactive slot filter (US-AG32). The server stays the
-// single source of truth — these bounds are display/input guards only.
-export function ServiceSelectionPanel({ service, onAdded }: ServiceSelectionPanelProps) {
+// US-AG31/AG32/AG33/AG34 — the shared sale-configuration body, ordered **people → date/time
+// matrix → price/extras → confirm**. The people-first reactive filter (US-AG32) and the
+// orange cushion warning (US-AG34) live in the matrix; the server stays the single source
+// of truth — these bounds are display/input guards only.
+export function ServiceSelectionPanel({
+  service,
+  days,
+  today,
+  onAdded,
+}: ServiceSelectionPanelProps) {
   const addLine = usePosCart((s) => s.addLine)
 
   // US-AG32 — party size is chosen FIRST (before any slot), default 1.
@@ -52,19 +62,6 @@ export function ServiceSelectionPanel({ service, onAdded }: ServiceSelectionPane
         ),
       ),
     [service],
-  )
-
-  // US-AG32 — reactive time-slot matrix: only slots that seat the whole group survive
-  // (`slot.remaining + slot.max_extra_seats >= partySize` === effectiveRemaining ≥ party).
-  // Non-fitting slots are removed from the array, so SlotPicker never renders them (DOM).
-  const fittingSlots = useMemo(
-    () =>
-      service.slots.filter(
-        (s) =>
-          effectiveRemaining(s, service.is_flexible, service.flex_capacity_pct) >=
-          partySize,
-      ),
-    [service, partySize],
   )
 
   const clearSelection = () => {
@@ -181,19 +178,21 @@ export function ServiceSelectionPanel({ service, onAdded }: ServiceSelectionPane
         </Stack>
       </Box>
 
-      {/* US-AG32 — reactive matrix: only slots that seat the whole group. */}
+      {/* US-AG33/AG34 — date/time matrix: a row per day, per-day fit filter + orange cushion. */}
       <Box>
         <Typography variant="subtitle2" color="text.secondary" sx={{ mb: 1 }}>
           Elige un horario
         </Typography>
-        {fittingSlots.length === 0 ? (
+        {service.slots.length === 0 ? (
           <Typography color="text.secondary">
-            No hay horarios para {partySize}{' '}
-            {partySize === 1 ? 'persona' : 'personas'}.
+            No hay horarios disponibles para este servicio.
           </Typography>
         ) : (
           <SlotPicker
-            slots={fittingSlots}
+            slots={service.slots}
+            days={days}
+            today={today}
+            partySize={partySize}
             selectedId={slot?.id ?? null}
             onSelect={handleSelectSlot}
             isFlexible={service.is_flexible}

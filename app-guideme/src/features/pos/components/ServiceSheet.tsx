@@ -9,6 +9,7 @@ import CloseRounded from '@mui/icons-material/CloseRounded'
 import { usePosService } from '../hooks'
 import { usePosFilters } from '../../../store/posFilters'
 import { ServiceSelectionPanel } from './ServiceSelectionPanel'
+import { todayStr, addDays } from '../dates'
 
 interface ServiceSheetProps {
   /** The service to configure; `null` keeps the sheet closed. */
@@ -23,12 +24,15 @@ interface ServiceSheetProps {
 // without navigating away. Loads the service detail scoped by the catalog's inherited day
 // context (US-AG30), so the slot matrix matches the date the agent filtered to.
 export function ServiceSheet({ serviceId, onClose, onAdded }: ServiceSheetProps) {
-  // US-AG30 — inherit the catalog's selected day: an explicit date scopes the slot list to
-  // that day; the "Hoy" anchor (null) shows today onward (the default, unregressed).
+  // US-AG30/AG33 — inherit the catalog's selected day. An explicit date stays a single day
+  // (a hyper-specific search shouldn't get extra noise); the "Hoy" anchor (null) expands to
+  // the 3-day window [today, today+2], matching the catalog's availability window.
   const selectedDate = usePosFilters((s) => s.selectedDate)
-  const range = selectedDate
-    ? { from: selectedDate, to: selectedDate }
-    : undefined
+  const today = todayStr()
+  const days = selectedDate
+    ? [selectedDate]
+    : [today, addDays(today, 1), addDays(today, 2)]
+  const range = { from: days[0], to: days[days.length - 1] }
   const {
     data: service,
     isLoading,
@@ -86,7 +90,14 @@ export function ServiceSheet({ serviceId, onClose, onAdded }: ServiceSheetProps)
           </Alert>
         )}
 
-        {service && <ServiceSelectionPanel service={service} onAdded={onAdded} />}
+        {service && (
+          <ServiceSelectionPanel
+            service={service}
+            days={days}
+            today={today}
+            onAdded={onAdded}
+          />
+        )}
       </Box>
     </SwipeableDrawer>
   )

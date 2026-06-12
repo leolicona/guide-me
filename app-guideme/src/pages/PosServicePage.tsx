@@ -15,6 +15,7 @@ import ArrowBackRounded from '@mui/icons-material/ArrowBackRounded'
 import ShoppingCartRounded from '@mui/icons-material/ShoppingCartRounded'
 import { usePosService } from '../features/pos/hooks'
 import { ServiceSelectionPanel } from '../features/pos/components/ServiceSelectionPanel'
+import { todayStr, addDays } from '../features/pos/dates'
 import { usePosCart, cartCount } from '../store/posCart'
 import { usePosFilters } from '../store/posFilters'
 import { ROUTES } from '../config/routes'
@@ -24,12 +25,14 @@ import { ROUTES } from '../config/routes'
 // the selection logic lives in exactly one place.
 export default function PosServicePage() {
   const { id } = useParams<{ id: string }>()
-  // US-AG30 — inherit the catalog's selected day: an explicit date scopes the slot list to
-  // that day; the "Hoy" anchor (null) shows today onward (the default, unregressed).
+  // US-AG30/AG33 — inherit the catalog's selected day. An explicit date stays a single day;
+  // the "Hoy" anchor (null) expands to the 3-day window [today, today+2].
   const selectedDate = usePosFilters((s) => s.selectedDate)
-  const range = selectedDate
-    ? { from: selectedDate, to: selectedDate }
-    : undefined
+  const today = todayStr()
+  const days = selectedDate
+    ? [selectedDate]
+    : [today, addDays(today, 1), addDays(today, 2)]
+  const range = { from: days[0], to: days[days.length - 1] }
   const { data: service, isLoading, isError } = usePosService(id, range)
   const navigate = useNavigate()
 
@@ -76,7 +79,12 @@ export default function PosServicePage() {
         {service && (
           <Card>
             <CardContent>
-              <ServiceSelectionPanel service={service} onAdded={() => setAdded(true)} />
+              <ServiceSelectionPanel
+                service={service}
+                days={days}
+                today={today}
+                onAdded={() => setAdded(true)}
+              />
             </CardContent>
           </Card>
         )}
