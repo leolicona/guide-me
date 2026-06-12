@@ -80,7 +80,7 @@ export default function ScannerPage() {
     <Stack direction="row" spacing={1} sx={{ alignItems: 'center', mb: 3 }}>
       <QrCodeScannerRounded color="primary" />
       <Typography variant="h4" component="h1">
-        Escanear boleto
+        Escáner
       </Typography>
     </Stack>
   )

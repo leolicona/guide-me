@@ -8,6 +8,8 @@ export interface ServiceExtra {
   status: ServiceStatus
 }
 
+export type CommissionType = 'percent' | 'fixed'
+
 export interface Service {
   id: string
   name: string
@@ -16,9 +18,11 @@ export interface Service {
   base_price: number
   minimum_price: number
   default_capacity: number
-  /** US-A12 — per-service commission bonus in basis points (500 = 5%), stacked on the
-   * agent's base %. Same units as the agent's base_commission. */
-  commission_bonus: number
+  /** US-A12 (rev.) — the service's commission, earned identically by any seller
+   * (docs/commissions/service-based-commission.spec.md). `percent` → commission_value is
+   * basis points (1000 = 10%); `fixed` → minor units per spot, capped at minimum_price. */
+  commission_type: CommissionType
+  commission_value: number
   status: ServiceStatus
   /** Present on detail (GET /:id), absent on the list. */
   extras?: ServiceExtra[]
@@ -42,8 +46,8 @@ const currencyFmt = new Intl.NumberFormat('es-MX', {
 export const formatMoney = (cents: number): string =>
   currencyFmt.format(centsToAmount(cents))
 
-// commission_bonus is stored as integer basis points; the UI shows/edits percent.
-// (Mirrors features/agents base_commission conversions.)
+// A percent commission_value is stored as integer basis points; the UI shows/edits percent.
+// (A fixed commission_value is money — use the cents conversions above instead.)
 
 /** percent (e.g. 5) → basis points (500). */
 export const percentToBasisPoints = (percent: number): number =>

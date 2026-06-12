@@ -1029,20 +1029,23 @@ describe('Agent Continuous Cash Balance with Cash Drops', () => {
   // -------------------------------------------------------------------------
   // Roles
   // -------------------------------------------------------------------------
-  it('Scenario 15 — wrong role both ways → 403', async () => {
+  // US-A34/A35 widen the self-scoped /me read and /me/drops (the admin's "Tu caja"); the
+  // admin↔agent boundary otherwise holds.
+  it('Scenario 15 — role boundaries (US-A35 opens /me read + self-drop to the admin)', async () => {
     const { organizationId, agentId } = await seedOrgWithStaff()
     const dropId = await seedDrop({ organizationId, agentId, amount: 100000 })
 
-    // agent → admin routes
+    // agent → admin routes: still forbidden
     expect((await listBalances(AGENT_EMAIL)).status).toBe(403)
     expect((await listDrops(AGENT_EMAIL)).status).toBe(403)
     expect((await getDrop(AGENT_EMAIL, dropId)).status).toBe(403)
     expect((await reviewDrop(AGENT_EMAIL, dropId, { decision: 'confirmed' })).status).toBe(403)
 
-    // admin → /me/* routes
-    expect((await getMyBalance(ADMIN_EMAIL)).status).toBe(403)
+    // admin → self surface: own balance read and the self-authorized drop are now permitted;
+    // expense logging stays agent-only.
+    expect((await getMyBalance(ADMIN_EMAIL)).status).toBe(200)
+    expect((await createDrop(ADMIN_EMAIL, { amount: 100 })).status).toBe(201)
     expect((await addExpense(ADMIN_EMAIL, { description: 'X', amount: 100 })).status).toBe(403)
-    expect((await createDrop(ADMIN_EMAIL, { amount: 100 })).status).toBe(403)
   })
 
   // -------------------------------------------------------------------------

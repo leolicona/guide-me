@@ -6,16 +6,11 @@ export const inviteAgentSchema = z.object({
 
 export type InviteAgentFormData = z.infer<typeof inviteAgentSchema>
 
-// US-A07 — edit agent. `commission` is a percent (0–100) the admin types; the
-// form converts it to basis points (percentToBasisPoints) before calling the API.
+// US-A07 — edit agent profile (name, phone). No commission here (rev. 2026-06-11): commission
+// is defined per service in the catalog (docs/commissions/service-based-commission.spec.md).
 export const editAgentSchema = z.object({
   name: z.string().min(1, 'El nombre es obligatorio'),
   phone: z.string().optional(),
-  commission: z
-    .number()
-    .min(0, 'La comisión mínima es 0%')
-    .max(100, 'La comisión máxima es 100%')
-    .refine((v) => Number(v.toFixed(2)) === v, 'Máximo 2 decimales'),
 })
 
 export type EditAgentFormData = z.infer<typeof editAgentSchema>

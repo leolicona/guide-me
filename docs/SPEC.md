@@ -43,8 +43,8 @@ GuideMe is a multi-tenant, mobile-optimized SaaS platform that centralizes the s
 #### Staff Management
 
 - **US-A05** — As an admin, I want to invite a sales agent by email to join my organization.
-- **US-A06** — As an admin, I want to see the list of active agents in my organization with their assigned commission percentage.
-- **US-A07** — As an admin, I want to edit an agent's profile and base commission percentage.
+- **US-A06** — As an admin, I want to see the list of active agents in my organization with their contact info and status. *(Rev. 2026-06-11: agents no longer carry a commission rate — commission is defined per service, US-A12.)*
+- **US-A07** — As an admin, I want to edit an agent's profile (name, phone). *(Rev. 2026-06-11: the base commission percentage moved to the service — US-A12.)*
 - **US-A08** — As an admin, I want to deactivate (suspend) an agent so they lose access to the platform without deleting their history.
 
 #### Service Catalog
@@ -52,7 +52,7 @@ GuideMe is a multi-tenant, mobile-optimized SaaS platform that centralizes the s
 - **US-A09** — As an admin, I want to create a tour/service (e.g., "Canyon Sunrise Tour") with a name, description, base price, minimum selling price, and maximum capacity per time slot.
 - **US-A10** — As an admin, I want to define recurring schedules or specific dates for each service, with its independent capacity per slot.
 - **US-A11** — As an admin, I want to add optional "extras" to a service (e.g., "Professional photo", "Travel insurance") with their individual price.
-- **US-A12** — As an admin, I want to define an additional commission bonus per specific service, which is added to the agent's base %.
+- **US-A12** — As an admin, I want to define each service's commission — either a **percentage** of the sold price or a **fixed amount per spot** — so that any seller (agent or admin) earns exactly that commission for selling it. *(Rev. 2026-06-11: replaces the earlier "base % per agent + bonus per service" model — `docs/commissions/service-based-commission.spec.md`.)*
 - **US-A13** — As an admin, I want to edit or deactivate a service in the catalog without affecting already sold tickets (folios).
 
 #### Dashboard and Monitoring
@@ -80,6 +80,19 @@ GuideMe is a multi-tenant, mobile-optimized SaaS platform that centralizes the s
 - **US-A23** — As an admin, I want to mark a cancelled folio (or partial cancellation) as "refunded" to track if the physical cash has been returned to the client.
 - **US-A26** — As an admin, when cancelling a folio, I want to choose if the cancellation triggers a "Clawback" (agent loses commission) or if the company absorbs the loss.
 - **US-A24** — As an admin, I want to see an audit timeline on the folio details page showing who created it, when it was cancelled, and by whom, with the associated reason.
+
+#### Vendor Capabilities (Admin as Seller)
+
+> The admin's primary daily activity is selling. These stories make the admin a first-class
+> seller — the same POS flow, scanner, and commission math agents use — with one asymmetry that
+> reflects their elevated permissions: the admin's own cash settlement is **self-authorized**.
+> Full spec: `docs/admin-vendor/admin-vendor-capabilities.spec.md`.
+
+- **US-A31** — As an admin, I want to sell services through the same POS flow agents use (catalog → cart → checkout → folio), so I can serve customers directly without leaving my account.
+- **US-A32** — As an admin, I want to validate access by scanning clients' QR codes, so I can grant entry like my agents do.
+- **US-A33** — As an admin, I want to earn commission on my own sales under the **same rule** as agents — the commission defined on each service sold (US-A12), snapshotted at POS — so my earnings are tracked consistently and I appear as a seller in the commission report. *(Rev. 2026-06-11: commission is service-based, so this holds by construction — no per-seller rate exists to configure.)*
+- **US-A34** — As an admin, I want my own cash hand-ins (and payouts when the company owes me) to be **self-authorized** — born confirmed, never entering an approval queue, with no acknowledgment window — since I hold elevated permissions, while the accounting stays byte-identical to an agent's.
+- **US-A35** — As an admin, I want a **"Tu caja"** section on my Caja screen showing my own drawer (cash collected, commission earned, net to hand in) with an *Entregar* action, pinned above my team's balances, so I reconcile my own cash alongside the team's.
 
 ---
 
@@ -146,6 +159,18 @@ GuideMe is a multi-tenant, mobile-optimized SaaS platform that centralizes the s
 - **US-L02** — As a user (admin or agent), I want to switch the app language between Spanish (MX) and English so I can use the interface in my preferred language.
 - **US-L03** — As a user (admin or agent), I want my language preference to be persisted in the browser so the app loads in my chosen language on every visit without needing to change it again.
 
+#### Navigation & App Shell (UX)
+
+> Reorganizes the authenticated shell around each role's daily loop. Full spec:
+> `docs/navigation/app-shell-redesign.spec.md` (rationale: `docs/navigation/role-based-ia-reorganization.md`).
+
+- **US-UX01** — As a user, I want to land directly on my first daily action when I open the app (agent → **Vender**, admin → **Hoy**), instead of a placeholder dashboard, so I save a tap every session.
+- **US-UX02** — As a user, I want navigation destinations named by **concept** and shared across roles (**Vender · Escáner · Ventas · Caja · Hoy**), so the same label always means the same thing and an admin can train an agent by pointing at the same buttons.
+- **US-UX03** — As a user, I want the top app bar removed so content uses the full viewport, with my identity and **Cerrar sesión** living in an account surface — a bottom-pinned avatar popover on desktop, a fixed top-right avatar chip + bottom sheet on mobile.
+- **US-UX04** — As an admin, I want occasional management tools (Agentes, Catálogo, Configuración, Reportes) in the account/overflow menu rather than the daily nav bar, so my daily destinations stay focused.
+- **US-UX05** — As a user, I want one consistent verb per action across every screen and dialog (**Cobrar · Entregar · Confirmar · Firmar/Disputar · Cancelar folio**), so the same action never reads two different ways.
+- **US-UX06** — As an admin, I want a pending-drops badge on **Caja**, so cash awaiting my confirmation is visible from the nav without opening the screen.
+
 ---
 
 ### Client
@@ -189,7 +214,7 @@ GuideMe is a multi-tenant, mobile-optimized SaaS platform that centralizes the s
 - [x] **Mobile point of sale with controlled discount** *(US-AG03, US-AG04, US-AG05, US-AG06, US-AG08)* — `docs/pos/pos-controlled-discount.spec.md`
 - [x] **Folio generation with signed QR code (HMAC)** *(US-AG08, US-C02)* — `docs/qr/folio-qr-signing.spec.md`
 - [x] **Online QR Scanner** *(US-AG15, US-AG17, US-AG19)* — `docs/scanner/online-qr-scanner.spec.md`
-- [x] **Commissions: base % per agent + bonus per service** *(US-A12)* — `docs/commissions/commissions.spec.md` — *base % is admin-editable per agent; the per-service `commission_bonus` is set in the catalog service form; the per-sale commission is computed and snapshotted at POS (base % × total + Σ per-service bonus) and deducted from the running balance.*
+- [x] **Commissions: defined per service (percent or fixed per spot)** *(US-A12)* — `docs/commissions/service-based-commission.spec.md` — *each service carries its `commission_type` + `commission_value`, set in the catalog form; the per-sale commission is computed and snapshotted at POS (Σ per-line: % of line total, or fixed × quantity) and deducted from the running balance. Any seller — agent or admin — earns the same for the same sale. Supersedes the original per-agent base % + bonus model (`docs/commissions/commissions.spec.md`).*
 - [x] **Agent continuous cash balance (Net-remittance) with cash drops** *(US-AG12, US-AG13, US-AG14, US-AG23, US-AG24, US-AG25, US-A19, US-A25, US-A26)* — `docs/cash-drops/agent-balance-cash-drops.spec.md`
 - [x] **Total folio cancellation** *(US-A21)* — `docs/cancellation/total-folio-cancellation.spec.md`
 
@@ -205,13 +230,32 @@ GuideMe is a multi-tenant, mobile-optimized SaaS platform that centralizes the s
 ### Out of MVP (Phase 2+)
 
 #### 🚀 PHASE 2: Core Enhancements
-- [ ] **Advanced Cash Collection (Admin-Initiated & Adjustments)** *(US-A27, US-A28, US-A29, US-A30, US-AG27, US-AG28)* - *Enables face-to-face direct collections and adjustments with a non-blocking sign-or-dispute acknowledgment workflow for agents, auto-signing after a per-org configurable window.* — `docs/cash-drops/advanced-cash-collection.spec.md`
-- [ ] **Agent Balance UX Overhaul (Cash vs Electronic)** *(US-AG29)* - *Redesigns the agent dashboard to visually separate total sales, earned commissions, and physical cash debt, clarifying the impact of non-cash payments.* — `docs/cash-drops/agent-balance-ux-overhaul.spec.md`
+- [x] **Advanced Cash Collection (Admin-Initiated & Adjustments)** *(US-A27, US-A28, US-A29, US-A30, US-AG27, US-AG28)* - *Enables face-to-face direct collections and adjustments with a non-blocking sign-or-dispute acknowledgment workflow for agents, auto-signing after a per-org configurable window.* — `docs/cash-drops/advanced-cash-collection.spec.md`
+- [x] **Agent Balance UX Overhaul (Cash vs Electronic)** *(US-AG29)* - *Redesigns the agent dashboard to visually separate total sales, earned commissions, and physical cash debt, clarifying the impact of non-cash payments.* — `docs/cash-drops/agent-balance-ux-overhaul.spec.md`
 - [ ] **Offline-capable QR validation with post-sync** *(US-AG16)* - *Deferred from MVP to focus on real-time validation.*
 - [ ] **Partial cancellations (per service within the folio)** *(US-A22)* - *Deferred to simplify inventory logic in MVP.*
 - [x] **Cash refund tracking** *(US-A23)* - *To ensure the admin can reconcile physical cash returns. Pairs with the Tourist Portal's Refund PIN (US-T05) to confirm the customer received the cash.* — **delivered with** `docs/tourist-portal/tourist-self-service-portal.spec.md` (the request→approve→PIN→confirm loop ships as one feature).
 - [ ] **Folio audit timeline** *(US-A24)* - *To track the lifecycle of a sale and resolve internal disputes.*
 - [x] **Tourist Self-Service Portal (Magic Link, itinerary, QR, cancellation request + Refund PIN)** *(US-T01, US-T02, US-T03, US-T04, US-T05)* - *B2C portal. Depends on the Email feature (US-AG09/US-C01) for the Magic Link; the cancellation-request + Refund-PIN flow extends Total Folio Cancellation (US-A21) and Cash refund tracking (US-A23).* — `docs/tourist-portal/tourist-self-service-portal.spec.md` (bundles US-A23 refund tracking).
+
+#### 🧭 REORG: Role-Aligned IA & Admin Selling
+
+> Realigns the app to each role's actual workflow (admin = total control **and** a daily
+> seller; agent = sell, scan, settle). Plan: `docs/navigation/role-based-ia-reorganization.md`.
+> Listed by priority within the reorg initiative.
+
+**🟢 MUST HAVE** *(Reorg Phase 1 — unlock & reorganize; small, immediate value)*
+- [x] **Administrator Vendor Capabilities** *(US-A31, US-A32, US-A33, US-A34, US-A35)* — *Unlocks the admin as a first-class seller (POS, scanner, commission under the same seller-independent rule) with self-authorized own-cash settlement; adds the "Tu caja" block (own drawer + sales/commission cards). Financially inert.* — `docs/admin-vendor/admin-vendor-capabilities.spec.md`
+- [x] **App Shell Redesign (role-aligned nav, shared vocabulary, account surface)** *(US-UX01, US-UX02, US-UX03, US-UX04, US-UX05, US-UX06)* — *Removes the top bar; role-based landing; concept-named nav (Vender·Escáner·Ventas·Caja·Hoy); avatar account surface for identity/logout/overflow; one-verb CTA sweep; Caja drops badge. Frontend-only.* — `docs/navigation/app-shell-redesign.spec.md`
+- [x] **Service-Based Commission (percent or fixed per spot)** *(US-A12 rev., US-A33)* — *Commission moves from the seller to the service; any seller earns identically. Migration 0030 backfills the old bonus as the rate; per-agent `base_commission` retired.* — `docs/commissions/service-based-commission.spec.md`
+
+**🟡 SHOULD HAVE** *(Reorg Phase 2 — the real "Hoy")*
+- [ ] **Daily Operations Dashboard as "Hoy"** *(US-A14, US-A15, US-A16, US-AG26)* — *Replaces the interim queue-card Hoy with the spec'd occupancy + day's-sales dashboard; folds the agent snapshot into the agent's Caja.* — `docs/dashboard/occupancy-dashboard.spec.md`
+
+**🔵 COULD HAVE** *(Reorg Phase 3 — overflow grows + cleanup)*
+- [ ] **Configuración home** *(US-A29)* — *Edit the org acknowledgment window and the admin's own base commission.*
+- [ ] **Reportes home** *(US-A17, US-A18, US-A20)* — *Commission/performance reports + export, reached from the account surface.*
+- [ ] **Screen unification** — *Merge the duplicate Ventas (Folios/Historial) and folio-detail page pairs into single role-aware components.*
 
 #### 🔵 COULD HAVE
 *Nice-to-have features that improve UX if extra time is available.*
@@ -244,11 +288,21 @@ GuideMe is a multi-tenant, mobile-optimized SaaS platform that centralizes the s
 
 ### Commissions
 
-- Each agent has a `base_commission` (%) assigned by the admin.
-- Each service can have an additional `commission_bonus` (%) defined by the admin.
-- Total commission per sales line = `(sold_price × base_commission) + (sold_price × commission_bonus)`.
-- Commissions are calculated on the final sold price (post-discount), not on the base price.
-- Bookings/down-payments generate commissions only on the amount actually collected (the cumulative cash that has entered the agent's running balance).
+> **Service-based model** (rev. 2026-06-11 — `docs/commissions/service-based-commission.spec.md`).
+> Commission belongs to the **service sold**, not to the seller; agents and admins earn
+> identically for identical sales. The per-agent `base_commission` is retired.
+
+- Each service defines `commission_type` (`percent` | `fixed`) and `commission_value`
+  (basis points for percent; minor units **per spot** for fixed), set by the admin in the catalog.
+- Commission per sales line: **percent** → `round(line_total × commission_value / 10000)`,
+  where the line total includes the line's extras and reflects any discount;
+  **fixed** → `commission_value × quantity`, independent of discounts and extras.
+- A fixed `commission_value` must not exceed the service's `minimum_price`, so commission can
+  never exceed the revenue of even a maximally-discounted pass.
+- The folio's commission is the sum of its line commissions, **snapshotted at POS** — later
+  catalog edits never rewrite sold folios.
+- Bookings/down-payments (when built): percent commissions accrue on the amount actually
+  collected; fixed commissions accrue when the folio reaches `paid`.
 
 ### Bookings (Down-payment / Partial Payment)
 
@@ -304,9 +358,11 @@ GuideMe is a multi-tenant, mobile-optimized SaaS platform that centralizes the s
 | **Cash drop (Entrega de efectivo)** | An event where an agent hands physical cash to the admin; once the admin confirms receipt it reduces the agent's running balance. |
 | **Cash closure (Corte de caja)** | *Deprecated (Phase-1 pivot).* The earlier daily summary model — replaced by the continuous running balance + cash drops. |
 | **Minimum price (Precio mínimo)** | Price floor per service defined by the admin. The agent cannot sell below it. |
-| **Commission bonus (Bonus de comisión)** | Additional commission percentage defined by the admin for a specific service. |
+| **Service commission (Comisión del servicio)** | The commission defined on each catalog service — a percentage of the sold price or a fixed amount per spot — earned identically by any seller (agent or admin). Replaced the earlier per-agent base % + per-service bonus (rev. 2026-06-11). |
 | **Clawback** | On cancelling a folio, the admin's choice (US-A26) to make the agent **forfeit** the commission booked on that sale (vs. the company absorbing the loss). Recorded as `cancellation_clawback` on the folio and applied by the running-balance derivation. |
 | **Direct collection (Cobro directo)** | A cash collection the admin records face-to-face (US-A27): a `confirmed` drop created by the admin that reduces the agent's balance immediately and owes the agent a signature. |
 | **Acknowledgment window (Ventana de firma)** | Per-organization period (default 24 h, range 1–168 h — US-A29) during which an agent can sign or dispute a unilateral admin money-move (direct collection / adjusted drop) before it auto-signs. An open dispute is never auto-signed. |
 | **Magic Link** | A signed, time-limited tokenized URL emailed to a tourist that grants passwordless access to their self-service booking portal (Phase 2). |
 | **Refund PIN** | A secure code shown to a tourist in the portal once their cancellation is approved; the tourist gives it to the agent/admin to confirm the physical cash refund was received, closing the cash-refund loop (US-T05 ↔ US-A23). |
+| **Self-authorized settlement** | A cash drop or payout created by the admin against their **own** balance: because the hand-in party and the approving party are the same person, the event is born `confirmed` (`reviewed_by = self`), skips the pending-review queue, and opens no acknowledgment window. The balance derivation is unchanged — only the approval *step* is skipped (US-A34). Surfaced as an "auto-confirmada" label. |
+| **Tu caja / Equipo** | The two sections of the admin's **Caja** screen: **Tu caja** is the admin's own drawer (their sales' cash collected, commission, and net to hand in, with an *Entregar* action) pinned above **Equipo**, the agents' balances and pending-drop review queue (US-A35). |

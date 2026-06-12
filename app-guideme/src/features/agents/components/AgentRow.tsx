@@ -3,7 +3,6 @@ import EditRounded from '@mui/icons-material/EditRounded'
 import BlockRounded from '@mui/icons-material/BlockRounded'
 import CheckCircleRounded from '@mui/icons-material/CheckCircleRounded'
 import type { Agent } from '../types'
-import { basisPointsToPercent } from '../types'
 
 interface AgentRowProps {
   agent: Agent
@@ -39,9 +38,11 @@ export function AgentRow({
             <Typography variant="body2" color="text.secondary" noWrap>
               {agent.email}
             </Typography>
-            <Typography variant="body2" color="text.secondary">
-              Comisión: {basisPointsToPercent(agent.base_commission).toFixed(2)}%
-            </Typography>
+            {agent.phone && (
+              <Typography variant="body2" color="text.secondary" noWrap>
+                {agent.phone}
+              </Typography>
+            )}
           </Box>
 
           <Box

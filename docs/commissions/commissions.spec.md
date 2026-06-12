@@ -1,5 +1,12 @@
 # Feature: Commissions — Base % per Agent + Bonus per Service
 
+> **SUPERSEDED (2026-06-11)** by `docs/commissions/service-based-commission.spec.md`: commission
+> now belongs to the **service** (`commission_type` percent|fixed + `commission_value`), the
+> per-agent `users.base_commission` is retired, and any seller (agent or admin) earns the same
+> for the same sale. This document remains the record of the original model — the **snapshot
+> semantics** it established (computed at POS, stored on the folio, consumed by the running
+> balance and clawback) are still in force.
+
 ## Context
 
 An agent earns a **commission** on every sale: a **base percentage** of the folio total

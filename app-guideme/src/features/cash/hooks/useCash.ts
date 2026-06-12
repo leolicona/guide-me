@@ -107,6 +107,19 @@ export const usePendingAckCount = (enabled: boolean) =>
 export const useBalances = () =>
   useQuery({ queryKey: BALANCES_KEY, queryFn: listBalances })
 
+// US-UX06 — badge feed for the admin nav (admins only — pass `enabled: role === 'admin'`).
+// The count of cash drops awaiting the admin's confirmation, summed across the org's agents.
+// Shares the ['cash','balances'] cache with CashBalancesPage, so it adds no extra request when
+// both are mounted. The admin's OWN drops are self-authorized (born confirmed) and never
+// pending, so they never inflate this badge.
+export const usePendingDropCount = (enabled: boolean) =>
+  useQuery({
+    queryKey: BALANCES_KEY,
+    queryFn: listBalances,
+    enabled,
+    select: (rows) => rows.reduce((n, r) => n + r.pending_drops_count, 0),
+  })
+
 // US-A19 — the drops review queue (defaults to pending).
 export const useDrops = (filters: DropFilters = {}) =>
   useQuery({

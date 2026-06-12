@@ -31,6 +31,7 @@ import {
   useRegisterPayout,
 } from '../features/cash/hooks'
 import { AckChip } from '../features/cash/components/AckChip'
+import { TuCajaSection } from '../features/cash/components/TuCajaSection'
 import { SOURCE_LABEL } from '../features/cash/components/ackPresentation'
 import { METHOD_LABEL } from '../features/cash/components/paymentPresentation'
 import type { BalanceListItem, DropStatus } from '../features/cash/types'
@@ -430,10 +431,16 @@ export default function CashBalancesPage() {
   return (
     <Fade in timeout={400}>
       <Box sx={{ maxWidth: 760, mx: 'auto' }}>
-        <Typography variant="h4" component="h1" sx={{ mb: 2 }}>
-          Cash
+        <Typography variant="h4" component="h1" sx={{ mb: 3 }}>
+          Caja
         </Typography>
 
+        {/* US-A35 — the admin's own drawer, pinned above the team. */}
+        <TuCajaSection />
+
+        <Typography variant="overline" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+          Equipo
+        </Typography>
         <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ mb: 3 }}>
           <Tab label="Saldos" />
           <Tab label="Entregas" />

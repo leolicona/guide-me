@@ -1,10 +1,7 @@
-import { Suspense } from 'react'
+import { Suspense, useState } from 'react'
 import { Outlet, Link as RouterLink, useLocation } from 'react-router-dom'
 import {
-  AppBar,
-  Toolbar,
-  Typography,
-  Button,
+  Avatar,
   Box,
   Badge,
   ButtonBase,
@@ -16,19 +13,16 @@ import {
 import { alpha, useTheme } from '@mui/material/styles'
 import type { SvgIconComponent } from '@mui/icons-material'
 import AccountBalanceWalletRounded from '@mui/icons-material/AccountBalanceWalletRounded'
-import DashboardRounded from '@mui/icons-material/DashboardRounded'
-import GroupsRounded from '@mui/icons-material/GroupsRounded'
-import MapRounded from '@mui/icons-material/MapRounded'
-import PaymentsRounded from '@mui/icons-material/PaymentsRounded'
 import PointOfSaleRounded from '@mui/icons-material/PointOfSaleRounded'
 import QrCodeScannerRounded from '@mui/icons-material/QrCodeScannerRounded'
-import ReceiptRounded from '@mui/icons-material/ReceiptRounded'
 import ReceiptLongRounded from '@mui/icons-material/ReceiptLongRounded'
+import TodayRounded from '@mui/icons-material/TodayRounded'
 import { useCurrentUser } from '../features/auth/CurrentUserContext'
-import { useLogout } from '../features/auth/hooks/useLogout'
-import { usePendingAckCount } from '../features/cash/hooks'
+import { usePendingAckCount, usePendingDropCount } from '../features/cash/hooks'
 import { usePendingCancellationCount } from '../features/folios/hooks'
 import { ROUTES } from '../config/routes'
+import { AccountMenu } from './AccountMenu'
+import { AccountAvatarChip } from './AccountAvatarChip'
 
 interface NavItem {
   label: string
@@ -38,41 +32,60 @@ interface NavItem {
   role?: 'admin' | 'agent'
 }
 
-// Single source of truth so the rail and the bottom bar never drift.
+// US-UX02 — destinations named by CONCEPT, shared across roles. Routes diverge by role where
+// the underlying surface differs (Ventas: agent /history vs admin /folios; Caja: agent
+// /balance vs admin /cash), but the label, icon, and slot are identical — so the admin nav is
+// exactly the agent nav plus "Hoy". Array order is the render order; the role filter preserves
+// it, yielding agent [Vender, Escáner, Ventas, Caja] and admin [Hoy, Vender, Escáner, Ventas,
+// Caja]. Occasional admin tools (Agentes, Catálogo, …) live in the account surface, not here.
 const NAV_ITEMS: NavItem[] = [
-  { label: 'Dashboard', to: ROUTES.DASHBOARD, icon: DashboardRounded },
-  { label: 'POS', to: ROUTES.POS, icon: PointOfSaleRounded, role: 'agent' },
-  { label: 'Scanner', to: ROUTES.SCAN, icon: QrCodeScannerRounded, role: 'agent' },
-  { label: 'Historial', to: ROUTES.HISTORY, icon: ReceiptLongRounded, role: 'agent' },
-  { label: 'Balance', to: ROUTES.BALANCE, icon: AccountBalanceWalletRounded, role: 'agent' },
-  { label: 'Agentes', to: ROUTES.AGENTS, icon: GroupsRounded, role: 'admin' },
-  { label: 'Catálogo', to: ROUTES.CATALOG, icon: MapRounded, role: 'admin' },
-  { label: 'Folios', to: ROUTES.FOLIOS, icon: ReceiptRounded, role: 'admin' },
-  { label: 'Cash', to: ROUTES.CASH, icon: PaymentsRounded, role: 'admin' },
+  { label: 'Hoy', to: ROUTES.DASHBOARD, icon: TodayRounded, role: 'admin' },
+  { label: 'Vender', to: ROUTES.POS, icon: PointOfSaleRounded },
+  { label: 'Escáner', to: ROUTES.SCAN, icon: QrCodeScannerRounded },
+  { label: 'Ventas', to: ROUTES.HISTORY, icon: ReceiptLongRounded, role: 'agent' },
+  { label: 'Ventas', to: ROUTES.FOLIOS, icon: ReceiptLongRounded, role: 'admin' },
+  { label: 'Caja', to: ROUTES.BALANCE, icon: AccountBalanceWalletRounded, role: 'agent' },
+  { label: 'Caja', to: ROUTES.CASH, icon: AccountBalanceWalletRounded, role: 'admin' },
 ]
 
 const RAIL_WIDTH = 88
 
+const initialsOf = (name: string) =>
+  name
+    .trim()
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((w) => w[0]?.toUpperCase() ?? '')
+    .join('') || '?'
+
 /**
- * Authenticated app shell: a Material-3-styled navigation rail (md and up) or a
- * bottom navigation bar (mobile). The active destination gets an indigo
- * (`secondary`) pill — the single accent reserved for active states. Built on
- * MUI v2 primitives (no first-class NavigationRail exists); MD3 is approximated.
+ * Authenticated app shell. No top bar (US-UX03): the rail (md+) runs full-height with a
+ * monogram on top, the daily destination pills in the middle, and a bottom-pinned avatar that
+ * opens the account surface; on mobile a bottom navigation bar plus a fixed top-right avatar
+ * chip. The active destination gets an indigo (`secondary`) pill — the single accent reserved
+ * for active states.
  */
 export function AppLayout() {
   const theme = useTheme()
   const isDesktop = useMediaQuery(theme.breakpoints.up('md'))
   const location = useLocation()
   const user = useCurrentUser()
-  const { logout, isPending } = useLogout()
-  // US-AG27/AG28 — admin money-moves awaiting the agent's signature, surfaced on the Balance
-  // destination so the obligation is visible without opening the screen. Agents only.
+  // US-AG27/AG28 — admin money-moves awaiting the agent's signature, surfaced on the agent's
+  // Caja destination. Agents only.
   const { data: pendingAckCount = 0 } = usePendingAckCount(user.role === 'agent')
-  // US-T04 — tourists' cancellation requests awaiting review, surfaced on the Folios
+  // US-T04 — tourists' cancellation requests awaiting review, surfaced on the admin's Ventas
   // destination. Admins only.
   const { data: pendingCancellationCount = 0 } = usePendingCancellationCount(
     user.role === 'admin',
   )
+  // US-UX06 — agent cash drops awaiting confirmation, surfaced on the admin's Caja destination.
+  // Admins only; the admin's own (self-authorized) drops never count.
+  const { data: pendingDropCount = 0 } = usePendingDropCount(user.role === 'admin')
+
+  // US-UX01 — both roles land on their first daily action; the monogram links there too.
+  const landingRoute = user.role === 'admin' ? ROUTES.DASHBOARD : ROUTES.POS
+
+  const [accountAnchor, setAccountAnchor] = useState<HTMLElement | null>(null)
 
   const items = NAV_ITEMS.filter((i) => !i.role || i.role === user.role)
   const isActive = (to: string) => location.pathname.startsWith(to)
@@ -80,6 +93,7 @@ export function AppLayout() {
   const badgeFor = (to: string) => {
     if (to === ROUTES.BALANCE) return pendingAckCount
     if (to === ROUTES.FOLIOS) return pendingCancellationCount
+    if (to === ROUTES.CASH) return pendingDropCount
     return 0
   }
 
@@ -88,151 +102,152 @@ export function AppLayout() {
       sx={{
         minHeight: '100vh',
         display: 'flex',
-        flexDirection: 'column',
         bgcolor: 'background.default',
       }}
     >
-      <AppBar
-        position="sticky"
-        color="transparent"
-        elevation={0}
-        sx={{
-          borderBottom: '1px solid',
-          borderColor: 'divider',
-          bgcolor: 'background.paper',
-        }}
-      >
-        <Toolbar>
-          <Typography
-            variant="h6"
-            component={RouterLink}
-            to={ROUTES.DASHBOARD}
-            sx={{
-              flexGrow: 1,
-              fontWeight: 700,
-              color: 'primary.main',
-              textDecoration: 'none',
-            }}
-          >
-            GuideMe
-          </Typography>
-          <Typography
-            variant="body2"
-            color="text.secondary"
-            sx={{ mr: 2, display: { xs: 'none', sm: 'block' } }}
-          >
-            {user.name} ({user.role})
-          </Typography>
-          <Button
-            variant="outlined"
-            size="small"
-            onClick={logout}
-            disabled={isPending}
-          >
-            Cerrar sesión
-          </Button>
-        </Toolbar>
-      </AppBar>
-
-      <Box sx={{ display: 'flex', flex: 1, minHeight: 0 }}>
-        {isDesktop && (
-          <Box
-            component="nav"
-            aria-label="Primary"
-            sx={{
-              width: RAIL_WIDTH,
-              flexShrink: 0,
-              borderRight: '1px solid',
-              borderColor: 'divider',
-              bgcolor: 'background.paper',
-              py: 2,
-            }}
-          >
-            <Box
-              sx={{
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'center',
-                gap: 1,
-              }}
-            >
-              {items.map((item) => {
-                const active = isActive(item.to)
-                const Icon = item.icon
-                return (
-                  <ButtonBase
-                    key={item.to}
-                    component={RouterLink}
-                    to={item.to}
-                    aria-current={active ? 'page' : undefined}
-                    sx={{
-                      width: 64,
-                      py: 1,
-                      borderRadius: 3,
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: 0.5,
-                      color: active ? 'secondary.main' : 'text.secondary',
-                      transition: 'color 160ms ease',
-                      '&:hover .nav-pill': {
-                        bgcolor: (t) =>
-                          alpha(t.palette.secondary.main, active ? 0.16 : 0.08),
-                      },
-                    }}
-                  >
-                    <Box
-                      className="nav-pill"
-                      sx={{
-                        px: 2.25,
-                        py: 0.5,
-                        borderRadius: 999,
-                        display: 'flex',
-                        bgcolor: (t) =>
-                          active
-                            ? alpha(t.palette.secondary.main, 0.12)
-                            : 'transparent',
-                        transition: 'background-color 160ms ease',
-                      }}
-                    >
-                      <Badge badgeContent={badgeFor(item.to)} color="warning">
-                        <Icon fontSize="small" />
-                      </Badge>
-                    </Box>
-                    <Typography
-                      variant="caption"
-                      sx={{ fontWeight: active ? 600 : 500 }}
-                    >
-                      {item.label}
-                    </Typography>
-                  </ButtonBase>
-                )
-              })}
-            </Box>
-          </Box>
-        )}
-
+      {isDesktop && (
         <Box
-          component="main"
+          component="nav"
+          aria-label="Primary"
           sx={{
-            flex: 1,
-            minWidth: 0,
-            p: { xs: 2, md: 4 },
-            pb: { xs: 12, md: 4 },
+            width: RAIL_WIDTH,
+            flexShrink: 0,
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            borderRight: '1px solid',
+            borderColor: 'divider',
+            bgcolor: 'background.paper',
+            py: 2,
+            position: 'sticky',
+            top: 0,
+            height: '100vh',
           }}
         >
-          {/* Boundary lives *inside* the shell so lazy page chunks load without
-              tearing down the nav — only the content area shows the loader. */}
-          <Suspense
-            fallback={
-              <Box sx={{ display: 'flex', justifyContent: 'center', pt: 8 }}>
-                <CircularProgress />
-              </Box>
-            }
+          {/* Monogram → role landing */}
+          <ButtonBase
+            component={RouterLink}
+            to={landingRoute}
+            aria-label="Inicio"
+            sx={{
+              width: 44,
+              height: 44,
+              borderRadius: 2.5,
+              mb: 2,
+              fontWeight: 700,
+              fontSize: 18,
+              color: 'primary.contrastText',
+              bgcolor: 'primary.main',
+            }}
           >
-            <Outlet />
-          </Suspense>
+            G
+          </ButtonBase>
+
+          {/* Daily destinations */}
+          <Box
+            sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1 }}
+          >
+            {items.map((item) => {
+              const active = isActive(item.to)
+              const Icon = item.icon
+              return (
+                <ButtonBase
+                  key={item.to}
+                  component={RouterLink}
+                  to={item.to}
+                  aria-current={active ? 'page' : undefined}
+                  sx={{
+                    width: 64,
+                    py: 1,
+                    borderRadius: 3,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 0.5,
+                    color: active ? 'secondary.main' : 'text.secondary',
+                    transition: 'color 160ms ease',
+                    '&:hover .nav-pill': {
+                      bgcolor: (t) =>
+                        alpha(t.palette.secondary.main, active ? 0.16 : 0.08),
+                    },
+                  }}
+                >
+                  <Box
+                    className="nav-pill"
+                    sx={{
+                      px: 2.25,
+                      py: 0.5,
+                      borderRadius: 999,
+                      display: 'flex',
+                      bgcolor: (t) =>
+                        active ? alpha(t.palette.secondary.main, 0.12) : 'transparent',
+                      transition: 'background-color 160ms ease',
+                    }}
+                  >
+                    <Badge badgeContent={badgeFor(item.to)} color="warning">
+                      <Icon fontSize="small" />
+                    </Badge>
+                  </Box>
+                  <Box
+                    component="span"
+                    sx={{
+                      fontSize: 12,
+                      fontWeight: active ? 600 : 500,
+                      lineHeight: 1,
+                    }}
+                  >
+                    {item.label}
+                  </Box>
+                </ButtonBase>
+              )
+            })}
+          </Box>
+
+          {/* Spacer pushes the account avatar to the bottom of the rail */}
+          <Box sx={{ flex: 1 }} />
+
+          {/* Account surface trigger (identity · Gestión · Configuración · Cerrar sesión) */}
+          <ButtonBase
+            onClick={(e) => setAccountAnchor(e.currentTarget)}
+            aria-label={`Cuenta de ${user.name}`}
+            sx={{ borderRadius: 999, p: 0.5 }}
+          >
+            <Avatar sx={{ bgcolor: 'secondary.main', width: 36, height: 36, fontSize: 14 }}>
+              {initialsOf(user.name)}
+            </Avatar>
+          </ButtonBase>
+          <AccountMenu
+            variant="popover"
+            open={Boolean(accountAnchor)}
+            anchorEl={accountAnchor}
+            onClose={() => setAccountAnchor(null)}
+          />
         </Box>
+      )}
+
+      <Box
+        component="main"
+        sx={{
+          flex: 1,
+          minWidth: 0,
+          p: { xs: 2, md: 4 },
+          pb: { xs: 12, md: 4 },
+        }}
+      >
+        {/* Boundary lives *inside* the shell so lazy page chunks load without tearing down the
+            nav — only the content area shows the loader. */}
+        <Suspense
+          fallback={
+            <Box sx={{ display: 'flex', justifyContent: 'center', pt: 8 }}>
+              <CircularProgress />
+            </Box>
+          }
+        >
+          <Outlet />
+        </Suspense>
       </Box>
+
+      {/* Mobile: the account chip is the only fixed overlay (top-right, safe-area aware). */}
+      {!isDesktop && <AccountAvatarChip />}
 
       {!isDesktop && (
         <BottomNavigation

@@ -24,9 +24,10 @@ const validationHook = (result: { success: boolean }) => {
   }
 }
 
-// POS is agent-facing: folios are agent-attributed (agent_id). Admins get
-// dashboards/reports instead (separate feature).
-pos.use('*', authMiddleware, requireRole('agent'))
+// Selling is a daily activity for BOTH roles (US-A31): agents and admins run the same POS
+// flow. Folios are attributed to the caller (agent_id = seller.userId) uniformly, so an
+// admin's sales roll up to the admin's own drawer and commission report row.
+pos.use('*', authMiddleware, requireRole('agent', 'admin'))
 
 pos.get('/services', listPosServices)
 pos.get('/services/:id', getPosService)

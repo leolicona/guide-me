@@ -710,8 +710,16 @@ export const deleteExpense = async (c: CashContext) => {
 }
 
 // US-AG14 — register a cash drop (hand-in). The server snapshots balance_before from the
-// live derivation and forces status='pending', agent_id=caller. balance_before in the body
-// is ignored.
+// live derivation and forces agent_id=caller. balance_before in the body is ignored.
+//
+// US-A34 self-authorization: when an ADMIN files a hand-in, the depositing party and the
+// approving party are the same person (this route is caller-scoped — agent_id is always the
+// caller), so the drop is born `confirmed` (reviewed_by = self) instead of `pending`. It
+// never enters the admin's review queue and opens no acknowledgment window. Accounting is
+// unaffected: the balance derivation already counts only confirmed drops, so a self-confirmed
+// drop enters the formula exactly as an agent's drop does once an admin confirms it — the
+// only thing skipped is the approval step. An agent's drop is ALWAYS `pending`; the role
+// check below is the single seam, so self-authorization can never leak to agents.
 export const createDrop = async (c: CashContext) => {
   const user = c.get('user')
   const org = user.organizationId
@@ -719,6 +727,9 @@ export const createDrop = async (c: CashContext) => {
   const db = getDb(c.env)
 
   const { balance } = await deriveBalance(db, org, user.userId)
+
+  const selfAuthorized = user.role === 'admin'
+  const now = new Date()
 
   const [drop] = await db
     .insert(cashDrops)
@@ -728,7 +739,17 @@ export const createDrop = async (c: CashContext) => {
       agentId: user.userId,
       amount: input.amount,
       balanceBefore: balance,
-      status: 'pending',
+      // Self-confirmed: mirror reviewDrop's watermark (balance_after = pre-drop balance −
+      // amount; `balance` here already excludes this not-yet-inserted drop) and stamp the
+      // reviewer as self, the audit marker the UI reads as "auto-confirmada".
+      ...(selfAuthorized
+        ? {
+            status: 'confirmed' as const,
+            balanceAfter: balance - input.amount,
+            reviewedBy: user.userId,
+            reviewedAt: now,
+          }
+        : { status: 'pending' as const }),
       note: input.note ?? null,
     })
     .returning()
@@ -1004,28 +1025,34 @@ export const reviewDrop = async (c: CashContext) => {
 }
 
 // US-A25 — register a company-to-agent payout (transfer/payroll) to clear a negative
-// balance. Immediate (no review): it raises the agent's balance by `amount` on next read.
-// `agent_id` must name an agent in the admin's org (else 404 — no cross-org leak);
-// organization_id / created_by come from context, never the body.
+// balance. Immediate (no review): it raises the target's balance by `amount` on next read.
+// `agent_id` must name an agent in the admin's org — OR the admin themselves, for a
+// self-authorized payout that clears the admin's OWN negative balance (US-A34, symmetric with
+// the self-confirmed drop). Payouts have no review workflow, so "self-confirmed" here is just
+// permitting the self-target. organization_id / created_by come from context, never the body.
 export const registerPayout = async (c: CashContext) => {
   const admin = c.get('user')
   const org = admin.organizationId
   const input = (await c.req.json()) as CreatePayoutInput
   const db = getDb(c.env)
 
-  const [agent] = await db
+  const isSelf = input.agent_id === admin.userId
+
+  const [target] = await db
     .select({ id: users.id })
     .from(users)
     .where(
       and(
         eq(users.id, input.agent_id),
         eq(users.organizationId, org),
-        eq(users.role, 'agent'),
+        // Otherwise the target must be an agent in the admin's org; self bypasses the role
+        // filter so the admin can clear their own balance.
+        ...(isSelf ? [] : [eq(users.role, 'agent')]),
       ),
     )
     .limit(1)
 
-  if (!agent) {
+  if (!target) {
     throw new ApiError('NOT_FOUND', 404, 'Agent not found')
   }
 

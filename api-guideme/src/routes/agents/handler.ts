@@ -78,13 +78,14 @@ export const inviteAgent = async (c: AgentsContext) => {
 
 // Maps a users row to the public agent shape. password_hash / password_salt are
 // never selected, so they can never leak into a response.
+// No commission field (rev. 2026-06-11): commission is defined per service, not per agent —
+// docs/commissions/service-based-commission.spec.md.
 interface AgentRow {
   id: string
   name: string
   email: string
   phone: string | null
   status: string
-  baseCommission: number
 }
 
 const serializeAgent = (row: AgentRow) => ({
@@ -93,7 +94,6 @@ const serializeAgent = (row: AgentRow) => ({
   email: row.email,
   phone: row.phone,
   status: row.status,
-  base_commission: row.baseCommission,
 })
 
 const agentColumns = {
@@ -102,7 +102,6 @@ const agentColumns = {
   email: users.email,
   phone: users.phone,
   status: users.status,
-  baseCommission: users.baseCommission,
 } as const
 
 // US-A06 — list every agent in the caller's org (active + suspended).
@@ -124,7 +123,8 @@ export const listAgents = async (c: AgentsContext) => {
   return c.json({ agents: rows.map(serializeAgent) })
 }
 
-// US-A07 — edit an agent's profile and base commission.
+// US-A07 — edit an agent's profile (name, phone). Commission is service-based (US-A12 rev.),
+// so there is nothing rate-related to edit here.
 export const updateAgent = async (c: AgentsContext) => {
   const admin = c.get('user')
   const id = c.req.param('id')
@@ -136,7 +136,6 @@ export const updateAgent = async (c: AgentsContext) => {
     .set({
       name: input.name,
       phone: input.phone ?? null,
-      baseCommission: input.base_commission,
       updatedAt: new Date(),
     })
     .where(

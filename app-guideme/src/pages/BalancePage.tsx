@@ -102,7 +102,7 @@ export default function BalancePage() {
     <Fade in timeout={400}>
       <Box sx={{ maxWidth: 680, mx: 'auto' }}>
         <Typography variant="h4" component="h1" sx={{ mb: 3 }}>
-          Mi saldo
+          Caja
         </Typography>
 
         {isLoading && (

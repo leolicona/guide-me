@@ -115,15 +115,18 @@ const seedExpense = async (opts: {
     .run()
 }
 
-const seedService = async (organizationId: string): Promise<{ serviceId: string }> => {
+const seedService = async (
+  organizationId: string,
+  commissionValue = 0, // percent, basis points (service-based commission — US-A12 rev.)
+): Promise<{ serviceId: string }> => {
   const serviceId = crypto.randomUUID()
   const ts = nowSec()
   await env.DB.prepare(
     `INSERT INTO services
-       (id, organization_id, name, description, base_price, minimum_price, default_capacity, commission_bonus, status, created_at, updated_at)
-     VALUES (?, ?, 'City Tour', NULL, 150000, 100000, 12, 0, 'active', ?, ?)`,
+       (id, organization_id, name, description, base_price, minimum_price, default_capacity, commission_value, status, created_at, updated_at)
+     VALUES (?, ?, 'City Tour', NULL, 150000, 100000, 12, ?, 'active', ?, ?)`,
   )
-    .bind(serviceId, organizationId, ts, ts)
+    .bind(serviceId, organizationId, commissionValue, ts, ts)
     .run()
   return { serviceId }
 }
@@ -339,9 +342,9 @@ describe('Agent Balance UX Overhaul — cash vs electronic read model (US-AG29)'
   // -------------------------------------------------------------------------
   it('S6 — POS accepts transfer and link; commission earned, no cash debt, bucketed', async () => {
     const { organizationId } = await seedUser({ email: ADMIN_EMAIL, role: 'admin' })
-    // base_commission is in basis points: 1000 = 10%.
-    await seedUser({ email: AGENT_EMAIL, role: 'agent', organizationId, baseCommission: 1000 })
-    const { serviceId } = await seedService(organizationId)
+    await seedUser({ email: AGENT_EMAIL, role: 'agent', organizationId })
+    // Service-based commission (US-A12 rev.): the SERVICE pays 10% (1000 bp) to any seller.
+    const { serviceId } = await seedService(organizationId, 1000)
     const { slotId: slotA } = await seedSlot(organizationId, serviceId, '06:00')
     const { slotId: slotB } = await seedSlot(organizationId, serviceId, '09:00')
 
@@ -431,9 +434,11 @@ describe('Agent Balance UX Overhaul — cash vs electronic read model (US-AG29)'
   // -------------------------------------------------------------------------
   // Roles & multitenancy
   // -------------------------------------------------------------------------
-  it('S10 — wrong role → 403 on both surfaces', async () => {
+  // US-A35 — the admin reads their own /me drawer ("Tu caja"); the agent is still denied the
+  // org-wide /balances surface.
+  it('S10 — admin reads its own /me; agent denied /balances', async () => {
     await seedOrgWithStaff()
-    expect((await getMyBalance(ADMIN_EMAIL)).status).toBe(403)
+    expect((await getMyBalance(ADMIN_EMAIL)).status).toBe(200)
     expect((await listBalances(AGENT_EMAIL)).status).toBe(403)
   })
 

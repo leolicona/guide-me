@@ -134,7 +134,7 @@ export default function FoliosListPage() {
     <Fade in timeout={400}>
       <Box sx={{ maxWidth: 760, mx: 'auto' }}>
         <Typography variant="h4" component="h1" sx={{ mb: 2 }}>
-          Folios
+          Ventas
         </Typography>
 
         <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ mb: 3 }}>

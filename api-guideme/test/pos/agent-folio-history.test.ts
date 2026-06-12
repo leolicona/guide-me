@@ -71,7 +71,7 @@ const seedService = async (organizationId: string, name = 'City Tour') => {
   const ts = Math.floor(Date.now() / 1000)
   await env.DB.prepare(
     `INSERT INTO services
-       (id, organization_id, name, description, base_price, minimum_price, default_capacity, commission_bonus, status, created_at, updated_at)
+       (id, organization_id, name, description, base_price, minimum_price, default_capacity, commission_value, status, created_at, updated_at)
      VALUES (?, ?, ?, NULL, 150000, 100000, 12, 0, 'active', ?, ?)`,
   )
     .bind(serviceId, organizationId, name, ts, ts)
@@ -261,11 +261,13 @@ describe('US-AG21 — agent folio detail', () => {
 // Authorization
 // ---------------------------------------------------------------------------
 describe('Agent folio history — authorization', () => {
-  it('Scenario 9 — non-agent (admin) → 403 on the list', async () => {
+  // US-A31 — admins sell too, so the caller-scoped POS folio list is available to them; it
+  // returns the admin's OWN folios (empty here — they haven't sold).
+  it('Scenario 9 — admin reads their own POS folio list (US-A31)', async () => {
     await seedUser({ email: ADMIN_EMAIL, role: 'admin' })
     const res = await SELF.fetch(`${base}/folios`, { headers: auth(ADMIN_EMAIL) })
-    expect(res.status).toBe(403)
-    expect(((await res.json()) as any).error.code).toBe('FORBIDDEN')
+    expect(res.status).toBe(200)
+    expect(((await res.json()) as any).folios).toEqual([])
   })
 })
 

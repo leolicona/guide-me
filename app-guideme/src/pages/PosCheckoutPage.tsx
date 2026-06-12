@@ -291,11 +291,12 @@ export default function PosCheckoutPage() {
               onClick={handleConfirm}
               disabled={confirm.isPending || !emailValid}
             >
-              {confirm.isPending ? 'Confirmando…' : 'Confirmar venta'}
+              {/* Verb glossary (US-UX05): taking payment is always "Cobrar". */}
+              {confirm.isPending ? 'Cobrando…' : 'Cobrar'}
             </Button>
             {!emailValid && (
               <Typography variant="caption" color="text.secondary" sx={{ textAlign: 'center' }}>
-                Captura el correo del cliente para enviar el boleto y confirmar la venta.
+                Captura el correo del cliente para enviar el boleto y poder cobrar.
               </Typography>
             )}
           </Stack>

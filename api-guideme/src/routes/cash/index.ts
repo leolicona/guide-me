@@ -49,9 +49,13 @@ cash.use('*', authMiddleware)
 
 const agent = requireRole('agent')
 const admin = requireRole('admin')
+// Self-scoped surface: every /me/* handler keys strictly on `user.userId`, so it is safe for
+// any caller — an admin only ever touches their OWN drawer. The admin uses it for the "Tu
+// caja" section (US-A35): read their own balance and file a self-authorized hand-in (US-A34).
+const agentOrAdmin = requireRole('agent', 'admin')
 
-// Agent surface (/me/*) — scoped to the caller.
-cash.get('/me', agent, getMyBalance)
+// Self surface (/me/*) — scoped to the caller.
+cash.get('/me', agentOrAdmin, getMyBalance)
 cash.post(
   '/me/expenses',
   agent,
@@ -61,7 +65,7 @@ cash.post(
 cash.delete('/me/expenses/:id', agent, deleteExpense)
 cash.post(
   '/me/drops',
-  agent,
+  agentOrAdmin,
   zValidator('json', createDropSchema, validationHook),
   createDrop,
 )

@@ -30,7 +30,8 @@ interface SeedServiceOptions {
   basePrice?: number
   minimumPrice?: number
   defaultCapacity?: number
-  commissionBonus?: number
+  commissionType?: 'percent' | 'fixed'
+  commissionValue?: number
   status?: 'active' | 'inactive'
 }
 
@@ -40,17 +41,18 @@ const seedService = async ({
   basePrice = 150000,
   minimumPrice = 100000,
   defaultCapacity = 12,
-  commissionBonus = 0,
+  commissionType = 'percent',
+  commissionValue = 0,
   status = 'active',
 }: SeedServiceOptions): Promise<{ serviceId: string }> => {
   const serviceId = crypto.randomUUID()
   const ts = Math.floor(Date.now() / 1000)
   await env.DB.prepare(
     `INSERT INTO services
-       (id, organization_id, name, description, base_price, minimum_price, default_capacity, commission_bonus, status, created_at, updated_at)
-     VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?)`,
+       (id, organization_id, name, description, base_price, minimum_price, default_capacity, commission_type, commission_value, status, created_at, updated_at)
+     VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?)`,
   )
-    .bind(serviceId, organizationId, name, basePrice, minimumPrice, defaultCapacity, commissionBonus, status, ts, ts)
+    .bind(serviceId, organizationId, name, basePrice, minimumPrice, defaultCapacity, commissionType, commissionValue, status, ts, ts)
     .run()
   return { serviceId }
 }
@@ -293,19 +295,15 @@ describe('US-AG04 / AG05 / AG06 / AG08 — confirm sale', () => {
     expect((await getSlotRow(slotId))!.booked).toBe(2)
   })
 
-  it('US-AG23/AG25 — commission = base % + per-service bonus %; payment_method stored', async () => {
-    // Agent earns 10% base (1000 bp); the service adds a 5% bonus (500 bp). Card payment.
-    // Both rates are basis points; the bonus stacks on the base → constant 15% combined.
-    const { organizationId } = await seedUser({
-      email: AGENT_EMAIL,
-      role: 'agent',
-      baseCommission: 1000,
-    })
+  it('US-AG23/AG25 — commission = the service\'s percent of the line total; payment_method stored', async () => {
+    // Service-based commission (US-A12 rev.): the service pays 15% (1500 bp) to ANY seller;
+    // the seller carries no rate of their own. Card payment.
+    const { organizationId } = await seedUser({ email: AGENT_EMAIL, role: 'agent' })
     const { serviceId } = await seedService({
       organizationId,
       basePrice: 150000,
       minimumPrice: 100000,
-      commissionBonus: 500,
+      commissionValue: 1500,
     })
     const { slotId } = await seedSlot({ organizationId, serviceId, capacity: 12, booked: 0 })
 
@@ -315,8 +313,7 @@ describe('US-AG04 / AG05 / AG06 / AG08 — confirm sale', () => {
     })
 
     expect(status).toBe(201)
-    // total = 300000 → base 10% = 30000; bonus 5% of line_total 300000 = 15000 →
-    // commission 45000 (a constant 15%).
+    // line_total = 300000 → 15% = 45000.
     expect(json.folio.payment_method).toBe('card')
     expect(json.folio.commission_amount).toBe(45000)
 
@@ -329,7 +326,7 @@ describe('US-AG04 / AG05 / AG06 / AG08 — confirm sale', () => {
     expect(row?.commission_amount).toBe(45000)
   })
 
-  it('US-AG25 — payment_method defaults to cash; zero base commission → 0', async () => {
+  it('US-AG25 — payment_method defaults to cash; zero-commission service → 0', async () => {
     const { organizationId } = await seedUser({ email: AGENT_EMAIL, role: 'agent' })
     const { serviceId } = await seedService({ organizationId })
     const { slotId } = await seedSlot({ organizationId, serviceId, capacity: 12, booked: 0 })
@@ -561,25 +558,24 @@ describe('US-AG04 / AG05 / AG06 / AG08 — confirm sale', () => {
 // US-AG* — authorization
 // ---------------------------------------------------------------------------
 describe('POS — authorization', () => {
-  it('Scenario 16 — admin role → 403 on any /api/pos route', async () => {
+  // US-A31 — selling is a daily activity for BOTH roles; the admin runs the same POS flow.
+  it('Scenario 16 — admin is permitted on /api/pos (US-A31)', async () => {
     const { organizationId } = await seedUser({ email: ADMIN_EMAIL, role: 'admin' })
     const { serviceId } = await seedService({ organizationId })
     const { slotId } = await seedSlot({ organizationId, serviceId, capacity: 12 })
 
-    const calls = [
-      SELF.fetch(`${base}/services`, { headers: auth(ADMIN_EMAIL) }),
-      SELF.fetch(`${base}/services/${serviceId}`, { headers: auth(ADMIN_EMAIL) }),
-      SELF.fetch(`${base}/folios`, {
-        method: 'POST',
-        headers: jsonAuth(ADMIN_EMAIL),
-        body: JSON.stringify({ lines: [{ slot_id: slotId, quantity: 1, unit_price: 150000 }] }),
+    expect((await SELF.fetch(`${base}/services`, { headers: auth(ADMIN_EMAIL) })).status).toBe(200)
+    expect((await SELF.fetch(`${base}/services/${serviceId}`, { headers: auth(ADMIN_EMAIL) })).status).toBe(200)
+
+    const sale = await SELF.fetch(`${base}/folios`, {
+      method: 'POST',
+      headers: jsonAuth(ADMIN_EMAIL),
+      body: JSON.stringify({
+        customer_email: 'cliente@example.com',
+        lines: [{ slot_id: slotId, quantity: 1, unit_price: 150000 }],
       }),
-    ]
-    for (const p of calls) {
-      const res = await p
-      expect(res.status).toBe(403)
-      expect(((await res.json()) as any).error.code).toBe('FORBIDDEN')
-    }
+    })
+    expect(sale.status).toBe(201) // attributed to the admin (agent_id = seller.userId)
   })
 })
 

@@ -9,13 +9,11 @@ import {
   TextField,
   Button,
   Stack,
-  InputAdornment,
   CircularProgress,
 } from '@mui/material'
 import { editAgentSchema } from '../schemas'
 import type { EditAgentFormData } from '../schemas'
 import { useUpdateAgent } from '../hooks/useUpdateAgent'
-import { basisPointsToPercent, percentToBasisPoints } from '../types'
 import type { Agent } from '../types'
 import { ServiceError } from '../../../services/authService'
 
@@ -36,16 +34,16 @@ export function EditAgentDialog({ agent, open, onClose }: EditAgentDialogProps) 
     formState: { errors },
   } = useForm<EditAgentFormData>({
     resolver: zodResolver(editAgentSchema),
-    defaultValues: { name: '', phone: '', commission: 0 },
+    defaultValues: { name: '', phone: '' },
   })
 
-  // Prefill whenever a new agent is selected (basis points → percent).
+  // Prefill whenever a new agent is selected. (No commission here — it is service-based,
+  // edited in the catalog: docs/commissions/service-based-commission.spec.md.)
   useEffect(() => {
     if (agent) {
       reset({
         name: agent.name,
         phone: agent.phone ?? '',
-        commission: basisPointsToPercent(agent.base_commission),
       })
     }
   }, [agent, reset])
@@ -59,7 +57,6 @@ export function EditAgentDialog({ agent, open, onClose }: EditAgentDialogProps) 
         data: {
           name: data.name.trim(),
           phone,
-          base_commission: percentToBasisPoints(data.commission),
         },
       },
       {
@@ -72,7 +69,7 @@ export function EditAgentDialog({ agent, open, onClose }: EditAgentDialogProps) 
                 message: 'Este agente ya no existe.',
               })
             } else if (error.status === 400) {
-              setError('commission', {
+              setError('name', {
                 type: 'manual',
                 message: 'Revisa los valores e inténtalo de nuevo.',
               })
@@ -106,23 +103,6 @@ export function EditAgentDialog({ agent, open, onClose }: EditAgentDialogProps) 
               error={!!errors.phone}
               helperText={errors.phone?.message}
               {...register('phone')}
-            />
-            <TextField
-              label="Comisión base"
-              type="number"
-              fullWidth
-              disabled={isLoading}
-              error={!!errors.commission}
-              helperText={errors.commission?.message ?? '0–100'}
-              slotProps={{
-                input: {
-                  endAdornment: (
-                    <InputAdornment position="end">%</InputAdornment>
-                  ),
-                },
-                htmlInput: { step: 0.01, min: 0, max: 100 },
-              }}
-              {...register('commission', { valueAsNumber: true })}
             />
           </Stack>
         </DialogContent>

@@ -59,7 +59,15 @@ function App() {
               </AuthGuard>
             }
           >
-            <Route path={ROUTES.DASHBOARD} element={<DashboardPage />} />
+            {/* Admin "Hoy" landing — agents land on Vender, so this is admin-only */}
+            <Route
+              path={ROUTES.DASHBOARD}
+              element={
+                <RoleGuard role="admin">
+                  <DashboardPage />
+                </RoleGuard>
+              }
+            />
             <Route
               path={ROUTES.AGENTS}
               element={
@@ -85,39 +93,12 @@ function App() {
               }
             />
 
-            {/* Agent point of sale (US-AG03–AG08) */}
-            <Route
-              path={ROUTES.POS}
-              element={
-                <RoleGuard role="agent">
-                  <PosCatalogPage />
-                </RoleGuard>
-              }
-            />
-            <Route
-              path={ROUTES.POS_SERVICE}
-              element={
-                <RoleGuard role="agent">
-                  <PosServicePage />
-                </RoleGuard>
-              }
-            />
-            <Route
-              path={ROUTES.POS_CHECKOUT}
-              element={
-                <RoleGuard role="agent">
-                  <PosCheckoutPage />
-                </RoleGuard>
-              }
-            />
-            <Route
-              path={ROUTES.FOLIO}
-              element={
-                <RoleGuard role="agent">
-                  <FolioReceiptPage />
-                </RoleGuard>
-              }
-            />
+            {/* Point of sale (US-AG03–AG08) — selling is a daily activity for BOTH roles
+                (US-A31), so no RoleGuard: agents and admins run the same flow. */}
+            <Route path={ROUTES.POS} element={<PosCatalogPage />} />
+            <Route path={ROUTES.POS_SERVICE} element={<PosServicePage />} />
+            <Route path={ROUTES.POS_CHECKOUT} element={<PosCheckoutPage />} />
+            <Route path={ROUTES.FOLIO} element={<FolioReceiptPage />} />
 
             {/* Agent folio history — read-only list + detail (US-AG20, US-AG21) */}
             <Route
@@ -137,15 +118,9 @@ function App() {
               }
             />
 
-            {/* Agent access scanner (US-AG15, AG17, AG19) */}
-            <Route
-              path={ROUTES.SCAN}
-              element={
-                <RoleGuard role="agent">
-                  <ScannerPage />
-                </RoleGuard>
-              }
-            />
+            {/* Access scanner (US-AG15, AG17, AG19) — granting access is a daily activity
+                for BOTH roles (US-A32). */}
+            <Route path={ROUTES.SCAN} element={<ScannerPage />} />
 
             {/* Agent running balance — expenses + cash hand-ins (US-AG12/13/14) */}
             <Route

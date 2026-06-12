@@ -100,7 +100,9 @@ export function PendingAcknowledgments({ items }: { items: PendingAck[] }) {
                     onClick={() => acknowledge.mutate(item.id)}
                     disabled={acknowledge.isPending || dispute.isPending}
                   >
-                    Firmar / Confirmar
+                    {/* Verb glossary (US-UX05): the agent's acknowledgment is "Firmar" —
+                        "Confirmar" is reserved for the ADMIN accepting a drop/collection. */}
+                    Firmar
                   </Button>
                   <Button
                     size="small"

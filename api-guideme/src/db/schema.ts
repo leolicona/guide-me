@@ -29,6 +29,9 @@ export const users = sqliteTable('users', {
   status: text('status', { enum: ['unverified', 'active', 'suspended'] })
     .notNull()
     .default('unverified'),
+  // DEPRECATED (2026-06-11): commission is service-based now (services.commission_type/value —
+  // docs/commissions/service-based-commission.spec.md). No code reads or writes this column;
+  // it is kept only to avoid a users-table rebuild. A future migration may drop it.
   baseCommission: integer('base_commission').notNull().default(0),
   plan: text('plan').notNull().default('free'),
   createdAt: integer('created_at', { mode: 'timestamp' })
@@ -86,9 +89,14 @@ export const services = sqliteTable('services', {
   basePrice: integer('base_price').notNull(),
   minimumPrice: integer('minimum_price').notNull(),
   defaultCapacity: integer('default_capacity').notNull(),
-  // Per-service commission bonus in basis points (500 = 5%), stacked on the agent's base %
-  // and applied to this service's line total — see US-A12 / docs/commissions/commissions.spec.md.
-  commissionBonus: integer('commission_bonus').notNull().default(0),
+  // Service-based commission (US-A12 rev. / docs/commissions/service-based-commission.spec.md):
+  // the service defines what ANY seller earns. `percent` → commission_value is basis points
+  // (1000 = 10%) of the line total incl. extras; `fixed` → commission_value is minor units PER
+  // SPOT (× quantity), capped at minimum_price so it never exceeds a floor-priced pass.
+  commissionType: text('commission_type', { enum: ['percent', 'fixed'] })
+    .notNull()
+    .default('percent'),
+  commissionValue: integer('commission_value').notNull().default(0),
   status: text('status', { enum: ['active', 'inactive'] })
     .notNull()
     .default('active'),

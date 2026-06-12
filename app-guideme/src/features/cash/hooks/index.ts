@@ -7,6 +7,7 @@ export {
   useAcknowledgeDrop,
   useDisputeDrop,
   usePendingAckCount,
+  usePendingDropCount,
   useBalances,
   useDrops,
   useDrop,

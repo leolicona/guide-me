@@ -275,15 +275,15 @@ describe('Online QR Scanner', () => {
     expect(missing.status).toBe(400)
   })
 
-  it('Scenario 11 — admin is forbidden', async () => {
+  // US-A32 — granting access by scanning is a daily activity for BOTH roles; the admin
+  // validates at the gate like an agent (a forged token still resolves to an invalid result,
+  // not an authorization error).
+  it('Scenario 11 — admin may scan (US-A32)', async () => {
     await seedUser({ email: ADMIN_EMAIL, role: 'admin' })
-    const res = await SELF.fetch(`${TICKETS}/scan`, {
-      method: 'POST',
-      headers: jsonAuth(ADMIN_EMAIL),
-      body: JSON.stringify({ token: 'whatever' }),
-    })
-    expect(res.status).toBe(403)
-    expect(((await res.json()) as any).error.code).toBe('FORBIDDEN')
+    const { status, json } = await scan(ADMIN_EMAIL, 'whatever')
+    expect(status).toBe(200)
+    expect(json.result).toBe('invalid')
+    expect(json.reason).toBe('INVALID_SIGNATURE')
   })
 
   it('Scenario 12 — B3/B4: an org_a agent cannot mutate an org_b ticket', async () => {

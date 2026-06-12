@@ -50,7 +50,7 @@ const mockSuccessfulRefresh = (identity: string) => {
  *  assertions on UPDATE/DELETE isolation. */
 const getUserRow = async (id: string) => {
   const r = await env.DB.prepare(
-    'SELECT id, name, email, role, status, base_commission FROM users WHERE id = ?',
+    'SELECT id, name, email, role, status FROM users WHERE id = ?',
   )
     .bind(id)
     .first<{
@@ -59,7 +59,6 @@ const getUserRow = async (id: string) => {
       email: string
       role: string
       status: string
-      base_commission: number
     }>()
   return r
 }
@@ -71,7 +70,7 @@ afterEach(() => vi.restoreAllMocks())
 // US-A06 — GET /api/agents
 // ---------------------------------------------------------------------------
 describe('US-A06 — list agents (GET /api/agents)', () => {
-  it('Scenario 1 — lists agents with commission, excludes admin, ordered by name, no password fields', async () => {
+  it('Scenario 1 — lists agents, excludes admin, ordered by name, no password/commission fields', async () => {
     const { organizationId } = await seedUser({
       email: ADMIN_EMAIL,
       role: 'admin',
@@ -83,17 +82,13 @@ describe('US-A06 — list agents (GET /api/agents)', () => {
       status: 'active',
       organizationId,
     })
-    const { userId: anaId } = await seedUser({
+    await seedUser({
       email: 'ana@empresa.com',
       name: 'Ana',
       role: 'agent',
       status: 'suspended',
       organizationId,
     })
-    // Give one agent a known commission to prove it round-trips (basis points).
-    await env.DB.prepare('UPDATE users SET base_commission = ? WHERE id = ?')
-      .bind(1050, anaId)
-      .run()
 
     const res = await SELF.fetch('http://api.local/api/agents', {
       headers: auth(ADMIN_EMAIL),
@@ -106,18 +101,15 @@ describe('US-A06 — list agents (GET /api/agents)', () => {
     expect(body.agents).toHaveLength(2)
     // Ordered by name asc.
     expect(body.agents.map((a) => a.name)).toEqual(['Ana', 'Zara'])
-    // Status + commission present; commission in basis points.
-    expect(body.agents[0]).toMatchObject({
-      name: 'Ana',
-      status: 'suspended',
-      base_commission: 1050,
-    })
-    expect(body.agents[1]).toMatchObject({ status: 'active', base_commission: 0 })
-    // No secret fields ever serialized.
+    expect(body.agents[0]).toMatchObject({ name: 'Ana', status: 'suspended' })
+    expect(body.agents[1]).toMatchObject({ status: 'active' })
+    // No secret fields ever serialized — and no commission either: it is service-based
+    // (US-A12 rev. — docs/commissions/service-based-commission.spec.md).
     for (const a of body.agents) {
       expect(a).not.toHaveProperty('password_hash')
       expect(a).not.toHaveProperty('password_salt')
       expect(a).not.toHaveProperty('passwordHash')
+      expect(a).not.toHaveProperty('base_commission')
     }
   })
 
@@ -175,7 +167,6 @@ describe('US-A07 — edit agent (PUT /api/agents/:id)', () => {
       body: JSON.stringify({
         name: 'New Name',
         phone: '+52 55 9999 0000',
-        base_commission: 1200,
       }),
     })
 
@@ -185,10 +176,10 @@ describe('US-A07 — edit agent (PUT /api/agents/:id)', () => {
       id: userId,
       name: 'New Name',
       phone: '+52 55 9999 0000',
-      base_commission: 1200,
       email: AGENT_EMAIL, // unchanged
       status: 'active', // unchanged
     })
+    expect(body.agent).not.toHaveProperty('base_commission')
 
     // Immutables verified directly in D1.
     const row = await getUserRow(userId)
@@ -197,11 +188,10 @@ describe('US-A07 — edit agent (PUT /api/agents/:id)', () => {
       role: 'agent',
       status: 'active',
       name: 'New Name',
-      base_commission: 1200,
     })
   })
 
-  it('Scenario 5 — invalid base_commission (-1 / 10001 / float) → 400, no change', async () => {
+  it('Scenario 5 — a base_commission in the body is stripped, not honoured (US-A12 rev.)', async () => {
     const { organizationId } = await seedUser({
       email: ADMIN_EMAIL,
       role: 'admin',
@@ -212,18 +202,20 @@ describe('US-A07 — edit agent (PUT /api/agents/:id)', () => {
       organizationId,
     })
 
-    for (const bad of [-1, 10001, 10.5]) {
-      const res = await SELF.fetch(`http://api.local/api/agents/${userId}`, {
-        method: 'PUT',
-        headers: jsonAuth(ADMIN_EMAIL),
-        body: JSON.stringify({ name: 'X', base_commission: bad }),
-      })
-      expect(res.status, `base_commission=${bad}`).toBe(400)
-      expect(((await res.json()) as any).error.code).toBe('VALIDATION_ERROR')
-    }
+    // Commission is service-based: a legacy client still sending base_commission gets a
+    // normal profile update — the key is stripped by Zod and never written.
+    const res = await SELF.fetch(`http://api.local/api/agents/${userId}`, {
+      method: 'PUT',
+      headers: jsonAuth(ADMIN_EMAIL),
+      body: JSON.stringify({ name: 'X', base_commission: 9999 }),
+    })
+    expect(res.status).toBe(200)
+    expect(((await res.json()) as any).agent).not.toHaveProperty('base_commission')
 
-    // Untouched.
-    expect((await getUserRow(userId))?.base_commission).toBe(0)
+    const raw = await env.DB.prepare('SELECT base_commission FROM users WHERE id = ?')
+      .bind(userId)
+      .first<{ base_commission: number }>()
+    expect(raw?.base_commission).toBe(0) // deprecated column untouched
   })
 
   it('Scenario 6 — editing unknown id → 404', async () => {
@@ -232,7 +224,7 @@ describe('US-A07 — edit agent (PUT /api/agents/:id)', () => {
     const res = await SELF.fetch('http://api.local/api/agents/does-not-exist', {
       method: 'PUT',
       headers: jsonAuth(ADMIN_EMAIL),
-      body: JSON.stringify({ name: 'X', base_commission: 0 }),
+      body: JSON.stringify({ name: 'X' }),
     })
 
     expect(res.status).toBe(404)
@@ -248,13 +240,12 @@ describe('US-A07 — edit agent (PUT /api/agents/:id)', () => {
     const res = await SELF.fetch(`http://api.local/api/agents/${adminId}`, {
       method: 'PUT',
       headers: jsonAuth(ADMIN_EMAIL),
-      body: JSON.stringify({ name: 'Hacked', base_commission: 9999 }),
+      body: JSON.stringify({ name: 'Hacked' }),
     })
 
     expect(res.status).toBe(404)
     const row = await getUserRow(adminId)
     expect(row?.name).not.toBe('Hacked')
-    expect(row?.base_commission).toBe(0)
   })
 })
 
@@ -467,7 +458,7 @@ describe('Multitenancy isolation', () => {
     const put = await SELF.fetch(`http://api.local/api/agents/${agentBId}`, {
       method: 'PUT',
       headers: jsonAuth(orgA.adminEmail),
-      body: JSON.stringify({ name: 'Hacked', base_commission: 9999 }),
+      body: JSON.stringify({ name: 'Hacked' }),
     })
     const deact = await SELF.fetch(
       `http://api.local/api/agents/${agentBId}/deactivate`,
@@ -487,7 +478,6 @@ describe('Multitenancy isolation', () => {
     expect(row).toMatchObject({
       name: 'Agent B',
       status: 'active',
-      base_commission: 0,
     })
   })
 
@@ -505,7 +495,6 @@ describe('Multitenancy isolation', () => {
       headers: jsonAuth(orgA.adminEmail),
       body: JSON.stringify({
         name: 'Renamed',
-        base_commission: 500,
         organizationId: orgB.organizationId, // must be stripped by Zod
       }),
     })

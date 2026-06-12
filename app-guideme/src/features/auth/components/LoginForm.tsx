@@ -15,9 +15,10 @@ export function LoginForm() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const rawRedirect = searchParams.get('redirect') ?? '';
-  const redirectPath = rawRedirect.startsWith('/') && !rawRedirect.startsWith('//')
-    ? rawRedirect
-    : ROUTES.DASHBOARD;
+  // A safe deep-link continuation wins; otherwise we fall back to the role's landing, resolved
+  // in onSuccess once the session is known (US-UX01: admin → Hoy, agent → Vender).
+  const explicitRedirect =
+    rawRedirect.startsWith('/') && !rawRedirect.startsWith('//') ? rawRedirect : null;
   const loginMutation = useLogin();
   const queryClient = useQueryClient();
 
@@ -42,17 +43,19 @@ export function LoginForm() {
         // on an already-authenticated, success state. Otherwise a stale/empty
         // ['me'] state (e.g. left over from a prior 401) makes the guard bounce
         // straight back to /login while the refetch is still in flight.
+        let landing: string = ROUTES.POS; // agent default
         try {
-          await queryClient.fetchQuery({
+          const me = await queryClient.fetchQuery({
             queryKey: ['me'],
             queryFn: getMe,
             staleTime: 0,
           });
+          landing = me.role === 'admin' ? ROUTES.DASHBOARD : ROUTES.POS;
         } catch {
           // If /api/me fails right after a successful login it's a real session
           // problem (not a race); let the guard handle the redirect.
         }
-        navigate(redirectPath, { replace: true });
+        navigate(explicitRedirect ?? landing, { replace: true });
       },
       onError: (error) => {
         if (error instanceof ServiceError) {

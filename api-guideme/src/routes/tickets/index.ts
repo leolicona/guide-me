@@ -18,9 +18,10 @@ const validationHook = (result: { success: boolean }) => {
   }
 }
 
-// Ticket redemption is agent-facing (the agent scans at the gate). Leaves room for the
-// Phase-2 `POST /api/tickets/sync` sibling (offline validation) on the same router.
-tickets.use('*', authMiddleware, requireRole('agent'))
+// Granting access by scanning is a daily activity for BOTH roles (US-A32): agents and admins
+// both validate at the gate. Leaves room for the Phase-2 `POST /api/tickets/sync` sibling
+// (offline validation) on the same router.
+tickets.use('*', authMiddleware, requireRole('agent', 'admin'))
 
 tickets.post(
   '/scan',

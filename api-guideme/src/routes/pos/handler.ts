@@ -11,7 +11,6 @@ import {
   serviceExtras,
   services,
   slots,
-  users,
 } from '../../db/schema'
 import {
   sendTicketConfirmationEmail,
@@ -253,7 +252,10 @@ interface PreparedLine {
   minimumPrice: number
   unitPrice: number
   lineTotal: number
-  commissionBonus: number // service bonus % in basis points, snapshot (US-A12)
+  // Service-based commission snapshot (US-A12 rev.): percent → value is basis points of the
+  // line total; fixed → value is minor units per spot (× quantity).
+  commissionType: 'percent' | 'fixed'
+  commissionValue: number
   extras: PreparedExtra[]
   // Signed at confirm time, once all decrements succeed (below).
   qrToken?: string
@@ -287,7 +289,8 @@ export const confirmSale = async (c: PosContext) => {
         serviceName: services.name,
         basePrice: services.basePrice,
         minimumPrice: services.minimumPrice,
-        commissionBonus: services.commissionBonus,
+        commissionType: services.commissionType,
+        commissionValue: services.commissionValue,
       })
       .from(slots)
       .innerJoin(services, eq(slots.serviceId, services.id))
@@ -368,7 +371,8 @@ export const confirmSale = async (c: PosContext) => {
       minimumPrice: slot.minimumPrice,
       unitPrice: line.unit_price,
       lineTotal,
-      commissionBonus: slot.commissionBonus,
+      commissionType: slot.commissionType,
+      commissionValue: slot.commissionValue,
       extras: preparedExtras,
     })
   }
@@ -380,23 +384,21 @@ export const confirmSale = async (c: PosContext) => {
   )
   const total = subtotal
 
-  // COMMISSION (US-AG23 / US-A12): the agent's base % of the folio total plus each
-  // service's bonus %, both snapshotted now so later rate changes don't rewrite history.
-  // Both base_commission and commission_bonus are in basis points (1000 = 10%,
-  // 10000 = 100%); divide by 10000. The service bonus stacks on the base and applies to
-  // its own line total, so the combined rate is constant regardless of price or passes.
-  const [agentRow] = await db
-    .select({ baseCommission: users.baseCommission })
-    .from(users)
-    .where(and(eq(users.id, agent.userId), eq(users.organizationId, org)))
-    .limit(1)
-  const basePct = agentRow?.baseCommission ?? 0
-  const baseCommission = Math.round((total * basePct) / 10000)
-  const bonusTotal = prepared.reduce(
-    (sum, l) => sum + Math.round((l.lineTotal * l.commissionBonus) / 10000),
+  // COMMISSION (US-AG23 / US-A12 rev. — service-based, seller-independent): each line earns
+  // its SERVICE's commission, snapshotted now so later catalog edits don't rewrite history.
+  // `percent` → basis points (1000 = 10%) of the line total (incl. extras, post-discount);
+  // `fixed` → minor units per spot (× quantity), independent of discounts and extras (the
+  // catalog caps it at minimum_price, so it never exceeds a floor-priced pass). No seller
+  // lookup exists: an admin's cart and an agent's identical cart yield identical commission
+  // (docs/commissions/service-based-commission.spec.md, Rule 2).
+  const commissionAmount = prepared.reduce(
+    (sum, l) =>
+      sum +
+      (l.commissionType === 'fixed'
+        ? l.commissionValue * l.quantity
+        : Math.round((l.lineTotal * l.commissionValue) / 10000)),
     0,
   )
-  const commissionAmount = baseCommission + bonusTotal
 
   // 2. DECREMENT each slot atomically & conditionally; track successes.
   const applied: { slotId: string; qty: number }[] = []

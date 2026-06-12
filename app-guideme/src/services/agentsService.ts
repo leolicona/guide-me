@@ -21,12 +21,11 @@ export const listAgents = async (): Promise<Agent[]> => {
   return res.agents
 }
 
-// US-A07 — edit an agent's profile + base commission. `base_commission` is in
-// basis points (use percentToBasisPoints from features/agents/types).
+// US-A07 — edit an agent's profile (name, phone). No commission field (rev. 2026-06-11):
+// commission is service-based — docs/commissions/service-based-commission.spec.md.
 export interface UpdateAgentInput {
   name: string
   phone: string | null
-  base_commission: number
 }
 
 export const updateAgent = async (

@@ -55,7 +55,7 @@ export default function FolioHistoryPage() {
     <Fade in timeout={400}>
       <Box sx={{ maxWidth: 760, mx: 'auto' }}>
         <Typography variant="h4" component="h1" sx={{ mb: 3 }}>
-          Historial
+          Ventas
         </Typography>
 
         <ToggleButtonGroup

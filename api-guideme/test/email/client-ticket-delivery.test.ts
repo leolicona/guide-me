@@ -30,7 +30,7 @@ const seedService = async (orgId: string, name = 'Tour') => {
   const id = crypto.randomUUID()
   const ts = Math.floor(Date.now() / 1000)
   await env.DB.prepare(
-    `INSERT INTO services (id, organization_id, name, description, base_price, minimum_price, default_capacity, commission_bonus, status, created_at, updated_at) VALUES (?, ?, ?, NULL, 150000, 100000, 12, 0, 'active', ?, ?)`
+    `INSERT INTO services (id, organization_id, name, description, base_price, minimum_price, default_capacity, commission_value, status, created_at, updated_at) VALUES (?, ?, ?, NULL, 150000, 100000, 12, 0, 'active', ?, ?)`
   ).bind(id, orgId, name, ts, ts).run()
   return { id }
 }

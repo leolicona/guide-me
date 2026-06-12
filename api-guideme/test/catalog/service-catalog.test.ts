@@ -27,7 +27,8 @@ interface SeedServiceOptions {
   basePrice?: number
   minimumPrice?: number
   defaultCapacity?: number
-  commissionBonus?: number
+  commissionType?: 'percent' | 'fixed'
+  commissionValue?: number
   status?: 'active' | 'inactive'
   /** Override updated_at (unix seconds) — used to assert it advances on edit. */
   updatedAt?: number
@@ -40,7 +41,8 @@ const seedService = async ({
   basePrice = 150000,
   minimumPrice = 100000,
   defaultCapacity = 10,
-  commissionBonus = 0,
+  commissionType = 'percent',
+  commissionValue = 0,
   status = 'active',
   updatedAt,
 }: SeedServiceOptions): Promise<{ serviceId: string }> => {
@@ -48,8 +50,8 @@ const seedService = async ({
   const ts = updatedAt ?? Math.floor(Date.now() / 1000)
   await env.DB.prepare(
     `INSERT INTO services
-       (id, organization_id, name, description, base_price, minimum_price, default_capacity, commission_bonus, status, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       (id, organization_id, name, description, base_price, minimum_price, default_capacity, commission_type, commission_value, status, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   )
     .bind(
       serviceId,
@@ -59,7 +61,8 @@ const seedService = async ({
       basePrice,
       minimumPrice,
       defaultCapacity,
-      commissionBonus,
+      commissionType,
+      commissionValue,
       status,
       ts,
       ts,
@@ -99,7 +102,7 @@ const seedExtra = async ({
 const getServiceRow = (id: string) =>
   env.DB.prepare(
     `SELECT id, organization_id, name, description, base_price, minimum_price,
-            default_capacity, commission_bonus, status, updated_at
+            default_capacity, commission_type, commission_value, status, updated_at
        FROM services WHERE id = ?`,
   )
     .bind(id)
@@ -111,7 +114,8 @@ const getServiceRow = (id: string) =>
       base_price: number
       minimum_price: number
       default_capacity: number
-      commission_bonus: number
+      commission_type: string
+      commission_value: number
       status: string
       updated_at: number
     }>()
@@ -622,10 +626,10 @@ describe('US-A11 — service extras', () => {
 })
 
 // ---------------------------------------------------------------------------
-// US-A12 — per-service commission bonus
-// Spec: docs/commissions/commissions.spec.md (Scenarios 1–8)
+// US-A12 (rev.) — service-based commission: percent or fixed per spot
+// Spec: docs/commissions/service-based-commission.spec.md
 // ---------------------------------------------------------------------------
-describe('US-A12 — service commission bonus', () => {
+describe('US-A12 — service-based commission (percent | fixed)', () => {
   const createService = (body: Record<string, unknown>) =>
     SELF.fetch('http://api.local/api/services', {
       method: 'POST',
@@ -633,7 +637,7 @@ describe('US-A12 — service commission bonus', () => {
       body: JSON.stringify(body),
     })
 
-  it('Scenario 1 — create with commission_bonus → stored and echoed', async () => {
+  it('Scenario 1 — create with a percent commission → stored and echoed', async () => {
     await seedUser({ email: ADMIN_EMAIL, role: 'admin' })
 
     const res = await createService({
@@ -641,49 +645,72 @@ describe('US-A12 — service commission bonus', () => {
       base_price: 150000,
       minimum_price: 100000,
       default_capacity: 12,
-      commission_bonus: 5000,
+      commission_type: 'percent',
+      commission_value: 5000,
     })
     expect(res.status).toBe(201)
     const body = (await res.json()) as { service: any }
-    expect(body.service.commission_bonus).toBe(5000)
-    expect((await getServiceRow(body.service.id))?.commission_bonus).toBe(5000)
+    expect(body.service.commission_type).toBe('percent')
+    expect(body.service.commission_value).toBe(5000)
+    const row = await getServiceRow(body.service.id)
+    expect(row?.commission_type).toBe('percent')
+    expect(row?.commission_value).toBe(5000)
   })
 
-  it('Scenario 2 — commission_bonus defaults to 0 when omitted', async () => {
+  it('Scenario 2 — commission defaults to percent / 0 when omitted', async () => {
     await seedUser({ email: ADMIN_EMAIL, role: 'admin' })
 
     const res = await createService({
-      name: 'No Bonus Tour',
+      name: 'No Commission Tour',
       base_price: 150000,
       minimum_price: 100000,
       default_capacity: 12,
     })
     expect(res.status).toBe(201)
     const body = (await res.json()) as { service: any }
-    expect(body.service.commission_bonus).toBe(0)
+    expect(body.service.commission_type).toBe('percent')
+    expect(body.service.commission_value).toBe(0)
   })
 
-  it('Scenario 3 — negative / non-integer / > 10000 bonus → 400, no row', async () => {
+  it('Scenario 3 — invalid commission values → 400, no row', async () => {
     await seedUser({ email: ADMIN_EMAIL, role: 'admin' })
 
-    // commission_bonus is basis points (0–10000): -1, non-integer, and 10001 all reject.
-    for (const commission_bonus of [-1, 10.5, 10001]) {
-      const res = await createService({
-        name: 'Bad Bonus',
-        base_price: 150000,
-        minimum_price: 100000,
-        default_capacity: 12,
-        commission_bonus,
-      })
-      expect(res.status, String(commission_bonus)).toBe(400)
+    const base = {
+      name: 'Bad Commission',
+      base_price: 150000,
+      minimum_price: 100000,
+      default_capacity: 12,
+    }
+    // percent is basis points (0–10000): -1, non-integer, and 10001 all reject.
+    for (const commission_value of [-1, 10.5, 10001]) {
+      const res = await createService({ ...base, commission_type: 'percent', commission_value })
+      expect(res.status, String(commission_value)).toBe(400)
       expect(((await res.json()) as any).error.code).toBe('VALIDATION_ERROR')
     }
+    // fixed is capped at minimum_price (D3) so commission can never exceed a floor-priced pass.
+    const overCap = await createService({
+      ...base,
+      commission_type: 'fixed',
+      commission_value: 100001,
+    })
+    expect(overCap.status).toBe(400)
+    // unknown type rejects.
+    const badType = await createService({ ...base, commission_type: 'tip', commission_value: 1 })
+    expect(badType.status).toBe(400)
     expect(await countServices()).toBe(0)
+
+    // fixed at exactly the floor is valid.
+    const atCap = await createService({
+      ...base,
+      commission_type: 'fixed',
+      commission_value: 100000,
+    })
+    expect(atCap.status).toBe(201)
   })
 
-  it('Scenario 4 — PUT replaces the bonus', async () => {
+  it('Scenario 4 — PUT replaces type and value (percent → fixed)', async () => {
     const { organizationId } = await seedUser({ email: ADMIN_EMAIL, role: 'admin' })
-    const { serviceId } = await seedService({ organizationId, commissionBonus: 5000 })
+    const { serviceId } = await seedService({ organizationId, commissionValue: 5000 })
 
     const res = await SELF.fetch(`http://api.local/api/services/${serviceId}`, {
       method: 'PUT',
@@ -693,36 +720,44 @@ describe('US-A12 — service commission bonus', () => {
         base_price: 150000,
         minimum_price: 100000,
         default_capacity: 10,
-        commission_bonus: 8000,
+        commission_type: 'fixed',
+        commission_value: 30000,
       }),
     })
     expect(res.status).toBe(200)
-    expect(((await res.json()) as { service: any }).service.commission_bonus).toBe(8000)
-    expect((await getServiceRow(serviceId))?.commission_bonus).toBe(8000)
+    const body = (await res.json()) as { service: any }
+    expect(body.service.commission_type).toBe('fixed')
+    expect(body.service.commission_value).toBe(30000)
+    const row = await getServiceRow(serviceId)
+    expect(row?.commission_type).toBe('fixed')
+    expect(row?.commission_value).toBe(30000)
   })
 
-  it('Scenario 5 — list and detail expose commission_bonus', async () => {
+  it('Scenario 5 — list and detail expose commission_type + commission_value', async () => {
     const { organizationId } = await seedUser({ email: ADMIN_EMAIL, role: 'admin' })
-    const { serviceId } = await seedService({ organizationId, commissionBonus: 7000 })
+    const { serviceId } = await seedService({ organizationId, commissionValue: 7000 })
 
     const list = await SELF.fetch('http://api.local/api/services', {
       headers: jsonAuth(ADMIN_EMAIL),
     })
     const listBody = (await list.json()) as { services: any[] }
-    expect(listBody.services[0].commission_bonus).toBe(7000)
+    expect(listBody.services[0].commission_type).toBe('percent')
+    expect(listBody.services[0].commission_value).toBe(7000)
 
     const detail = await SELF.fetch(`http://api.local/api/services/${serviceId}`, {
       headers: jsonAuth(ADMIN_EMAIL),
     })
-    expect(((await detail.json()) as { service: any }).service.commission_bonus).toBe(7000)
+    const detailBody = (await detail.json()) as { service: any }
+    expect(detailBody.service.commission_type).toBe('percent')
+    expect(detailBody.service.commission_value).toBe(7000)
   })
 
-  it('Scenario 7 — editing the bonus does not rewrite a sold folio\'s commission_amount', async () => {
+  it('Scenario 7 — editing the commission does not rewrite a sold folio\'s commission_amount', async () => {
     const { organizationId, userId: agentId } = await seedUser({
       email: ADMIN_EMAIL,
       role: 'admin',
     })
-    const { serviceId } = await seedService({ organizationId, commissionBonus: 5000 })
+    const { serviceId } = await seedService({ organizationId, commissionValue: 5000 })
 
     // A folio already sold with a snapshotted commission_amount.
     const folioId = crypto.randomUUID()
@@ -742,7 +777,8 @@ describe('US-A12 — service commission bonus', () => {
         base_price: 150000,
         minimum_price: 100000,
         default_capacity: 10,
-        commission_bonus: 800, // bump the rate after the sale (5% → 8%)
+        commission_type: 'fixed',
+        commission_value: 50000, // re-type the commission after the sale
       }),
     })
 

@@ -13,14 +13,26 @@ export const createServiceSchema = z
     base_price: money,
     minimum_price: money,
     default_capacity: z.number().int().min(1),
-    // US-A12 — per-service commission bonus in basis points (500 = 5%, 0–10000), stacked
-    // on the agent's base % and applied to this service's line total. Same units as
-    // users.base_commission. Optional → 0 (a service with no special bonus).
-    commission_bonus: z.number().int().min(0).max(10000).optional().default(0),
+    // US-A12 (rev.) — the service's commission, earned by ANY seller
+    // (docs/commissions/service-based-commission.spec.md). `percent` → commission_value in
+    // basis points (1000 = 10%, 0–10000) of the line total; `fixed` → commission_value in
+    // minor units PER SPOT. Optional → percent/0 (a service that pays no commission).
+    commission_type: z.enum(['percent', 'fixed']).optional().default('percent'),
+    commission_value: z.number().int().min(0).optional().default(0),
   })
   .refine((v) => v.minimum_price <= v.base_price, {
     message: 'minimum_price must be ≤ base_price',
     path: ['minimum_price'],
+  })
+  .refine((v) => v.commission_type !== 'percent' || v.commission_value <= 10000, {
+    message: 'percent commission must be ≤ 10000 basis points (100%)',
+    path: ['commission_value'],
+  })
+  // D3 — a fixed commission may never exceed the price floor, so commission can never exceed
+  // the revenue of even a maximally-discounted pass (kills the discount-incentive trap).
+  .refine((v) => v.commission_type !== 'fixed' || v.commission_value <= v.minimum_price, {
+    message: 'fixed commission must be ≤ minimum_price',
+    path: ['commission_value'],
   })
 
 // Same shape as create — PUT is a full replace.

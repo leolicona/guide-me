@@ -17,7 +17,8 @@ export type ServicesContext = Context<{
 }>
 
 // --- Serializers: DB columns → API shape (snake_case money/capacity fields).
-// commission_bonus is in basis points (500 = 5%), not money — see services schema. ---
+// commission_value is basis points when commission_type='percent', minor units per spot when
+// 'fixed' — see services schema / docs/commissions/service-based-commission.spec.md. ---
 
 interface ServiceRow {
   id: string
@@ -26,7 +27,8 @@ interface ServiceRow {
   basePrice: number
   minimumPrice: number
   defaultCapacity: number
-  commissionBonus: number
+  commissionType: 'percent' | 'fixed'
+  commissionValue: number
   status: string
 }
 
@@ -54,7 +56,8 @@ const serializeService = (
   base_price: row.basePrice,
   minimum_price: row.minimumPrice,
   default_capacity: row.defaultCapacity,
-  commission_bonus: row.commissionBonus,
+  commission_type: row.commissionType,
+  commission_value: row.commissionValue,
   status: row.status,
   ...(extras !== undefined ? { extras: extras.map(serializeExtra) } : {}),
 })
@@ -66,7 +69,8 @@ const serviceColumns = {
   basePrice: services.basePrice,
   minimumPrice: services.minimumPrice,
   defaultCapacity: services.defaultCapacity,
-  commissionBonus: services.commissionBonus,
+  commissionType: services.commissionType,
+  commissionValue: services.commissionValue,
   status: services.status,
 } as const
 
@@ -107,7 +111,8 @@ export const createService = async (c: ServicesContext) => {
       basePrice: input.base_price,
       minimumPrice: input.minimum_price,
       defaultCapacity: input.default_capacity,
-      commissionBonus: input.commission_bonus ?? 0,
+      commissionType: input.commission_type ?? 'percent',
+      commissionValue: input.commission_value ?? 0,
       status: 'active',
     })
     .returning(serviceColumns)
@@ -176,7 +181,8 @@ export const updateService = async (c: ServicesContext) => {
       basePrice: input.base_price,
       minimumPrice: input.minimum_price,
       defaultCapacity: input.default_capacity,
-      commissionBonus: input.commission_bonus ?? 0,
+      commissionType: input.commission_type ?? 'percent',
+      commissionValue: input.commission_value ?? 0,
       updatedAt: new Date(),
     })
     .where(

@@ -11,6 +11,8 @@ import {
   Stack,
   InputAdornment,
   CircularProgress,
+  ToggleButton,
+  ToggleButtonGroup,
 } from '@mui/material'
 import { serviceFormSchema } from '../schemas'
 import type { ServiceFormData } from '../schemas'
@@ -38,7 +40,8 @@ const EMPTY: ServiceFormData = {
   base_price: 0,
   minimum_price: 0,
   default_capacity: 1,
-  commission_bonus: 0,
+  commission_type: 'percent',
+  commission_value: 0,
 }
 
 export function ServiceFormDialog({
@@ -55,13 +58,17 @@ export function ServiceFormDialog({
     handleSubmit,
     reset,
     setError,
+    setValue,
+    watch,
     formState: { errors },
   } = useForm<ServiceFormData>({
     resolver: zodResolver(serviceFormSchema),
     defaultValues: EMPTY,
   })
+  const commissionType = watch('commission_type')
 
-  // Prefill on open: edit → service values (cents → major); create → blank.
+  // Prefill on open: edit → service values (cents → major); create → blank. The commission
+  // value is unit-converted by its type: percent ↔ basis points, fixed ↔ centavos.
   useEffect(() => {
     if (!open) return
     if (service) {
@@ -71,7 +78,11 @@ export function ServiceFormDialog({
         base_price: centsToAmount(service.base_price),
         minimum_price: centsToAmount(service.minimum_price),
         default_capacity: service.default_capacity,
-        commission_bonus: basisPointsToPercent(service.commission_bonus),
+        commission_type: service.commission_type,
+        commission_value:
+          service.commission_type === 'fixed'
+            ? centsToAmount(service.commission_value)
+            : basisPointsToPercent(service.commission_value),
       })
     } else {
       reset(EMPTY)
@@ -85,7 +96,11 @@ export function ServiceFormDialog({
       base_price: amountToCents(data.base_price),
       minimum_price: amountToCents(data.minimum_price),
       default_capacity: data.default_capacity,
-      commission_bonus: percentToBasisPoints(data.commission_bonus),
+      commission_type: data.commission_type,
+      commission_value:
+        data.commission_type === 'fixed'
+          ? amountToCents(data.commission_value)
+          : percentToBasisPoints(data.commission_value),
     }
 
     const onError = (error: unknown) => {
@@ -189,24 +204,54 @@ export function ServiceFormDialog({
                 slotProps={{ htmlInput: { step: 1, min: 1 } }}
                 {...register('default_capacity', { valueAsNumber: true })}
               />
+            </Stack>
+            {/* US-A12 (rev.) — the commission ANY seller earns for this service. */}
+            <Stack direction="row" spacing={2}>
+              <ToggleButtonGroup
+                size="small"
+                exclusive
+                value={commissionType}
+                onChange={(_, v) => {
+                  if (v) setValue('commission_type', v, { shouldValidate: true })
+                }}
+                disabled={isLoading}
+                aria-label="Tipo de comisión"
+                sx={{ alignSelf: 'flex-start', mt: 1 }}
+              >
+                <ToggleButton value="percent">%</ToggleButton>
+                <ToggleButton value="fixed">$ por lugar</ToggleButton>
+              </ToggleButtonGroup>
               <TextField
-                label="Bono de comisión"
+                label="Comisión"
                 type="number"
                 fullWidth
                 disabled={isLoading}
-                error={!!errors.commission_bonus}
+                error={!!errors.commission_value}
                 helperText={
-                  errors.commission_bonus?.message ?? 'Se suma al % de comisión del agente'
+                  errors.commission_value?.message ??
+                  (commissionType === 'fixed'
+                    ? 'Monto fijo por lugar vendido — no puede exceder el precio mínimo'
+                    : 'Porcentaje del precio vendido — lo gana quien venda este servicio')
                 }
                 slotProps={{
-                  input: {
-                    endAdornment: (
-                      <InputAdornment position="end">%</InputAdornment>
-                    ),
-                  },
-                  htmlInput: { step: 0.01, min: 0, max: 100 },
+                  input:
+                    commissionType === 'fixed'
+                      ? {
+                          startAdornment: (
+                            <InputAdornment position="start">$</InputAdornment>
+                          ),
+                        }
+                      : {
+                          endAdornment: (
+                            <InputAdornment position="end">%</InputAdornment>
+                          ),
+                        },
+                  htmlInput:
+                    commissionType === 'fixed'
+                      ? { step: 0.01, min: 0 }
+                      : { step: 0.01, min: 0, max: 100 },
                 }}
-                {...register('commission_bonus', { valueAsNumber: true })}
+                {...register('commission_value', { valueAsNumber: true })}
               />
             </Stack>
           </Stack>

@@ -81,8 +81,13 @@ export default function CatalogDetailPage() {
                       {formatMoney(service.base_price)} · mín{' '}
                       {formatMoney(service.minimum_price)} · cap.{' '}
                       {service.default_capacity}
-                      {service.commission_bonus > 0 && (
-                        <> · bono {service.commission_bonus / 100}%</>
+                      {service.commission_value > 0 && (
+                        <>
+                          {' · comisión '}
+                          {service.commission_type === 'fixed'
+                            ? `${formatMoney(service.commission_value)} por lugar`
+                            : `${service.commission_value / 100}%`}
+                        </>
                       )}
                     </Typography>
                   </Box>
