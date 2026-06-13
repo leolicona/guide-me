@@ -125,8 +125,13 @@ export const register = (data: RegisterInput) =>
     body: JSON.stringify(data),
   })
 
+// POST, not GET (BUG-010): the token is single-use, and a GET URL gets refetched on tab
+// focus and prefetched by mail-link scanners — burning the token after (or before) use.
 export const verifyEmail = (token: string) =>
-  request<AuthUserResponse>(`/api/auth/verify?token=${encodeURIComponent(token)}`)
+  request<AuthUserResponse>('/api/auth/verify', {
+    method: 'POST',
+    body: JSON.stringify({ token }),
+  })
 
 export const login = (data: LoginInput) =>
   request<AuthUserResponse>('/api/auth/login', {

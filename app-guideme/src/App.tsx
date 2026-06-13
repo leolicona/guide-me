@@ -5,6 +5,7 @@ import CircularProgress from '@mui/material/CircularProgress'
 import { ROUTES } from './config/routes'
 import { AuthGuard } from './features/auth/components/AuthGuard'
 import { RoleGuard } from './features/auth/components/RoleGuard'
+import { useMe } from './features/auth/hooks/useMe'
 import { AppLayout } from './layout/AppLayout'
 
 const LoginPage = lazy(() => import('./pages/LoginPage'))
@@ -37,6 +38,16 @@ function PageLoader() {
       <CircularProgress />
     </Box>
   )
+}
+
+// BUG-004 — the catch-all is session-aware: an authenticated user opening the bare domain
+// or an unknown path lands on their role's home (US-UX01), not on the login form (which
+// used to read as "my session was lost"). Logged out (or /api/me failing) still → /login.
+function RootRedirect() {
+  const { data: user, isLoading, isFetching } = useMe()
+  if (isLoading || (isFetching && !user)) return <PageLoader />
+  if (!user) return <Navigate to={ROUTES.LOGIN} replace />
+  return <Navigate to={user.role === 'admin' ? ROUTES.DASHBOARD : ROUTES.POS} replace />
 }
 
 function App() {
@@ -180,7 +191,7 @@ function App() {
               </AuthGuard>
             }
           />
-          <Route path="*" element={<Navigate to={ROUTES.LOGIN} replace />} />
+          <Route path="*" element={<RootRedirect />} />
         </Routes>
       </Suspense>
     </BrowserRouter>

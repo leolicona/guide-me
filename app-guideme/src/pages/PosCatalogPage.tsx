@@ -17,11 +17,14 @@ import {
   FormControlLabel,
   Switch,
   Snackbar,
+  useMediaQuery,
 } from '@mui/material'
+import { useTheme } from '@mui/material/styles'
 import ShoppingCartRounded from '@mui/icons-material/ShoppingCartRounded'
 import { usePosServices } from '../features/pos/hooks'
 import { AvailabilityChip } from '../features/pos/components/AvailabilityChip'
 import { ServiceSheet } from '../features/pos/components/ServiceSheet'
+import { AccountAvatarChip } from '../layout/AccountAvatarChip'
 import { usePosCart, cartCount } from '../store/posCart'
 import { usePosFilters } from '../store/posFilters'
 import { formatMoney } from '../features/catalog/types'
@@ -31,10 +34,9 @@ import {
   type ServiceCategory,
 } from '../features/catalog/categories'
 import { ROUTES } from '../config/routes'
-
-// Org-local "today" (naive calendar string), the anchor for the default 3-day window
-// and the floor for the date picker. MVP single-timezone model (mirrors the API).
-const todayStr = () => new Date().toISOString().slice(0, 10)
+// Org-local "today" (device-local calendar string, BUG-007) — the anchor for the default
+// 3-day window and the floor for the date picker; shared with the sheet/detail views.
+import { todayStr } from '../features/pos/dates'
 
 export default function PosCatalogPage() {
   // US-AG30 — the selected day is global (inherited by the detail view); null = "Hoy"
@@ -43,6 +45,11 @@ export default function PosCatalogPage() {
   const selectedDate = usePosFilters((s) => s.selectedDate)
   const setSelectedDate = usePosFilters((s) => s.setSelectedDate)
   const today = todayStr()
+
+  // On mobile the account avatar lives inline in this page's top bar (a Cart sibling); on
+  // desktop it lives in the rail, so the bar shows only the Cart.
+  const theme = useTheme()
+  const isDesktop = useMediaQuery(theme.breakpoints.up('md'))
 
   const { data: services, isLoading, isError } = usePosServices(
     today,
@@ -75,36 +82,37 @@ export default function PosCatalogPage() {
   return (
     <Fade in timeout={400}>
       <Box>
+        {/* Title removed (US-UX02 — the bottom nav already names the active view). The bar is a
+            right-aligned cluster: Cart + (on mobile) the account avatar as flowed siblings. */}
         <Box
           sx={{
             display: 'flex',
-            justifyContent: 'space-between',
+            justifyContent: 'flex-end',
             alignItems: 'center',
-            gap: 2,
-            mb: 3,
+            minHeight: 56,
           }}
         >
-          <Typography variant="h4" component="h1">
-            Vender
-          </Typography>
-          <Badge badgeContent={count} color="secondary">
-            <Button
-              variant="outlined"
-              startIcon={<ShoppingCartRounded />}
-              component={RouterLink}
-              to={ROUTES.POS_CHECKOUT}
-              disabled={count === 0}
-            >
-              Cart
-            </Button>
-          </Badge>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+            <Badge badgeContent={count} color="secondary">
+              <Button
+                variant="outlined"
+                startIcon={<ShoppingCartRounded />}
+                component={RouterLink}
+                to={ROUTES.POS_CHECKOUT}
+                disabled={count === 0}
+              >
+                Cart
+              </Button>
+            </Badge>
+            {!isDesktop && <AccountAvatarChip inline />}
+          </Box>
         </Box>
 
         {/* US-AG30 — filter bar: Date (default "Hoy") + "Ocultar agotados" toggle. */}
         <Stack
           direction="row"
           spacing={1.5}
-          sx={{ mb: 2, flexWrap: 'wrap', rowGap: 1.5, alignItems: 'center' }}
+          sx={{ mt: 1, mb: 2, flexWrap: 'wrap', rowGap: 1.5, alignItems: 'center' }}
         >
           <Chip
             label="Hoy"

@@ -13,11 +13,11 @@ export function AuthGuard({ children }: AuthGuardProps) {
   const location = useLocation();
 
   // Show the loader on the first load AND while a refetch is in flight without a
-  // cached user yet. The latter covers the post-login case: a prior 401 leaves
-  // the ['me'] query in an `error` state, and login success invalidates it.
-  // During that refetch React Query keeps the stale error (isLoading is false),
-  // so without this guard AuthGuard would bounce back to /login on the stale
-  // error before the refetch resolves to the now-authenticated user.
+  // cached user yet. LoginForm resolves ['me'] via fetchQuery BEFORE navigating, so
+  // the normal post-login mount finds a fresh success state; this guard remains for
+  // the residual paths (e.g. the 401 interceptor removed the query and a refetch is
+  // in flight) where React Query keeps a stale error (isLoading is false) — without
+  // it, AuthGuard would bounce back to /login before the refetch resolves.
   if (isLoading || (isFetching && !user)) {
     return (
       <Box sx={{ display: 'flex', minHeight: '100vh', alignItems: 'center', justifyContent: 'center' }}>

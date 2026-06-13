@@ -1,4 +1,5 @@
 import { and, asc, eq, gte, lte, ne } from 'drizzle-orm'
+import type { BatchItem } from 'drizzle-orm/batch'
 import { getDb } from '../../db/client'
 import { schedules, slots } from '../../db/schema'
 import { ApiError } from '../../types/errors'
@@ -82,9 +83,14 @@ const scheduleColumns = {
   status: schedules.status,
 } as const
 
-// D1 caps bound parameters per statement (~100). Each materialized slot row
-// binds 7 columns, so keep bulk inserts well under the limit.
-const INSERT_CHUNK = 12
+// D1 caps bound parameters per statement at 100. Each materialized slot row binds
+// 9 values (id, organization_id, service_id, schedule_id, date, start_time, capacity,
+// booked, status — created_at/updated_at use SQL defaults), so the chunk size is
+// DERIVED, never hand-tuned: a stale hand count overflowed the cap once the row grew
+// (BUG-012: 12 rows × 9 = 108 > 100 → every ≥12-slot schedule failed).
+const SLOT_INSERT_BOUND_COLUMNS = 9
+const D1_MAX_BOUND_PARAMETERS = 100
+const INSERT_CHUNK = Math.floor(D1_MAX_BOUND_PARAMETERS / SLOT_INSERT_BOUND_COLUMNS)
 
 // Is there already an ACTIVE slot for this service at this date/time?
 // `excludeSlotId` lets an edit/reactivate ignore the row being changed.
@@ -404,8 +410,14 @@ export const createSchedule = async (c: ServicesContext) => {
       status: 'active' as const,
     }))
 
-  for (let i = 0; i < rows.length; i += INSERT_CHUNK) {
-    await db.insert(slots).values(rows.slice(i, i + INSERT_CHUNK))
+  // One atomic batch for all chunks: a mid-way failure can no longer strand a
+  // half-materialized schedule (each chunk stays under the bound-parameter cap).
+  if (rows.length > 0) {
+    const inserts: BatchItem<'sqlite'>[] = []
+    for (let i = 0; i < rows.length; i += INSERT_CHUNK) {
+      inserts.push(db.insert(slots).values(rows.slice(i, i + INSERT_CHUNK)))
+    }
+    await db.batch(inserts as [BatchItem<'sqlite'>, ...BatchItem<'sqlite'>[]])
   }
 
   return c.json(

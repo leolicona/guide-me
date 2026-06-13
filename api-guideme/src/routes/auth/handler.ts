@@ -93,7 +93,12 @@ export const register = async (c: AuthContext) => {
 }
 
 export const verify = async (c: AuthContext) => {
-  const { token } = c.req.query() as VerifyQuery
+  // POST body for the app client (BUG-010 — a state-changing call must not be a
+  // refetchable GET); query string for the legacy GET deep-link. Both zod-validated.
+  const { token } =
+    c.req.method === 'POST'
+      ? ((await c.req.json()) as VerifyQuery)
+      : (c.req.query() as VerifyQuery)
 
   const { jwt, refreshToken } = await verifyToken(c.env, token)
 

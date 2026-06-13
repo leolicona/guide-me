@@ -246,8 +246,10 @@ export function AppLayout() {
         </Suspense>
       </Box>
 
-      {/* Mobile: the account chip is the only fixed overlay (top-right, safe-area aware). */}
-      {!isDesktop && <AccountAvatarChip />}
+      {/* Mobile: the account chip is the fixed top-right overlay — except on the POS catalog,
+          whose right-aligned top bar renders the avatar inline (as a Cart sibling), so the
+          floating chip is suppressed there to avoid a duplicate. */}
+      {!isDesktop && location.pathname !== ROUTES.POS && <AccountAvatarChip />}
 
       {!isDesktop && (
         <BottomNavigation

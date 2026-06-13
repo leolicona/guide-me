@@ -85,7 +85,11 @@ export const authMiddleware: MiddlewareHandler<AuthEnv> = async (c, next) => {
   try {
     newTokens = await refreshTokens(c.env, refreshToken)
   } catch {
-    clearSessionCookies(c)
+    // Do NOT clear the cookies here (BUG-014). When the access token expires, several
+    // queries refetch in parallel and each carries the SAME refresh token; with rotation
+    // only one refresh wins. A loser that cleared the cookies could land AFTER the
+    // winner's Set-Cookie and wipe the brand-new valid session. A genuinely dead refresh
+    // token just keeps 401ing (it grants nothing), so leaving it in place is safe.
     throw new ApiError('UNAUTHORIZED', 401, 'Session expired')
   }
 

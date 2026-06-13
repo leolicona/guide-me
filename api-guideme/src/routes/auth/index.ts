@@ -18,6 +18,7 @@ import {
   loginSchema,
   registerSchema,
   resetPasswordSchema,
+  verifyBodySchema,
   verifyQuerySchema,
 } from './schema'
 
@@ -31,6 +32,9 @@ const validationHook = (result: { success: boolean }) => {
 
 auth.post('/register', zValidator('json', registerSchema, validationHook), register)
 auth.get('/verify', zValidator('query', verifyQuerySchema, validationHook), verify)
+// BUG-010 — the app submits verification as POST so refetches/prefetches of the GET
+// can never burn the single-use token. The GET above remains for legacy deep-links.
+auth.post('/verify', zValidator('json', verifyBodySchema, validationHook), verify)
 auth.post('/login', zValidator('json', loginSchema, validationHook), login)
 auth.post('/logout', logout)
 auth.get(

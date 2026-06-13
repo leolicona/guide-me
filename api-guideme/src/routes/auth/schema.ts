@@ -16,6 +16,11 @@ export const verifyQuerySchema = z.object({
 
 export type VerifyQuery = z.infer<typeof verifyQuerySchema>
 
+// BUG-010 — verification consumes a single-use token, so the app calls it as a POST
+// (a GET gets refetched by tab focus and prefetched by mail-link scanners, burning the
+// token). Same shape as the query variant; the GET route stays for legacy deep-links.
+export const verifyBodySchema = verifyQuerySchema
+
 export const loginSchema = z.object({
   email: z.string().email('Invalid email format'),
   password: z.string().min(1, 'Password is required'),

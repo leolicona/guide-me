@@ -232,40 +232,52 @@ export const getFolioDetail = async (c: FoliosContext) => {
   return c.json({ folio })
 }
 
-// The atomic cancellation statements (US-A21): per line `slots.booked = MAX(0, booked −
-// quantity)` (clamped so a manually edited slot can never go negative), then the folio
-// UPDATE guarded `status != 'cancelled'` as a race backstop. Shared by the direct admin
-// cancel and the tourist-request approval — ONE cancellation path, two entrances.
-const buildCancellationBatch = (
+// The cancellation commit (US-A21), shared by the direct admin cancel and the
+// tourist-request approval — ONE cancellation path, two entrances. Two steps in
+// race-safe order (BUG-013):
+//   1. Flip the FOLIO first with a guarded UPDATE (`status != 'cancelled'`); RETURNING
+//      tells us whether WE won. A concurrent cancellation loses here and releases nothing.
+//   2. Only the winner releases the seats, per line `slots.booked = MAX(0, booked −
+//      quantity)` (clamped so a manually edited slot can never go negative), in one batch.
+// The reversed order (seats in the same batch as the guarded flip) double-released seats
+// when two cancellations raced: a 0-row guarded UPDATE does not abort a D1 batch, so the
+// loser's seat decrements still applied. Residual: a crash between 1 and 2 leaves seats
+// booked on a cancelled folio — conservative (no oversell), same compensate-style
+// trade-off as POS confirm.
+const applyCancellation = async (
   db: Db,
   org: string,
   folioId: string,
   lines: Array<{ slotId: string; quantity: number }>,
   now: Date,
   folioUpdate: Partial<typeof folios.$inferInsert>,
-): BatchItem<'sqlite'>[] => {
-  const statements: BatchItem<'sqlite'>[] = lines.map((line) =>
-    db
-      .update(slots)
-      .set({
-        booked: sql`MAX(0, ${slots.booked} - ${line.quantity})`,
-        updatedAt: now,
-      })
-      .where(and(eq(slots.id, line.slotId), eq(slots.organizationId, org))),
-  )
-  statements.push(
-    db
-      .update(folios)
-      .set({ ...folioUpdate, updatedAt: now })
-      .where(
-        and(
-          eq(folios.id, folioId),
-          eq(folios.organizationId, org),
-          ne(folios.status, 'cancelled'),
-        ),
+): Promise<boolean> => {
+  const won = await db
+    .update(folios)
+    .set({ ...folioUpdate, updatedAt: now })
+    .where(
+      and(
+        eq(folios.id, folioId),
+        eq(folios.organizationId, org),
+        ne(folios.status, 'cancelled'),
       ),
-  )
-  return statements
+    )
+    .returning({ id: folios.id })
+  if (won.length === 0) return false
+
+  if (lines.length > 0) {
+    const statements = lines.map((line) =>
+      db
+        .update(slots)
+        .set({
+          booked: sql`MAX(0, ${slots.booked} - ${line.quantity})`,
+          updatedAt: now,
+        })
+        .where(and(eq(slots.id, line.slotId), eq(slots.organizationId, org))),
+    )
+    await db.batch(statements as [BatchItem<'sqlite'>, ...BatchItem<'sqlite'>[]])
+  }
+  return true
 }
 
 // Fire-and-forget cancellation email — a Resend failure must never fail a committed
@@ -341,15 +353,17 @@ export const cancelFolio = async (c: FoliosContext) => {
     .where(and(eq(folioLines.folioId, id), eq(folioLines.organizationId, org)))
 
   const now = new Date()
-  const statements = buildCancellationBatch(db, org, id, lines, now, {
+  const won = await applyCancellation(db, org, id, lines, now, {
     status: 'cancelled',
     cancelledAt: now,
     cancelledBy: admin.userId,
     cancellationReason: input.reason ?? null,
     cancellationClawback: input.clawback ?? false,
   })
-
-  await db.batch(statements as [BatchItem<'sqlite'>, ...BatchItem<'sqlite'>[]])
+  if (!won) {
+    // A concurrent cancellation won the guarded flip after our pre-check.
+    throw new ApiError('CONFLICT', 409, 'This folio is already cancelled')
+  }
 
   const folioOut = await readFolio(db, org, id)
   if (folioOut) await queueCancellationEmail(c, db, org, id, folioOut)
@@ -453,12 +467,14 @@ const loadRequest = async (db: Db, org: string, requestId: string) => {
   return request
 }
 
-// US-T04 → US-A21 — APPROVE a tourist's cancellation request: runs the same atomic
-// cancellation as the direct admin cancel (seats released, status flipped, email sent),
-// marks the request approved, and — when the folio was PAID — opens the refund obligation
-// (US-A23): refund_status='pending', refund_amount = amount_paid, and a freshly generated
-// Refund PIN the tourist will read in their portal (D5/D6). Cancellation + request flip +
-// refund fields commit in ONE batch so a failure can never wedge the request.
+// US-T04 → US-A21 — APPROVE a tourist's cancellation request: runs the same race-safe
+// cancellation as the direct admin cancel (folio flipped first, then seats released, email
+// sent), marks the request approved, and — when the folio was PAID — opens the refund
+// obligation (US-A23): refund_status='pending', refund_amount = amount_paid, and a freshly
+// generated Refund PIN the tourist will read in their portal (D5/D6). The refund fields
+// ride the guarded folio flip itself, so they can never apply to a folio someone else
+// already cancelled. If a crash lands between the flip and the request update, the request
+// stays pending against a cancelled folio — the admin resolves it explicitly (409 path).
 export const approveCancellationRequest = async (c: FoliosContext) => {
   const admin = c.get('user')
   const org = admin.organizationId
@@ -495,7 +511,7 @@ export const approveCancellationRequest = async (c: FoliosContext) => {
   const now = new Date()
   // Refund obligation only when money actually changed hands (S9: unpaid → no PIN).
   const owesRefund = folio.amountPaid > 0
-  const statements = buildCancellationBatch(db, org, folio.id, lines, now, {
+  const won = await applyCancellation(db, org, folio.id, lines, now, {
     status: 'cancelled',
     cancelledAt: now,
     cancelledBy: admin.userId,
@@ -509,25 +525,28 @@ export const approveCancellationRequest = async (c: FoliosContext) => {
         }
       : {}),
   })
-  statements.push(
-    db
-      .update(cancellationRequests)
-      .set({
-        status: 'approved',
-        resolvedBy: admin.userId,
-        resolvedAt: now,
-        updatedAt: now,
-      })
-      .where(
-        and(
-          eq(cancellationRequests.id, requestId),
-          eq(cancellationRequests.organizationId, org),
-          eq(cancellationRequests.status, 'pending'),
-        ),
-      ),
-  )
+  if (!won) {
+    // A concurrent cancellation won the guarded flip after our pre-check. The request
+    // stays pending — the admin resolves it explicitly (same recovery as approving a
+    // request whose folio was already cancelled directly).
+    throw new ApiError('CONFLICT', 409, 'This folio is already cancelled')
+  }
 
-  await db.batch(statements as [BatchItem<'sqlite'>, ...BatchItem<'sqlite'>[]])
+  await db
+    .update(cancellationRequests)
+    .set({
+      status: 'approved',
+      resolvedBy: admin.userId,
+      resolvedAt: now,
+      updatedAt: now,
+    })
+    .where(
+      and(
+        eq(cancellationRequests.id, requestId),
+        eq(cancellationRequests.organizationId, org),
+        eq(cancellationRequests.status, 'pending'),
+      ),
+    )
 
   const folioOut = await readFolio(db, org, folio.id)
   if (folioOut) await queueCancellationEmail(c, db, org, folio.id, folioOut)

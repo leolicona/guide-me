@@ -5,6 +5,7 @@ import CssBaseline from '@mui/material/CssBaseline'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { theme } from './config/theme'
 import { queryClient } from './config/queryClient'
+import { AppErrorBoundary } from './layout/AppErrorBoundary'
 import './index.css'
 import App from './App.tsx'
 
@@ -13,7 +14,11 @@ createRoot(document.getElementById('root')!).render(
     <ThemeProvider theme={theme}>
       <CssBaseline />
       <QueryClientProvider client={queryClient}>
-        <App />
+        {/* BUG-015 — catches rejected lazy-chunk imports (post-deploy stale hashes) that
+            would otherwise unmount the root into a blank page; auto-reloads once. */}
+        <AppErrorBoundary>
+          <App />
+        </AppErrorBoundary>
       </QueryClientProvider>
     </ThemeProvider>
   </StrictMode>,

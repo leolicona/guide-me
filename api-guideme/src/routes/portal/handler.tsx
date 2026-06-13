@@ -1,5 +1,6 @@
 import type { Context } from 'hono'
 import { and, desc, eq } from 'drizzle-orm'
+import { renderSVG } from 'uqr'
 import { getDb, type Db } from '../../db/client'
 import {
   cancellationRequests,
@@ -22,9 +23,11 @@ export type PortalContext = Context<{
 
 const REASON_MAX_LENGTH = 500
 
-// Same external QR-image service the confirmation email uses (client-ticket-delivery spec).
-const qrImageUrl = (token: string): string =>
-  `https://api.qrserver.com/v1/create-qr-code/?size=250x250&ecc=M&data=${encodeURIComponent(token)}`
+// QR rendered locally as inline SVG (BUG-009): the signed token IS the entry credential,
+// so it must never leave our trust boundary the way the old api.qrserver.com <img> URL
+// did. (The confirmation email still uses the external service — <img> is the only thing
+// mail clients render and they refuse data: URIs; tracked as the BUG-009 residual.)
+const qrSvg = (token: string): string => renderSVG(token, { ecc: 'M' })
 
 const shortId = (id: string): string => id.slice(0, 8).toUpperCase()
 
@@ -240,11 +243,11 @@ const PortalPage = ({ data }: { data: PortalData }) => {
                 cancelled folio so the page never implies a valid ticket (Rule 3). */}
             {!cancelled && line.qrToken && (
               <div class="portal-qr">
-                <img
-                  src={qrImageUrl(line.qrToken)}
-                  alt={`Código QR — ${line.serviceName}`}
-                  width="220"
-                  height="220"
+                <div
+                  role="img"
+                  aria-label={`Código QR — ${line.serviceName}`}
+                  style="width:220px;height:220px"
+                  dangerouslySetInnerHTML={{ __html: qrSvg(line.qrToken) }}
                 />
                 <p class="portal-muted">Presenta este código al llegar</p>
               </div>

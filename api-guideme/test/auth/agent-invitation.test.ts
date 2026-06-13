@@ -309,6 +309,44 @@ describe('Agent Invitation — POST /api/agents/invite', () => {
       .first<{ c: number }>()
     expect(pendingCount?.c).toBe(1)
   })
+
+  it("Regression (BUG-011): inviting an identity never expires ANOTHER org's pending invitation", async () => {
+    const ADMIN_B_EMAIL = 'admin-b@otra.com'
+    const orgA = await seedUser()
+    const orgB = await seedUser({ email: ADMIN_B_EMAIL })
+    // Org A already holds a pending invitation for the same identity.
+    const inviteA = await seedInvitation({
+      organizationId: orgA.organizationId,
+      invitedBy: orgA.userId,
+      token: 'org_a_token',
+    })
+    mockResend()
+
+    // Org B's admin invites the SAME email.
+    const res = await SELF.fetch('http://api.local/api/agents/invite', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Cookie: `gm_access=${buildFakeJwt(ADMIN_B_EMAIL)}`,
+      },
+      body: JSON.stringify({ identity: AGENT_EMAIL }),
+    })
+    expect(res.status).toBe(201)
+
+    // Org A's invitation is untouched (the supersede UPDATE is org-scoped)…
+    const rowA = await env.DB.prepare('SELECT status FROM invitations WHERE id = ?')
+      .bind(inviteA.id)
+      .first<{ status: string }>()
+    expect(rowA?.status).toBe('pending')
+
+    // …and org B got its own, independent pending invitation.
+    const rowB = await env.DB.prepare(
+      "SELECT status FROM invitations WHERE organization_id = ? AND identity = ? AND status = 'pending'",
+    )
+      .bind(orgB.organizationId, AGENT_EMAIL)
+      .first<{ status: string }>()
+    expect(rowB?.status).toBe('pending')
+  })
 })
 
 describe('Accept Invitation — GET /api/auth/invite/accept', () => {

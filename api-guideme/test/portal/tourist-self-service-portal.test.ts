@@ -313,7 +313,10 @@ describe('Tourist Self-Service Portal — magic link, itinerary, cancellation re
     const page = await portalGet(token)
     expect(page.status).toBe(200)
     expect(page.html).toContain(serviceName)
-    expect(page.html).toContain('qrserver.com')
+    // BUG-009 — the QR is an inline locally-rendered SVG; the signed token (the entry
+    // credential) must never be shipped to a third-party image service.
+    expect(page.html).toContain('<svg')
+    expect(page.html).not.toContain('qrserver.com')
     expect(page.html).toContain('Presenta este código al llegar')
     expect(page.html).toContain('2 personas')
     // The service description doubles as the meeting-point blurb (US-T02).
@@ -347,7 +350,7 @@ describe('Tourist Self-Service Portal — magic link, itinerary, cancellation re
     const page = await portalGet(token)
     expect(page.status).toBe(200)
     expect(page.html).toContain('Reserva cancelada')
-    expect(page.html).not.toContain('qrserver.com')
+    expect(page.html).not.toContain('<svg')
     expect(page.html).not.toContain('Presenta este código al llegar')
   })
 

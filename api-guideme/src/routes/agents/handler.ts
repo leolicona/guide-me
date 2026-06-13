@@ -33,11 +33,15 @@ export const inviteAgent = async (c: AgentsContext) => {
     )
   }
 
+  // Supersede only THIS org's previous pending invites for the identity. The org filter
+  // is load-bearing (BUG-011): without it, inviting an email here silently expired
+  // another organization's still-valid invitation for the same address.
   await db
     .update(invitations)
     .set({ status: 'expired', updatedAt: new Date() })
     .where(
       and(
+        eq(invitations.organizationId, admin.organizationId),
         eq(invitations.identity, input.identity),
         eq(invitations.status, 'pending'),
       ),

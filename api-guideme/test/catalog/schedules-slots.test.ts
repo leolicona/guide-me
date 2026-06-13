@@ -545,6 +545,29 @@ describe('US-A10 — recurring schedules', () => {
     expect(await countSlots()).toBe(6) // 1 pre-existing + 5 generated
   })
 
+  it('Regression (BUG-012) — a schedule materializing ≥ 12 slots stays under the D1 bound-parameter cap', async () => {
+    const { organizationId } = await seedUser({ email: ADMIN_EMAIL })
+    const { serviceId } = await seedService({ organizationId, defaultCapacity: 10 })
+
+    // Mon–Fri over 4 full weeks → 20 slots. The old hand-tuned chunk of 12 rows bound
+    // 12 × 9 = 108 parameters (> D1's 100), so any schedule with ≥ 12 slots threw.
+    const res = await SELF.fetch(`${base}/${serviceId}/schedules`, {
+      method: 'POST',
+      headers: jsonAuth(ADMIN_EMAIL),
+      body: JSON.stringify({
+        weekdays: [1, 2, 3, 4, 5],
+        start_time: '06:00',
+        start_date: '2026-06-08',
+        end_date: '2026-07-05',
+      }),
+    })
+
+    expect(res.status).toBe(201)
+    const body = (await res.json()) as { slots_generated: number }
+    expect(body.slots_generated).toBe(20)
+    expect(await countSlots()).toBe(20)
+  })
+
   it('Scenario 12 — end_date < start_date or horizon > 366 → 400, nothing written', async () => {
     const { organizationId } = await seedUser({ email: ADMIN_EMAIL })
     const { serviceId } = await seedService({ organizationId })

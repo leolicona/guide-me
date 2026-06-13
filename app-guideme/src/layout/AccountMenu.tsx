@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
+  Alert,
   Avatar,
   Box,
   Button,
@@ -69,7 +70,7 @@ interface AccountMenuProps {
 export function AccountMenu({ variant, open, onClose, anchorEl }: AccountMenuProps) {
   const user = useCurrentUser()
   const navigate = useNavigate()
-  const { logout, isPending } = useLogout()
+  const { logout, isPending, isError } = useLogout()
   const [confirmOpen, setConfirmOpen] = useState(false)
 
   const go = (to: string) => {
@@ -213,6 +214,13 @@ export function AccountMenu({ variant, open, onClose, anchorEl }: AccountMenuPro
           <DialogContentText>
             Tendrás que iniciar sesión de nuevo para volver a entrar.
           </DialogContentText>
+          {/* BUG-006 — a failed logout means the session is still alive on the server;
+              say so instead of pretending the user is out. */}
+          {isError && (
+            <Alert severity="error" sx={{ mt: 2 }}>
+              No se pudo cerrar la sesión. Revisa tu conexión e inténtalo de nuevo.
+            </Alert>
+          )}
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setConfirmOpen(false)} disabled={isPending}>

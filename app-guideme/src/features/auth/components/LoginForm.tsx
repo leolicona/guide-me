@@ -49,6 +49,9 @@ export function LoginForm() {
             queryKey: ['me'],
             queryFn: getMe,
             staleTime: 0,
+            // useMe's retry:false is an observer option that fetchQuery does NOT inherit;
+            // without this, a genuinely failing /api/me retried 3× (~7 s frozen button).
+            retry: false,
           });
           landing = me.role === 'admin' ? ROUTES.DASHBOARD : ROUTES.POS;
         } catch {

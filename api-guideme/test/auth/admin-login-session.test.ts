@@ -289,7 +289,7 @@ describe('Auth Middleware — protected routes', () => {
     expect(cookieHeader).toMatch(/Max-Age=604800/)
   })
 
-  it('Scenario 8: returns 401 UNAUTHORIZED and clears cookies when refresh is invalid', async () => {
+  it('Scenario 8: returns 401 UNAUTHORIZED — and does NOT clear cookies — when refresh fails (BUG-014)', async () => {
     await seedUser()
     const expiredJwt = buildFakeJwt(USER_EMAIL, -60)
 
@@ -309,11 +309,11 @@ describe('Auth Middleware — protected routes', () => {
     const body = (await res.json()) as { error: { code: string } }
     expect(body.error.code).toBe('UNAUTHORIZED')
 
+    // BUG-014 — a failed refresh must NOT emit delete-cookie headers: parallel requests
+    // race the rotation, and a loser's clear arriving after the winner's Set-Cookie would
+    // wipe the brand-new valid session. A dead refresh token grants nothing anyway.
     const setCookies = res.headers.getSetCookie?.() ?? []
-    const cookieHeader = setCookies.join('\n')
-    expect(cookieHeader).toMatch(/gm_access=/)
-    expect(cookieHeader).toMatch(/gm_refresh=/)
-    expect(cookieHeader).toMatch(/Max-Age=0/)
+    expect(setCookies).toEqual([])
   })
 
   it('Scenario 9: returns 401 UNAUTHORIZED without attempting refresh when no access cookie', async () => {
