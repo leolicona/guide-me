@@ -9,9 +9,12 @@ const amount = z
   .number({ message: 'Ingresa un monto válido' })
   .min(0, 'El monto no puede ser negativo')
 
-export const serviceFormSchema = z
-  .object({
-    name: z.string().min(1, 'El nombre es obligatorio'),
+// The unrefined field set, shared by the single-dialog form and the create Wizard
+// (US-A38). Kept as a plain ZodObject so the Wizard can `.merge` its availability
+// fields; the cross-field refines are applied below (and re-stated in the Wizard's
+// own superRefine), so both forms enforce the identical rules.
+export const serviceCoreObject = z.object({
+  name: z.string().min(1, 'El nombre es obligatorio'),
     description: z.string().optional(),
     base_price: amount,
     minimum_price: amount,
@@ -36,7 +39,9 @@ export const serviceFormSchema = z
       .int('El porcentaje debe ser un entero')
       .min(0, 'El porcentaje no puede ser negativo')
       .max(FLEX_CAP_MAX_PCT, `El máximo permitido es ${FLEX_CAP_MAX_PCT}%`),
-  })
+})
+
+export const serviceFormSchema = serviceCoreObject
   .refine((v) => v.minimum_price <= v.base_price, {
     message: 'El precio mínimo debe ser ≤ al precio base',
     path: ['minimum_price'],

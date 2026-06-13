@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import {
   Box,
   Typography,
@@ -6,15 +7,33 @@ import {
   CircularProgress,
   Alert,
   Fade,
+  Snackbar,
 } from '@mui/material'
 import AddRounded from '@mui/icons-material/AddRounded'
 import { useServices } from '../features/catalog/hooks/useServices'
 import { ServiceList } from '../features/catalog/components/ServiceList'
-import { ServiceFormDialog } from '../features/catalog/components/ServiceFormDialog'
+import { ServiceWizard } from '../features/catalog/components/wizard/ServiceWizard'
+import { ROUTES } from '../config/routes'
 
 export default function CatalogListPage() {
   const { data: services, isLoading, isError } = useServices()
+  const navigate = useNavigate()
   const [creating, setCreating] = useState(false)
+  const [created, setCreated] = useState(false)
+
+  // US-A44 — on a fully-successful create show a success toast; on a partial create (service
+  // saved but a schedule/extra failed) route to the detail page so the operator finishes the
+  // few that didn't land, flagged by router state the detail page reads.
+  const handleCreated = (serviceId: string, failures: number) => {
+    setCreating(false)
+    if (failures === 0) {
+      setCreated(true)
+    } else {
+      navigate(ROUTES.CATALOG_DETAIL.replace(':id', serviceId), {
+        state: { wizardPartial: true },
+      })
+    }
+  }
 
   return (
     <Fade in timeout={400}>
@@ -60,11 +79,22 @@ export default function CatalogListPage() {
             <ServiceList services={services} />
           ))}
 
-        <ServiceFormDialog
-          service={null}
+        <ServiceWizard
           open={creating}
           onClose={() => setCreating(false)}
+          onCreated={handleCreated}
         />
+
+        <Snackbar
+          open={created}
+          autoHideDuration={3000}
+          onClose={() => setCreated(false)}
+          anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+        >
+          <Alert severity="success" variant="filled" onClose={() => setCreated(false)}>
+            Servicio creado
+          </Alert>
+        </Snackbar>
       </Box>
     </Fade>
   )

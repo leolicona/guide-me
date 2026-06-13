@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { useNavigate, Link as RouterLink } from 'react-router-dom'
 import {
   Box,
@@ -10,6 +11,7 @@ import {
   Stack,
   Divider,
   TextField,
+  InputAdornment,
   IconButton,
   ToggleButton,
   ToggleButtonGroup,
@@ -30,9 +32,10 @@ import {
   cartSubtotal,
   cartDiscountTotal,
   cartTotal,
+  type CartLine,
 } from '../store/posCart'
 import { ServiceError } from '../services/authService'
-import { formatMoney } from '../features/catalog/types'
+import { formatMoney, amountToCents, centsToAmount } from '../features/catalog/types'
 import { ROUTES } from '../config/routes'
 
 // customer_email is mandatory at POS — it's the only delivery channel for the ticket + QR
@@ -53,6 +56,60 @@ function errorMessage(error: unknown): string {
     }
   }
   return 'No se pudo completar la venta. Por favor, inténtalo de nuevo.'
+}
+
+// The discount lives here now (US: moved out of the Bottom Sheet, which only secures
+// inventory). Edits are kept local so typing isn't fought by the store's clamp; on blur the
+// price commits and snaps back into [minimum, base]. The store remains authoritative.
+function LinePriceField({ line }: { line: CartLine }) {
+  const setUnitPrice = usePosCart((s) => s.setUnitPrice)
+  const [value, setValue] = useState(String(centsToAmount(line.unit_price)))
+
+  const min = line.service.minimum_price
+  const base = line.service.base_price
+  const cents = value === '' ? NaN : amountToCents(Number(value))
+  const belowMin = cents < min
+  const aboveBase = cents > base
+  const invalid = Number.isNaN(cents) || belowMin || aboveBase
+
+  const commit = () => {
+    const clamped = Number.isNaN(cents)
+      ? line.unit_price
+      : Math.min(Math.max(cents, min), base)
+    setUnitPrice(line.slot.id, clamped)
+    setValue(String(centsToAmount(clamped)))
+  }
+
+  return (
+    <TextField
+      label="Precio unitario"
+      type="number"
+      size="small"
+      value={value}
+      onChange={(e) => setValue(e.target.value)}
+      onBlur={commit}
+      error={value !== '' && invalid}
+      helperText={
+        belowMin
+          ? `Mínimo ${formatMoney(min)}`
+          : aboveBase
+            ? `Máximo ${formatMoney(base)}`
+            : `Mín ${formatMoney(min)} · base ${formatMoney(base)}`
+      }
+      slotProps={{
+        input: {
+          startAdornment: <InputAdornment position="start">$</InputAdornment>,
+        },
+        htmlInput: {
+          min: centsToAmount(min),
+          max: centsToAmount(base),
+          step: 0.01,
+          inputMode: 'decimal',
+        },
+      }}
+      sx={{ mt: 1.5, width: 180 }}
+    />
+  )
 }
 
 export default function PosCheckoutPage() {
@@ -119,8 +176,7 @@ export default function PosCheckoutPage() {
                         <Box sx={{ minWidth: 0 }}>
                           <Typography variant="subtitle2">{line.service.name}</Typography>
                           <Typography variant="caption" color="text.secondary">
-                            {line.slot.date} · {line.slot.start_time} ·{' '}
-                            {formatMoney(line.unit_price)} cada uno
+                            {line.slot.date} · {line.slot.start_time}
                           </Typography>
                           {line.extras.map((e) => (
                             <Typography
@@ -132,6 +188,7 @@ export default function PosCheckoutPage() {
                               + {e.quantity}× {e.extra.name} ({formatMoney(e.extra.price)})
                             </Typography>
                           ))}
+                          <LinePriceField line={line} />
                         </Box>
                         <Stack spacing={0.5} sx={{ alignItems: 'flex-end' }}>
                           <Typography variant="subtitle2">

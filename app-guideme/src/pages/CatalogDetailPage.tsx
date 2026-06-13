@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useParams, Link as RouterLink } from 'react-router-dom'
+import { useParams, useLocation, Link as RouterLink } from 'react-router-dom'
 import {
   Box,
   Typography,
@@ -25,6 +25,10 @@ export default function CatalogDetailPage() {
   const { id } = useParams<{ id: string }>()
   const { data: service, isLoading, isError } = useService(id)
   const [editing, setEditing] = useState(false)
+  // US-A44 — the Wizard routes here when the service saved but some schedules/extras failed.
+  const location = useLocation()
+  const partial = (location.state as { wizardPartial?: boolean } | null)?.wizardPartial
+  const [showPartial, setShowPartial] = useState(!!partial)
 
   return (
     <Fade in timeout={400}>
@@ -37,6 +41,17 @@ export default function CatalogDetailPage() {
         >
           Catálogo
         </Button>
+
+        {showPartial && (
+          <Alert
+            severity="warning"
+            onClose={() => setShowPartial(false)}
+            sx={{ mb: 2 }}
+          >
+            Servicio creado, pero algunos horarios o extras no se guardaron. Revísalos y agrégalos
+            aquí abajo.
+          </Alert>
+        )}
 
         {isLoading && (
           <Box sx={{ display: 'flex', justifyContent: 'center', py: 6 }}>

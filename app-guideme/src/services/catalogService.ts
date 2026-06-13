@@ -1,5 +1,10 @@
 import { request } from './authService'
-import type { Service, ServiceExtra, ServiceStatus } from '../features/catalog/types'
+import type {
+  CommissionType,
+  Service,
+  ServiceExtra,
+  ServiceStatus,
+} from '../features/catalog/types'
 import type { ServiceCategory } from '../features/catalog/categories'
 
 // All money fields below are in minor units (centavos) — the caller converts
@@ -16,6 +21,10 @@ export interface ServiceInput {
   flex_capacity_pct?: number
   /** US-A37 — required primary category. */
   category: ServiceCategory
+  /** US-A12 — service commission. `percent` → basis points; `fixed` → centavos per spot.
+   * Optional: the API defaults to percent/0 (a service that pays no commission). */
+  commission_type?: CommissionType
+  commission_value?: number
 }
 
 export interface ExtraInput {

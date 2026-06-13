@@ -1,6 +1,7 @@
 export * from './useServices'
 export * from './useService'
 export * from './useCreateService'
+export * from './useCreateServiceFull'
 export * from './useUpdateService'
 export * from './useDeactivateService'
 export * from './useReactivateService'

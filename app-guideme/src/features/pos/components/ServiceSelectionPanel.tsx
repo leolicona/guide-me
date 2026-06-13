@@ -5,20 +5,17 @@ import {
   Button,
   Stack,
   Divider,
-  TextField,
   IconButton,
 } from '@mui/material'
 import AddRounded from '@mui/icons-material/AddRounded'
 import RemoveRounded from '@mui/icons-material/RemoveRounded'
+import ShoppingCartRounded from '@mui/icons-material/ShoppingCartRounded'
 import { SlotPicker } from './SlotPicker'
 import { effectiveRemaining } from '../capacity'
+import { useRepeatPress } from '../hooks'
 import type { PosServiceDetail, PosSlot } from '../types'
 import { usePosCart, type CartExtra } from '../../../store/posCart'
-import {
-  amountToCents,
-  centsToAmount,
-  formatMoney,
-} from '../../catalog/types'
+import { formatMoney } from '../../catalog/types'
 
 interface ServiceSelectionPanelProps {
   service: PosServiceDetail
@@ -32,10 +29,11 @@ interface ServiceSelectionPanelProps {
   onAdded: () => void
 }
 
-// US-AG31/AG32/AG33/AG34 — the shared sale-configuration body, ordered **people → date/time
-// matrix → price/extras → confirm**. The people-first reactive filter (US-AG32) and the
-// orange cushion warning (US-AG34) live in the matrix; the server stays the single source
-// of truth — these bounds are display/input guards only.
+// US-AG31/AG32/AG33/AG34 — the sale-configuration body, laid out as fixed header (service +
+// People) · scrollable date/time matrix · pinned "Agregar al carrito" footer. This step is
+// strictly about securing inventory: the unit-price adjustment now lives in the cart, so the
+// agent locks the slot here and tunes the discount at checkout. The server stays the single
+// source of truth — the bounds here are display/input guards only.
 export function ServiceSelectionPanel({
   service,
   days,
@@ -47,8 +45,6 @@ export function ServiceSelectionPanel({
   // US-AG32 — party size is chosen FIRST (before any slot), default 1.
   const [partySize, setPartySize] = useState(1)
   const [slot, setSlot] = useState<PosSlot | null>(null)
-  // Discount price is edited in major units; clamped to [minimum, base].
-  const [priceInput, setPriceInput] = useState('')
   const [extraQtys, setExtraQtys] = useState<Record<string, number>>({})
 
   // US-AG32 — the largest group any in-window slot can seat (Effective Capacity, US-A36).
@@ -66,15 +62,16 @@ export function ServiceSelectionPanel({
 
   const clearSelection = () => {
     setSlot(null)
-    setPriceInput('')
     setExtraQtys({})
   }
 
   // The People counter only grows via the `+` button. When it does, the currently selected
-  // slot may no longer seat the group — clear it here (rather than in an effect) so
-  // price/extras/confirm collapse until a fitting slot is re-picked (US-AG32, Scenario 9).
-  const incrementParty = () => {
-    const next = Math.min(maxParty, partySize + 1)
+  // slot may no longer seat the group — clear it here so extras/confirm collapse until a
+  // fitting slot is re-picked (US-AG32, Scenario 9). Returns whether the value changed, so
+  // the long-press repeat (useRepeatPress) stops once the cap is reached.
+  const incrementParty = (): boolean => {
+    if (partySize >= maxParty) return false
+    const next = partySize + 1
     setPartySize(next)
     if (
       slot &&
@@ -82,16 +79,22 @@ export function ServiceSelectionPanel({
     ) {
       clearSelection()
     }
+    return true
   }
 
-  const handleSelectSlot = (s: PosSlot) => {
-    setSlot(s)
-    setPriceInput(String(centsToAmount(service.base_price)))
+  const decrementParty = (): boolean => {
+    if (partySize <= 1) return false
+    setPartySize(partySize - 1)
+    return true
   }
+
+  const incHandlers = useRepeatPress(incrementParty)
+  const decHandlers = useRepeatPress(decrementParty)
+
+  const handleSelectSlot = (s: PosSlot) => setSlot(s)
 
   const handleAdd = () => {
     if (!slot) return
-    const unitCents = amountToCents(Number(priceInput))
     const extras: CartExtra[] = service.extras
       .filter((e) => (extraQtys[e.id] ?? 0) > 0)
       .map((e) => ({ extra: e, quantity: extraQtys[e.id] }))
@@ -107,17 +110,12 @@ export function ServiceSelectionPanel({
       // is the Effective Capacity (raw + flexible margin), so pass the effective figure.
       slot: { ...slot, remaining: flexRemaining },
       quantity: partySize,
-      unit_price: unitCents,
+      // Price is locked to base here — the discount is applied later in the cart.
+      unit_price: service.base_price,
       extras,
     })
     onAdded()
   }
-
-  // Discount-field validation (the store also clamps; this drives inline UX).
-  const priceCents = priceInput === '' ? NaN : amountToCents(Number(priceInput))
-  const belowMin = priceCents < service.minimum_price
-  const aboveBase = priceCents > service.base_price
-  const priceInvalid = Number.isNaN(priceCents) || belowMin || aboveBase
 
   // US-A36 — the sellable ceiling for the selected slot: raw remaining for a Hard Cap
   // service, raw + flexible margin for a Soft Cap one. `inFlexZone` is true once the party
@@ -128,9 +126,10 @@ export function ServiceSelectionPanel({
   const inFlexZone = !!slot && partySize > slot.remaining
 
   return (
-    <Stack spacing={3}>
-      <Box>
-        <Typography variant="h5" component="h2">
+    <Box sx={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
+      {/* ── Fixed header: service identity + People (US-AG32, chosen first) ── */}
+      <Box sx={{ px: 3, pt: 1, pb: 2.5, flexShrink: 0 }}>
+        <Typography variant="h5" component="h2" sx={{ fontWeight: 600 }}>
           {service.name}
         </Typography>
         {service.description && (
@@ -141,46 +140,66 @@ export function ServiceSelectionPanel({
         <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
           {formatMoney(service.base_price)} · mín {formatMoney(service.minimum_price)}
         </Typography>
-      </Box>
 
-      {/* US-AG32 — People control is the FIRST interactive element. */}
-      <Box>
-        <Typography variant="subtitle2" color="text.secondary" sx={{ mb: 1 }}>
-          Personas
-        </Typography>
-        <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
-          <IconButton
-            size="small"
-            aria-label="Menos personas"
-            onClick={() => setPartySize((q) => Math.max(1, q - 1))}
-            disabled={partySize <= 1}
-          >
-            <RemoveRounded />
-          </IconButton>
-          <Typography sx={{ minWidth: 32, textAlign: 'center' }}>{partySize}</Typography>
-          <IconButton
-            size="small"
-            aria-label="Más personas"
-            onClick={incrementParty}
-            disabled={partySize >= maxParty}
-          >
-            <AddRounded />
-          </IconButton>
-          {inFlexZone && (
-            <Typography
-              variant="caption"
-              color="warning.main"
-              sx={{ ml: 1, fontWeight: 600 }}
-            >
-              Usando cupo flexible · {flexRemaining} máx.
+        <Stack
+          direction="row"
+          sx={{ alignItems: 'center', justifyContent: 'space-between', mt: 2.5 }}
+        >
+          <Box>
+            <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
+              Personas
             </Typography>
-          )}
+            {inFlexZone && (
+              <Typography variant="caption" color="warning.main" sx={{ fontWeight: 600 }}>
+                Usando cupo flexible · {flexRemaining} máx.
+              </Typography>
+            )}
+          </Box>
+
+          {/* Stepper pill — hold +/- to accelerate (useRepeatPress). */}
+          <Stack
+            direction="row"
+            sx={{
+              alignItems: 'center',
+              border: '1px solid',
+              borderColor: 'divider',
+              borderRadius: 999,
+              px: 0.5,
+            }}
+          >
+            <IconButton
+              size="small"
+              aria-label="Menos personas"
+              disabled={partySize <= 1}
+              sx={{ touchAction: 'none' }}
+              {...decHandlers}
+            >
+              <RemoveRounded fontSize="small" />
+            </IconButton>
+            <Typography
+              sx={{ minWidth: 36, textAlign: 'center', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}
+            >
+              {partySize}
+            </Typography>
+            <IconButton
+              size="small"
+              aria-label="Más personas"
+              color="secondary"
+              disabled={partySize >= maxParty}
+              sx={{ touchAction: 'none' }}
+              {...incHandlers}
+            >
+              <AddRounded fontSize="small" />
+            </IconButton>
+          </Stack>
         </Stack>
       </Box>
 
-      {/* US-AG33/AG34 — date/time matrix: a row per day, per-day fit filter + orange cushion. */}
-      <Box>
-        <Typography variant="subtitle2" color="text.secondary" sx={{ mb: 1 }}>
+      <Divider />
+
+      {/* ── Scrollable matrix (the ONLY overflow-y region) ── */}
+      <Box sx={{ flex: 1, minHeight: 0, overflowY: 'auto', px: 3, py: 2.5 }}>
+        <Typography variant="subtitle2" color="text.secondary" sx={{ mb: 1.5 }}>
           Elige un horario
         </Typography>
         {service.slots.length === 0 ? (
@@ -199,105 +218,84 @@ export function ServiceSelectionPanel({
             flexCapacityPct={service.flex_capacity_pct}
           />
         )}
+
+        {slot && service.extras.length > 0 && (
+          <Box sx={{ mt: 3 }}>
+            <Typography variant="subtitle2" color="text.secondary" sx={{ mb: 1 }}>
+              Extras
+            </Typography>
+            <Stack spacing={1} divider={<Divider flexItem />}>
+              {service.extras.map((extra) => {
+                const qty = extraQtys[extra.id] ?? 0
+                return (
+                  <Stack
+                    key={extra.id}
+                    direction="row"
+                    spacing={1}
+                    sx={{ alignItems: 'center', justifyContent: 'space-between' }}
+                  >
+                    <Box sx={{ minWidth: 0 }}>
+                      <Typography variant="body2">{extra.name}</Typography>
+                      <Typography variant="caption" color="text.secondary">
+                        {formatMoney(extra.price)}
+                      </Typography>
+                    </Box>
+                    <Stack direction="row" spacing={0.5} sx={{ alignItems: 'center' }}>
+                      <IconButton
+                        size="small"
+                        aria-label={`Menos ${extra.name}`}
+                        onClick={() =>
+                          setExtraQtys((m) => ({
+                            ...m,
+                            [extra.id]: Math.max(0, qty - 1),
+                          }))
+                        }
+                        disabled={qty <= 0}
+                      >
+                        <RemoveRounded fontSize="small" />
+                      </IconButton>
+                      <Typography sx={{ minWidth: 24, textAlign: 'center' }}>
+                        {qty}
+                      </Typography>
+                      <IconButton
+                        size="small"
+                        aria-label={`Más ${extra.name}`}
+                        onClick={() =>
+                          setExtraQtys((m) => ({
+                            ...m,
+                            [extra.id]: qty + 1,
+                          }))
+                        }
+                      >
+                        <AddRounded fontSize="small" />
+                      </IconButton>
+                    </Stack>
+                  </Stack>
+                )
+              })}
+            </Stack>
+          </Box>
+        )}
       </Box>
 
-      {slot && (
-        <>
-          <Box>
-            <Typography variant="subtitle2" color="text.secondary" sx={{ mb: 1 }}>
-              Precio unitario
-            </Typography>
-            <TextField
-              type="number"
-              size="small"
-              value={priceInput}
-              onChange={(e) => setPriceInput(e.target.value)}
-              error={priceInput !== '' && priceInvalid}
-              helperText={
-                belowMin
-                  ? `Mínimo ${formatMoney(service.minimum_price)}`
-                  : aboveBase
-                    ? `Máximo ${formatMoney(service.base_price)}`
-                    : `Mín ${formatMoney(service.minimum_price)} · base ${formatMoney(service.base_price)}`
-              }
-              slotProps={{
-                htmlInput: {
-                  min: centsToAmount(service.minimum_price),
-                  max: centsToAmount(service.base_price),
-                  step: 0.01,
-                },
-              }}
-            />
-          </Box>
+      <Divider />
 
-          {service.extras.length > 0 && (
-            <Box>
-              <Typography variant="subtitle2" color="text.secondary" sx={{ mb: 1 }}>
-                Extras
-              </Typography>
-              <Stack spacing={1} divider={<Divider flexItem />}>
-                {service.extras.map((extra) => {
-                  const qty = extraQtys[extra.id] ?? 0
-                  return (
-                    <Stack
-                      key={extra.id}
-                      direction="row"
-                      spacing={1}
-                      sx={{ alignItems: 'center', justifyContent: 'space-between' }}
-                    >
-                      <Box sx={{ minWidth: 0 }}>
-                        <Typography variant="body2">{extra.name}</Typography>
-                        <Typography variant="caption" color="text.secondary">
-                          {formatMoney(extra.price)}
-                        </Typography>
-                      </Box>
-                      <Stack direction="row" spacing={0.5} sx={{ alignItems: 'center' }}>
-                        <IconButton
-                          size="small"
-                          aria-label={`Menos ${extra.name}`}
-                          onClick={() =>
-                            setExtraQtys((m) => ({
-                              ...m,
-                              [extra.id]: Math.max(0, qty - 1),
-                            }))
-                          }
-                          disabled={qty <= 0}
-                        >
-                          <RemoveRounded fontSize="small" />
-                        </IconButton>
-                        <Typography sx={{ minWidth: 24, textAlign: 'center' }}>
-                          {qty}
-                        </Typography>
-                        <IconButton
-                          size="small"
-                          aria-label={`Más ${extra.name}`}
-                          onClick={() =>
-                            setExtraQtys((m) => ({
-                              ...m,
-                              [extra.id]: qty + 1,
-                            }))
-                          }
-                        >
-                          <AddRounded fontSize="small" />
-                        </IconButton>
-                      </Stack>
-                    </Stack>
-                  )
-                })}
-              </Stack>
-            </Box>
-          )}
-
-          <Button
-            variant="contained"
-            disableElevation
-            onClick={handleAdd}
-            disabled={priceInvalid}
-          >
-            Agregar al carrito
-          </Button>
-        </>
-      )}
-    </Stack>
+      {/* ── Pinned footer: always visible, enabled once a slot is chosen ── */}
+      <Box sx={{ px: 3, py: 2, flexShrink: 0 }}>
+        <Button
+          fullWidth
+          size="large"
+          variant="contained"
+          color="secondary"
+          disableElevation
+          startIcon={<ShoppingCartRounded />}
+          onClick={handleAdd}
+          disabled={!slot}
+          sx={{ py: 1.25 }}
+        >
+          {slot ? 'Agregar al carrito' : 'Elige un horario'}
+        </Button>
+      </Box>
+    </Box>
   )
 }

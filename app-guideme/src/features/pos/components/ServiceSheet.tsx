@@ -51,13 +51,18 @@ export function ServiceSheet({ serviceId, onClose, onAdded }: ServiceSheetProps)
           sx: {
             borderTopLeftRadius: 16,
             borderTopRightRadius: 16,
+            // The sheet grows upward from the base as content is added; the matrix inside
+            // scrolls once it would exceed this cap. The footer stays pinned to the base.
             maxHeight: '85vh',
+            display: 'flex',
+            flexDirection: 'column',
+            overflow: 'hidden',
           },
         },
       }}
     >
-      {/* Grab puller + close affordance (elegant-minimalist). */}
-      <Box sx={{ position: 'relative', pt: 1.5 }}>
+      {/* Grab puller + close affordance (elegant-minimalist) — fixed. */}
+      <Box sx={{ position: 'relative', pt: 1.5, pb: 0.5, flexShrink: 0 }}>
         <Box
           sx={{
             width: 36,
@@ -77,28 +82,28 @@ export function ServiceSheet({ serviceId, onClose, onAdded }: ServiceSheetProps)
         </IconButton>
       </Box>
 
-      <Box sx={{ px: 3, pt: 2, pb: 4, overflowY: 'auto' }}>
-        {isLoading && (
-          <Box sx={{ display: 'flex', justifyContent: 'center', py: 6 }}>
-            <CircularProgress />
-          </Box>
-        )}
+      {isLoading && (
+        <Box sx={{ display: 'flex', justifyContent: 'center', py: 6 }}>
+          <CircularProgress />
+        </Box>
+      )}
 
-        {isError && (
+      {isError && (
+        <Box sx={{ px: 3, py: 3 }}>
           <Alert severity="error">
             No se pudo cargar este servicio. Por favor, inténtalo de nuevo.
           </Alert>
-        )}
+        </Box>
+      )}
 
-        {service && (
-          <ServiceSelectionPanel
-            service={service}
-            days={days}
-            today={today}
-            onAdded={onAdded}
-          />
-        )}
-      </Box>
+      {service && (
+        <ServiceSelectionPanel
+          service={service}
+          days={days}
+          today={today}
+          onAdded={onAdded}
+        />
+      )}
     </SwipeableDrawer>
   )
 }
