@@ -261,6 +261,90 @@ export const sendTicketConfirmationEmail = async (
   }
 }
 
+// US-AG07 — apartado (booking) confirmation. NO scannable QR (the booking is not yet `paid`);
+// the full ticket + QR email is sent only at settlement. Tells the customer the deposit was
+// received, the pending balance, and the hold expiry so they know when to settle.
+export interface BookingConfirmationEmailInput {
+  to: string
+  customerName: string | null
+  orgName: string
+  folioId: string
+  createdAt: Date
+  amountPaid: number
+  total: number
+  pendingBalance: number
+  bookingExpiresAt: Date
+  lines: Array<{
+    serviceName: string
+    slotDate: string // 'YYYY-MM-DD'
+    slotStartTime: string // 'HH:MM'
+    quantity: number
+  }>
+}
+
+export const sendBookingConfirmationEmail = async (
+  env: CloudflareBindings,
+  data: BookingConfirmationEmailInput,
+): Promise<void> => {
+  const orgName = escapeHtml(data.orgName)
+  const greeting = data.customerName ? `Hola ${escapeHtml(data.customerName)},` : 'Hola,'
+  const expiresStr = data.bookingExpiresAt.toLocaleString('es-MX', {
+    day: '2-digit', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit',
+  })
+
+  const linesHtml = data.lines
+    .map(
+      (line) => `
+      <div style="border:1px solid #e0e0e0;border-radius:8px;padding:12px;margin:12px 0;">
+        <h3 style="margin:0 0 6px">${escapeHtml(line.serviceName)}</h3>
+        <p style="margin:4px 0">📅 <strong>${line.slotDate}</strong> — ${line.slotStartTime}</p>
+        <p style="margin:4px 0">👥 Personas: ${line.quantity}</p>
+      </div>`,
+    )
+    .join('')
+
+  const html = `
+    <div style="font-family:sans-serif;max-width:600px;margin:0 auto;color:#1a1a2e">
+      <h2 style="color:#1a1a2e">¡Tu apartado está registrado!</h2>
+      <p>${greeting}</p>
+      <p>Hemos registrado tu apartado en <strong>${orgName}</strong> y reservado tus lugares.
+         Para asegurarlos, liquida el saldo restante antes de la fecha límite.</p>
+
+      ${linesHtml}
+
+      <table style="width:100%;margin:8px 0;font-size:14px">
+        <tr><td><strong>Folio</strong></td><td>#${shortId(data.folioId)}</td></tr>
+        <tr><td><strong>Anticipo recibido</strong></td><td>${formatAmount(data.amountPaid)}</td></tr>
+        <tr><td><strong>Total</strong></td><td>${formatAmount(data.total)}</td></tr>
+        <tr><td><strong>Saldo pendiente</strong></td><td><strong>${formatAmount(data.pendingBalance)}</strong></td></tr>
+        <tr><td><strong>Vence</strong></td><td>${expiresStr}</td></tr>
+      </table>
+
+      <p style="font-size:13px;color:#777;margin-top:16px;">
+        Tu código QR de acceso se generará al liquidar el saldo. ${orgName} — GuideMe.
+      </p>
+    </div>`
+
+  const res = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${env.RESEND_API_KEY}`,
+    },
+    body: JSON.stringify({
+      from: env.RESEND_FROM,
+      to: data.to,
+      subject: `Tu apartado está registrado — ${data.orgName}`,
+      html,
+    }),
+  })
+
+  if (!res.ok) {
+    const body = await res.text()
+    throw new ApiError('INTERNAL_ERROR', 502, `Resend error: ${body}`)
+  }
+}
+
 export interface CancellationEmailInput {
   to: string
   customerName: string | null

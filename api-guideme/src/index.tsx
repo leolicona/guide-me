@@ -11,6 +11,7 @@ import organizationsRouter from './routes/organizations'
 import foliosRouter from './routes/folios'
 import portalRouter from './routes/portal'
 import posRouter from './routes/pos'
+import { sweepExpiredBookings } from './routes/pos/sweep'
 import servicesRouter from './routes/services'
 import ticketsRouter from './routes/tickets'
 import type { AppVariables } from './types/context'
@@ -58,4 +59,19 @@ app.get('/', (c) => {
   return c.render(<h1>Hello!</h1>)
 })
 
-export default app
+// Worker handlers: the Hono app serves `fetch`; `scheduled` runs the bookings auto-expiry sweep
+// (US-AG07 P3) on the cron trigger in wrangler.jsonc. waitUntil so the sweep finishes after return.
+export default {
+  fetch: app.fetch,
+  scheduled: (
+    _event: ScheduledController,
+    env: CloudflareBindings,
+    ctx: ExecutionContext,
+  ) => {
+    ctx.waitUntil(
+      sweepExpiredBookings(env).catch((err) =>
+        console.error('[sweep] expired-bookings sweep failed', err),
+      ),
+    )
+  },
+}

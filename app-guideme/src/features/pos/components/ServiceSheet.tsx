@@ -57,6 +57,11 @@ export function ServiceSheet({ serviceId, onClose, onAdded }: ServiceSheetProps)
             display: 'flex',
             flexDirection: 'column',
             overflow: 'hidden',
+            // Luminous glassmorphism — keep the catalog visible behind the sheet without
+            // clutter: a 90% white fill over a 20px backdrop blur (DESING.md § Elevation).
+            backgroundColor: 'rgba(255,255,255,0.9)',
+            backdropFilter: 'blur(20px)',
+            WebkitBackdropFilter: 'blur(20px)',
           },
         },
       }}

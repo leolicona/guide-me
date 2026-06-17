@@ -7,6 +7,12 @@ export const organizations = sqliteTable('organizations', {
   // Hours an admin money-move (direct collection / adjusted confirm) stays awaiting the
   // agent's signature before it auto-signs (US-AG27/AG28). Per-org configurable; default 24.
   ackWindowHours: integer('ack_window_hours').notNull().default(24),
+  // Bookings/down-payments policy (US-A46 / US-AG07.1) — org-level globals. minimum deposit as a
+  // percent of the folio total (0–100; 0 = no minimum); hold window in whole days before an
+  // unsettled booking auto-cancels; same-day buffer in minutes (release margin for a same-day tour).
+  bookingMinDownPaymentPct: integer('booking_min_down_payment_pct').notNull().default(0),
+  bookingHoldDays: integer('booking_hold_days').notNull().default(7),
+  sameDayBufferMinutes: integer('same_day_buffer_minutes').notNull().default(15),
   createdAt: integer('created_at', { mode: 'timestamp' })
     .notNull()
     .default(sql`(unixepoch())`),
@@ -220,6 +226,17 @@ export const folios = sqliteTable('folios', {
   // Commission the agent earns on this sale (minor units), snapshotted at confirm time
   // (US-AG23). Deducted from the running balance unless clawed back on cancellation.
   commissionAmount: integer('commission_amount').notNull().default(0),
+  // Bookings/down-payments (US-AG07). bookingExpiresAt: snapshot release timestamp for a 'booking'
+  // folio (null otherwise) — see resolveBookingExpiry. settledAt/By: one-shot settlement audit.
+  // reminder*: the WhatsApp recovery claim (US-AG07.3) — an atomic flag preventing double-contact.
+  bookingExpiresAt: integer('booking_expires_at', { mode: 'timestamp' }),
+  settledAt: integer('settled_at', { mode: 'timestamp' }),
+  settledBy: text('settled_by').references(() => users.id),
+  reminderStatus: text('reminder_status', { enum: ['none', 'sent'] })
+    .notNull()
+    .default('none'),
+  reminderSentAt: integer('reminder_sent_at', { mode: 'timestamp' }),
+  reminderSentBy: text('reminder_sent_by').references(() => users.id),
   cancelledAt: integer('cancelled_at', { mode: 'timestamp' }), // set on total cancellation (US-A21)
   cancelledBy: text('cancelled_by').references(() => users.id), // admin who cancelled
   cancellationReason: text('cancellation_reason'), // optional admin note
@@ -273,6 +290,12 @@ export const folioLines = sqliteTable('folio_lines', {
   minimumPrice: integer('minimum_price').notNull(), // snapshot unit floor
   unitPrice: integer('unit_price').notNull(), // sold unit price (post-discount)
   lineTotal: integer('line_total').notNull(),
+  // Commission inputs snapshotted at sale (US-AG07): so settle re-derives commission without
+  // re-reading a possibly-edited service. percent → basis points of line_total; fixed → per spot.
+  commissionType: text('commission_type', { enum: ['percent', 'fixed'] })
+    .notNull()
+    .default('percent'),
+  commissionValue: integer('commission_value').notNull().default(0),
   qrToken: text('qr_token'), // signed access ticket; null for folios sold pre-feature
   redeemedCount: integer('redeemed_count').notNull().default(0), // passes redeemed; <= quantity
   createdAt: integer('created_at', { mode: 'timestamp' })

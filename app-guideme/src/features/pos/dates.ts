@@ -19,3 +19,29 @@ export const todayStr = (): string => {
 /** Add `n` whole days to a YYYY-MM-DD string (UTC midnight arithmetic). */
 export const addDays = (date: string, n: number): string =>
   new Date(Date.parse(`${date}T00:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10)
+
+/** The `YYYY-MM` month of a YYYY-MM-DD date string (or of `today` when omitted). */
+export const monthOf = (date: string): string => date.slice(0, 7)
+
+/** Shift a `YYYY-MM` month by `n` months, returning `YYYY-MM` (handles year rollover). */
+export const addMonths = (month: string, n: number): string => {
+  const [y, m] = month.split('-').map(Number)
+  const d = new Date(Date.UTC(y, m - 1 + n, 1))
+  return d.toISOString().slice(0, 7)
+}
+
+/** Number of days in a `YYYY-MM` month (handles leap February). */
+export const daysInMonth = (month: string): number => {
+  const [y, m] = month.split('-').map(Number)
+  return new Date(Date.UTC(y, m, 0)).getUTCDate()
+}
+
+/**
+ * Weekday index (0 = Monday … 6 = Sunday) of the first day of a `YYYY-MM` month — the
+ * count of leading blanks before day 1 in a Monday-first calendar grid.
+ */
+export const firstWeekdayMondayBased = (month: string): number => {
+  const [y, m] = month.split('-').map(Number)
+  const jsDay = new Date(Date.UTC(y, m - 1, 1)).getUTCDay() // 0 = Sunday … 6 = Saturday
+  return (jsDay + 6) % 7
+}

@@ -13,6 +13,7 @@ export const ROUTES = {
   POS: '/pos',
   POS_SERVICE: '/pos/service/:id',
   POS_CHECKOUT: '/pos/checkout',
+  POS_BOOKINGS: '/pos/bookings', // US-AG07.3 — Apartados recovery dashboard
   FOLIO: '/pos/folio/:id',
   SCAN: '/scan',
   HISTORY: '/history', // agent — own folio history list (US-AG20)

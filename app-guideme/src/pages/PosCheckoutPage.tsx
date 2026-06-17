@@ -15,6 +15,7 @@ import {
   IconButton,
   ToggleButton,
   ToggleButtonGroup,
+  Chip,
 } from '@mui/material'
 import ArrowBackRounded from '@mui/icons-material/ArrowBackRounded'
 import AddRounded from '@mui/icons-material/AddRounded'
@@ -24,7 +25,7 @@ import PaymentsRounded from '@mui/icons-material/PaymentsRounded'
 import CreditCardRounded from '@mui/icons-material/CreditCardRounded'
 import AccountBalanceRounded from '@mui/icons-material/AccountBalanceRounded'
 import LinkRounded from '@mui/icons-material/LinkRounded'
-import { useConfirmSale } from '../features/pos/hooks'
+import { useConfirmSale, useMyOrganization } from '../features/pos/hooks'
 import {
   usePosCart,
   toConfirmPayload,
@@ -41,6 +42,13 @@ import { ROUTES } from '../config/routes'
 // customer_email is mandatory at POS — it's the only delivery channel for the ticket + QR
 // in Phase 1. Mirror the backend's validation so the agent gets immediate feedback.
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+
+// US-AG07 D4 — a booking needs a dialable phone (mirrors the server's ≥ 8-digit check).
+const isDialable = (phone: string): boolean => phone.replace(/\D/g, '').length >= 8
+
+// US-AG07.2 — the adaptive checkout's derived state from the entered amount vs the cart total
+// and the org minimum deposit. Drives the button label/enablement and the sale type.
+type SaleState = 'FULL' | 'PARTIAL' | 'INSUFFICIENT' | 'EXCESS' | 'EMPTY'
 
 // Map a confirm error to an actionable banner message.
 function errorMessage(error: unknown): string {
@@ -130,9 +138,61 @@ export default function PosCheckoutPage() {
   const emailTrimmed = customerEmail.trim()
   const emailValid = EMAIL_RE.test(emailTrimmed)
 
+  // US-AG07.2 — adaptive, amount-driven checkout. The amount input pre-loads the cart total; the
+  // sale type / button / validity derive from it. A suggested-deposit chip reuses the org minimum %.
+  const { data: org } = useMyOrganization()
+  const total = cartTotal(lines)
+  const minPct = org?.booking_min_down_payment_pct ?? 0
+  const minCents = Math.ceil((total * minPct) / 100)
+  const suggestedCents = minPct > 0 ? minCents : 0
+
+  const [amountInput, setAmountInput] = useState(() => String(centsToAmount(total)))
+  // Reset the amount to the total whenever the cart total changes (render-phase, no effect).
+  const [prevTotal, setPrevTotal] = useState(total)
+  if (total !== prevTotal) {
+    setPrevTotal(total)
+    setAmountInput(String(centsToAmount(total)))
+  }
+  const amountCents =
+    amountInput.trim() === '' ? NaN : amountToCents(Number(amountInput))
+
+  const saleState: SaleState =
+    Number.isNaN(amountCents) || amountCents <= 0
+      ? 'EMPTY'
+      : amountCents > total
+        ? 'EXCESS'
+        : amountCents === total
+          ? 'FULL'
+          : amountCents >= minCents
+            ? 'PARTIAL'
+            : 'INSUFFICIENT'
+
+  const chipLit = suggestedCents > 0 && amountCents === suggestedCents
+  const phoneOk = isDialable(customerPhone)
+  // A booking additionally requires a dialable phone (D4).
+  const canSubmit =
+    !confirm.isPending &&
+    emailValid &&
+    (saleState === 'FULL' || (saleState === 'PARTIAL' && phoneOk))
+
+  const buttonLabel = confirm.isPending
+    ? saleState === 'FULL'
+      ? 'Cobrando…'
+      : 'Registrando…'
+    : saleState === 'FULL'
+      ? 'Cobrar' // verb glossary (US-UX05)
+      : saleState === 'PARTIAL'
+        ? 'Registrar apartado'
+        : saleState === 'INSUFFICIENT'
+          ? `Mínimo ${formatMoney(minCents)}`
+          : saleState === 'EXCESS'
+            ? 'Excede el total'
+            : 'Captura un monto'
+
   const handleConfirm = () => {
     // Read the current state directly so the payload reflects any last edits.
     const payload = toConfirmPayload(usePosCart.getState())
+    if (saleState === 'PARTIAL') payload.down_payment = amountCents
     confirm.mutate(payload, {
       onSuccess: (folio) => {
         clear()
@@ -341,15 +401,65 @@ export default function PosCheckoutPage() {
               </CardContent>
             </Card>
 
+            {/* US-AG07.2 — adaptive amount: full total in one tap, or convert to an apartado. */}
+            <Card>
+              <CardContent>
+                <Stack
+                  direction="row"
+                  sx={{ justifyContent: 'space-between', alignItems: 'center', mb: 2 }}
+                >
+                  <Typography variant="h6">Monto a cobrar</Typography>
+                  {suggestedCents > 0 && (
+                    <Chip
+                      label={`Apartar ${minPct}% · ${formatMoney(suggestedCents)}`}
+                      color="primary"
+                      variant={chipLit ? 'filled' : 'outlined'}
+                      onClick={() => setAmountInput(String(centsToAmount(suggestedCents)))}
+                      size="small"
+                    />
+                  )}
+                </Stack>
+                <TextField
+                  label="Monto recibido"
+                  type="number"
+                  fullWidth
+                  value={amountInput}
+                  onChange={(e) => setAmountInput(e.target.value)}
+                  error={saleState === 'INSUFFICIENT' || saleState === 'EXCESS'}
+                  slotProps={{
+                    input: {
+                      startAdornment: <InputAdornment position="start">$</InputAdornment>,
+                    },
+                    htmlInput: { min: 0, step: 0.01, inputMode: 'decimal' },
+                  }}
+                  helperText={
+                    saleState === 'PARTIAL'
+                      ? `Apartado · Saldo pendiente ${formatMoney(total - amountCents)}${minPct > 0 ? ` · Mínimo ${formatMoney(minCents)}` : ''}`
+                      : saleState === 'FULL'
+                        ? 'Pago total'
+                        : saleState === 'INSUFFICIENT'
+                          ? `Por debajo del mínimo (${formatMoney(minCents)})`
+                          : saleState === 'EXCESS'
+                            ? `No puede exceder el total (${formatMoney(total)})`
+                            : 'Captura el monto recibido'
+                  }
+                />
+                {saleState === 'PARTIAL' && !phoneOk && (
+                  <Typography variant="caption" color="error" sx={{ display: 'block', mt: 1 }}>
+                    Un apartado requiere un teléfono válido para dar seguimiento por WhatsApp.
+                  </Typography>
+                )}
+              </CardContent>
+            </Card>
+
             <Button
               variant="contained"
               size="large"
               disableElevation
               onClick={handleConfirm}
-              disabled={confirm.isPending || !emailValid}
+              disabled={!canSubmit}
             >
-              {/* Verb glossary (US-UX05): taking payment is always "Cobrar". */}
-              {confirm.isPending ? 'Cobrando…' : 'Cobrar'}
+              {buttonLabel}
             </Button>
             {!emailValid && (
               <Typography variant="caption" color="text.secondary" sx={{ textAlign: 'center' }}>

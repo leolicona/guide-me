@@ -9,6 +9,10 @@
       "custom_domain": true
     }
   ],
+  // US-AG07 (P3) — every 15 min, auto-cancel expired bookings and release their spots.
+  "triggers": {
+    "crons": ["*/15 * * * *"]
+  },
   "d1_databases": [
     {
       "binding": "DB",

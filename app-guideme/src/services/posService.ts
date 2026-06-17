@@ -32,7 +32,17 @@ export interface ConfirmSaleInput {
   customer_phone?: string | null
   /** US-AG25 — collection channel. Server defaults to 'cash' when omitted. */
   payment_method?: PaymentMethod
+  /** US-AG07 — present ⇒ BOOKING mode: the deposit (minor units). Requires a dialable phone.
+   *  Absent ⇒ a normal full paid sale. */
+  down_payment?: number
   lines: ConfirmLineInput[]
+}
+
+/** US-AG07.3 — the atomic reminder-claim result. */
+export interface ReminderClaim {
+  claimed: boolean
+  reminder_sent_at: number | null
+  reminder_sent_by: string | null
 }
 
 export interface ServiceDetailRange {
@@ -56,6 +66,21 @@ export const listPosServices = async (
     `/api/pos/services${qs ? `?${qs}` : ''}`,
   )
   return res.services
+}
+
+// US-AG35 — month availability for the POS calendar Bottom Sheet. `month` is `YYYY-MM`;
+// the server owns the scan range (first…last of that month) and never returns past days.
+// Returns the ascending list of `YYYY-MM-DD` dates that have a sellable slot.
+export const getPosAvailabilityDays = async (
+  month: string,
+  today?: string,
+): Promise<string[]> => {
+  const params = new URLSearchParams({ month })
+  if (today) params.set('today', today)
+  const res = await request<{ days: string[] }>(
+    `/api/pos/availability/days?${params.toString()}`,
+  )
+  return res.days
 }
 
 // US-AG03 / AG04 / AG05 — active service detail (active extras + active future slots).
@@ -85,6 +110,41 @@ export const confirmSale = async (data: ConfirmSaleInput): Promise<Folio> => {
 // US-AG08 / AG21 — read back one of the caller agent's own folios (receipt + history detail).
 export const getFolio = async (id: string): Promise<Folio> => {
   const res = await request<{ folio: Folio }>(`/api/pos/folios/${id}`)
+  return res.folio
+}
+
+// US-AG07 — one-shot settlement of a booking: collect the balance → paid + QR.
+export const settleBooking = async (id: string): Promise<Folio> => {
+  const res = await request<{ folio: Folio }>(`/api/pos/folios/${id}/settle`, {
+    method: 'POST',
+  })
+  return res.folio
+}
+
+// US-AG07.4 — manual cancellation of a booking (release spots; deposit retained).
+export const cancelBooking = async (id: string, reason?: string): Promise<Folio> => {
+  const res = await request<{ folio: Folio }>(`/api/pos/folios/${id}/cancel`, {
+    method: 'POST',
+    body: JSON.stringify({ reason }),
+  })
+  return res.folio
+}
+
+// US-AG07.3 — claim the WhatsApp reminder (atomic; call BEFORE opening WhatsApp).
+export const claimReminder = async (
+  id: string,
+  force = false,
+): Promise<ReminderClaim> =>
+  request<ReminderClaim>(`/api/pos/folios/${id}/reminder`, {
+    method: 'POST',
+    body: JSON.stringify({ force }),
+  })
+
+// US-AG07.5 — reactivate an expired booking when capacity allows.
+export const reactivateBooking = async (id: string): Promise<Folio> => {
+  const res = await request<{ folio: Folio }>(`/api/pos/folios/${id}/reactivate`, {
+    method: 'POST',
+  })
   return res.folio
 }
 

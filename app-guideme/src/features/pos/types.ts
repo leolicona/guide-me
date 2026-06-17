@@ -99,6 +99,10 @@ export interface Folio {
   discount_total: number
   total: number
   amount_paid: number
+  /** US-AG07 — total − amount_paid (present on a booking; 0 once paid). */
+  pending_balance?: number
+  /** US-AG07 — booking hold expiry (unix secs); null for a non-booking folio. */
+  booking_expires_at?: number | null
   /** How payment was collected (US-AG25). */
   payment_method: PaymentMethod
   /** Set when the folio was cancelled by an admin (US-A21); null otherwise. */
@@ -107,14 +111,24 @@ export interface Folio {
   lines: FolioLine[]
 }
 
-// US-AG20 — lean row for the agent's own read-only sales history. No `agent` block: every
-// row is the caller's own (that distinguishes it from the admin org-wide list).
+export type ReminderStatus = 'none' | 'sent'
+
+// US-AG20 / US-AG07.3 — lean row for the agent's own folio history & the Apartados dashboard.
 export interface FolioHistoryItem {
   id: string
   customer_name: string | null
+  /** US-AG07.3 — phone for the WhatsApp recovery deep link. */
+  customer_phone?: string | null
   status: FolioStatus
   total: number
   amount_paid: number
+  /** US-AG07.3 — total − amount_paid; the prominent figure on a booking card. */
+  pending_balance?: number
   created_at: number
   cancelled_at: number | null
+  /** US-AG07.3 — booking expiry (unix secs); drives the urgency sort + border. */
+  booking_expires_at?: number | null
+  reminder_status?: ReminderStatus
+  reminder_sent_at?: number | null
+  reminder_sent_by?: string | null
 }

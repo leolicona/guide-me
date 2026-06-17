@@ -2,6 +2,32 @@
 
 This document tracks known technical debt, deferred tasks, and architectural improvements that are planned for future phases.
 
+## 17. Cash Drawer — Retained Booking-Deposit Carve-Out — ⚠️ OPEN (cross-feature follow-up)
+
+**Status:** Bookings/down-payments (`docs/bookings/bookings-down-payments.spec.md`, decision D7 /
+open decision O3) ship with a **non-refundable retained deposit**: when a booking is cancelled
+(manually via `POST /api/pos/folios/:id/cancel`, or by the auto-expiry sweep) the customer's
+`amount_paid` **stays in the agent's cash drawer** and the folio goes to `status='cancelled'`,
+`refund_status='none'`.
+
+**The discrepancy:** the cash-drawer derivation (`api-guideme/src/routes/cash/handler.ts`) sums
+`cash_collected` over **non-cancelled** folios only (`ne(folios.status, 'cancelled')`). So a
+retained cash deposit on a cancelled booking is **excluded** from collected cash even though the
+agent physically holds that money — the drawer would under-count by the deposit.
+
+**Why deferred here:** the carve-out belongs to the *Cash drawer* feature's aggregation + its own
+test surface (the bookings feature only sets `amount_paid`/`status`/`refund_status`). Wiring it in
+the bookings PR would reach into another feature's derivation and tests.
+
+**Action required:**
+- **Who:** the cash-drawer owner (or the first PR that reconciles booking deposits into the drawer).
+- **What:** in the `cash_collected` sum, include cancelled folios whose deposit was **retained**
+  (a booking cancellation: `status='cancelled' AND refund_status='none' AND payment_method='cash'`),
+  distinct from a refunding admin cancellation (US-A21, `refund_status` `pending`/`refunded`).
+  Mirror the existing watermark-reversal logic (TECH_DEBT §12a) so a deposit retained pre-watermark
+  isn't double-counted.
+- **Reference:** `docs/bookings/bookings-down-payments.spec.md` §6 (cash-drawer row) + O3.
+
 ## 16. Tourist Portal — Deferred Notifications & Electronic Refund Movement — ⚠️ OPEN (by design)
 
 **Status:** The Tourist Self-Service Portal (`docs/tourist-portal/tourist-self-service-portal.spec.md`)
