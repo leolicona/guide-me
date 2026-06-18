@@ -18,7 +18,8 @@ const orgColumns = {
   name: organizations.name,
   bookingMinDownPaymentPct: organizations.bookingMinDownPaymentPct,
   bookingHoldDays: organizations.bookingHoldDays,
-  sameDayBufferMinutes: organizations.sameDayBufferMinutes,
+  salesCutoffOffsetMinutes: organizations.salesCutoffOffsetMinutes,
+  bookingGraceOffsetMinutes: organizations.bookingGraceOffsetMinutes,
 } as const
 
 const serializeOrg = (o: {
@@ -26,13 +27,15 @@ const serializeOrg = (o: {
   name: string
   bookingMinDownPaymentPct: number
   bookingHoldDays: number
-  sameDayBufferMinutes: number
+  salesCutoffOffsetMinutes: number
+  bookingGraceOffsetMinutes: number
 }) => ({
   id: o.id,
   name: o.name,
   booking_min_down_payment_pct: o.bookingMinDownPaymentPct,
   booking_hold_days: o.bookingHoldDays,
-  same_day_buffer_minutes: o.sameDayBufferMinutes,
+  sales_cutoff_offset_minutes: o.salesCutoffOffsetMinutes,
+  booking_grace_offset_minutes: o.bookingGraceOffsetMinutes,
 })
 
 export const getMyOrganization = async (c: OrganizationsContext) => {
@@ -68,8 +71,10 @@ export const updateMyOrganization = async (c: OrganizationsContext) => {
     updates.bookingMinDownPaymentPct = input.booking_min_down_payment_pct
   if (input.booking_hold_days !== undefined)
     updates.bookingHoldDays = input.booking_hold_days
-  if (input.same_day_buffer_minutes !== undefined)
-    updates.sameDayBufferMinutes = input.same_day_buffer_minutes
+  if (input.sales_cutoff_offset_minutes !== undefined)
+    updates.salesCutoffOffsetMinutes = input.sales_cutoff_offset_minutes
+  if (input.booking_grace_offset_minutes !== undefined)
+    updates.bookingGraceOffsetMinutes = input.booking_grace_offset_minutes
 
   await db
     .update(organizations)

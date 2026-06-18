@@ -23,6 +23,7 @@ import {
 } from '@mui/material'
 import ArrowBackRounded from '@mui/icons-material/ArrowBackRounded'
 import { useFolio, useCancelFolio, useConfirmRefund } from '../features/folios/hooks'
+import { BookingActions, ExpiredBookingBanner, venceLabel } from '../features/bookings'
 import type { FolioStatus } from '../features/folios/types'
 import { ServiceError } from '../services/authService'
 import { formatMoney } from '../features/catalog/types'
@@ -64,6 +65,8 @@ export default function FolioDetailPage() {
   const [overrideNote, setOverrideNote] = useState('')
 
   const isCancelled = folio?.status === 'cancelled'
+  // US-AG07/D5 — a live apartado: it gets the booking actions instead of the US-A21 cancel.
+  const isBooking = folio?.status === 'booking'
 
   const closeDialog = () => {
     setConfirmOpen(false)
@@ -130,6 +133,16 @@ export default function FolioDetailPage() {
                 <Typography variant="caption" color="text.secondary">
                   {formatDate(folio.created_at)} · {folio.agent.name}
                 </Typography>
+                {/* US-AG07.3 — live apartado countdown, inline on the existing detail. */}
+                {isBooking && folio.booking_expires_at != null && (
+                  <Typography
+                    variant="caption"
+                    color="warning.main"
+                    sx={{ display: 'block', mt: 0.5, fontWeight: 600 }}
+                  >
+                    {venceLabel(folio.booking_expires_at)}
+                  </Typography>
+                )}
               </Box>
               <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
                 {/* US-A23 — refund status at a glance, next to the folio status. */}
@@ -143,7 +156,9 @@ export default function FolioDetailPage() {
               </Stack>
             </Stack>
 
-            {isCancelled && (
+            {/* An expired apartado (cancelled + booking_expires_at) gets the reactivation
+                banner; a plain admin cancellation keeps the audit notice. */}
+            {isCancelled && folio.booking_expires_at == null && (
               <Alert severity="error">
                 Cancelado{folio.cancelled_at ? ` el ${formatDate(folio.cancelled_at)}` : ''}
                 {folio.cancellation_reason ? ` — ${folio.cancellation_reason}` : ''}
@@ -152,6 +167,7 @@ export default function FolioDetailPage() {
                   : ' · comisión absorbida por la empresa'}
               </Alert>
             )}
+            <ExpiredBookingBanner folio={folio} />
 
             {/* US-A23 / US-T05 — the open refund obligation: the client reads their PIN in
                 the portal and hands it over to receive the cash; confirming here closes
@@ -233,9 +249,19 @@ export default function FolioDetailPage() {
                     <Typography variant="h6">{formatMoney(folio.total)}</Typography>
                   </Stack>
                   <Stack direction="row" sx={{ justifyContent: 'space-between' }}>
-                    <Typography color="text.secondary">Pagado</Typography>
+                    <Typography color="text.secondary">
+                      {isBooking ? 'Anticipo' : 'Pagado'}
+                    </Typography>
                     <Typography>{formatMoney(folio.amount_paid)}</Typography>
                   </Stack>
+                  {isBooking && (
+                    <Stack direction="row" sx={{ justifyContent: 'space-between' }}>
+                      <Typography color="text.secondary">Saldo pendiente</Typography>
+                      <Typography color="primary">
+                        {formatMoney(folio.pending_balance ?? folio.total - folio.amount_paid)}
+                      </Typography>
+                    </Stack>
+                  )}
                 </Stack>
               </CardContent>
             </Card>
@@ -244,7 +270,12 @@ export default function FolioDetailPage() {
               <Alert severity="error">No se pudo cancelar este folio. Inténtalo de nuevo.</Alert>
             )}
 
-            {!isCancelled && (
+            {/* US-AG07/07.4/07.5 — a live apartado settles/cancels (non-refundable) or, once
+                expired, reactivates here. The US-A21 refundable cancel below is hidden for
+                bookings so the two flows never overlap (per the confirmed decision). */}
+            <BookingActions folio={folio} />
+
+            {!isCancelled && !isBooking && (
               <Button
                 variant="outlined"
                 color="error"

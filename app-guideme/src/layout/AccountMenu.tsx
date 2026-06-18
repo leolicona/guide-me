@@ -45,7 +45,7 @@ interface ManagementLink {
 const MANAGEMENT_LINKS: ManagementLink[] = [
   { label: 'Agentes', to: ROUTES.AGENTS, icon: GroupsRounded },
   { label: 'Catálogo', to: ROUTES.CATALOG, icon: MapRounded },
-  { label: 'Configuración', to: '#', icon: SettingsRounded, disabled: true },
+  { label: 'Configuración', to: ROUTES.SETTINGS, icon: SettingsRounded },
 ]
 
 const initialsOf = (name: string) =>

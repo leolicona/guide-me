@@ -8,7 +8,8 @@
 
 **Scope (this phase):** org-level policy only (cascade-ready resolver), booking create, one-shot
 settle, manual cancel, reminder, auto-expiry sweep, **reactivation only** of US-AG07.5, adaptive
-checkout, recovery dashboard. **Deferred:** per-service overrides, B2B `scan_allowed_unpaid`,
+checkout, and apartado recovery **integrated into the existing Ventas list + folio detail** (D9 —
+no dedicated dashboard/route). **Deferred:** per-service overrides, B2B `scan_allowed_unpaid`,
 reschedule + coupon (§1.2 of the spec).
 
 The data model is **already provisioned** for the core (`folios.status:'booking'`,
@@ -28,8 +29,8 @@ Phase 4 → Auto-expiry sweep (wrangler cron + scheduled handler)               
 Phase 5 → Reactivate endpoint                                                   [US-AG07.5]
 Phase 6 → Org policy edit (PUT /organizations/me) + admin settings UI           [US-A46]
 Phase 7 → Frontend: adaptive amount-driven checkout                             [US-AG07.2]
-Phase 8 → Frontend: recovery dashboard + WhatsApp + reminder dim                [US-AG07.3]
-Phase 9 → Frontend: expiry banner + Reactivar y Liquidar                        [US-AG07.5]
+Phase 8 → Frontend: Ventas-list recovery (urgency + WhatsApp + dim), no dashboard [US-AG07.3, D9]
+Phase 9 → Frontend: folio-detail expiry banner + Liquidar/Cancelar/Reactivar      [US-AG07/.4/.5, D9]
 Phase 10 → Cash-drawer carve-out coordination + review against spec + gates
 ```
 
@@ -189,33 +190,84 @@ sub-component), `…/services/posService.ts`, `…/features/pos/hooks/`.
 
 ---
 
-## Phase 8 — Recovery dashboard (US-AG07.3, frontend)
+## Phase 8 — Recovery on the existing Ventas list (US-AG07.3, frontend — D9, no dashboard)
 
-**Files:** new `app-guideme/src/features/pos/components/BookingsDashboard.tsx` (+ a route/tab),
-`…/hooks/usePosBookings.ts`, `…/services/posService.ts`.
+> **Revised (D9):** no `BookingsDashboard`, no route/tab. The recovery affordances are added to
+> the **existing `FolioHistoryPage`** (the agent's Ventas list, already filterable by *Reservas*).
 
-1. `usePosBookings()` → `GET /api/pos/folios?status=booking`; sort client-side by
-   `booking_expires_at ASC`. Admin variant hits the org-wide `/api/folios?status=booking`.
-2. Card: pending-balance badge, left border **orange** if `expires_in < 24h` else grey, *vence*
-   hint (`booking_expires_at − now`).
-3. **WhatsApp** action (**pre-flight, D6**): tap → `POST /reminder` **first**. On `claimed:true` →
-   dim icon to opacity .5 + `window.open("https://wa.me/{phone}?text={encodeURIComponent(template)}")`
-   (copy from name, service_name, slot time, pending). On `claimed:false` → non-blocking notice
-   "Ya contactado por {reminder_sent_by} a las {HH:MM} · **Reenviar**"; *Reenviar* re-posts
-   `{ force:true }` then opens WhatsApp. Template hardcoded ES this phase.
-4. Tapping a card → folio detail with **Liquidar saldo** (Phase 2) and **Cancelar** (Phase 3).
+**Files:** `app-guideme/src/pages/FolioHistoryPage.tsx`, new shared module
+`…/features/bookings/` — `components/BookingWhatsAppButton.tsx` + `bookingUrgency.ts`
+(`hoursUntilExpiry`/`isUrgentBooking`/`venceLabel`). The `features/bookings` module is consumed by
+both the agent (`pos`) and admin (`folios`) surfaces but imports neither — one-way deps (see §
+"Module boundary" below).
+
+1. The list already calls `useMyFolios({ status })` and the row type already carries
+   `booking_expires_at`/`pending_balance`/`customer_phone`/`reminder_status` — no new hook.
+2. **Decorate only `booking`-status cards:** left accent **orange** if `expires_in < 24h` else
+   grey, a *Vence en…* chip, and the pending-balance figure beside Total/Anticipo.
+3. **WhatsApp** via the shared `BookingWhatsAppButton` (**pre-flight, D6**, `stopPropagation` so it
+   doesn't open the card): tap → `POST /reminder` **first**. On `claimed:true` → dim icon to
+   opacity .5 + `window.open("https://wa.me/{phone}?text={encodeURIComponent(template)}")`. On
+   `claimed:false` → non-blocking *¿Reenviar?* confirm; accept → re-post `{ force:true }` then open.
+   Template hardcoded ES this phase.
+4. Tapping a card → the **existing** folio detail (`FolioHistoryDetailPage`) with the Phase-9
+   actions.
+5. **Admin org-wide (D5/D9-admin):** the same decorations go on `FoliosListPage` and the WhatsApp
+   button is reused as-is. Backend: extend `listFolios` (and `readFolio`, Phase 9) with
+   `booking_expires_at`/`pending_balance`/`customer_phone`/`reminder_status`/`reminder_sent_*`;
+   extend the `FolioListItem`/`FolioDetail` frontend types. The shared `BookingWhatsAppButton`
+   takes a minimal `ReminderTarget` shape so both the pos and admin row types satisfy it.
 
 ---
 
-## Phase 9 — Expiry / reactivation UI (US-AG07.5, frontend)
+## Phase 9 — Expiry / settle on the existing folio detail (US-AG07/07.4/07.5, frontend — D9)
 
-**Files:** the folio detail component, `…/hooks/`.
+> **Revised (D9):** the banner + actions are **dynamically incorporated** into the folio detail the
+> agent already opens — no separate contingency screen. Shared between `FolioHistoryDetailPage`
+> (reached from the Ventas list) and the post-sale `FolioReceiptPage`.
 
-1. When a folio is `cancelled` with `booking_expires_at` set (an expired booking): banner
-   **"Apartado Expirado - Cupos Liberados"**.
-2. **Reactivar y Liquidar** button: calls `POST /reactivate`; on `200` proceed to settle; on
-   `409 NO_CAPACITY_AVAILABLE` disable it ("Tour Lleno").
-3. **Reagendar Tour** / **Generar Cupón** render **disabled** ("Próximamente") — deferred.
+**Files:** `…/features/bookings/components/BookingActions.tsx` (exports `BookingActions` +
+`ExpiredBookingBanner`), `…/pages/FolioHistoryDetailPage.tsx`, `…/pages/FolioReceiptPage.tsx`.
+
+1. Gate the QR (`Boletos de acceso`) section to `status === 'paid'`; show a pending-balance row for
+   live/expired apartados.
+2. **Live apartado** → `BookingActions` renders **Liquidar saldo** (Phase 2) + **Cancelar apartado**
+   (Phase 3, confirm modal, non-refundable).
+3. **Expired apartado** (`cancelled` + `booking_expires_at` set) → `ExpiredBookingBanner`
+   ("Apartado Expirado - Cupos Liberados") + **Reactivar y Liquidar** (`POST /reactivate`; on
+   `200` proceed to settle; on `409 NO_CAPACITY_AVAILABLE` inline error). **Reagendar** / **Generar
+   cupón** render **disabled** ("Próximamente") — deferred.
+4. **Admin org-wide (D5/D9-admin):** drop the same `ExpiredBookingBanner` + `BookingActions` into
+   `FolioDetailPage`; **hide the US-A21 refundable *Cancelar folio* for `booking` folios** (it
+   stays for `paid`). `BookingActions`/`ExpiredBookingBanner` take a minimal `BookingFolio` shape
+   so the admin `FolioDetail` satisfies them. The booking mutations (`useBookingActions`)
+   invalidate the folio namespaces by their **root keys** (`['pos']` + `['folios']`, prefix match)
+   so the list/detail refetch **without** `features/bookings` importing either feature's key
+   constants.
+
+---
+
+## Module boundary — `features/bookings` (D9 topology)
+
+To keep the dependency graph one-way, the booking domain lives in its **own** feature consumed by
+both surfaces, never importing back:
+
+```
+features/bookings/        ← shared apartado domain
+  bookingUrgency.ts        (isUrgentBooking, venceLabel, hoursUntilExpiry)
+  components/              (BookingActions, ExpiredBookingBanner, BookingWhatsAppButton)
+  hooks/useBookingActions  (useSettle/Cancel/Reactivate/ClaimReminder → services/bookingsService)
+  index.ts
+features/organization/    ← neutral org hooks (useMyOrganization/useUpdateOrganization)
+services/bookingsService  ← settle/cancel/reminder/reactivate API clients
+
+deps:  bookings → { organization, auth, catalog(util), services } ;  pos → organization ;
+       pages → { bookings, pos, folios, organization }
+       (pos ↔ folios ↔ bookings have NO edges between them)
+```
+
+This replaced the earlier arrangement where the components/hooks lived in `features/pos` and the
+mutations imported `features/folios`' `FOLIOS_KEY` — a pos↔folios coupling now removed.
 
 ---
 

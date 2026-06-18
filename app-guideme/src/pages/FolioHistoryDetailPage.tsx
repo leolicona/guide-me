@@ -15,6 +15,7 @@ import {
 import ArrowBackRounded from '@mui/icons-material/ArrowBackRounded'
 import { useFolio } from '../features/pos/hooks'
 import { TicketQr } from '../features/pos/components/TicketQr'
+import { BookingActions, ExpiredBookingBanner, venceLabel } from '../features/bookings'
 import type { FolioStatus } from '../features/pos/types'
 import { formatMoney } from '../features/catalog/types'
 import { ROUTES } from '../config/routes'
@@ -46,6 +47,8 @@ const formatDate = (unixSeconds: number) =>
 export default function FolioHistoryDetailPage() {
   const { id } = useParams<{ id: string }>()
   const { data: folio, isLoading, isError } = useFolio(id)
+
+  const isBooking = folio?.status === 'booking'
 
   return (
     <Fade in timeout={400}>
@@ -90,14 +93,27 @@ export default function FolioHistoryDetailPage() {
               <Typography variant="caption" color="text.secondary">
                 {folio.id} · {formatDate(folio.created_at)}
               </Typography>
+              {/* US-AG07.3 — live apartado countdown, inline on the existing detail. */}
+              {isBooking && folio.booking_expires_at != null && (
+                <Typography
+                  variant="caption"
+                  color="warning.main"
+                  sx={{ display: 'block', mt: 0.5, fontWeight: 600 }}
+                >
+                  {venceLabel(folio.booking_expires_at)}
+                </Typography>
+              )}
             </Box>
 
-            {folio.status === 'cancelled' && (
+            {/* A plain (admin) cancellation keeps the neutral notice; an expired apartado gets
+                the reactivation banner instead (US-AG07.5). */}
+            {folio.status === 'cancelled' && folio.booking_expires_at == null && (
               <Alert severity="error">
                 Este folio fue cancelado
                 {folio.cancelled_at ? ` el ${formatDate(folio.cancelled_at)}` : ''}.
               </Alert>
             )}
+            <ExpiredBookingBanner folio={folio} />
 
             <Card>
               <CardContent>
@@ -158,27 +174,44 @@ export default function FolioHistoryDetailPage() {
                     <Typography variant="h6">{formatMoney(folio.total)}</Typography>
                   </Stack>
                   <Stack direction="row" sx={{ justifyContent: 'space-between' }}>
-                    <Typography color="text.secondary">Pagado</Typography>
+                    <Typography color="text.secondary">
+                      {isBooking ? 'Anticipo' : 'Pagado'}
+                    </Typography>
                     <Typography>{formatMoney(folio.amount_paid)}</Typography>
                   </Stack>
+                  {isBooking && (
+                    <Stack direction="row" sx={{ justifyContent: 'space-between' }}>
+                      <Typography color="text.secondary">Saldo pendiente</Typography>
+                      <Typography color="primary">
+                        {formatMoney(folio.pending_balance ?? folio.total - folio.amount_paid)}
+                      </Typography>
+                    </Stack>
+                  )}
                 </Stack>
               </CardContent>
             </Card>
 
-            <Box>
-              <Typography variant="h6" sx={{ mb: 1.5 }}>
-                Boletos de acceso
-              </Typography>
-              <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                Un QR por servicio. El cliente lo presenta a la entrada; un agente lo escanea
-                para canjear un pase.
-              </Typography>
-              <Stack spacing={2}>
-                {folio.lines.map((line) => (
-                  <TicketQr key={line.id} line={line} />
-                ))}
-              </Stack>
-            </Box>
+            {/* QR access only exists once the folio is paid — a live/expired apartado has none. */}
+            {folio.status === 'paid' && (
+              <Box>
+                <Typography variant="h6" sx={{ mb: 1.5 }}>
+                  Boletos de acceso
+                </Typography>
+                <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                  Un QR por servicio. El cliente lo presenta a la entrada; un agente lo escanea
+                  para canjear un pase.
+                </Typography>
+                <Stack spacing={2}>
+                  {folio.lines.map((line) => (
+                    <TicketQr key={line.id} line={line} />
+                  ))}
+                </Stack>
+              </Box>
+            )}
+
+            {/* US-AG07/07.4/07.5 — Liquidar/Cancelar (live) or Reactivar (expired), dynamically
+                incorporated into this existing detail. Renders nothing for paid/plain folios. */}
+            <BookingActions folio={folio} />
           </Stack>
         )}
       </Box>

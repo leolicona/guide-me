@@ -16,6 +16,7 @@ import {
   ToggleButtonGroup,
 } from '@mui/material'
 import { useMyFolios } from '../features/pos/hooks'
+import { BookingWhatsAppButton, isUrgentBooking, venceLabel } from '../features/bookings'
 import type { FolioStatus } from '../features/pos/types'
 import { formatMoney } from '../features/catalog/types'
 import { ROUTES } from '../config/routes'
@@ -90,52 +91,97 @@ export default function FolioHistoryPage() {
 
         {folios && folios.length > 0 && (
           <Stack spacing={2}>
-            {folios.map((f) => (
-              <Card key={f.id} variant="outlined">
-                <CardActionArea
-                  component={RouterLink}
-                  to={ROUTES.HISTORY_DETAIL.replace(':id', f.id)}
+            {folios.map((f) => {
+              // US-AG07.3/07.5 — apartado affordances integrated into THIS existing card: an
+              // urgency accent + countdown + the WhatsApp recovery button. No separate dashboard.
+              const isBooking = f.status === 'booking'
+              const urgent = isBooking && isUrgentBooking(f.booking_expires_at)
+              return (
+                <Card
+                  key={f.id}
+                  variant="outlined"
+                  sx={
+                    isBooking
+                      ? {
+                          borderLeftWidth: 4,
+                          borderLeftColor: urgent ? 'warning.main' : 'divider',
+                        }
+                      : undefined
+                  }
                 >
-                  <CardContent>
-                    <Stack
-                      direction="row"
-                      sx={{ justifyContent: 'space-between', alignItems: 'center' }}
-                    >
-                      <Box sx={{ minWidth: 0 }}>
-                        <Typography variant="subtitle1" noWrap>
-                          {f.customer_name ?? 'Sin nombre'}
-                        </Typography>
-                        <Typography variant="caption" color="text.secondary">
-                          {formatDate(f.created_at)}
-                        </Typography>
-                      </Box>
-                      <Chip
-                        size="small"
-                        color={STATUS_COLOR[f.status]}
-                        label={STATUS_LABEL[f.status]}
-                      />
-                    </Stack>
-                    <Divider sx={{ my: 1.5 }} />
-                    <Stack direction="row" spacing={3}>
-                      <Box>
-                        <Typography variant="caption" color="text.secondary">
-                          Total
-                        </Typography>
-                        <Typography variant="body2">{formatMoney(f.total)}</Typography>
-                      </Box>
-                      <Box>
-                        <Typography variant="caption" color="text.secondary">
-                          Pagado
-                        </Typography>
-                        <Typography variant="body2">
-                          {formatMoney(f.amount_paid)}
-                        </Typography>
-                      </Box>
-                    </Stack>
-                  </CardContent>
-                </CardActionArea>
-              </Card>
-            ))}
+                  <CardActionArea
+                    component={RouterLink}
+                    to={ROUTES.HISTORY_DETAIL.replace(':id', f.id)}
+                  >
+                    <CardContent>
+                      <Stack
+                        direction="row"
+                        spacing={1}
+                        sx={{ justifyContent: 'space-between', alignItems: 'flex-start' }}
+                      >
+                        <Box sx={{ minWidth: 0 }}>
+                          <Typography variant="subtitle1" noWrap>
+                            {f.customer_name ?? 'Sin nombre'}
+                          </Typography>
+                          <Typography variant="caption" color="text.secondary">
+                            {formatDate(f.created_at)}
+                          </Typography>
+                          {isBooking && f.booking_expires_at != null && (
+                            <Chip
+                              size="small"
+                              variant="outlined"
+                              color={urgent ? 'warning' : 'default'}
+                              label={venceLabel(f.booking_expires_at)}
+                              sx={{ mt: 0.5, display: 'flex', width: 'fit-content' }}
+                            />
+                          )}
+                        </Box>
+                        {/* Status chip + WhatsApp sit side by side in one cluster — never overlap. */}
+                        <Stack
+                          direction="row"
+                          spacing={0.5}
+                          sx={{ alignItems: 'center', flexShrink: 0 }}
+                        >
+                          <Chip
+                            size="small"
+                            color={STATUS_COLOR[f.status]}
+                            label={STATUS_LABEL[f.status]}
+                          />
+                          {isBooking && <BookingWhatsAppButton folio={f} />}
+                        </Stack>
+                      </Stack>
+                      <Divider sx={{ my: 1.5 }} />
+                      <Stack direction="row" spacing={3}>
+                        <Box>
+                          <Typography variant="caption" color="text.secondary">
+                            Total
+                          </Typography>
+                          <Typography variant="body2">{formatMoney(f.total)}</Typography>
+                        </Box>
+                        <Box>
+                          <Typography variant="caption" color="text.secondary">
+                            {isBooking ? 'Anticipo' : 'Pagado'}
+                          </Typography>
+                          <Typography variant="body2">
+                            {formatMoney(f.amount_paid)}
+                          </Typography>
+                        </Box>
+                        {isBooking && (
+                          <Box>
+                            <Typography variant="caption" color="text.secondary">
+                              Saldo pendiente
+                            </Typography>
+                            <Typography variant="body2" color="primary">
+                              {formatMoney(f.pending_balance ?? f.total - f.amount_paid)}
+                            </Typography>
+                          </Box>
+                        )}
+                      </Stack>
+                    </CardContent>
+                  </CardActionArea>
+                </Card>
+              )
+            })}
           </Stack>
         )}
       </Box>

@@ -4,19 +4,18 @@ import {
   claimReminder,
   reactivateBooking,
   settleBooking,
-} from '../../../services/posService'
-import { MY_FOLIOS_QUERY_KEY } from './useMyFolios'
-import { FOLIO_QUERY_KEY } from './useFolio'
-import { POS_QUERY_KEY } from './usePosServices'
+} from '../../../services/bookingsService'
 
-// Any booking action changes a folio and (settle/cancel/reactivate) inventory, so invalidate
-// the folio history, the open folio, and the catalog availability.
+// A booking action mutates a folio and (settle/cancel/reactivate) inventory, so every dependent
+// query must refetch. We invalidate the two folio NAMESPACES by their root keys (TanStack matches
+// by prefix): `['pos']` covers the catalog availability + the agent folio list/detail; `['folios']`
+// covers the admin list/detail. Using the literal roots keeps `features/bookings` free of any
+// import into `pos`/`folios` — so both features depend on bookings, never the reverse.
 function useInvalidateBookings() {
   const qc = useQueryClient()
   return () => {
-    qc.invalidateQueries({ queryKey: MY_FOLIOS_QUERY_KEY })
-    qc.invalidateQueries({ queryKey: FOLIO_QUERY_KEY })
-    qc.invalidateQueries({ queryKey: POS_QUERY_KEY })
+    qc.invalidateQueries({ queryKey: ['pos'] })
+    qc.invalidateQueries({ queryKey: ['folios'] })
   }
 }
 

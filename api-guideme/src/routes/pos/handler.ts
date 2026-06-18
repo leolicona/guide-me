@@ -158,6 +158,18 @@ export const listPosServices = async (c: PosContext) => {
   // service and we group per service, so SQLite's per-row integer division yields each slot's
   // floored margin and the sum is exact — a fully-booked-but-flexible service still advertises
   // its sellable last-minute spots instead of reading "Agotado".
+  // US-A47 — exclude slots already past the sales cutoff so `has_availability` / `next_slot_date`
+  // never advertise a departed time (e.g. a service whose only "remaining" slot today is over).
+  const cutoffRows = await db
+    .select({ v: organizations.salesCutoffOffsetMinutes })
+    .from(organizations)
+    .where(eq(organizations.id, agent.organizationId))
+    .limit(1)
+  const sellableThreshold = salesThresholdStr(
+    Math.floor(Date.now() / 1000),
+    cutoffRows[0]?.v ?? 0,
+  )
+
   const availabilityRows = await db
     .select({
       serviceId: slots.serviceId,
@@ -178,6 +190,7 @@ export const listPosServices = async (c: PosContext) => {
         // US-AG30 — bound to the availability window [windowFrom, windowTo].
         gte(slots.date, windowFrom),
         lte(slots.date, windowTo),
+        sellableSlotSql(sellableThreshold),
       ),
     )
     .groupBy(slots.serviceId)
@@ -236,6 +249,17 @@ export const listAvailabilityDays = async (c: PosContext) => {
 
   const db = getDb(c.env)
 
+  // US-A47 — drop days whose only slots have passed the sales cutoff (no past times in the picker).
+  const cutoffRows = await db
+    .select({ v: organizations.salesCutoffOffsetMinutes })
+    .from(organizations)
+    .where(eq(organizations.id, agent.organizationId))
+    .limit(1)
+  const sellableThreshold = salesThresholdStr(
+    Math.floor(Date.now() / 1000),
+    cutoffRows[0]?.v ?? 0,
+  )
+
   const rows = await db
     .select({ date: slots.date })
     .from(slots)
@@ -247,6 +271,7 @@ export const listAvailabilityDays = async (c: PosContext) => {
         eq(services.status, 'active'),
         gte(slots.date, windowFrom),
         lte(slots.date, monthEnd),
+        sellableSlotSql(sellableThreshold),
         // US-A36 — effective remaining > 0 per slot: raw remaining plus the flexible margin
         // (floor(capacity × pct / 100)) for a Soft Cap service. Grouping by date then yields
         // exactly the days with at least one sellable slot.
@@ -311,11 +336,24 @@ export const getPosService = async (c: PosContext) => {
   const from = c.req.query('from') ?? utcToday()
   const to = c.req.query('to')
 
+  // US-A47 — never surface a slot that's no longer sellable (its departure passed the cutoff),
+  // so the matrix shows only the times an agent can actually sell today.
+  const cutoffRows = await db
+    .select({ v: organizations.salesCutoffOffsetMinutes })
+    .from(organizations)
+    .where(eq(organizations.id, agent.organizationId))
+    .limit(1)
+  const threshold = salesThresholdStr(
+    Math.floor(Date.now() / 1000),
+    cutoffRows[0]?.v ?? 0,
+  )
+
   const slotFilters = [
     eq(slots.serviceId, id),
     eq(slots.organizationId, agent.organizationId),
     eq(slots.status, 'active'),
     gte(slots.date, from),
+    sellableSlotSql(threshold),
   ]
   if (to) slotFilters.push(lte(slots.date, to))
 
@@ -385,7 +423,7 @@ interface PreparedLine {
 interface BookingPolicy {
   minDownPaymentPct: number
   holdDays: number
-  sameDayBufferMinutes: number
+  bookingGraceOffsetMinutes: number
 }
 
 // US-AG07.1 — cascade-ready policy resolver. A per-service override (later phase) would take
@@ -393,14 +431,36 @@ interface BookingPolicy {
 function resolveBookingPolicy(org: {
   bookingMinDownPaymentPct: number
   bookingHoldDays: number
-  sameDayBufferMinutes: number
+  bookingGraceOffsetMinutes: number
 }): BookingPolicy {
   return {
     minDownPaymentPct: org.bookingMinDownPaymentPct,
     holdDays: org.bookingHoldDays,
-    sameDayBufferMinutes: org.sameDayBufferMinutes,
+    bookingGraceOffsetMinutes: org.bookingGraceOffsetMinutes,
   }
 }
+
+// US-A47 — a slot is sellable only while its start is beyond the org's sales cutoff. SIGNED
+// offset: positive closes sales N min BEFORE departure; negative keeps them open until N min
+// AFTER (a walk-up grace). Threshold instant = now + offset; a slot is sellable ⟺ its start is
+// strictly after the threshold. Compared in the naive-UTC model (same as slotEpoch); absolute-
+// timezone correctness is the separate BUG-007 limitation.
+const salesThresholdStr = (nowSec: number, cutoffOffsetMin: number): string =>
+  new Date((nowSec + cutoffOffsetMin * 60) * 1000).toISOString().slice(0, 16)
+
+// SQL predicate form for the read filters (matrix / availability): keep only future-of-cutoff
+// slots. `slots.date` is 'YYYY-MM-DD' and `slots.startTime` is 'HH:MM', so `date||'T'||time` is a
+// fixed-width ISO minute string, lexicographically comparable to the threshold.
+const sellableSlotSql = (thresholdStr: string) =>
+  sql`(${slots.date} || 'T' || ${slots.startTime}) > ${thresholdStr}`
+
+// JS form for the write guard (confirmSale / reactivate): sellable ⟺ slot start > threshold.
+const isSlotSellable = (
+  date: string,
+  startTime: string,
+  nowSec: number,
+  cutoffOffsetMin: number,
+): boolean => slotEpoch(date, startTime) > nowSec + cutoffOffsetMin * 60
 
 // Epoch (seconds) of a naive slot start — single-timezone model (UTC arithmetic, no tz math).
 const slotEpoch = (date: string, time: string): number =>
@@ -415,7 +475,9 @@ function bookingExpiryDate(
   isSameDay: boolean,
 ): Date {
   const holdDuration = policy.holdDays * 86_400
-  const tourBuffer = isSameDay ? policy.sameDayBufferMinutes * 60 : 86_400
+  // Same-day: use the org's grace offset (+ before / − after departure). Otherwise a 24h
+  // pre-departure release. A negative grace pushes the expiry PAST departure (a grace window).
+  const tourBuffer = isSameDay ? policy.bookingGraceOffsetMinutes * 60 : 86_400
   const expiry = Math.min(nowSec + holdDuration, earliestSlotEpoch - tourBuffer)
   return new Date(expiry * 1000)
 }
@@ -554,12 +616,17 @@ export const confirmSale = async (c: PosContext) => {
       name: organizations.name,
       bookingMinDownPaymentPct: organizations.bookingMinDownPaymentPct,
       bookingHoldDays: organizations.bookingHoldDays,
-      sameDayBufferMinutes: organizations.sameDayBufferMinutes,
+      salesCutoffOffsetMinutes: organizations.salesCutoffOffsetMinutes,
+      bookingGraceOffsetMinutes: organizations.bookingGraceOffsetMinutes,
     })
     .from(organizations)
     .where(eq(organizations.id, org))
     .limit(1)
   const orgRow = orgRows[0]
+  // US-A47 — the sales cutoff gates EVERY new folio (walk-in sale + booking creation): a slot
+  // past its cutoff is no longer sellable. Evaluated once against the request's start instant.
+  const saleNowSec = Math.floor(Date.now() / 1000)
+  const salesCutoffOffset = orgRow?.salesCutoffOffsetMinutes ?? 0
 
   // 1. VALIDATE (reads only) — snapshot prices/names from active, in-org inventory.
   const prepared: PreparedLine[] = []
@@ -593,6 +660,17 @@ export const confirmSale = async (c: PosContext) => {
     const slot = slotRows[0]
     if (!slot) {
       throw new ApiError('NOT_FOUND', 404, 'Slot not found or unavailable')
+    }
+
+    // US-A47 — refuse a slot whose departure has passed the sales cutoff (no selling a tour
+    // that already left / is past the walk-in window). Closes the past-slot integrity hole for
+    // both full sales and booking creation, regardless of a stale client.
+    if (!isSlotSellable(slot.date, slot.startTime, saleNowSec, salesCutoffOffset)) {
+      throw new ApiError(
+        'SLOT_CLOSED',
+        409,
+        'This time slot is closed for sale (its departure has passed the cutoff)',
+      )
     }
 
     // Controlled discount (US-AG06): floor at the admin's minimum_price.
@@ -696,7 +774,7 @@ export const confirmSale = async (c: PosContext) => {
   const policy = resolveBookingPolicy({
     bookingMinDownPaymentPct: orgRow?.bookingMinDownPaymentPct ?? 0,
     bookingHoldDays: orgRow?.bookingHoldDays ?? 7,
-    sameDayBufferMinutes: orgRow?.sameDayBufferMinutes ?? 15,
+    bookingGraceOffsetMinutes: orgRow?.bookingGraceOffsetMinutes ?? 15,
   })
   const isBooking = input.down_payment != null
   let status: 'paid' | 'booking' = 'paid'
@@ -1438,6 +1516,37 @@ export const reactivateBooking = async (c: PosContext) => {
     .innerJoin(services, eq(slots.serviceId, services.id))
     .where(and(eq(folioLines.folioId, id), eq(folioLines.organizationId, org)))
 
+  // Current org policy — drives both the US-A47 sales cutoff guard and the fresh expiry below.
+  const orgRows = await db
+    .select({
+      bookingMinDownPaymentPct: organizations.bookingMinDownPaymentPct,
+      bookingHoldDays: organizations.bookingHoldDays,
+      salesCutoffOffsetMinutes: organizations.salesCutoffOffsetMinutes,
+      bookingGraceOffsetMinutes: organizations.bookingGraceOffsetMinutes,
+    })
+    .from(organizations)
+    .where(eq(organizations.id, org))
+    .limit(1)
+  const policy = resolveBookingPolicy({
+    bookingMinDownPaymentPct: orgRows[0]?.bookingMinDownPaymentPct ?? 0,
+    bookingHoldDays: orgRows[0]?.bookingHoldDays ?? 7,
+    bookingGraceOffsetMinutes: orgRows[0]?.bookingGraceOffsetMinutes ?? 15,
+  })
+
+  // US-A47 — don't reactivate onto a slot whose departure has passed the sales cutoff (that
+  // would re-create an already-expired booking). Guard BEFORE re-blocking any spots.
+  const reactivateNowSec = Math.floor(Date.now() / 1000)
+  const salesCutoffOffset = orgRows[0]?.salesCutoffOffsetMinutes ?? 0
+  for (const line of lineRows) {
+    if (!isSlotSellable(line.slotDate, line.slotStartTime, reactivateNowSec, salesCutoffOffset)) {
+      throw new ApiError(
+        'SLOT_CLOSED',
+        409,
+        'This booking’s departure has passed the sales cutoff and cannot be reactivated',
+      )
+    }
+  }
+
   // Re-decrement each slot atomically with the effective-capacity guard; compensate on failure.
   const applied: { slotId: string; qty: number }[] = []
   for (const line of lineRows) {
@@ -1474,21 +1583,7 @@ export const reactivateBooking = async (c: PosContext) => {
     applied.push({ slotId: line.slotId, qty: line.quantity })
   }
 
-  // Fresh expiry from the current org policy + earliest slot.
-  const orgRows = await db
-    .select({
-      bookingMinDownPaymentPct: organizations.bookingMinDownPaymentPct,
-      bookingHoldDays: organizations.bookingHoldDays,
-      sameDayBufferMinutes: organizations.sameDayBufferMinutes,
-    })
-    .from(organizations)
-    .where(eq(organizations.id, org))
-    .limit(1)
-  const policy = resolveBookingPolicy({
-    bookingMinDownPaymentPct: orgRows[0]?.bookingMinDownPaymentPct ?? 0,
-    bookingHoldDays: orgRows[0]?.bookingHoldDays ?? 7,
-    sameDayBufferMinutes: orgRows[0]?.sameDayBufferMinutes ?? 15,
-  })
+  // Fresh expiry from the current org policy (read above) + earliest slot.
   const earliest = lineRows.reduce(
     (min, l) => {
       const e = slotEpoch(l.slotDate, l.slotStartTime)
@@ -1498,7 +1593,7 @@ export const reactivateBooking = async (c: PosContext) => {
   )
   const bookingExpiresAt = bookingExpiryDate(
     policy,
-    Math.floor(Date.now() / 1000),
+    reactivateNowSec,
     earliest.epoch,
     earliest.date === utcToday(),
   )

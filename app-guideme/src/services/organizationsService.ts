@@ -7,7 +7,10 @@ export interface MyOrganization {
   name: string
   booking_min_down_payment_pct: number
   booking_hold_days: number
-  same_day_buffer_minutes: number
+  // US-A47 — signed departure offsets (minutes): + = before departure, − = after (grace).
+  // salesCutoff closes new walk-in sales; bookingGrace times the unsettled same-day auto-cancel.
+  sales_cutoff_offset_minutes: number
+  booking_grace_offset_minutes: number
 }
 
 export const getMyOrganization = async (): Promise<MyOrganization> => {
@@ -18,7 +21,8 @@ export const getMyOrganization = async (): Promise<MyOrganization> => {
 export interface UpdateOrganizationInput {
   booking_min_down_payment_pct?: number
   booking_hold_days?: number
-  same_day_buffer_minutes?: number
+  sales_cutoff_offset_minutes?: number
+  booking_grace_offset_minutes?: number
 }
 
 // US-A46 — admin updates the org booking policy.

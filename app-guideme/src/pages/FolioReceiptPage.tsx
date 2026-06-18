@@ -15,29 +15,20 @@ import {
 import CheckCircleRounded from '@mui/icons-material/CheckCircleRounded'
 import EventAvailableRounded from '@mui/icons-material/EventAvailableRounded'
 import EventBusyRounded from '@mui/icons-material/EventBusyRounded'
-import PaidRounded from '@mui/icons-material/PaidRounded'
-import {
-  useFolio,
-  useSettleBooking,
-  useCancelBooking,
-  useReactivateBooking,
-} from '../features/pos/hooks'
+import { useFolio } from '../features/pos/hooks'
 import { TicketQr } from '../features/pos/components/TicketQr'
+import { BookingActions, ExpiredBookingBanner } from '../features/bookings'
 import { formatMoney } from '../features/catalog/types'
 import { ROUTES } from '../config/routes'
 
 export default function FolioReceiptPage() {
   const { id } = useParams<{ id: string }>()
   const { data: folio, isLoading, isError } = useFolio(id)
-  const settle = useSettleBooking()
-  const cancel = useCancelBooking()
-  const reactivate = useReactivateBooking()
 
   const isBooking = folio?.status === 'booking'
   // A cancelled folio that carries a booking expiry was an apartado (US-AG07.5 late arrival).
   const isExpiredBooking =
     folio?.status === 'cancelled' && folio?.booking_expires_at != null
-  const busy = settle.isPending || cancel.isPending || reactivate.isPending
 
   return (
     <Fade in timeout={400}>
@@ -80,12 +71,7 @@ export default function FolioReceiptPage() {
               )}
             </Box>
 
-            {isExpiredBooking && (
-              <Alert severity="warning" icon={<EventBusyRounded />}>
-                Apartado Expirado — Cupos Liberados. Reactívalo para volver a bloquear los
-                lugares (si aún hay cupo) y cobrar el saldo.
-              </Alert>
-            )}
+            <ExpiredBookingBanner folio={folio} />
 
             <Card>
               <CardContent>
@@ -197,60 +183,9 @@ export default function FolioReceiptPage() {
               </Box>
             )}
 
-            {/* US-AG07 — booking actions: settle (one-shot) or cancel (non-refundable). */}
-            {isBooking && (
-              <Stack spacing={1.5}>
-                <Button
-                  variant="contained"
-                  size="large"
-                  disableElevation
-                  startIcon={<PaidRounded />}
-                  disabled={busy}
-                  onClick={() => settle.mutate(folio.id)}
-                >
-                  {settle.isPending ? 'Liquidando…' : 'Liquidar saldo'}
-                </Button>
-                <Button
-                  color="inherit"
-                  disabled={busy}
-                  onClick={() => {
-                    if (window.confirm('¿Cancelar el apartado y liberar los lugares? El anticipo no es reembolsable.')) {
-                      cancel.mutate({ id: folio.id })
-                    }
-                  }}
-                >
-                  Cancelar apartado
-                </Button>
-              </Stack>
-            )}
-
-            {/* US-AG07.5 — late-arrival contingency (reactivation only this phase). */}
-            {isExpiredBooking && (
-              <Stack spacing={1.5}>
-                <Button
-                  variant="contained"
-                  size="large"
-                  disableElevation
-                  disabled={busy}
-                  onClick={() => reactivate.mutate(folio.id)}
-                >
-                  {reactivate.isPending ? 'Reactivando…' : 'Reactivar y Liquidar'}
-                </Button>
-                {reactivate.isError && (
-                  <Alert severity="error">
-                    El tour ya no tiene cupo para reactivar este apartado.
-                  </Alert>
-                )}
-                <Stack direction="row" spacing={1.5}>
-                  <Button fullWidth disabled>
-                    Reagendar (Próximamente)
-                  </Button>
-                  <Button fullWidth disabled>
-                    Generar cupón (Próximamente)
-                  </Button>
-                </Stack>
-              </Stack>
-            )}
+            {/* US-AG07/07.4/07.5 — Liquidar/Cancelar (live) or Reactivar (expired). Shared with
+                the Ventas folio detail so both stay in sync. */}
+            <BookingActions folio={folio} />
 
             <Button
               variant={isBooking || isExpiredBooking ? 'text' : 'contained'}

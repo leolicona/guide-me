@@ -10,10 +10,10 @@ export const ROUTES = {
   INVITE_AGENT: '/agents/invite',
   CATALOG: '/catalog',
   CATALOG_DETAIL: '/catalog/:id',
+  SETTINGS: '/settings', // admin — org booking policy (US-A46)
   POS: '/pos',
   POS_SERVICE: '/pos/service/:id',
   POS_CHECKOUT: '/pos/checkout',
-  POS_BOOKINGS: '/pos/bookings', // US-AG07.3 — Apartados recovery dashboard
   FOLIO: '/pos/folio/:id',
   SCAN: '/scan',
   HISTORY: '/history', // agent — own folio history list (US-AG20)

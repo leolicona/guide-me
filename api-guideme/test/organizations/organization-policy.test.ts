@@ -32,7 +32,10 @@ describe('US-A46 — org booking policy', () => {
     expect(json.organization).toMatchObject({
       booking_min_down_payment_pct: 0,
       booking_hold_days: 7,
-      same_day_buffer_minutes: 15,
+      // US-A47 — split policies: sales cutoff (default 0 = sellable until departure) +
+      // booking grace (renamed same-day buffer; default 15 = cancel 15 min before departure).
+      sales_cutoff_offset_minutes: 0,
+      booking_grace_offset_minutes: 15,
     })
   })
 
@@ -41,13 +44,17 @@ describe('US-A46 — org booking policy', () => {
     const { status, json } = await put('admin@empresa.com', {
       booking_min_down_payment_pct: 50,
       booking_hold_days: 3,
-      same_day_buffer_minutes: 10,
+      // A positive cutoff (close sales 5 min before) and a NEGATIVE grace (cancel 10 min AFTER
+      // departure — the "After" direction the UI translates to a negative integer).
+      sales_cutoff_offset_minutes: 5,
+      booking_grace_offset_minutes: -10,
     })
     expect(status).toBe(200)
     expect(json.organization).toMatchObject({
       booking_min_down_payment_pct: 50,
       booking_hold_days: 3,
-      same_day_buffer_minutes: 10,
+      sales_cutoff_offset_minutes: 5,
+      booking_grace_offset_minutes: -10,
     })
     const after = await get('admin@empresa.com')
     expect(after.json.organization.booking_min_down_payment_pct).toBe(50)
@@ -57,7 +64,10 @@ describe('US-A46 — org booking policy', () => {
     await seedUser({ email: 'admin@empresa.com', role: 'admin' })
     expect((await put('admin@empresa.com', { booking_min_down_payment_pct: 101 })).status).toBe(400)
     expect((await put('admin@empresa.com', { booking_hold_days: 0 })).status).toBe(400)
-    expect((await put('admin@empresa.com', { same_day_buffer_minutes: -1 })).status).toBe(400)
+    // Offsets are signed (±240). Negative is now VALID (a grace window); only out-of-bounds fails.
+    expect((await put('admin@empresa.com', { booking_grace_offset_minutes: -30 })).status).toBe(200)
+    expect((await put('admin@empresa.com', { sales_cutoff_offset_minutes: 999 })).status).toBe(400)
+    expect((await put('admin@empresa.com', { booking_grace_offset_minutes: -999 })).status).toBe(400)
   })
 
   it('an agent may not edit the policy → 403', async () => {

@@ -29,6 +29,8 @@ This specification unifies two workflows:
 | D6 | **Reminder sync** | **Persisted flag + pre-flight atomic claim** (no realtime infra). `POST /reminder` is an **atomic conditional claim** (`… WHERE reminder_status='none'`): the tap runs it **before** opening WhatsApp and opens **only if it won**; a loser gets `claimed:false` + who/when and a non-blocking *¿Reenviar?* (`?force=true` re-claims). The dashboard refetch keeps the list fresh but is **not** the collision guard — the server-side claim is. Replaces the earlier passive-refetch design (which only converged after a poll, leaving a double-send window). |
 | D7 | **Deposit on cancel/expiry** | **Non-refundable, retained in the agent's cash drawer** (US-AG07.4). Same treatment for manual cancel and auto-expiry. **Resolves O1.** |
 | D8 | **Commission** | **Percent on the amount collected**; **fixed only on reaching `paid`** (reserved by the commissions spec). A retained deposit keeps its percent commission. |
+| D9 | **No new screens — integrate into existing flow** (revises the standalone surfaces in US-AG07.3/07.5) | "Less is more": apartado management has **no dedicated dashboard or route**. The **existing Ventas list** (`FolioHistoryPage`, which already has a *Reservas* filter) gains an **urgency accent + countdown + one-tap WhatsApp** on booking cards; the **existing folio detail** (`FolioHistoryDetailPage`, and the post-sale `FolioReceiptPage`) **dynamically** grows the **expiry banner + Liquidar/Cancelar/Reactivar**. Agents manage everything on screens they already know — no new navigation to learn. The banner/actions and WhatsApp claim are **shared components** (`BookingActions`, `ExpiredBookingBanner`, `BookingWhatsAppButton`) in a dedicated **`features/bookings`** module (with `bookingUrgency` + the action hooks) reused by every detail surface; both the `pos` and `folios` features depend on it one-way, neither imports the other (see plan § "Module boundary"). |
+| D9-admin | **Same affordances on the admin org-wide surface** (D5) | The **admin `/folios`** list (`FoliosListPage`) and detail (`FolioDetailPage`) get the **identical** decorations (urgency, pending balance, WhatsApp, expiry banner, Liquidar/Reactivar) — reusing the same shared components. This required extending the admin serializers (`listFolios`, `readFolio`) with `booking_expires_at`/`pending_balance`/`customer_phone`/`reminder_status`/`reminder_sent_*`. On a **`booking`-status** folio the admin detail shows the **non-refundable** Liquidar/Cancelar (US-AG07.4) and **hides** the US-A21 refundable *Cancelar folio*; that refundable flow stays for `paid` folios. The booking-action mutations also invalidate the admin `['folios']` query key so the list/detail refetch. |
 
 ## 1.2 Scope of THIS implementation (phasing)
 
@@ -142,8 +144,14 @@ Escenario 3: Edición manual del monto que rompe el estado del chip
 ### US-AG07.3 — Tablero Proactivo de Recuperación de Ingresos (CRM)
 
 > As a: Sales Agent / Ticket Booth Operator
-> I want: A "Reservas" dashboard sorted by expiration urgency with quick action contact buttons
+> I want: My existing **Reservas** list surfaced with expiration urgency and a quick WhatsApp button
 > To: Proactively contact tourists before releasing their spots, avoiding empty tour seats.
+
+> **Implementation (D9): no dedicated dashboard.** This is delivered by **enhancing the existing
+> Ventas list** (`FolioHistoryPage`) — which already filters by *Reservas* — rather than building
+> a new screen. Booking cards get a left urgency accent (Orange `< 24h`, Grey safe), a *Vence en…*
+> chip, the pending-balance figure, and the `BookingWhatsAppButton` (pre-flight atomic claim, D6).
+> "La pestaña de Reservas" in the scenarios below = the *Reservas* filter on that list.
 
 #### Gherkin Scenarios
 
@@ -194,6 +202,11 @@ Escenario 1: Cancelación exitosa y liberación en tiempo real
 > I want: To reactivate expired bookings safely if the tourist arrives late and there is still capacity
 > To: Avoid friction with late customers while preventing overbooking.
 
+> **Implementation (D9): no contingency screen.** The expiry banner and `Reactivar y Liquidar`
+> button are **dynamically incorporated into the existing folio detail** (`FolioHistoryDetailPage`
+> / `FolioReceiptPage`) via the shared `ExpiredBookingBanner` + `BookingActions` components — the
+> agent opens the same folio they already know and the contingency actions appear in context.
+
 #### Flujo de Resolución de Conflictos
 ```
 [Turista llega tarde y reserva expiró]
@@ -236,7 +249,11 @@ folios read back as non-bookings.
 ```ts
 bookingMinDownPaymentPct: integer('booking_min_down_payment_pct').notNull().default(0),  // US-A46
 bookingHoldDays: integer('booking_hold_days').notNull().default(7),                       // US-A46
-sameDayBufferMinutes: integer('same_day_buffer_minutes').notNull().default(15),           // US-AG07.1 (org-level)
+// US-A47 — two SIGNED departure offsets (+ before / − after). salesCutoff closes new sales/booking
+// creation on a departing slot; bookingGrace times the unsettled same-day auto-cancel (renamed
+// from same_day_buffer_minutes). Migration 0033: add salesCutoff (default 0) + RENAME the buffer.
+salesCutoffOffsetMinutes: integer('sales_cutoff_offset_minutes').notNull().default(0),    // US-A47
+bookingGraceOffsetMinutes: integer('booking_grace_offset_minutes').notNull().default(15), // US-A47 (was same_day_buffer)
 ```
 
 ### `folios` (active — this phase)
@@ -288,12 +305,18 @@ org-wide list via `/api/folios`). Money is integer **minor units**. Per Multiten
 | `POST /api/pos/folios/:id/cancel` *(new)* | `{ reason?: string }` | `200` (Cancelled Folio) | `409` (not a live booking), `404` | AG07.4 |
 | `POST /api/pos/folios/:id/reminder` *(new)* | `{ force?: boolean }` — **atomic claim** (D6). Returns `{ claimed, reminder_sent_at, reminder_sent_by }` | `200` (claimed true/false) | `409` (not a booking), `404` | AG07.3 |
 | `POST /api/pos/folios/:id/reactivate` *(new)* | `{}` — re-block freed spots **iff** effective capacity ≥ the booking's spots, then return to settle | `200` (re-booked, fresh `booking_expires_at`) | `409 NO_CAPACITY_AVAILABLE`, `404` | AG07.5 |
-| `PUT /api/organizations/me` *(extended)* | `{ booking_min_down_payment_pct?, booking_hold_days?, same_day_buffer_minutes? }` | `200` | `400` (range) | A46 |
+| `PUT /api/organizations/me` *(extended)* | `{ booking_min_down_payment_pct?, booking_hold_days?, sales_cutoff_offset_minutes?, booking_grace_offset_minutes? }` (offsets signed, ±240) | `200` | `400` (range) | A46/A47 |
+| `POST /api/pos/folios` + `…/reactivate` *(guard, US-A47)* | — | — | `409 SLOT_CLOSED` when the slot's departure has passed `sales_cutoff_offset_minutes` (blocks selling/booking/reactivating a departed slot) | A47 |
 | `GET /api/pos/folios?status=booking` *(row extended)* | — | row gains `booking_expires_at`, `pending_balance` (=`total−amount_paid`), `reminder_status` | — | AG07.3 |
+| `GET /api/folios` + `GET /api/folios/:id` *(admin, extended — D5/D9-admin)* | — | list rows & detail gain `booking_expires_at`, `pending_balance`, `customer_phone`, `reminder_status`, `reminder_sent_at/by` so the org-wide `/folios` surface decorates apartado rows | — | AG07.3 |
 
 ### 4.1 Booking creation (handler logic, after `total` is computed)
 
 ```
+// US-A47 — sales cutoff applies to EVERY line of EVERY new folio (full sale AND booking), per
+// line in the validate loop, BEFORE any inventory decrement:
+for (line of lines) if (slotEpoch(line) <= now + org.salesCutoffOffsetMinutes*60) -> 409 SLOT_CLOSED
+
 policy = resolveBookingPolicy(service, org)          // = service-override ?? org-global; org-only this phase
 if (down_payment != null) {
   require customer_phone is present & dialable         // D4 → 400 VALIDATION_ERROR otherwise
@@ -311,8 +334,10 @@ if (down_payment != null) {
 
 ```
 holdDuration = org.bookingHoldDays * 24 * 3600
-tourBuffer   = sameDay(earliestSlot, createdAt)  ? org.sameDayBufferMinutes * 60  : 24*3600
+tourBuffer   = sameDay(earliestSlot, createdAt)  ? org.bookingGraceOffsetMinutes * 60  : 24*3600
 bookingExpiresAt = min( createdAt + holdDuration,  earliestSlotStart - tourBuffer )
+// US-A47 — bookingGraceOffsetMinutes is SIGNED: a NEGATIVE grace makes tourBuffer negative, pushing
+// the expiry PAST departure (a courtesy window for an unsettled same-day apartado).
 ```
 *(Cascade-ready: the service-override branch is a later phase; the resolver signature already
 takes `service` so wiring it in is additive.)*
@@ -360,19 +385,30 @@ Functional minimalism — reduce cognitive load, stay elegant. No B2B switch thi
      leaves $Y dims the chip (render-phase derived state, no effect).
    * Phone field is **required** once the amount makes it a booking (D4); helper line shows
      `Saldo pendiente $… · Mínimo $…`.
-2. **Recovery dashboard (CRM, US-AG07.3):**
-   * Caller-scoped for agents; admins get the org-wide list (D5). Ordered by `bookingExpiresAt ASC`.
-   * Left border Orange if `expires_in < 24h`, Grey if safe. Pending balance in a badge.
-   * **WhatsApp (pre-flight, D6)**: tap → `POST /reminder` (atomic claim) **first**. On
-     `claimed:true` → dim the icon to opacity 0.5 and `window.open("https://wa.me/{phone}?text=…")`
-     with client-built copy. On `claimed:false` → a non-blocking notice "Ya contactado por
-     {reminder_sent_by} a las {HH:MM} · **Reenviar**"; *Reenviar* re-posts with `force:true` then
-     opens WhatsApp. The dim persists for other viewers after refetch.
-3. **Expiry handling (US-AG07.5 — reactivation only this phase):**
-   * Expired booking shows the banner **"Apartado Expirado - Cupos Liberados"**.
-   * If effective capacity ≥ the booking's spots: green **`[ Reactivar y Liquidar ]`** (active).
-   * If full: it is **disabled** ("Tour Lleno"). `[ Reagendar Tour ]` and `[ Generar Cupón ]`
-     render **disabled / "Próximamente"** — those actions are a **later phase** (§1.2).
+2. **Recovery on the existing folio lists (CRM, US-AG07.3 — D9, no dedicated dashboard):**
+   * Delivered by enhancing the agent `FolioHistoryPage` (caller-scoped) **and** the admin
+     `FoliosListPage` (org-wide, D5) — both already filter by *Reservas*. **Only `booking`-status
+     cards** are decorated; paid/cancelled cards read as before.
+   * Left accent Orange if `expires_in < 24h`, Grey if safe; a *Vence en…* chip; the
+     pending-balance figure beside Total/Anticipo.
+   * **WhatsApp (pre-flight, D6)** via the shared `BookingWhatsAppButton`: tap → `POST /reminder`
+     (atomic claim) **first** (the button `stopPropagation`s so it never opens the card's detail).
+     On `claimed:true` → dim the icon to opacity 0.5 and `window.open("https://wa.me/{phone}?text=…")`
+     with client-built copy. On `claimed:false` → a non-blocking *¿Reenviar?* confirm; on accept it
+     re-posts with `force:true` then opens WhatsApp. The dim persists for other viewers after refetch.
+   * Tapping the card opens the **existing folio detail** for the in-context actions (below).
+3. **Expiry & settle on the existing folio detail (US-AG07/07.4/07.5 — D9):**
+   * No separate screen: `ExpiredBookingBanner` + `BookingActions` are dropped into the agent
+     `FolioHistoryDetailPage`, the post-sale `FolioReceiptPage`, **and the admin `FolioDetailPage`**
+     (D5). QR access is gated to `paid`; a live/expired apartado shows a pending-balance row.
+   * On the **admin** detail, a `booking`-status folio shows the non-refundable Liquidar/Cancelar
+     and **hides** the US-A21 refundable *Cancelar folio* (which stays for `paid` folios).
+   * **Live apartado** → **`[ Liquidar saldo ]`** (one-shot) + **`Cancelar apartado`** (confirm,
+     non-refundable, releases spots).
+   * **Expired apartado** → banner **"Apartado Expirado - Cupos Liberados"** + green
+     **`[ Reactivar y Liquidar ]`**; if the tour has refilled the reactivate call returns
+     `409 NO_CAPACITY_AVAILABLE` (inline error). `[ Reagendar ]` and `[ Generar cupón ]` render
+     **disabled / "Próximamente"** — a **later phase** (§1.2).
 
 ---
 
@@ -380,7 +416,7 @@ Functional minimalism — reduce cognitive load, stay elegant. No B2B switch thi
 
 | Concern | Owner |
 |---|---|
-| Booking create / settle / cancel / reactivate / reminder, org policy, expiry sweep, adaptive checkout, dashboard | **This feature** |
+| Booking create / settle / cancel / reactivate / reminder, org policy, expiry sweep, adaptive checkout; apartado affordances **integrated into the existing Ventas list + folio detail** (D9, no dedicated dashboard) | **This feature** |
 | Cart pricing, atomic decrement, controlled discount, extras, QR signing, ticket email, portal token | *POS / QR / Email* — reused (QR+email **invoked at settle**) |
 | Commission snapshot storage + running-balance derivation | *Commissions* — this feature only sets the snapshot per D8 |
 | **Cash drawer** | *Cash drawer* — **REQUIRES A FOLLOW-UP**: today it *excludes* `cancelled` folios from collected cash, but a **non-refundable retained deposit stays in the drawer** (D7). The drawer must count `amount_paid` of a `cancelled` **booking** (deposit retained) as collected cash — a "cancelled-but-retained" carve-out. Tracked as an Open Decision + a note to the cash-drawer owner. |
@@ -425,7 +461,7 @@ Functional minimalism — reduce cognitive load, stay elegant. No B2B switch thi
 - [x] Org policy editable via `PUT /api/organizations/me` (range-validated, admin-only).
 - [x] Scheduled Worker (`wrangler.jsonc` cron `*/15` + `scheduled` export → `sweepExpiredBookings`) sweeps expired bookings.
 - [~] Cash-drawer carve-out for cancelled-but-retained deposits — **filed as a cross-feature follow-up** (`docs/TECH_DEBT.md` §17), owned by the cash-drawer derivation.
-- [x] Frontend: adaptive checkout (states + suggested chip), Apartados dashboard (urgency sort, WhatsApp pre-flight, reminder dim, settle/cancel), reactivation UI on the folio view.
+- [x] Frontend (D9 — **no new screens**): adaptive checkout (states + suggested chip); apartado recovery **integrated into the existing folio lists** — agent `FolioHistoryPage` and admin `FoliosListPage` (urgency accent + countdown + WhatsApp pre-flight/dim on `booking` cards); **expiry banner + Liquidar/Cancelar/Reactivar dynamically added to every folio detail** (`FolioHistoryDetailPage`, `FolioReceiptPage`, admin `FolioDetailPage`) via shared `BookingActions`/`ExpiredBookingBanner`/`BookingWhatsAppButton`; the admin detail hides the US-A21 refundable cancel for `booking` folios (D9-admin); admin serializers (`listFolios`/`readFolio`) extended with the booking fields; booking mutations invalidate the admin `['folios']` cache. Org policy editable on the admin **Configuración** screen (US-A46), which is what surfaces the deposit chip.
 - [x] Tests (26 new): all §7 scenarios incl. **Sc.16 org isolation via `seedTwoOrgs`** and Sc.17 backward-compat; full suite 345 pass (the only 6 reds are a pre-existing, unrelated QR-ticket-expiry date-bomb in the scanner suite).
 
 ---

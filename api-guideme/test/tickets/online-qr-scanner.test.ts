@@ -170,10 +170,13 @@ describe('Online QR Scanner', () => {
 
   it('Scenario 4 — expired ticket', async () => {
     const { organizationId } = await seedUser({ email: AGENT_EMAIL, role: 'agent' })
-    // A past-dated (still active) slot mints a ticket whose expires_at is in the past.
-    const { lineId, token } = await mintTicket(AGENT_EMAIL, organizationId, { date: '2020-01-01' })
+    // US-A47 — a past slot can no longer be SOLD, so mint a valid ticket (slot 2026-06-15, expiry
+    // = slotDate + 48h = 2026-06-17) then jump the frozen clock past it to test EXPIRED rejection.
+    const { lineId, token } = await mintTicket(AGENT_EMAIL, organizationId, { date: '2026-06-15' })
 
+    vi.setSystemTime(new Date('2026-06-18T12:00:00Z'))
     const { json } = await scan(AGENT_EMAIL, token)
+    vi.setSystemTime(new Date('2026-06-14T12:00:00Z')) // restore the anchor for later tests
     expect(json.result).toBe('invalid')
     expect(json.reason).toBe('EXPIRED')
     expect(await getRedeemedCount(lineId)).toBe(0)

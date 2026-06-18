@@ -22,8 +22,8 @@ const CatalogDetailPage = lazy(() => import('./pages/CatalogDetailPage'))
 const PosCatalogPage = lazy(() => import('./pages/PosCatalogPage'))
 const PosServicePage = lazy(() => import('./pages/PosServicePage'))
 const PosCheckoutPage = lazy(() => import('./pages/PosCheckoutPage'))
-const BookingsDashboardPage = lazy(() => import('./pages/BookingsDashboardPage'))
 const FolioReceiptPage = lazy(() => import('./pages/FolioReceiptPage'))
+const SettingsPage = lazy(() => import('./pages/SettingsPage'))
 const FolioHistoryPage = lazy(() => import('./pages/FolioHistoryPage'))
 const FolioHistoryDetailPage = lazy(() => import('./pages/FolioHistoryDetailPage'))
 const ScannerPage = lazy(() => import('./pages/ScannerPage'))
@@ -105,12 +105,21 @@ function App() {
               }
             />
 
+            {/* Org booking policy — admin sets the min down-payment % (US-A46) */}
+            <Route
+              path={ROUTES.SETTINGS}
+              element={
+                <RoleGuard role="admin">
+                  <SettingsPage />
+                </RoleGuard>
+              }
+            />
+
             {/* Point of sale (US-AG03–AG08) — selling is a daily activity for BOTH roles
                 (US-A31), so no RoleGuard: agents and admins run the same flow. */}
             <Route path={ROUTES.POS} element={<PosCatalogPage />} />
             <Route path={ROUTES.POS_SERVICE} element={<PosServicePage />} />
             <Route path={ROUTES.POS_CHECKOUT} element={<PosCheckoutPage />} />
-            <Route path={ROUTES.POS_BOOKINGS} element={<BookingsDashboardPage />} />
             <Route path={ROUTES.FOLIO} element={<FolioReceiptPage />} />
 
             {/* Agent folio history — read-only list + detail (US-AG20, US-AG21) */}

@@ -4,21 +4,31 @@
 
 export type FolioStatus = 'paid' | 'booking' | 'cancelled'
 
+// US-AG07.3 — last-reminder tracking for the WhatsApp recovery flow.
+export type ReminderStatus = 'none' | 'sent'
+
 export interface FolioAgent {
   id: string
   name: string
 }
 
-// Lean row shape for the admin list — enough to identify a folio to cancel.
+// Lean row shape for the admin list — enough to identify a folio to cancel, plus the
+// booking-recovery fields (US-AG07.3/D5) that decorate apartado rows org-wide.
 export interface FolioListItem {
   id: string
   agent: FolioAgent
   customer_name: string | null
+  customer_phone?: string | null
   status: FolioStatus
   total: number
   amount_paid: number
+  pending_balance?: number
   created_at: number
   cancelled_at: number | null
+  booking_expires_at?: number | null
+  reminder_status?: ReminderStatus
+  reminder_sent_at?: number | null
+  reminder_sent_by?: string | null
 }
 
 export interface FolioLineExtra {
@@ -55,6 +65,12 @@ export interface FolioDetail {
   discount_total: number
   total: number
   amount_paid: number
+  // US-AG07/D5 — apartado state for the booking banner + Liquidar/Reactivar on the detail.
+  pending_balance?: number
+  booking_expires_at?: number | null
+  reminder_status?: ReminderStatus
+  reminder_sent_at?: number | null
+  reminder_sent_by?: string | null
   cancelled_at: number | null
   cancelled_by: string | null
   cancellation_reason: string | null

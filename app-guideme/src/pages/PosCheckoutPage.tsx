@@ -25,7 +25,8 @@ import PaymentsRounded from '@mui/icons-material/PaymentsRounded'
 import CreditCardRounded from '@mui/icons-material/CreditCardRounded'
 import AccountBalanceRounded from '@mui/icons-material/AccountBalanceRounded'
 import LinkRounded from '@mui/icons-material/LinkRounded'
-import { useConfirmSale, useMyOrganization } from '../features/pos/hooks'
+import { useConfirmSale } from '../features/pos/hooks'
+import { useMyOrganization } from '../features/organization'
 import {
   usePosCart,
   toConfirmPayload,
@@ -55,6 +56,10 @@ function errorMessage(error: unknown): string {
   if (error instanceof ServiceError) {
     if (error.code === 'SLOT_UNAVAILABLE') {
       return 'Un horario seleccionado se agotó — por favor revisa tu carrito e inténtalo de nuevo.'
+    }
+    // US-A47 — the slot's departure passed the sales cutoff (it's no longer sellable).
+    if (error.code === 'SLOT_CLOSED') {
+      return 'Un horario ya cerró para venta (su salida pasó el límite). Quítalo del carrito para continuar.'
     }
     if (error.code === 'PRICE_BELOW_MINIMUM') {
       return 'Un artículo tiene un precio por debajo del mínimo — ajusta el descuento e inténtalo de nuevo.'

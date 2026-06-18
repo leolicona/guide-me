@@ -85,7 +85,7 @@ const setOrgPolicy = async (
   p: { minPct?: number; holdDays?: number; bufferMin?: number },
 ) => {
   await env.DB.prepare(
-    `UPDATE organizations SET booking_min_down_payment_pct = ?, booking_hold_days = ?, same_day_buffer_minutes = ? WHERE id = ?`,
+    `UPDATE organizations SET booking_min_down_payment_pct = ?, booking_hold_days = ?, booking_grace_offset_minutes = ? WHERE id = ?`,
   )
     .bind(p.minPct ?? 0, p.holdDays ?? 7, p.bufferMin ?? 15, orgId)
     .run()

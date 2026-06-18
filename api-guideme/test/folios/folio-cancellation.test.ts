@@ -238,6 +238,47 @@ describe('Total Folio Cancellation', () => {
     expect(await getSlotBooked(slotId)).toBe(0)
   })
 
+  // US-AG07.3 / D5 — the admin list + detail must carry the apartado-recovery fields so the
+  // org-wide /folios surface can decorate booking rows (urgency, pending balance, WhatsApp).
+  it('exposes apartado fields on the admin list + detail', async () => {
+    const { organizationId, agentId } = await seedOrgWithStaff()
+    const serviceId = await seedService(organizationId)
+    const slotId = await seedSlot(organizationId, serviceId, { booked: 2 })
+    const folioId = await seedFolio({
+      organizationId,
+      agentId,
+      status: 'booking',
+      total: 150000,
+      amountPaid: 50000,
+    })
+    await seedFolioLine({ organizationId, folioId, serviceId, slotId, quantity: 2 })
+
+    const expiresAt = Math.floor(Date.now() / 1000) + 3600
+    await env.DB.prepare(
+      `UPDATE folios
+         SET booking_expires_at = ?, customer_phone = '5551234567',
+             reminder_status = 'sent', reminder_sent_at = ?, reminder_sent_by = ?
+       WHERE id = ?`,
+    )
+      .bind(expiresAt, expiresAt, agentId, folioId)
+      .run()
+
+    const list = await listFolios(ADMIN_EMAIL, 'status=booking')
+    expect(list.status).toBe(200)
+    const row = list.json.folios.find((r: any) => r.id === folioId)
+    expect(row.pending_balance).toBe(100000)
+    expect(row.booking_expires_at).toBe(expiresAt)
+    expect(row.customer_phone).toBe('5551234567')
+    expect(row.reminder_status).toBe('sent')
+    expect(row.reminder_sent_by).toBe(agentId)
+
+    const detail = await getFolio(ADMIN_EMAIL, folioId)
+    expect(detail.status).toBe(200)
+    expect(detail.json.folio.pending_balance).toBe(100000)
+    expect(detail.json.folio.booking_expires_at).toBe(expiresAt)
+    expect(detail.json.folio.reminder_status).toBe('sent')
+  })
+
   it('Scenario 4 — double cancellation → 409; spots and audit unchanged', async () => {
     const { organizationId, agentId } = await seedOrgWithStaff()
     const serviceId = await seedService(organizationId)

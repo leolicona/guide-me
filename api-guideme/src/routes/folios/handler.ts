@@ -56,6 +56,12 @@ const readFolio = async (db: Db, org: string, folioId: string) => {
       cancelledBy: folios.cancelledBy,
       cancellationReason: folios.cancellationReason,
       cancellationClawback: folios.cancellationClawback,
+      // US-AG07/D5 — apartado state, so the admin detail can show the expiry banner +
+      // Liquidar/Reactivar and the reminder status.
+      bookingExpiresAt: folios.bookingExpiresAt,
+      reminderStatus: folios.reminderStatus,
+      reminderSentAt: folios.reminderSentAt,
+      reminderSentBy: folios.reminderSentBy,
       // US-A23 — refund tracking. refund_pin is DELIBERATELY not selected: the PIN is
       // portal-only (spec D6) — the admin learns it from the tourist in person, which is
       // exactly what proves the cash changed hands.
@@ -128,7 +134,12 @@ const readFolio = async (db: Db, org: string, folioId: string) => {
     discount_total: folio.discountTotal,
     total: folio.total,
     amount_paid: folio.amountPaid,
+    pending_balance: folio.total - folio.amountPaid,
     commission_amount: folio.commissionAmount,
+    booking_expires_at: tsOrNull(folio.bookingExpiresAt),
+    reminder_status: folio.reminderStatus,
+    reminder_sent_at: tsOrNull(folio.reminderSentAt),
+    reminder_sent_by: folio.reminderSentBy,
     cancelled_at: tsOrNull(folio.cancelledAt),
     cancelled_by: folio.cancelledBy,
     cancellation_reason: folio.cancellationReason,
@@ -193,11 +204,18 @@ export const listFolios = async (c: FoliosContext) => {
       agentId: folios.agentId,
       agentName: users.name,
       customerName: folios.customerName,
+      customerPhone: folios.customerPhone,
       status: folios.status,
       total: folios.total,
       amountPaid: folios.amountPaid,
       createdAt: folios.createdAt,
       cancelledAt: folios.cancelledAt,
+      // US-AG07.3/D5 — booking-recovery fields so the admin list can decorate apartado rows
+      // (urgency accent, pending balance, WhatsApp reminder) exactly like the agent list.
+      bookingExpiresAt: folios.bookingExpiresAt,
+      reminderStatus: folios.reminderStatus,
+      reminderSentAt: folios.reminderSentAt,
+      reminderSentBy: folios.reminderSentBy,
     })
     .from(folios)
     .innerJoin(users, eq(folios.agentId, users.id))
@@ -209,11 +227,17 @@ export const listFolios = async (c: FoliosContext) => {
       id: r.id,
       agent: { id: r.agentId, name: r.agentName },
       customer_name: r.customerName,
+      customer_phone: r.customerPhone,
       status: r.status,
       total: r.total,
       amount_paid: r.amountPaid,
+      pending_balance: r.total - r.amountPaid,
       created_at: Math.floor(r.createdAt.getTime() / 1000),
       cancelled_at: tsOrNull(r.cancelledAt),
+      booking_expires_at: tsOrNull(r.bookingExpiresAt),
+      reminder_status: r.reminderStatus,
+      reminder_sent_at: tsOrNull(r.reminderSentAt),
+      reminder_sent_by: r.reminderSentBy,
     })),
   })
 }

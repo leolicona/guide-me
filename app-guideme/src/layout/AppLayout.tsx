@@ -14,7 +14,6 @@ import { alpha, useTheme } from '@mui/material/styles'
 import type { SvgIconComponent } from '@mui/icons-material'
 import AccountBalanceWalletRounded from '@mui/icons-material/AccountBalanceWalletRounded'
 import PointOfSaleRounded from '@mui/icons-material/PointOfSaleRounded'
-import BookmarkAddedRounded from '@mui/icons-material/BookmarkAddedRounded'
 import QrCodeScannerRounded from '@mui/icons-material/QrCodeScannerRounded'
 import ReceiptLongRounded from '@mui/icons-material/ReceiptLongRounded'
 import TodayRounded from '@mui/icons-material/TodayRounded'
@@ -41,9 +40,8 @@ interface NavItem {
 // Caja]. Occasional admin tools (Agentes, Catálogo, …) live in the account surface, not here.
 const NAV_ITEMS: NavItem[] = [
   { label: 'Hoy', to: ROUTES.DASHBOARD, icon: TodayRounded, role: 'admin' },
+  // US-AG07.3 — Apartados is no longer a nav destination; it's a tab inside Vender.
   { label: 'Vender', to: ROUTES.POS, icon: PointOfSaleRounded },
-  // US-AG07.3 — Apartados recovery dashboard (agent-only; caller-scoped open bookings).
-  { label: 'Apartados', to: ROUTES.POS_BOOKINGS, icon: BookmarkAddedRounded, role: 'agent' },
   { label: 'Escáner', to: ROUTES.SCAN, icon: QrCodeScannerRounded },
   { label: 'Ventas', to: ROUTES.HISTORY, icon: ReceiptLongRounded, role: 'agent' },
   { label: 'Ventas', to: ROUTES.FOLIOS, icon: ReceiptLongRounded, role: 'admin' },
@@ -92,8 +90,8 @@ export function AppLayout() {
 
   const items = NAV_ITEMS.filter((i) => !i.role || i.role === user.role)
   const isActive = (to: string) => location.pathname.startsWith(to)
-  // Pick the LONGEST matching route so a nested path (e.g. /pos/bookings) highlights its own tab
-  // rather than the parent (/pos · Vender), which it also prefix-matches.
+  // Pick the LONGEST matching route so a future nested destination highlights its own tab
+  // rather than a parent it also prefix-matches.
   const activeValue = items.reduce<string | false>(
     (best, i) =>
       isActive(i.to) && (best === false || i.to.length > best.length) ? i.to : best,

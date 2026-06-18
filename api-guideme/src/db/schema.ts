@@ -9,10 +9,14 @@ export const organizations = sqliteTable('organizations', {
   ackWindowHours: integer('ack_window_hours').notNull().default(24),
   // Bookings/down-payments policy (US-A46 / US-AG07.1) — org-level globals. minimum deposit as a
   // percent of the folio total (0–100; 0 = no minimum); hold window in whole days before an
-  // unsettled booking auto-cancels; same-day buffer in minutes (release margin for a same-day tour).
+  // unsettled booking auto-cancels. US-A47 — two SIGNED-minute departure offsets (+ = before
+  // departure, − = after, a grace window): salesCutoff closes NEW sales/booking creation on a
+  // departing slot; bookingGrace decides when an unsettled SAME-DAY booking auto-cancels (was
+  // same_day_buffer_minutes).
   bookingMinDownPaymentPct: integer('booking_min_down_payment_pct').notNull().default(0),
   bookingHoldDays: integer('booking_hold_days').notNull().default(7),
-  sameDayBufferMinutes: integer('same_day_buffer_minutes').notNull().default(15),
+  salesCutoffOffsetMinutes: integer('sales_cutoff_offset_minutes').notNull().default(0),
+  bookingGraceOffsetMinutes: integer('booking_grace_offset_minutes').notNull().default(15),
   createdAt: integer('created_at', { mode: 'timestamp' })
     .notNull()
     .default(sql`(unixepoch())`),
