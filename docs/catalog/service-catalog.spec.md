@@ -119,6 +119,16 @@ row for historical values. To keep that guarantee:
 - `DELETE /api/services/:id/extras/:extraId` therefore performs a **soft-deactivate**
   (sets the extra's `status = 'inactive'`), not a row deletion.
 
+> **Rev. 2026-06-23 — US-A58 adds a guarded hard-delete.** Deactivation (above) remains the
+> default and the only path for a service that has ever sold. US-A58 introduces a true
+> `DELETE /api/services/:id` that is **rejected (`409 SERVICE_HAS_FOLIOS`) whenever any folio
+> references the service** — so the snapshot guarantee is never at risk — and only removes a
+> genuinely unused service. The hard-delete must also remove dependent rows that have no
+> historical value: its slots/schedules/extras and any `affiliate_commissions` rows
+> (`docs/affiliates/affiliate-setup-commissions.spec.md` D12) in the same transaction (D1 has no
+> automatic `ON DELETE CASCADE`). *(Open: whether future-dated slots with zero bookings also block
+> the delete or are simply removed.)*
+
 ---
 
 ## Pricing rules (enforced server-side)
