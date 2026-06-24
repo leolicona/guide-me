@@ -501,6 +501,36 @@ describe('Agent Continuous Cash Balance with Cash Drops', () => {
     expect(after.json.balance.last_drop).toBeNull()
   })
 
+  it('Scenario 7b — a hand-in exceeding the available cash is rejected (400 DROP_EXCEEDS_BALANCE)', async () => {
+    const { organizationId, agentId } = await seedOrgWithStaff()
+    await seedFolio({ organizationId, agentId, amountPaid: 300000 }) // holds 300000
+
+    // Over the balance → blocked, and no row is written.
+    const over = await createDrop(AGENT_EMAIL, { amount: 300001 })
+    expect(over.status).toBe(400)
+    expect(errCode(over.json)).toBe('DROP_EXCEEDS_BALANCE')
+    expect(await countDrops()).toBe(0)
+
+    // Exactly the balance → allowed (the common "hand in everything" case).
+    const exact = await createDrop(AGENT_EMAIL, { amount: 300000 })
+    expect(exact.status).toBe(201)
+  })
+
+  it('Scenario 7c — pending hand-ins cannot together over-commit the drawer', async () => {
+    const { organizationId, agentId } = await seedOrgWithStaff()
+    await seedFolio({ organizationId, agentId, amountPaid: 300000 })
+
+    // First pending hand-in pledges 200000; only 100000 remains available.
+    expect((await createDrop(AGENT_EMAIL, { amount: 200000 })).status).toBe(201)
+
+    const over = await createDrop(AGENT_EMAIL, { amount: 150000 })
+    expect(over.status).toBe(400)
+    expect(errCode(over.json)).toBe('DROP_EXCEEDS_BALANCE')
+
+    // The remaining 100000 is still deliverable.
+    expect((await createDrop(AGENT_EMAIL, { amount: 100000 })).status).toBe(201)
+  })
+
   it('Scenario 8 — cancel a pending drop (200); confirmed/rejected → 409; other-agent/unknown → 404', async () => {
     const { organizationId, adminId, agentId } = await seedOrgWithStaff()
     const { userId: agent2Id } = await seedUser({ email: AGENT2_EMAIL, role: 'agent', organizationId })
@@ -1032,8 +1062,10 @@ describe('Agent Continuous Cash Balance with Cash Drops', () => {
   // US-A34/A35 widen the self-scoped /me read and /me/drops (the admin's "Tu caja"); the
   // admin↔agent boundary otherwise holds.
   it('Scenario 15 — role boundaries (US-A35 opens /me read + self-drop to the admin)', async () => {
-    const { organizationId, agentId } = await seedOrgWithStaff()
+    const { organizationId, adminId, agentId } = await seedOrgWithStaff()
     const dropId = await seedDrop({ organizationId, agentId, amount: 100000 })
+    // The admin must hold cash to hand in (the drop is capped at the available balance).
+    await seedFolio({ organizationId, agentId: adminId, amountPaid: 100 })
 
     // agent → admin routes: still forbidden
     expect((await listBalances(AGENT_EMAIL)).status).toBe(403)

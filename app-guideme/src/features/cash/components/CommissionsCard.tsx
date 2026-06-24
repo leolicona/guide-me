@@ -14,7 +14,7 @@ export function CommissionsCard({ commissions }: { commissions: CommissionBreakd
         <Typography variant="overline" color="text.secondary">
           Comisiones ganadas
         </Typography>
-        <Typography variant="h4" sx={{ fontWeight: 600 }}>
+        <Typography variant="h5" sx={{ fontWeight: 600 }}>
           {formatMoney(commissions.total)}
         </Typography>
 

@@ -9,6 +9,7 @@ import {
   CardContent,
   CircularProgress,
   Alert,
+  Collapse,
   Fade,
   Stack,
   Divider,
@@ -24,9 +25,12 @@ import {
   DialogContent,
   DialogActions,
 } from '@mui/material'
+import ExpandMoreRounded from '@mui/icons-material/ExpandMoreRounded'
+import StorefrontRounded from '@mui/icons-material/StorefrontRounded'
 import {
   useBalances,
   useDrops,
+  usePendingDropCount,
   useRegisterCollection,
   useRegisterPayout,
 } from '../features/cash/hooks'
@@ -62,7 +66,236 @@ const formatDate = (unixSeconds: number) =>
 // — which live on already-confirmed drops — surface in one tap.
 type DropFilter = DropStatus | 'all' | 'disputed'
 
-// --- Balances tab: company cash exposure per agent (US-A19) + payouts (US-A25)
+function KpiStat({
+  label,
+  value,
+  accent,
+}: {
+  label: string
+  value: string
+  accent?: 'warning' | 'error'
+}) {
+  return (
+    <Box sx={{ flex: 1, minWidth: 0 }}>
+      <Typography variant="caption" color="text.secondary" noWrap>
+        {label}
+      </Typography>
+      <Typography
+        variant="h6"
+        sx={{ fontWeight: 600, color: accent ? `${accent}.main` : 'text.primary' }}
+      >
+        {value}
+      </Typography>
+    </Box>
+  )
+}
+
+// --- Triage header: the at-a-glance state of the company's field cash (US-A19). ---
+// One compact stat strip so the admin lands on "how much is out, how much needs me" without
+// scanning every card. Cash in field = Σ positive balances (money agents/affiliates hold).
+function KpiHeader({ balances }: { balances: BalanceListItem[] }) {
+  const { data: disputed } = useDrops({ status: 'all', ack: 'disputed' })
+  const cashInField = balances.reduce((n, r) => n + (r.balance > 0 ? r.balance : 0), 0)
+  const pending = balances.reduce((n, r) => n + r.pending_drops_count, 0)
+  const disputes = disputed?.length ?? 0
+
+  return (
+    <Card variant="outlined" sx={{ mb: 3 }}>
+      <CardContent>
+        <Stack direction="row" spacing={2} divider={<Divider orientation="vertical" flexItem />}>
+          <KpiStat label="Efectivo en la calle" value={formatMoney(cashInField)} />
+          <KpiStat
+            label="Entregas por confirmar"
+            value={String(pending)}
+            accent={pending > 0 ? 'warning' : undefined}
+          />
+          <KpiStat
+            label="En disputa"
+            value={String(disputes)}
+            accent={disputes > 0 ? 'error' : undefined}
+          />
+        </Stack>
+      </CardContent>
+    </Card>
+  )
+}
+
+// One labelled line in the shift breakdown. `sign` renders the +/− that ties each component to
+// the running-balance formula (mirrors the agent's BalancePage).
+function BreakdownRow({
+  label,
+  value,
+  sign,
+}: {
+  label: string
+  value: number
+  sign?: '+' | '−'
+}) {
+  return (
+    <Stack direction="row" sx={{ justifyContent: 'space-between' }}>
+      <Typography variant="body2" color="text.secondary">
+        {label}
+      </Typography>
+      <Typography variant="body2">
+        {sign === '−' && value > 0 ? '−' : ''}
+        {sign === '+' && value > 0 ? '+' : ''}
+        {formatMoney(value)}
+      </Typography>
+    </Stack>
+  )
+}
+
+// One cash-holder row (US-A19). The headline (name, role, balance, pending badge) and the
+// actions stay visible; the reconciliation breakdown + sales split fold behind a disclosure
+// so a roster of many agents reads as a clean list — parity with the agent's own CashBoxCard.
+function BalanceRow({
+  row,
+  onCollect,
+  onPayout,
+}: {
+  row: BalanceListItem
+  onCollect: (row: BalanceListItem) => void
+  onPayout: (row: BalanceListItem) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const negative = row.balance < 0
+  const isAffiliate = row.role === 'affiliate'
+
+  return (
+    <Card variant="outlined">
+      <CardContent>
+        <Stack direction="row" sx={{ justifyContent: 'space-between', alignItems: 'center' }}>
+          <Box sx={{ minWidth: 0 }}>
+            <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+              <Typography variant="subtitle1" noWrap>
+                {row.agent.name}
+              </Typography>
+              {isAffiliate && (
+                <Chip
+                  size="small"
+                  variant="outlined"
+                  color="primary"
+                  icon={<StorefrontRounded sx={{ fontSize: 16 }} />}
+                  label={row.affiliate_company ?? 'Afiliado'}
+                />
+              )}
+            </Stack>
+            <Typography variant="caption" color="text.secondary">
+              {negative
+                ? `La empresa debe ${isAffiliate ? 'al afiliado' : 'al agente'}`
+                : 'Tiene efectivo de la empresa'}
+            </Typography>
+          </Box>
+          <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center' }}>
+            {row.pending_drops_count > 0 && (
+              <Badge badgeContent={row.pending_drops_count} color="warning">
+                <Chip size="small" variant="outlined" label="pendiente" />
+              </Badge>
+            )}
+            <Typography variant="h6" sx={{ color: negative ? 'error.main' : 'secondary.main' }}>
+              {formatMoney(Math.abs(row.balance))}
+            </Typography>
+          </Stack>
+        </Stack>
+
+        <Stack direction="row" spacing={1} sx={{ mt: 1, alignItems: 'center' }}>
+          {/* US-A27 — face-to-face collection: reduces the balance NOW and sends a signature
+              request (non-blocking). */}
+          <Button size="small" onClick={() => onCollect(row)}>
+            Registrar cobro directo
+          </Button>
+          {negative && (
+            <Button size="small" onClick={() => onPayout(row)}>
+              Registrar pago
+            </Button>
+          )}
+          <Box sx={{ flexGrow: 1 }} />
+          <Button
+            size="small"
+            color="inherit"
+            onClick={() => setOpen((v) => !v)}
+            endIcon={
+              <ExpandMoreRounded
+                sx={{ transform: open ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }}
+              />
+            }
+            sx={{ color: 'text.secondary' }}
+          >
+            Detalle
+          </Button>
+        </Stack>
+
+        <Collapse in={open}>
+          <Divider sx={{ my: 1.5 }} />
+          {/* Shift-scoped breakdown (US-A19) — mirrors the agent's own /me view: a
+              carry-forward line plus the components since their last confirmed drop. */}
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+            {row.last_drop
+              ? `Desde la última entrega · ${formatDate(row.last_drop.created_at)}`
+              : 'Toda la actividad'}
+          </Typography>
+          <Stack spacing={0.5}>
+            {row.carry_forward !== 0 && (
+              <BreakdownRow
+                label="Saldo anterior"
+                value={Math.abs(row.carry_forward)}
+                sign={row.carry_forward < 0 ? '−' : '+'}
+              />
+            )}
+            <BreakdownRow label="Cobrado" value={row.cash_collected} sign="+" />
+            <BreakdownRow label="Comisión" value={row.commission_total} sign="−" />
+            {/* Affiliates have no expenses (affiliate-portal D4) — the line is always zero. */}
+            {!isAffiliate && (
+              <BreakdownRow label="Gastos" value={row.expense_total} sign="−" />
+            )}
+            {row.payouts_total > 0 && (
+              <BreakdownRow label="Pagado" value={row.payouts_total} sign="+" />
+            )}
+          </Stack>
+
+          {/* US-AG29 (D5) — the same cash-vs-electronic split the agent sees on /me. */}
+          <Divider sx={{ my: 1.5 }} />
+          <Stack spacing={0.5}>
+            <Stack direction="row" sx={{ justifyContent: 'space-between' }}>
+              <Typography variant="body2" color="text.secondary">
+                Ventas del turno · {row.sales.cash_count + row.sales.electronic_count}
+              </Typography>
+              <Typography variant="body2">{formatMoney(row.sales.total)}</Typography>
+            </Stack>
+            <Stack direction="row" sx={{ justifyContent: 'space-between' }}>
+              <Typography variant="caption" color="text.secondary">
+                Efectivo {formatMoney(row.sales.cash)} · Electrónico{' '}
+                {formatMoney(row.sales.electronic)}
+              </Typography>
+              <Typography variant="caption" color="text.secondary">
+                Comisiones {formatMoney(row.commissions.total)}
+                {row.commissions.electronic > 0
+                  ? ` (electrónicas ${formatMoney(row.commissions.electronic)})`
+                  : ''}
+              </Typography>
+            </Stack>
+            {row.sales.electronic > 0 && (
+              <Stack direction="row" sx={{ flexWrap: 'wrap', gap: 0.5, mt: 0.5 }}>
+                {(['card', 'transfer', 'link'] as const)
+                  .filter((m) => row.sales.by_method[m] > 0)
+                  .map((m) => (
+                    <Chip
+                      key={m}
+                      size="small"
+                      variant="outlined"
+                      label={`${METHOD_LABEL[m]} · ${formatMoney(row.sales.by_method[m])}`}
+                    />
+                  ))}
+              </Stack>
+            )}
+          </Stack>
+        </Collapse>
+      </CardContent>
+    </Card>
+  )
+}
+
+// --- Balances tab: company cash exposure per agent/affiliate (US-A19) + payouts (US-A25)
 //     + direct collections (US-A27) ---
 function BalancesTab() {
   const { data: balances, isLoading, isError } = useBalances()
@@ -119,118 +352,21 @@ function BalancesTab() {
     return <Alert severity="error">No se pudieron cargar los saldos. Inténtalo de nuevo.</Alert>
   }
   if (!balances || balances.length === 0) {
-    return <Typography color="text.secondary">No hay agentes para mostrar.</Typography>
+    return <Typography color="text.secondary">No hay agentes ni afiliados para mostrar.</Typography>
   }
 
   return (
     <>
+      <KpiHeader balances={balances} />
       <Stack spacing={2}>
-        {balances.map((row) => {
-          const negative = row.balance < 0
-          return (
-            <Card key={row.agent.id} variant="outlined">
-              <CardContent>
-                <Stack direction="row" sx={{ justifyContent: 'space-between', alignItems: 'center' }}>
-                  <Box sx={{ minWidth: 0 }}>
-                    <Typography variant="subtitle1" noWrap>
-                      {row.agent.name}
-                    </Typography>
-                    <Typography variant="caption" color="text.secondary">
-                      {negative ? 'La empresa debe al agente' : 'Tiene efectivo de la empresa'}
-                    </Typography>
-                  </Box>
-                  <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center' }}>
-                    {row.pending_drops_count > 0 && (
-                      <Badge badgeContent={row.pending_drops_count} color="warning">
-                        <Chip size="small" variant="outlined" label="pendiente" />
-                      </Badge>
-                    )}
-                    <Typography
-                      variant="h6"
-                      sx={{ color: negative ? 'error.main' : 'secondary.main' }}
-                    >
-                      {formatMoney(Math.abs(row.balance))}
-                    </Typography>
-                  </Stack>
-                </Stack>
-
-                <Divider sx={{ my: 1.5 }} />
-                {/* Shift-scoped breakdown (US-A19) — mirrors the agent's own /me view: a
-                    carry-forward line plus the components since their last confirmed drop. */}
-                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
-                  {row.last_drop
-                    ? `Desde la última entrega · ${formatDate(row.last_drop.created_at)}`
-                    : 'Toda la actividad'}
-                </Typography>
-                <Stack spacing={0.5}>
-                  {row.carry_forward !== 0 && (
-                    <BreakdownRow
-                      label="Saldo anterior"
-                      value={Math.abs(row.carry_forward)}
-                      sign={row.carry_forward < 0 ? '−' : '+'}
-                    />
-                  )}
-                  <BreakdownRow label="Cobrado" value={row.cash_collected} sign="+" />
-                  <BreakdownRow label="Comisión" value={row.commission_total} sign="−" />
-                  <BreakdownRow label="Gastos" value={row.expense_total} sign="−" />
-                  {row.payouts_total > 0 && (
-                    <BreakdownRow label="Pagado" value={row.payouts_total} sign="+" />
-                  )}
-                </Stack>
-
-                {/* US-AG29 (D5) — the same cash-vs-electronic split the agent sees on /me. */}
-                <Divider sx={{ my: 1.5 }} />
-                <Stack spacing={0.5}>
-                  <Stack direction="row" sx={{ justifyContent: 'space-between' }}>
-                    <Typography variant="body2" color="text.secondary">
-                      Ventas del turno · {row.sales.cash_count + row.sales.electronic_count}
-                    </Typography>
-                    <Typography variant="body2">{formatMoney(row.sales.total)}</Typography>
-                  </Stack>
-                  <Stack direction="row" sx={{ justifyContent: 'space-between' }}>
-                    <Typography variant="caption" color="text.secondary">
-                      Efectivo {formatMoney(row.sales.cash)} · Electrónico{' '}
-                      {formatMoney(row.sales.electronic)}
-                    </Typography>
-                    <Typography variant="caption" color="text.secondary">
-                      Comisiones {formatMoney(row.commissions.total)}
-                      {row.commissions.electronic > 0
-                        ? ` (electrónicas ${formatMoney(row.commissions.electronic)})`
-                        : ''}
-                    </Typography>
-                  </Stack>
-                  {row.sales.electronic > 0 && (
-                    <Stack direction="row" sx={{ flexWrap: 'wrap', gap: 0.5, mt: 0.5 }}>
-                      {(['card', 'transfer', 'link'] as const)
-                        .filter((m) => row.sales.by_method[m] > 0)
-                        .map((m) => (
-                          <Chip
-                            key={m}
-                            size="small"
-                            variant="outlined"
-                            label={`${METHOD_LABEL[m]} · ${formatMoney(row.sales.by_method[m])}`}
-                          />
-                        ))}
-                    </Stack>
-                  )}
-                </Stack>
-
-                <Stack direction="row" spacing={1} sx={{ mt: 1.5 }}>
-                  {/* US-A27 — face-to-face collection: reduces the agent's balance NOW and
-                      sends them a signature request (non-blocking). */}
-                  <Button size="small" onClick={() => openCollection(row)}>
-                    Registrar cobro directo
-                  </Button>
-                  {negative && (
-                    <Button size="small" onClick={() => openPayout(row)}>
-                      Registrar pago
-                    </Button>
-                  )}
-                </Stack>
-              </CardContent>
-            </Card>
-          )
-        })}
+        {balances.map((row) => (
+          <BalanceRow
+            key={row.agent.id}
+            row={row}
+            onCollect={openCollection}
+            onPayout={openPayout}
+          />
+        ))}
       </Stack>
 
       {/* US-A27 — direct collection dialog */}
@@ -325,31 +461,6 @@ function BalancesTab() {
   )
 }
 
-// One labelled line in the shift breakdown. `sign` renders the +/− that ties each component to
-// the running-balance formula (mirrors the agent's BalancePage).
-function BreakdownRow({
-  label,
-  value,
-  sign,
-}: {
-  label: string
-  value: number
-  sign?: '+' | '−'
-}) {
-  return (
-    <Stack direction="row" sx={{ justifyContent: 'space-between' }}>
-      <Typography variant="body2" color="text.secondary">
-        {label}
-      </Typography>
-      <Typography variant="body2">
-        {sign === '−' && value > 0 ? '−' : ''}
-        {sign === '+' && value > 0 ? '+' : ''}
-        {formatMoney(value)}
-      </Typography>
-    </Stack>
-  )
-}
-
 // --- Drops tab: the review queue (US-A19) + open disputes (US-A27/A28) ---
 function DropsTab() {
   const [filter, setFilter] = useState<DropFilter>('pending')
@@ -427,6 +538,9 @@ function DropsTab() {
 
 export default function CashBalancesPage() {
   const [tab, setTab] = useState(0)
+  // Pending hand-ins awaiting confirmation — surfaced as a badge on the Entregas tab so the
+  // admin sees there is review work without switching to it. Shares the balances cache.
+  const { data: pendingCount } = usePendingDropCount(true)
 
   return (
     <Fade in timeout={400}>
@@ -443,7 +557,17 @@ export default function CashBalancesPage() {
         </Typography>
         <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ mb: 3 }}>
           <Tab label="Saldos" />
-          <Tab label="Entregas" />
+          <Tab
+            label={
+              <Badge
+                color="warning"
+                badgeContent={pendingCount ?? 0}
+                sx={{ '& .MuiBadge-badge': { right: -14, top: 2 } }}
+              >
+                Entregas
+              </Badge>
+            }
+          />
         </Tabs>
 
         {tab === 0 ? <BalancesTab /> : <DropsTab />}

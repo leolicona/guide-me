@@ -242,6 +242,67 @@ describe('D4 — capability denials', () => {
   })
 })
 
+// The admin's Caja folds affiliates into the SAME roster as agents (architecture review):
+// no standalone affiliate report — they appear as another cash-holding row, tagged with
+// their role + company, and the admin settles them through the existing collection flow.
+describe('Admin Caja folds in affiliates (D5/D6)', () => {
+  const affUserId = () =>
+    env.DB.prepare('SELECT id FROM users WHERE email = ?').bind(AFF_EMAIL).first<{ id: string }>()
+
+  it('GET /api/cash/balances includes the affiliate, tagged with role + company', async () => {
+    mockResend()
+    const { organizationId, enabled } = await seedPortalFixture()
+    // The affiliate sells a cash pass → they now hold company cash (a balance row).
+    const slot = await seedSlot(organizationId, enabled)
+    await SELF.fetch('http://api.local/api/pos/folios', {
+      method: 'POST',
+      headers: jsonAuth(AFF_EMAIL),
+      body: JSON.stringify({ lines: [{ slot_id: slot, quantity: 1, unit_price: 150000 }] }),
+    })
+
+    const res = await SELF.fetch('http://api.local/api/cash/balances', { headers: auth(ADMIN_EMAIL) })
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as {
+      balances: Array<{ agent: { id: string }; role: string; affiliate_company: string | null; balance: number }>
+    }
+    const aff = body.balances.find((r) => r.role === 'affiliate')
+    expect(aff).toBeDefined()
+    expect(aff!.affiliate_company).toBe('Hotel Maya')
+    // 150000 collected − 30000 commission (20%) = 120000 held.
+    expect(aff!.balance).toBe(120000)
+  })
+
+  it('an admin can register a direct collection against an affiliate', async () => {
+    mockResend()
+    const { organizationId, enabled } = await seedPortalFixture()
+    const slot = await seedSlot(organizationId, enabled)
+    const sale = await SELF.fetch('http://api.local/api/pos/folios', {
+      method: 'POST',
+      headers: jsonAuth(AFF_EMAIL),
+      body: JSON.stringify({ lines: [{ slot_id: slot, quantity: 1, unit_price: 150000 }] }),
+    })
+    const saleBody = (await sale.json()) as { folio: { id: string } }
+    // Backdate the sale so it sits clearly before the collection watermark (avoids the
+    // same-second collision that would re-count it into the post-watermark shift).
+    await env.DB.prepare('UPDATE folios SET created_at = ? WHERE id = ?')
+      .bind(Math.floor(Date.now() / 1000) - 100, saleBody.folio.id)
+      .run()
+    const aff = await affUserId()
+
+    const res = await SELF.fetch('http://api.local/api/cash/collections', {
+      method: 'POST',
+      headers: jsonAuth(ADMIN_EMAIL),
+      body: JSON.stringify({ agent_id: aff!.id, amount: 120000 }),
+    })
+    expect(res.status).toBe(201)
+
+    // The affiliate's balance is now settled to zero.
+    const me = await SELF.fetch('http://api.local/api/cash/me', { headers: auth(AFF_EMAIL) })
+    const meBody = (await me.json()) as { balance: { balance: number } }
+    expect(meBody.balance.balance).toBe(0)
+  })
+})
+
 describe('AF01 — onboarding (parallel invite acceptance)', () => {
   it('accepting an affiliate invite creates an affiliate user linked to the company, with position', async () => {
     mockResend()

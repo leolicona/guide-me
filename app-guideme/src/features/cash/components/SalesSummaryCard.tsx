@@ -20,7 +20,7 @@ export function SalesSummaryCard({ sales }: { sales: SalesBreakdown }) {
           Ventas del turno
         </Typography>
         <Stack direction="row" spacing={1} sx={{ alignItems: 'baseline' }}>
-          <Typography variant="h4" sx={{ fontWeight: 600 }}>
+          <Typography variant="h5" sx={{ fontWeight: 600 }}>
             {formatMoney(sales.total)}
           </Typography>
           <Typography variant="body2" color="text.secondary">

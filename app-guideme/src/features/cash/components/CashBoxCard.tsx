@@ -45,9 +45,12 @@ function BreakdownRow({
 export function CashBoxCard({
   balance,
   onRegisterDrop,
+  showExpenses = true,
 }: {
   balance: AgentBalance
   onRegisterDrop: () => void
+  // Affiliates have no expenses (affiliate-portal D4) — drop the always-zero line for them.
+  showExpenses?: boolean
 }) {
   const [open, setOpen] = useState(false)
   const negative = balance.balance < 0
@@ -95,7 +98,9 @@ export function CashBoxCard({
             )}
             <BreakdownRow label="Efectivo cobrado" value={balance.cash_collected} sign="+" />
             <BreakdownRow label="Comisión ganada" value={balance.commission_total} sign="−" />
-            <BreakdownRow label="Gastos" value={balance.expense_total} sign="−" />
+            {showExpenses && (
+              <BreakdownRow label="Gastos" value={balance.expense_total} sign="−" />
+            )}
             {balance.payouts_total > 0 && (
               <BreakdownRow label="Pagos recibidos" value={balance.payouts_total} sign="+" />
             )}

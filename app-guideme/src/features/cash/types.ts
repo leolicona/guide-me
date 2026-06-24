@@ -136,6 +136,10 @@ export interface AgentBalance {
 // The headline `balance` stays the authoritative all-time figure (the physical cash held).
 export interface BalanceListItem {
   agent: CashAgent
+  // The cash-holder's role. Affiliates (external resellers) fold into the same roster as
+  // in-house agents (affiliate-portal D5); `affiliate_company` names their partner company.
+  role: 'agent' | 'affiliate'
+  affiliate_company: string | null
   carry_forward: number // balance carried into the current shift (may be negative); 0 if none
   cash_collected: number // the breakdown components below are scoped to the current shift
   commission_total: number

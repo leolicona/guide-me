@@ -34,7 +34,7 @@ import { SalesSummaryCard } from '../features/cash/components/SalesSummaryCard'
 import { CommissionsCard } from '../features/cash/components/CommissionsCard'
 import type { DropStatus } from '../features/cash/types'
 import { ServiceError } from '../services/authService'
-import { formatMoney, amountToCents } from '../features/catalog/types'
+import { formatMoney, amountToCents, centsToAmount } from '../features/catalog/types'
 import { useCurrentUser } from '../features/auth/CurrentUserContext'
 
 const DROP_COLOR: Record<DropStatus, 'warning' | 'success' | 'error'> = {
@@ -88,11 +88,26 @@ export default function BalancePage() {
     )
   }
 
+  // What the caller can actually hand in: the cash they hold minus drops already pending
+  // confirmation (that cash is already pledged). The backend enforces this same cap.
+  const available = balance ? balance.balance - balance.pending_drops_total : 0
+
+  const openDrop = () => {
+    // Prefill the full available amount — the common "hand in everything" case — so the
+    // number the caller is staring at doesn't have to be retyped.
+    setDropAmount(available > 0 ? String(centsToAmount(available)) : '')
+    setDropNote('')
+    setDropOpen(true)
+  }
+
+  const dropCents = amountToCents(Number(dropAmount))
+  const dropExceeds = Number.isFinite(dropCents) && dropCents > available
+  const dropInvalid = !dropAmount || !Number.isFinite(dropCents) || dropCents <= 0 || dropExceeds
+
   const handleCreateDrop = () => {
-    const amount = amountToCents(Number(dropAmount))
-    if (!Number.isFinite(amount) || amount <= 0) return
+    if (dropInvalid) return
     createDrop.mutate(
-      { amount, note: dropNote.trim() || null },
+      { amount: dropCents, note: dropNote.trim() || null },
       {
         onSuccess: () => {
           setDropOpen(false)
@@ -134,7 +149,11 @@ export default function BalancePage() {
                   : 'Toda tu actividad'}
               </Typography>
               <Stack spacing={3}>
-                <CashBoxCard balance={balance} onRegisterDrop={() => setDropOpen(true)} />
+                <CashBoxCard
+                  balance={balance}
+                  showExpenses={!isAffiliate}
+                  onRegisterDrop={openDrop}
+                />
                 <SalesSummaryCard sales={balance.sales} />
                 <CommissionsCard commissions={balance.commissions} />
               </Stack>
@@ -315,6 +334,25 @@ export default function BalancePage() {
                 autoFocus
                 value={dropAmount}
                 onChange={(e) => setDropAmount(e.target.value)}
+                error={dropExceeds}
+                helperText={
+                  dropExceeds
+                    ? `No puedes entregar más de ${formatMoney(available)} disponibles.`
+                    : `Disponible para entregar: ${formatMoney(available)}`
+                }
+                slotProps={{
+                  input: {
+                    endAdornment: (
+                      <Button
+                        size="small"
+                        onClick={() => setDropAmount(String(centsToAmount(available)))}
+                        disabled={available <= 0}
+                      >
+                        Todo
+                      </Button>
+                    ),
+                  },
+                }}
               />
               <TextField
                 label="Nota (opcional)"
@@ -327,7 +365,10 @@ export default function BalancePage() {
             </Stack>
             {createDrop.isError && (
               <Alert severity="error" sx={{ mt: 2 }}>
-                No se pudo registrar la entrega. Inténtalo de nuevo.
+                {createDrop.error instanceof ServiceError &&
+                createDrop.error.code === 'DROP_EXCEEDS_BALANCE'
+                  ? 'La entrega supera el efectivo disponible. Ajusta el monto.'
+                  : 'No se pudo registrar la entrega. Inténtalo de nuevo.'}
               </Alert>
             )}
           </DialogContent>
@@ -337,7 +378,7 @@ export default function BalancePage() {
               variant="contained"
               disableElevation
               onClick={handleCreateDrop}
-              disabled={createDrop.isPending || !dropAmount}
+              disabled={createDrop.isPending || dropInvalid}
             >
               {createDrop.isPending ? 'Enviando…' : 'Entregar'}
             </Button>

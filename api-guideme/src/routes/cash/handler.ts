@@ -1,7 +1,8 @@
 import type { Context } from 'hono'
-import { and, desc, eq, gt, isNotNull, lte, ne, or, sql } from 'drizzle-orm'
+import { and, desc, eq, gt, inArray, isNotNull, lte, ne, or, sql } from 'drizzle-orm'
 import { getDb, type Db } from '../../db/client'
 import {
+  affiliateCompanies,
   agentExpenses,
   cashDrops,
   folios,
@@ -726,7 +727,20 @@ export const createDrop = async (c: CashContext) => {
   const input = (await c.req.json()) as CreateDropInput
   const db = getDb(c.env)
 
-  const { balance } = await deriveBalance(db, org, user.userId)
+  const { balance, pendingDropsTotal } = await deriveBalance(db, org, user.userId)
+
+  // A hand-in can never exceed the company cash the caller is actually holding. The cap is
+  // the physical balance minus any drops already pending confirmation (that cash is already
+  // pledged), so two pending hand-ins can't together over-commit the drawer. A non-positive
+  // available figure means there is nothing to hand in (the company owes the caller).
+  const available = balance - pendingDropsTotal
+  if (input.amount > available) {
+    throw new ApiError(
+      'DROP_EXCEEDS_BALANCE',
+      400,
+      'The hand-in exceeds the cash available to deliver',
+    )
+  }
 
   const selfAuthorized = user.role === 'admin'
   const now = new Date()
@@ -816,17 +830,28 @@ export const listBalances = async (c: CashContext) => {
   const org = admin.organizationId
   const db = getDb(c.env)
 
-  // A balance row is emitted for every org agent, even one with no activity (→ all zeros).
+  // A balance row is emitted for every cash-holding user, even one with no activity (→ all
+  // zeros). Affiliates (external resellers) carry the same running balance + cash-drop flow as
+  // agents (affiliate-portal D5), so they fold into the same roster — tagged with their role and
+  // company so the admin can tell an in-house agent from a partner at a glance.
   const agents = await db
-    .select({ id: users.id, name: users.name })
+    .select({
+      id: users.id,
+      name: users.name,
+      role: users.role,
+      affiliateCompany: affiliateCompanies.name,
+    })
     .from(users)
-    .where(and(eq(users.organizationId, org), eq(users.role, 'agent')))
+    .leftJoin(affiliateCompanies, eq(affiliateCompanies.id, users.affiliateCompanyId))
+    .where(and(eq(users.organizationId, org), inArray(users.role, ['agent', 'affiliate'])))
 
   const balances = await Promise.all(
     agents.map(async (agent) => {
       const derived = await deriveBalance(db, org, agent.id)
       return {
         agent: { id: agent.id, name: agent.name },
+        role: agent.role,
+        affiliate_company: agent.affiliateCompany ?? null,
         cash_collected: derived.cashCollected,
         commission_total: derived.commissionTotal,
         expense_total: derived.expenseTotal,
@@ -1047,7 +1072,7 @@ export const registerPayout = async (c: CashContext) => {
         eq(users.organizationId, org),
         // Otherwise the target must be an agent in the admin's org; self bypasses the role
         // filter so the admin can clear their own balance.
-        ...(isSelf ? [] : [eq(users.role, 'agent')]),
+        ...(isSelf ? [] : [inArray(users.role, ['agent', 'affiliate'])]),
       ),
     )
     .limit(1)
@@ -1101,7 +1126,7 @@ export const registerCollection = async (c: CashContext) => {
       and(
         eq(users.id, input.agent_id),
         eq(users.organizationId, org),
-        eq(users.role, 'agent'),
+        inArray(users.role, ['agent', 'affiliate']),
       ),
     )
     .limit(1)

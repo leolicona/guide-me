@@ -18,6 +18,7 @@ export type ErrorCode =
   | 'SERVICE_NOT_ALLOWED'
   | 'SERVICE_HAS_FOLIOS'
   | 'ALREADY_INVITED'
+  | 'DROP_EXCEEDS_BALANCE'
   | 'INTERNAL_ERROR'
 
 export class ApiError extends Error {

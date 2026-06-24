@@ -18,7 +18,7 @@ import { useMyBalance, useCreateDrop, useRegisterPayout } from '../hooks'
 import { CashBoxCard } from './CashBoxCard'
 import { SalesSummaryCard } from './SalesSummaryCard'
 import { CommissionsCard } from './CommissionsCard'
-import { formatMoney, amountToCents } from '../../catalog/types'
+import { formatMoney, amountToCents, centsToAmount } from '../../catalog/types'
 
 const formatDate = (unixSeconds: number) =>
   new Date(unixSeconds * 1000).toLocaleString(undefined, {
@@ -49,12 +49,21 @@ export function TuCajaSection() {
   if (isLoading || isError || !balance) return null
 
   const negative = balance.balance < 0
+  const available = balance.balance - balance.pending_drops_total
+
+  const openDrop = () => {
+    setDropAmount(available > 0 ? String(centsToAmount(available)) : '')
+    setDropOpen(true)
+  }
+
+  const dropCents = amountToCents(Number(dropAmount))
+  const dropExceeds = Number.isFinite(dropCents) && dropCents > available
+  const dropInvalid = !dropAmount || !Number.isFinite(dropCents) || dropCents <= 0 || dropExceeds
 
   const handleDrop = () => {
-    const amount = amountToCents(Number(dropAmount))
-    if (!Number.isFinite(amount) || amount <= 0) return
+    if (dropInvalid) return
     createDrop.mutate(
-      { amount },
+      { amount: dropCents },
       {
         onSuccess: () => {
           setDropOpen(false)
@@ -120,7 +129,7 @@ export function TuCajaSection() {
           </CardContent>
         </Card>
       ) : (
-        <CashBoxCard balance={balance} onRegisterDrop={() => setDropOpen(true)} />
+        <CashBoxCard balance={balance} onRegisterDrop={openDrop} />
       )}
 
       <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
@@ -152,6 +161,25 @@ export function TuCajaSection() {
             autoFocus
             value={dropAmount}
             onChange={(e) => setDropAmount(e.target.value)}
+            error={dropExceeds}
+            helperText={
+              dropExceeds
+                ? `No puedes entregar más de ${formatMoney(available)} disponibles.`
+                : `Disponible para entregar: ${formatMoney(available)}`
+            }
+            slotProps={{
+              input: {
+                endAdornment: (
+                  <Button
+                    size="small"
+                    onClick={() => setDropAmount(String(centsToAmount(available)))}
+                    disabled={available <= 0}
+                  >
+                    Todo
+                  </Button>
+                ),
+              },
+            }}
           />
           {createDrop.isError && (
             <Alert severity="error" sx={{ mt: 2 }}>
@@ -165,7 +193,7 @@ export function TuCajaSection() {
             variant="contained"
             disableElevation
             onClick={handleDrop}
-            disabled={createDrop.isPending || !dropAmount}
+            disabled={createDrop.isPending || dropInvalid}
           >
             {createDrop.isPending ? 'Enviando…' : 'Entregar'}
           </Button>
