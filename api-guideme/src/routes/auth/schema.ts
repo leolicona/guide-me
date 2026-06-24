@@ -38,6 +38,9 @@ export const completeInviteSchema = z.object({
   token: z.string().min(1, 'Token is required'),
   name: z.string().min(1, 'Name is required'),
   password: z.string().min(8, 'Password must be at least 8 characters'),
+  // US-AF01 — optional job title, only meaningful for an affiliate invite (the company is
+  // created by the admin, so it is shown read-only, never entered here). Ignored for an agent.
+  position: z.string().optional(),
 })
 
 export type CompleteInviteInput = z.infer<typeof completeInviteSchema>

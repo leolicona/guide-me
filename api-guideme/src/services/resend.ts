@@ -90,6 +90,46 @@ export const sendInvitationEmail = async (
   }
 }
 
+interface AffiliateInvitationEmailInput {
+  to: string
+  organizationName: string
+  companyName: string
+  inviteLink: string
+}
+
+// Parallel affiliate invite (D8). Same magic-link mechanics as the agent invite, but the copy
+// names the partner relationship ("vender como afiliado") rather than "agente".
+export const sendAffiliateInvitationEmail = async (
+  env: CloudflareBindings,
+  { to, organizationName, companyName, inviteLink }: AffiliateInvitationEmailInput,
+): Promise<void> => {
+  const res = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${env.RESEND_API_KEY}`,
+    },
+    body: JSON.stringify({
+      from: env.RESEND_FROM,
+      to,
+      subject: `Invitación para vender servicios de ${organizationName} en GuideMe`,
+      html: `
+        <p>Hola,</p>
+        <p>Has sido invitado a vender los servicios de <strong>${organizationName}</strong> como
+        afiliado (${companyName}) en GuideMe.</p>
+        <p>Completa tu registro haciendo clic en el siguiente enlace (válido por 7 días):</p>
+        <p><a href="${inviteLink}">Aceptar invitación</a></p>
+        <p>Si tú no esperabas esta invitación, puedes ignorar este correo.</p>
+      `,
+    }),
+  })
+
+  if (!res.ok) {
+    const body = await res.text()
+    throw new ApiError('INTERNAL_ERROR', 502, `Resend error: ${body}`)
+  }
+}
+
 interface PasswordResetEmailInput {
   to: string
   name: string

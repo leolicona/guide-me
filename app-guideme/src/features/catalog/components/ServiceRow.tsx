@@ -5,6 +5,7 @@ import TuneRounded from '@mui/icons-material/TuneRounded'
 import EventRepeatRounded from '@mui/icons-material/EventRepeatRounded'
 import BlockRounded from '@mui/icons-material/BlockRounded'
 import CheckCircleRounded from '@mui/icons-material/CheckCircleRounded'
+import DeleteOutlineRounded from '@mui/icons-material/DeleteOutlineRounded'
 import type { Service } from '../types'
 import { formatMoney } from '../types'
 import { categoryLabel } from '../categories'
@@ -15,6 +16,7 @@ interface ServiceRowProps {
   onManageExtras: (service: Service) => void
   onDeactivate: (service: Service) => void
   onReactivate: (service: Service) => void
+  onDelete: (service: Service) => void
 }
 
 export function ServiceRow({
@@ -23,6 +25,7 @@ export function ServiceRow({
   onManageExtras,
   onDeactivate,
   onReactivate,
+  onDelete,
 }: ServiceRowProps) {
   const inactive = service.status === 'inactive'
   const extrasCount = service.extras?.length ?? 0
@@ -109,14 +112,26 @@ export function ServiceRow({
               Horarios
             </Button>
             {inactive ? (
-              <Button
-                size="small"
-                color="primary"
-                startIcon={<CheckCircleRounded />}
-                onClick={() => onReactivate(service)}
-              >
-                Reactivar
-              </Button>
+              <>
+                <Button
+                  size="small"
+                  color="primary"
+                  startIcon={<CheckCircleRounded />}
+                  onClick={() => onReactivate(service)}
+                >
+                  Reactivar
+                </Button>
+                {/* US-A58 — permanent delete, offered for an already-deactivated (no-longer-offered)
+                    service. Blocked server-side if it has sales history. */}
+                <Button
+                  size="small"
+                  color="error"
+                  startIcon={<DeleteOutlineRounded />}
+                  onClick={() => onDelete(service)}
+                >
+                  Eliminar
+                </Button>
+              </>
             ) : (
               <Button
                 size="small"

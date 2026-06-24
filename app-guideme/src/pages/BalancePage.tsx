@@ -35,6 +35,7 @@ import { CommissionsCard } from '../features/cash/components/CommissionsCard'
 import type { DropStatus } from '../features/cash/types'
 import { ServiceError } from '../services/authService'
 import { formatMoney, amountToCents } from '../features/catalog/types'
+import { useCurrentUser } from '../features/auth/CurrentUserContext'
 
 const DROP_COLOR: Record<DropStatus, 'warning' | 'success' | 'error'> = {
   pending: 'warning',
@@ -57,6 +58,10 @@ const formatDate = (unixSeconds: number) =>
   })
 
 export default function BalancePage() {
+  // Affiliate-portal D4/D5: an affiliate carries the same running balance + cash-drop flow as an
+  // agent, but has NO expenses — hide the Gastos card for that role (the API also denies it 403).
+  const user = useCurrentUser()
+  const isAffiliate = user.role === 'affiliate'
   const { data: balance, isLoading, isError } = useMyBalance()
   const addExpense = useAddExpense()
   const deleteExpense = useDeleteExpense()
@@ -135,7 +140,8 @@ export default function BalancePage() {
               </Stack>
             </Box>
 
-            {/* Expenses (US-AG13) */}
+            {/* Expenses (US-AG13) — agents only; an affiliate has no expenses (D4). */}
+            {!isAffiliate && (
             <Card variant="outlined">
               <CardContent>
                 <Typography variant="h6" sx={{ mb: 2 }}>
@@ -220,6 +226,7 @@ export default function BalancePage() {
                 )}
               </CardContent>
             </Card>
+            )}
 
             {/* Recent hand-ins (US-AG14) */}
             <Card variant="outlined">

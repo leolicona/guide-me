@@ -1,7 +1,15 @@
 import type { Context } from 'hono'
+import type { BatchItem } from 'drizzle-orm/batch'
 import { and, asc, eq } from 'drizzle-orm'
 import { getDb } from '../../db/client'
-import { serviceExtras, services } from '../../db/schema'
+import {
+  affiliateCommissions,
+  folioLines,
+  schedules,
+  serviceExtras,
+  services,
+  slots,
+} from '../../db/schema'
 import { ApiError } from '../../types/errors'
 import type { AppVariables } from '../../types/context'
 import type {
@@ -249,6 +257,52 @@ export const deactivateService = (c: ServicesContext) =>
 
 export const reactivateService = (c: ServicesContext) =>
   setServiceStatus(c, 'active')
+
+// US-A58 — guarded hard-delete. Deactivation (above) is the default and the ONLY path for a
+// service that has ever sold; this permanently removes a genuinely unused service so the catalog
+// stays clean. The snapshot guarantee (folios carry their own copies) is never at risk because
+// the delete is REJECTED (409 SERVICE_HAS_FOLIOS) whenever any folio line references the service.
+// Otherwise it removes the service and its dependent rows that hold no historical value —
+// affiliate_commissions (affiliate-setup-commissions.spec.md D12), slots, schedules, extras — in
+// one atomic batch (D1 has no automatic ON DELETE CASCADE). A zero-booking future slot does not
+// block (no folio references it); it is simply removed with the service.
+export const deleteService = async (c: ServicesContext) => {
+  const admin = c.get('user')
+  const org = admin.organizationId
+  const id = c.req.param('id')
+  const db = getDb(c.env)
+
+  await requireService(db, org, id)
+
+  // History guard: any folio line referencing this service blocks the delete (steer to deactivate).
+  const sold = await db
+    .select({ id: folioLines.id })
+    .from(folioLines)
+    .where(and(eq(folioLines.serviceId, id), eq(folioLines.organizationId, org)))
+    .limit(1)
+  if (sold.length > 0) {
+    throw new ApiError(
+      'SERVICE_HAS_FOLIOS',
+      409,
+      'This service has sales history and cannot be deleted — deactivate it instead',
+    )
+  }
+
+  // FK-safe cascade: children before the service. Slots reference schedules, so slots go first.
+  await db.batch([
+    db
+      .delete(affiliateCommissions)
+      .where(and(eq(affiliateCommissions.serviceId, id), eq(affiliateCommissions.organizationId, org))),
+    db.delete(slots).where(and(eq(slots.serviceId, id), eq(slots.organizationId, org))),
+    db.delete(schedules).where(and(eq(schedules.serviceId, id), eq(schedules.organizationId, org))),
+    db
+      .delete(serviceExtras)
+      .where(and(eq(serviceExtras.serviceId, id), eq(serviceExtras.organizationId, org))),
+    db.delete(services).where(and(eq(services.id, id), eq(services.organizationId, org))),
+  ] as [BatchItem<'sqlite'>, ...BatchItem<'sqlite'>[]])
+
+  return c.json({ ok: true, deleted: id })
+}
 
 // Verify the parent service exists in the caller's org. Throws 404 otherwise.
 // Returns the row's id + defaultCapacity so callers (e.g. slots) can seed

@@ -8,6 +8,8 @@ export const ROUTES = {
   DASHBOARD: '/dashboard',
   AGENTS: '/agents',
   INVITE_AGENT: '/agents/invite',
+  AFFILIATES: '/affiliates', // admin — affiliate companies list (US-A48)
+  AFFILIATE_DETAIL: '/affiliates/:id', // admin — affiliate detail/edit (US-A48/A50/A52)
   CATALOG: '/catalog',
   CATALOG_DETAIL: '/catalog/:id',
   SETTINGS: '/settings', // admin — org booking policy (US-A46)

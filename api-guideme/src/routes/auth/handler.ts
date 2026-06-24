@@ -3,6 +3,8 @@ import { and, eq } from 'drizzle-orm'
 import { getCookie } from 'hono/cookie'
 import { getDb } from '../../db/client'
 import {
+  affiliateCompanies,
+  affiliateInvitations,
   invitations,
   organizations,
   passwordResetTokens,
@@ -180,12 +182,43 @@ export const logout = async (c: AuthContext) => {
   return c.json({ message: 'Sesión cerrada correctamente.' }, 200)
 }
 
-const findValidPendingInvitation = async (
+// Resolves a token across BOTH invite tables (D8 parallel flow). An agent invite lives in
+// `invitations`; an affiliate invite in `affiliate_invitations` and carries the company link.
+// Tokens are crypto-random UUIDs, so there is no cross-table collision; the agent path is
+// checked first and is byte-identical to before for an agent token.
+type ResolvedInvitation =
+  | {
+      kind: 'agent'
+      id: string
+      organizationId: string
+      identity: string
+      identityType: 'email'
+    }
+  | {
+      kind: 'affiliate'
+      id: string
+      organizationId: string
+      identity: string
+      identityType: 'email'
+      affiliateCompanyId: string
+    }
+
+const expiredOrMissing = (
+  status: string | undefined,
+  expiresAt: Date | number | null | undefined,
+): boolean => {
+  if (status !== 'pending' || expiresAt == null) return true
+  const ms = expiresAt instanceof Date ? expiresAt.getTime() : Number(expiresAt) * 1000
+  return ms <= Date.now()
+}
+
+const findAnyValidPendingInvitation = async (
   c: AuthContext,
   token: string,
-) => {
+): Promise<ResolvedInvitation> => {
   const db = getDb(c.env)
-  const found = await db
+
+  const agentRows = await db
     .select({
       id: invitations.id,
       organizationId: invitations.organizationId,
@@ -197,28 +230,49 @@ const findValidPendingInvitation = async (
     .from(invitations)
     .where(eq(invitations.token, token))
     .limit(1)
-
-  const invitation = found[0]
-  if (!invitation || invitation.status !== 'pending') {
-    throw new ApiError('INVALID_TOKEN', 400, 'Invalid or expired invitation token')
+  const agent = agentRows[0]
+  if (agent && !expiredOrMissing(agent.status, agent.expiresAt)) {
+    return {
+      kind: 'agent',
+      id: agent.id,
+      organizationId: agent.organizationId,
+      identity: agent.identity,
+      identityType: agent.identityType,
+    }
   }
 
-  const expiresAtMs =
-    invitation.expiresAt instanceof Date
-      ? invitation.expiresAt.getTime()
-      : Number(invitation.expiresAt) * 1000
-
-  if (expiresAtMs <= Date.now()) {
-    throw new ApiError('INVALID_TOKEN', 400, 'Invalid or expired invitation token')
+  const affRows = await db
+    .select({
+      id: affiliateInvitations.id,
+      organizationId: affiliateInvitations.organizationId,
+      affiliateCompanyId: affiliateInvitations.affiliateCompanyId,
+      identity: affiliateInvitations.identity,
+      identityType: affiliateInvitations.identityType,
+      status: affiliateInvitations.status,
+      expiresAt: affiliateInvitations.expiresAt,
+    })
+    .from(affiliateInvitations)
+    .where(eq(affiliateInvitations.token, token))
+    .limit(1)
+  const aff = affRows[0]
+  if (aff && !expiredOrMissing(aff.status, aff.expiresAt)) {
+    return {
+      kind: 'affiliate',
+      id: aff.id,
+      organizationId: aff.organizationId,
+      identity: aff.identity,
+      identityType: aff.identityType,
+      affiliateCompanyId: aff.affiliateCompanyId,
+    }
   }
 
-  return invitation
+  throw new ApiError('INVALID_TOKEN', 400, 'Invalid or expired invitation token')
 }
 
 export const acceptInvite = async (c: AuthContext) => {
   const { token } = c.req.query() as AcceptInviteQuery
 
-  const invitation = await findValidPendingInvitation(c, token)
+  const invitation = await findAnyValidPendingInvitation(c, token)
 
   const db = getDb(c.env)
   const org = await db
@@ -227,12 +281,26 @@ export const acceptInvite = async (c: AuthContext) => {
     .where(eq(organizations.id, invitation.organizationId))
     .limit(1)
 
+  // For an affiliate invite, surface the (admin-created) company name so the acceptance form
+  // can show it read-only ("Te unes a: …", US-AF01).
+  let companyName: string | null = null
+  if (invitation.kind === 'affiliate') {
+    const co = await db
+      .select({ name: affiliateCompanies.name })
+      .from(affiliateCompanies)
+      .where(eq(affiliateCompanies.id, invitation.affiliateCompanyId))
+      .limit(1)
+    companyName = co[0]?.name ?? null
+  }
+
   return c.json(
     {
       invitation: {
         identity: invitation.identity,
         identity_type: invitation.identityType,
         organization_name: org[0]?.name ?? '',
+        invitation_type: invitation.kind,
+        company_name: companyName,
       },
     },
     200,
@@ -242,13 +310,15 @@ export const acceptInvite = async (c: AuthContext) => {
 export const completeInvite = async (c: AuthContext) => {
   const input = (await c.req.json()) as CompleteInviteInput
 
-  const invitation = await findValidPendingInvitation(c, input.token)
+  const invitation = await findAnyValidPendingInvitation(c, input.token)
 
   const db = getDb(c.env)
 
   const { hash, salt } = await hashPassword(c.env, input.password)
 
   const userId = crypto.randomUUID()
+  const isAffiliate = invitation.kind === 'affiliate'
+  const role = isAffiliate ? 'affiliate' : 'agent'
 
   await db.insert(users).values({
     id: userId,
@@ -257,15 +327,25 @@ export const completeInvite = async (c: AuthContext) => {
     email: invitation.identity,
     passwordHash: hash,
     passwordSalt: salt,
-    role: 'agent',
+    role,
     status: 'active',
     plan: 'free',
+    // US-AF01 — link the affiliate user to its company + optional job title. Null for an agent.
+    affiliateCompanyId: isAffiliate ? invitation.affiliateCompanyId : null,
+    position: isAffiliate ? input.position?.trim() || null : null,
   })
 
-  await db
-    .update(invitations)
-    .set({ status: 'accepted', updatedAt: new Date() })
-    .where(eq(invitations.id, invitation.id))
+  if (isAffiliate) {
+    await db
+      .update(affiliateInvitations)
+      .set({ status: 'accepted', updatedAt: new Date() })
+      .where(eq(affiliateInvitations.id, invitation.id))
+  } else {
+    await db
+      .update(invitations)
+      .set({ status: 'accepted', updatedAt: new Date() })
+      .where(eq(invitations.id, invitation.id))
+  }
 
   const { jwt, refreshToken } = await verifyPassword(c.env, {
     password: input.password,
@@ -276,7 +356,7 @@ export const completeInvite = async (c: AuthContext) => {
 
   setSessionCookies(c, { jwt, refreshToken })
 
-  return c.json({ user: { name: input.name, role: 'agent' } }, 200)
+  return c.json({ user: { name: input.name, role } }, 200)
 }
 
 const findValidPasswordResetToken = async (

@@ -35,10 +35,15 @@ export const users = sqliteTable('users', {
   passwordHash: text('password_hash').notNull(),
   passwordSalt: text('password_salt').notNull(),
   phone: text('phone'),
-  role: text('role', { enum: ['admin', 'agent'] }).notNull(),
+  role: text('role', { enum: ['admin', 'agent', 'affiliate'] }).notNull(),
   status: text('status', { enum: ['unverified', 'active', 'suspended'] })
     .notNull()
     .default('unverified'),
+  // Affiliate program (docs/affiliates/affiliate-setup-commissions.spec.md, D4). Set at invite
+  // acceptance for an `affiliate` user; null for admin/agent. `position` is the optional job
+  // title collected on the affiliate onboarding form (US-AF01).
+  affiliateCompanyId: text('affiliate_company_id').references(() => affiliateCompanies.id),
+  position: text('position'),
   // DEPRECATED (2026-06-11): commission is service-based now (services.commission_type/value —
   // docs/commissions/service-based-commission.spec.md). No code reads or writes this column;
   // it is kept only to avoid a users-table rebuild. A future migration may drop it.
@@ -211,6 +216,10 @@ export const folios = sqliteTable('folios', {
   agentId: text('agent_id')
     .notNull()
     .references(() => users.id),
+  // Affiliate sale attribution (docs/affiliates/affiliate-setup-commissions.spec.md, D5). Null for
+  // in-house (agent/admin) sales; stamped with the seller's company for an affiliate sale (US-A51)
+  // so in-house vs affiliate revenue stays separable. The seller is still `agentId`.
+  affiliateCompanyId: text('affiliate_company_id').references(() => affiliateCompanies.id),
   customerName: text('customer_name'),
   customerEmail: text('customer_email'),
   customerPhone: text('customer_phone'),
@@ -466,6 +475,95 @@ export const cancellationRequests = sqliteTable('cancellation_requests', {
     .notNull()
     .default(sql`(unixepoch())`),
 })
+
+// ── Affiliate program ────────────────────────────────────────────────────────────────────
+// docs/affiliates/affiliate-setup-commissions.spec.md. An affiliate is an external reseller
+// (hotel / agency / restaurant). The admin models the company, curates which services it may
+// sell and at what commission (the allow-list), and invites its logins.
+
+// The partner company (US-A48/A52/A55). Suspending it (status) cascades to its users at
+// authMiddleware — existing folios/QRs stay intact (D7).
+export const affiliateCompanies = sqliteTable('affiliate_companies', {
+  id: text('id').primaryKey(),
+  organizationId: text('organization_id')
+    .notNull()
+    .references(() => organizations.id),
+  name: text('name').notNull(),
+  contactEmail: text('contact_email'),
+  contactPhone: text('contact_phone'),
+  status: text('status', { enum: ['active', 'suspended'] })
+    .notNull()
+    .default('active'),
+  createdAt: integer('created_at', { mode: 'timestamp' })
+    .notNull()
+    .default(sql`(unixepoch())`),
+  updatedAt: integer('updated_at', { mode: 'timestamp' })
+    .notNull()
+    .default(sql`(unixepoch())`),
+})
+
+// The allow-list AND the per-service rate in one (D1/D2): a service is sellable by an affiliate
+// iff a row exists here. `percent` → commission_value is basis points (1500 = 15%); `fixed` →
+// minor units PER SPOT (× quantity), capped at the service's minimum_price (D10). UNIQUE per
+// (company, service). Rows survive a service deactivation (D12); removed only on hard-delete.
+export const affiliateCommissions = sqliteTable('affiliate_commissions', {
+  id: text('id').primaryKey(),
+  organizationId: text('organization_id')
+    .notNull()
+    .references(() => organizations.id),
+  affiliateCompanyId: text('affiliate_company_id')
+    .notNull()
+    .references(() => affiliateCompanies.id),
+  serviceId: text('service_id')
+    .notNull()
+    .references(() => services.id),
+  commissionType: text('commission_type', { enum: ['percent', 'fixed'] }).notNull(),
+  commissionValue: integer('commission_value').notNull(),
+  createdAt: integer('created_at', { mode: 'timestamp' })
+    .notNull()
+    .default(sql`(unixepoch())`),
+  updatedAt: integer('updated_at', { mode: 'timestamp' })
+    .notNull()
+    .default(sql`(unixepoch())`),
+})
+
+// Parallel invite flow (D8): a dedicated table so the affiliate invite carries role + company
+// explicitly and the agent `invitations` path stays untouched. Acceptance creates the
+// `affiliate` user linked to affiliateCompanyId (US-AF01).
+export const affiliateInvitations = sqliteTable('affiliate_invitations', {
+  id: text('id').primaryKey(),
+  organizationId: text('organization_id')
+    .notNull()
+    .references(() => organizations.id),
+  affiliateCompanyId: text('affiliate_company_id')
+    .notNull()
+    .references(() => affiliateCompanies.id),
+  identity: text('identity').notNull(),
+  identityType: text('identity_type', { enum: ['email'] })
+    .notNull()
+    .default('email'),
+  token: text('token').notNull().unique(),
+  invitedBy: text('invited_by')
+    .notNull()
+    .references(() => users.id),
+  status: text('status', { enum: ['pending', 'accepted', 'expired'] })
+    .notNull()
+    .default('pending'),
+  expiresAt: integer('expires_at', { mode: 'timestamp' }).notNull(),
+  createdAt: integer('created_at', { mode: 'timestamp' })
+    .notNull()
+    .default(sql`(unixepoch())`),
+  updatedAt: integer('updated_at', { mode: 'timestamp' })
+    .notNull()
+    .default(sql`(unixepoch())`),
+})
+
+export type AffiliateCompany = typeof affiliateCompanies.$inferSelect
+export type NewAffiliateCompany = typeof affiliateCompanies.$inferInsert
+export type AffiliateCommission = typeof affiliateCommissions.$inferSelect
+export type NewAffiliateCommission = typeof affiliateCommissions.$inferInsert
+export type AffiliateInvitation = typeof affiliateInvitations.$inferSelect
+export type NewAffiliateInvitation = typeof affiliateInvitations.$inferInsert
 
 export type Organization = typeof organizations.$inferSelect
 export type NewOrganization = typeof organizations.$inferInsert

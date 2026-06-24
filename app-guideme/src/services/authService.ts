@@ -101,6 +101,8 @@ export interface CompleteInviteInput {
   token: string
   name: string
   password: string
+  /** US-AF01 — optional job title for an affiliate invite; ignored for an agent. */
+  position?: string
 }
 
 export interface AuthUserResponse {
@@ -116,6 +118,10 @@ export interface InviteResponse {
     identity: string
     identity_type: string
     organization_name: string
+    /** D8 — discriminates the parallel affiliate flow; absent on older responses. */
+    invitation_type?: 'agent' | 'affiliate'
+    /** The affiliate company the invitee is joining (shown read-only); null for agent. */
+    company_name?: string | null
   }
 }
 

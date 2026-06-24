@@ -23,10 +23,11 @@ const lineSchema = z.object({
 export const confirmSaleSchema = z
   .object({
     customer_name: z.string().nullable().optional(),
-    // customer_email is MANDATORY: in Phase 1, email is the only delivery channel for the
-    // ticket + QR (the self-service portal is Phase 2), so a sale without a valid address
-    // produces an undeliverable ticket. Format-validated here; reject the sale otherwise.
-    customer_email: z.string().trim().email('A valid customer email is required'),
+    // For an agent/admin sale, customer_email is the only ticket-delivery channel and is
+    // REQUIRED — enforced in the handler (it can't be enforced here because an affiliate sale
+    // delivers to the affiliate's own account email, so the field is optional for that role;
+    // affiliate-portal.spec.md D8). When present it must be a valid address either way.
+    customer_email: z.string().trim().email('A valid customer email is required').nullish(),
     // Phone stays optional metadata (no delivery dependency on it yet).
     customer_phone: z.string().nullable().optional(),
     // US-AG25/AG29 — how the payment was collected. Defaults to 'cash' (the common case

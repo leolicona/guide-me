@@ -4,6 +4,7 @@ import { renderer } from './renderer'
 import { errorHandler } from './middleware/errorHandler'
 import { authMiddleware } from './middleware/auth'
 import { requireRole } from './middleware/role'
+import affiliatesRouter from './routes/affiliates'
 import agentsRouter from './routes/agents'
 import authRouter from './routes/auth'
 import cashRouter from './routes/cash'
@@ -35,6 +36,7 @@ app.use('/api/*', async (c, next) => {
 
 app.route('/api/auth', authRouter)
 app.route('/api/agents', agentsRouter)
+app.route('/api/affiliates', affiliatesRouter)
 app.route('/api/organizations', organizationsRouter)
 app.route('/api/services', servicesRouter)
 app.route('/api/pos', posRouter)

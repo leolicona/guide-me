@@ -6,6 +6,7 @@ import { ServiceFormDialog } from './ServiceFormDialog'
 import { ExtrasManager } from './ExtrasManager'
 import { ConfirmServiceStatusDialog } from './ConfirmServiceStatusDialog'
 import type { ServiceStatusAction } from './ConfirmServiceStatusDialog'
+import { ConfirmDeleteServiceDialog } from './ConfirmDeleteServiceDialog'
 
 interface ServiceListProps {
   services: Service[]
@@ -18,6 +19,7 @@ export function ServiceList({ services }: ServiceListProps) {
     service: Service
     action: ServiceStatusAction
   } | null>(null)
+  const [deleting, setDeleting] = useState<Service | null>(null)
 
   return (
     <>
@@ -30,6 +32,7 @@ export function ServiceList({ services }: ServiceListProps) {
             onManageExtras={setManaging}
             onDeactivate={(s) => setConfirm({ service: s, action: 'deactivate' })}
             onReactivate={(s) => setConfirm({ service: s, action: 'reactivate' })}
+            onDelete={setDeleting}
           />
         ))}
       </Stack>
@@ -51,6 +54,12 @@ export function ServiceList({ services }: ServiceListProps) {
         action={confirm?.action ?? 'deactivate'}
         open={!!confirm}
         onClose={() => setConfirm(null)}
+      />
+
+      <ConfirmDeleteServiceDialog
+        service={deleting}
+        open={!!deleting}
+        onClose={() => setDeleting(null)}
       />
     </>
   )

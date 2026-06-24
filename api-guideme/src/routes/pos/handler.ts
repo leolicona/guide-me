@@ -3,6 +3,7 @@ import type { BatchItem } from 'drizzle-orm/batch'
 import { and, asc, desc, eq, gte, lte, sql } from 'drizzle-orm'
 import { getDb, type Db } from '../../db/client'
 import {
+  affiliateCommissions,
   folioAccessTokens,
   folioLineExtras,
   folioLines,
@@ -133,25 +134,39 @@ export const listPosServices = async (c: PosContext) => {
   const windowTo = selectedDate ?? addDays(today, AVAILABILITY_WINDOW_DAYS)
   const db = getDb(c.env)
 
-  const serviceRows = await db
-    .select({
-      id: services.id,
-      name: services.name,
-      description: services.description,
-      basePrice: services.basePrice,
-      minimumPrice: services.minimumPrice,
-      isFlexible: services.isFlexible,
-      flexCapacityPct: services.flexCapacityPct,
-      category: services.category,
-    })
-    .from(services)
-    .where(
-      and(
-        eq(services.organizationId, agent.organizationId),
-        eq(services.status, 'active'),
-      ),
-    )
-    .orderBy(asc(services.name))
+  // Curated catalog (affiliate-portal.spec.md §4.2): for an `affiliate` caller, INNER JOIN the
+  // allow-list so the list collapses to exactly the services the admin enabled for their company
+  // (a non-enabled service has no row and is absent). Agent/admin skip the join — full active
+  // catalog, unchanged. Single source of truth; no view.
+  const serviceCols = {
+    id: services.id,
+    name: services.name,
+    description: services.description,
+    basePrice: services.basePrice,
+    minimumPrice: services.minimumPrice,
+    isFlexible: services.isFlexible,
+    flexCapacityPct: services.flexCapacityPct,
+    category: services.category,
+  }
+  const baseWhere = and(
+    eq(services.organizationId, agent.organizationId),
+    eq(services.status, 'active'),
+  )
+  const serviceRows =
+    agent.role === 'affiliate'
+      ? await db
+          .select(serviceCols)
+          .from(services)
+          .innerJoin(
+            affiliateCommissions,
+            and(
+              eq(affiliateCommissions.serviceId, services.id),
+              eq(affiliateCommissions.affiliateCompanyId, agent.affiliateCompanyId ?? ''),
+            ),
+          )
+          .where(baseWhere)
+          .orderBy(asc(services.name))
+      : await db.select(serviceCols).from(services).where(baseWhere).orderBy(asc(services.name))
 
   // US-A36 — availability is the Σ EFFECTIVE remaining: each slot's raw remaining plus its
   // flexible margin (floor(capacity × pct / 100)) for a Soft Cap service. pct is constant per
@@ -319,6 +334,25 @@ export const getPosService = async (c: PosContext) => {
   const service = serviceRows[0]
   if (!service) {
     throw new ApiError('NOT_FOUND', 404, 'Service not found')
+  }
+
+  // Defense in depth (affiliate-portal.spec.md §4.2): an affiliate may only open a service on
+  // their allow-list. A hand-crafted request for a non-curated id → 404, even though it never
+  // appeared in their catalog.
+  if (agent.role === 'affiliate') {
+    const allowed = await db
+      .select({ id: affiliateCommissions.id })
+      .from(affiliateCommissions)
+      .where(
+        and(
+          eq(affiliateCommissions.affiliateCompanyId, agent.affiliateCompanyId ?? ''),
+          eq(affiliateCommissions.serviceId, id),
+        ),
+      )
+      .limit(1)
+    if (allowed.length === 0) {
+      throw new ApiError('NOT_FOUND', 404, 'Service not found')
+    }
   }
 
   const extras = await db
@@ -610,6 +644,42 @@ export const confirmSale = async (c: PosContext) => {
   const db = getDb(c.env)
   const org = agent.organizationId
 
+  // Affiliate sale (affiliate-portal.spec.md D2/D3): the seller may only sell allow-list
+  // services, and the commission resolves from the per-affiliate rate — NOT services.commission_*.
+  // Pre-fetch the company's allow-list once (serviceId → rate) so the validate loop both guards
+  // membership (SERVICE_NOT_ALLOWED) and overrides each line's commission snapshot.
+  const isAffiliate = agent.role === 'affiliate'
+  const affiliateCompanyId = isAffiliate ? agent.affiliateCompanyId : null
+
+  // Ticket delivery channel: an agent/admin sale REQUIRES a customer email (the only channel).
+  // An affiliate sale delivers to the affiliate's own account email (D8), so customer_email is
+  // an optional copy there. (The schema validates the format when present; this guards presence.)
+  if (!isAffiliate && !input.customer_email) {
+    throw new ApiError('VALIDATION_ERROR', 400, 'A valid customer email is required')
+  }
+  const affiliateRates = new Map<string, { type: 'percent' | 'fixed'; value: number }>()
+  if (isAffiliate) {
+    if (!affiliateCompanyId) {
+      throw new ApiError('FORBIDDEN', 403, 'Affiliate is not linked to a company')
+    }
+    const rateRows = await db
+      .select({
+        serviceId: affiliateCommissions.serviceId,
+        commissionType: affiliateCommissions.commissionType,
+        commissionValue: affiliateCommissions.commissionValue,
+      })
+      .from(affiliateCommissions)
+      .where(
+        and(
+          eq(affiliateCommissions.organizationId, org),
+          eq(affiliateCommissions.affiliateCompanyId, affiliateCompanyId),
+        ),
+      )
+    for (const r of rateRows) {
+      affiliateRates.set(r.serviceId, { type: r.commissionType, value: r.commissionValue })
+    }
+  }
+
   // Org name (for the email) + booking policy (US-A46 / US-AG07.1) — read once up front.
   const orgRows = await db
     .select({
@@ -722,6 +792,24 @@ export const confirmSale = async (c: PosContext) => {
       extrasTotal += extra.price * ex.quantity
     }
 
+    // Commission source (D3): an affiliate line snapshots the per-affiliate rate (and must be on
+    // the allow-list — defense in depth even though the catalog never showed a non-curated id);
+    // an agent/admin line keeps the service's seller-independent rate.
+    let commissionType = slot.commissionType
+    let commissionValue = slot.commissionValue
+    if (isAffiliate) {
+      const rate = affiliateRates.get(slot.serviceId)
+      if (!rate) {
+        throw new ApiError(
+          'SERVICE_NOT_ALLOWED',
+          403,
+          'This service is not enabled for your affiliate account',
+        )
+      }
+      commissionType = rate.type
+      commissionValue = rate.value
+    }
+
     const lineTotal = line.unit_price * line.quantity + extrasTotal
     prepared.push({
       id: crypto.randomUUID(),
@@ -735,8 +823,8 @@ export const confirmSale = async (c: PosContext) => {
       minimumPrice: slot.minimumPrice,
       unitPrice: line.unit_price,
       lineTotal,
-      commissionType: slot.commissionType,
-      commissionValue: slot.commissionValue,
+      commissionType,
+      commissionValue,
       isFlexible: slot.isFlexible,
       flexCapacityPct: slot.flexCapacityPct,
       extras: preparedExtras,
@@ -888,6 +976,8 @@ export const confirmSale = async (c: PosContext) => {
       id: folioId,
       organizationId: org,
       agentId: agent.userId,
+      // D5 — stamp the seller's company on an affiliate sale; null for in-house (agent/admin).
+      affiliateCompanyId,
       customerName: input.customer_name ?? null,
       customerEmail: input.customer_email ?? null,
       customerPhone: input.customer_phone ?? null,
@@ -943,33 +1033,47 @@ export const confirmSale = async (c: PosContext) => {
 
   const orgName = orgRow?.name ?? 'GuideMe'
 
+  // Ticket/QR recipients (affiliate-portal.spec.md D8): an affiliate sale is addressed to the
+  // affiliate (concierge) for group distribution, with the optional customer_email sent a copy;
+  // an agent/admin sale goes to the customer as before. Deduped so a self-addressed copy sends once.
+  const ticketRecipients = [
+    ...new Set(
+      (isAffiliate
+        ? [agent.email, input.customer_email]
+        : [input.customer_email]
+      ).filter((e): e is string => !!e),
+    ),
+  ]
+
   // Post-commit side effects diverge by sale type. A booking gets the apartado email (no QR, no
   // portal token); the paid sale mints the portal token + sends the full ticket + QR email. Both
   // are best-effort (waitUntil / try-catch) — a failure here must never roll back the committed sale.
   if (isBooking) {
-    if (input.customer_email && c.env.RESEND_API_KEY && bookingExpiresAt) {
+    if (c.env.RESEND_API_KEY && bookingExpiresAt) {
       const expiresAt = bookingExpiresAt
-      c.executionCtx.waitUntil(
-        sendBookingConfirmationEmail(c.env, {
-          to: input.customer_email,
-          customerName: input.customer_name ?? null,
-          orgName,
-          folioId,
-          createdAt: new Date(),
-          amountPaid,
-          total,
-          pendingBalance: total - amountPaid,
-          bookingExpiresAt: expiresAt,
-          lines: prepared.map((l) => ({
-            serviceName: l.serviceName,
-            slotDate: l.slotDate,
-            slotStartTime: l.slotStartTime,
-            quantity: l.quantity,
-          })),
-        }).catch((err) =>
-          console.error('[email] booking confirmation send failed', folioId, err),
-        ),
-      )
+      for (const to of ticketRecipients) {
+        c.executionCtx.waitUntil(
+          sendBookingConfirmationEmail(c.env, {
+            to,
+            customerName: input.customer_name ?? null,
+            orgName,
+            folioId,
+            createdAt: new Date(),
+            amountPaid,
+            total,
+            pendingBalance: total - amountPaid,
+            bookingExpiresAt: expiresAt,
+            lines: prepared.map((l) => ({
+              serviceName: l.serviceName,
+              slotDate: l.slotDate,
+              slotStartTime: l.slotStartTime,
+              quantity: l.quantity,
+            })),
+          }).catch((err) =>
+            console.error('[email] booking confirmation send failed', folioId, err),
+          ),
+        )
+      }
     }
   } else {
     const portalLink = await issuePortalLink(
@@ -979,33 +1083,36 @@ export const confirmSale = async (c: PosContext) => {
       folioId,
       prepared.map((l) => l.slotDate),
     )
-    dispatchTicketEmail(
-      c,
-      orgName,
-      folioId,
-      {
-        customerEmail: input.customer_email ?? null,
-        customerName: input.customer_name ?? null,
-        paymentMethod: input.payment_method ?? 'cash',
-        total,
-        createdAt: new Date(),
-      },
-      prepared.map((line) => ({
-        serviceName: line.serviceName,
-        slotDate: line.slotDate,
-        slotStartTime: line.slotStartTime,
-        quantity: line.quantity,
-        unitPrice: line.unitPrice,
-        lineTotal: line.lineTotal,
-        qrToken: line.qrToken!,
-        extras: line.extras.map((ex) => ({
-          name: ex.name,
-          price: ex.price,
-          quantity: ex.quantity,
-        })),
+    const ticketLines = prepared.map((line) => ({
+      serviceName: line.serviceName,
+      slotDate: line.slotDate,
+      slotStartTime: line.slotStartTime,
+      quantity: line.quantity,
+      unitPrice: line.unitPrice,
+      lineTotal: line.lineTotal,
+      qrToken: line.qrToken!,
+      extras: line.extras.map((ex) => ({
+        name: ex.name,
+        price: ex.price,
+        quantity: ex.quantity,
       })),
-      portalLink,
-    )
+    }))
+    for (const to of ticketRecipients) {
+      dispatchTicketEmail(
+        c,
+        orgName,
+        folioId,
+        {
+          customerEmail: to,
+          customerName: input.customer_name ?? null,
+          paymentMethod: input.payment_method ?? 'cash',
+          total,
+          createdAt: new Date(),
+        },
+        ticketLines,
+        portalLink,
+      )
+    }
   }
 
   return c.json(

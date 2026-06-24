@@ -9,6 +9,7 @@ import {
   createService,
   deactivateService,
   deleteExtra,
+  deleteService,
   getService,
   listServices,
   reactivateService,
@@ -64,6 +65,8 @@ services.put(
 )
 services.post('/:id/deactivate', deactivateService)
 services.post('/:id/reactivate', reactivateService)
+// US-A58 — guarded hard-delete (409 SERVICE_HAS_FOLIOS if it has sales history).
+services.delete('/:id', deleteService)
 
 services.post(
   '/:id/extras',

@@ -24,12 +24,14 @@ import { ROUTES } from '../config/routes'
 import { AccountMenu } from './AccountMenu'
 import { AccountAvatarChip } from './AccountAvatarChip'
 
+type Role = 'admin' | 'agent' | 'affiliate'
+
 interface NavItem {
   label: string
   to: string
   icon: SvgIconComponent
-  /** When set, the destination is only shown to that role. */
-  role?: 'admin' | 'agent'
+  /** When set, the destination is only shown to that role (or any role in the set). */
+  role?: Role | Role[]
 }
 
 // US-UX02 — destinations named by CONCEPT, shared across roles. Routes diverge by role where
@@ -38,14 +40,17 @@ interface NavItem {
 // exactly the agent nav plus "Hoy". Array order is the render order; the role filter preserves
 // it, yielding agent [Vender, Escáner, Ventas, Caja] and admin [Hoy, Vender, Escáner, Ventas,
 // Caja]. Occasional admin tools (Agentes, Catálogo, …) live in the account surface, not here.
+// Affiliate (affiliate-portal.spec.md D7) joins as a third role in the SAME shell with a trimmed
+// nav: [Vender, Ventas, Caja] — the agent set MINUS Escáner (no QR validation for this role, D4).
+// It reuses the agent's own /history (Ventas) and /balance (Caja) surfaces.
 const NAV_ITEMS: NavItem[] = [
   { label: 'Hoy', to: ROUTES.DASHBOARD, icon: TodayRounded, role: 'admin' },
   // US-AG07.3 — Apartados is no longer a nav destination; it's a tab inside Vender.
   { label: 'Vender', to: ROUTES.POS, icon: PointOfSaleRounded },
-  { label: 'Escáner', to: ROUTES.SCAN, icon: QrCodeScannerRounded },
-  { label: 'Ventas', to: ROUTES.HISTORY, icon: ReceiptLongRounded, role: 'agent' },
+  { label: 'Escáner', to: ROUTES.SCAN, icon: QrCodeScannerRounded, role: ['agent', 'admin'] },
+  { label: 'Ventas', to: ROUTES.HISTORY, icon: ReceiptLongRounded, role: ['agent', 'affiliate'] },
   { label: 'Ventas', to: ROUTES.FOLIOS, icon: ReceiptLongRounded, role: 'admin' },
-  { label: 'Caja', to: ROUTES.BALANCE, icon: AccountBalanceWalletRounded, role: 'agent' },
+  { label: 'Caja', to: ROUTES.BALANCE, icon: AccountBalanceWalletRounded, role: ['agent', 'affiliate'] },
   { label: 'Caja', to: ROUTES.CASH, icon: AccountBalanceWalletRounded, role: 'admin' },
 ]
 
@@ -88,7 +93,9 @@ export function AppLayout() {
 
   const [accountAnchor, setAccountAnchor] = useState<HTMLElement | null>(null)
 
-  const items = NAV_ITEMS.filter((i) => !i.role || i.role === user.role)
+  const items = NAV_ITEMS.filter(
+    (i) => !i.role || (Array.isArray(i.role) ? i.role.includes(user.role) : i.role === user.role),
+  )
   const isActive = (to: string) => location.pathname.startsWith(to)
   // Pick the LONGEST matching route so a future nested destination highlights its own tab
   // rather than a parent it also prefix-matches.

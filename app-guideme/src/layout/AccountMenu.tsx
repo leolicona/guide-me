@@ -25,6 +25,7 @@ import GroupsRounded from '@mui/icons-material/GroupsRounded'
 import LogoutRounded from '@mui/icons-material/LogoutRounded'
 import MapRounded from '@mui/icons-material/MapRounded'
 import SettingsRounded from '@mui/icons-material/SettingsRounded'
+import StorefrontRounded from '@mui/icons-material/StorefrontRounded'
 import { useCurrentUser } from '../features/auth/CurrentUserContext'
 import { useLogout } from '../features/auth/hooks/useLogout'
 import { ROUTES } from '../config/routes'
@@ -44,6 +45,7 @@ interface ManagementLink {
 
 const MANAGEMENT_LINKS: ManagementLink[] = [
   { label: 'Agentes', to: ROUTES.AGENTS, icon: GroupsRounded },
+  { label: 'Afiliados', to: ROUTES.AFFILIATES, icon: StorefrontRounded },
   { label: 'Catálogo', to: ROUTES.CATALOG, icon: MapRounded },
   { label: 'Configuración', to: ROUTES.SETTINGS, icon: SettingsRounded },
 ]
@@ -56,8 +58,8 @@ const initialsOf = (name: string) =>
     .map((w) => w[0]?.toUpperCase() ?? '')
     .join('') || '?'
 
-const roleLabel = (role: 'admin' | 'agent') =>
-  role === 'admin' ? 'Administrador' : 'Agente'
+const roleLabel = (role: 'admin' | 'agent' | 'affiliate') =>
+  role === 'admin' ? 'Administrador' : role === 'affiliate' ? 'Afiliado' : 'Agente'
 
 interface AccountMenuProps {
   variant: 'popover' | 'sheet'

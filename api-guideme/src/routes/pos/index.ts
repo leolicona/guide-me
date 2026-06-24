@@ -29,10 +29,11 @@ const validationHook = (result: { success: boolean }) => {
   }
 }
 
-// Selling is a daily activity for BOTH roles (US-A31): agents and admins run the same POS
-// flow. Folios are attributed to the caller (agent_id = seller.userId) uniformly, so an
-// admin's sales roll up to the admin's own drawer and commission report row.
-pos.use('*', authMiddleware, requireRole('agent', 'admin'))
+// Selling is a daily activity for agents, admins AND affiliates (US-A31 / affiliate-portal D1):
+// all three run the same POS flow, role-widened then filtered (the curated catalog + commission
+// source differ for an affiliate; see the handler). Folios are attributed to the caller
+// (agent_id = seller.userId) uniformly; an affiliate sale additionally stamps affiliate_company_id.
+pos.use('*', authMiddleware, requireRole('agent', 'admin', 'affiliate'))
 
 pos.get('/services', listPosServices)
 // US-AG35 — month availability for the calendar Bottom Sheet (declared before the

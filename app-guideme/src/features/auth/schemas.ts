@@ -32,6 +32,8 @@ export const inviteCompleteSchema = z
     name: z.string().min(1, 'El nombre es requerido'),
     password: z.string().min(8, 'La contraseña debe tener al menos 8 caracteres'),
     confirmPassword: z.string().min(1, 'Confirma tu contraseña'),
+    // US-AF01 — optional job title, only shown for an affiliate invite.
+    position: z.string().optional(),
   })
   .refine((data) => data.password === data.confirmPassword, {
     message: 'Las contraseñas no coinciden',

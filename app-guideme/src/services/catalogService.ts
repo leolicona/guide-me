@@ -80,6 +80,13 @@ export const reactivateService = (id: string) =>
     method: 'POST',
   })
 
+// US-A58 — guarded hard-delete. Throws ServiceError('SERVICE_HAS_FOLIOS', 409) when the service
+// has sales history (the caller steers the admin to deactivate instead).
+export const deleteService = (id: string) =>
+  request<{ ok: boolean; deleted: string }>(`/api/services/${id}`, {
+    method: 'DELETE',
+  })
+
 // US-A11 — nested extras CRUD.
 export const addExtra = async (
   id: string,

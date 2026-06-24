@@ -10,28 +10,45 @@ import { ROUTES } from '../../../config/routes';
 import { ServiceError } from '../../../services/authService';
 import { PasswordInput } from './PasswordInput';
 
-export function InviteCompleteForm({ token }: { token: string }) {
+export function InviteCompleteForm({
+  token,
+  isAffiliate = false,
+}: {
+  token: string
+  isAffiliate?: boolean
+}) {
   const navigate = useNavigate();
   const inviteCompleteMutation = useInviteComplete();
   const queryClient = useQueryClient();
 
   const { control, handleSubmit, setError, formState: { errors } } = useForm<InviteCompleteFormData>({
     resolver: zodResolver(inviteCompleteSchema),
-    defaultValues: { name: '', password: '', confirmPassword: '' }
+    defaultValues: { name: '', password: '', confirmPassword: '', position: '' }
   });
 
   const onSubmit = (data: InviteCompleteFormData) => {
-    inviteCompleteMutation.mutate({ token, name: data.name, password: data.password }, {
-      onSuccess: () => {
-        queryClient.invalidateQueries({ queryKey: ['me'] });
-        navigate(ROUTES.DASHBOARD, { replace: true });
+    inviteCompleteMutation.mutate(
+      {
+        token,
+        name: data.name,
+        password: data.password,
+        // Only meaningful (and only collected) for an affiliate invite.
+        ...(isAffiliate && data.position?.trim() ? { position: data.position.trim() } : {}),
       },
-      onError: (error) => {
-        if (error instanceof ServiceError && error.status === 400) {
-          setError('root', { type: 'manual', message: 'La invitación es inválida o ha expirado. Contacta a tu administrador.' });
+      {
+        onSuccess: (res) => {
+          queryClient.invalidateQueries({ queryKey: ['me'] });
+          // An affiliate lands on the POS (Vender); an agent on the dashboard.
+          const dest = res.user.role === 'affiliate' ? ROUTES.POS : ROUTES.DASHBOARD;
+          navigate(dest, { replace: true });
+        },
+        onError: (error) => {
+          if (error instanceof ServiceError && error.status === 400) {
+            setError('root', { type: 'manual', message: 'La invitación es inválida o ha expirado. Contacta a tu administrador.' });
+          }
         }
       }
-    });
+    );
   };
 
   return (
@@ -57,6 +74,24 @@ export function InviteCompleteForm({ token }: { token: string }) {
           />
         )}
       />
+
+      {isAffiliate && (
+        <Controller
+          name="position"
+          control={control}
+          render={({ field }) => (
+            <TextField
+              {...field}
+              fullWidth
+              label="Puesto (opcional)"
+              margin="normal"
+              disabled={inviteCompleteMutation.isPending}
+              error={!!errors.position}
+              helperText={errors.position?.message}
+            />
+          )}
+        />
+      )}
 
       <PasswordInput
         name="password"

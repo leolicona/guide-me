@@ -13,6 +13,11 @@ export type ErrorCode =
   | 'PRICE_BELOW_MINIMUM'
   | 'SLOT_UNAVAILABLE'
   | 'SLOT_CLOSED'
+  | 'DOWN_PAYMENT_BELOW_MINIMUM'
+  | 'SERVICE_INACTIVE'
+  | 'SERVICE_NOT_ALLOWED'
+  | 'SERVICE_HAS_FOLIOS'
+  | 'ALREADY_INVITED'
   | 'INTERNAL_ERROR'
 
 export class ApiError extends Error {

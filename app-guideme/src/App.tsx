@@ -17,6 +17,8 @@ const InviteAcceptPage = lazy(() => import('./pages/InviteAcceptPage'))
 const DashboardPage = lazy(() => import('./pages/DashboardPage'))
 const AgentsListPage = lazy(() => import('./pages/AgentsListPage'))
 const InviteAgentPage = lazy(() => import('./pages/InviteAgentPage'))
+const AffiliatesListPage = lazy(() => import('./pages/AffiliatesListPage'))
+const AffiliateDetailPage = lazy(() => import('./pages/AffiliateDetailPage'))
 const CatalogListPage = lazy(() => import('./pages/CatalogListPage'))
 const CatalogDetailPage = lazy(() => import('./pages/CatalogDetailPage'))
 const PosCatalogPage = lazy(() => import('./pages/PosCatalogPage'))
@@ -88,6 +90,23 @@ function App() {
                 </RoleGuard>
               }
             />
+            {/* Affiliate setup & commissions — admin only (US-A48/A50/A52) */}
+            <Route
+              path={ROUTES.AFFILIATES}
+              element={
+                <RoleGuard role="admin">
+                  <AffiliatesListPage />
+                </RoleGuard>
+              }
+            />
+            <Route
+              path={ROUTES.AFFILIATE_DETAIL}
+              element={
+                <RoleGuard role="admin">
+                  <AffiliateDetailPage />
+                </RoleGuard>
+              }
+            />
             <Route
               path={ROUTES.CATALOG}
               element={
@@ -122,11 +141,11 @@ function App() {
             <Route path={ROUTES.POS_CHECKOUT} element={<PosCheckoutPage />} />
             <Route path={ROUTES.FOLIO} element={<FolioReceiptPage />} />
 
-            {/* Agent folio history — read-only list + detail (US-AG20, US-AG21) */}
+            {/* Agent + affiliate folio history — read-only list + detail (US-AG20/AG21, AF09) */}
             <Route
               path={ROUTES.HISTORY}
               element={
-                <RoleGuard role="agent">
+                <RoleGuard role={['agent', 'affiliate']}>
                   <FolioHistoryPage />
                 </RoleGuard>
               }
@@ -134,21 +153,30 @@ function App() {
             <Route
               path={ROUTES.HISTORY_DETAIL}
               element={
-                <RoleGuard role="agent">
+                <RoleGuard role={['agent', 'affiliate']}>
                   <FolioHistoryDetailPage />
                 </RoleGuard>
               }
             />
 
-            {/* Access scanner (US-AG15, AG17, AG19) — granting access is a daily activity
-                for BOTH roles (US-A32). */}
-            <Route path={ROUTES.SCAN} element={<ScannerPage />} />
+            {/* Access scanner (US-AG15, AG17, AG19) — agents + admins (US-A32). Denied to an
+                affiliate (D4): the backend rejects scan calls and the nav hides Escáner; this
+                guard closes the by-URL path too. */}
+            <Route
+              path={ROUTES.SCAN}
+              element={
+                <RoleGuard role={['agent', 'admin']}>
+                  <ScannerPage />
+                </RoleGuard>
+              }
+            />
 
-            {/* Agent running balance — expenses + cash hand-ins (US-AG12/13/14) */}
+            {/* Agent + affiliate running balance — cash hand-ins (US-AG12/14, AF08). The
+                affiliate has no expenses (D4); the balance page simply shows none for that role. */}
             <Route
               path={ROUTES.BALANCE}
               element={
-                <RoleGuard role="agent">
+                <RoleGuard role={['agent', 'affiliate']}>
                   <BalancePage />
                 </RoleGuard>
               }

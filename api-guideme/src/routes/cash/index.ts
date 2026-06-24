@@ -53,9 +53,15 @@ const admin = requireRole('admin')
 // any caller — an admin only ever touches their OWN drawer. The admin uses it for the "Tu
 // caja" section (US-A35): read their own balance and file a self-authorized hand-in (US-A34).
 const agentOrAdmin = requireRole('agent', 'admin')
+// Affiliate parity (affiliate-portal.spec.md D5/D9): an affiliate carries the same running
+// balance and settles via the same cash-drop → admin-confirm flow as an agent. But expenses
+// (US-AG13) are DENIED to an affiliate (D4) — those routes stay `agent`-only, so an affiliate
+// (and an admin) hits 403 there.
+const selfActor = requireRole('agent', 'admin', 'affiliate')
+const agentOrAffiliate = requireRole('agent', 'affiliate')
 
 // Self surface (/me/*) — scoped to the caller.
-cash.get('/me', agentOrAdmin, getMyBalance)
+cash.get('/me', selfActor, getMyBalance)
 cash.post(
   '/me/expenses',
   agent,
@@ -65,16 +71,16 @@ cash.post(
 cash.delete('/me/expenses/:id', agent, deleteExpense)
 cash.post(
   '/me/drops',
-  agentOrAdmin,
+  selfActor,
   zValidator('json', createDropSchema, validationHook),
   createDrop,
 )
-cash.delete('/me/drops/:id', agent, cancelDrop)
+cash.delete('/me/drops/:id', agentOrAffiliate, cancelDrop)
 // US-AG27/AG28 — sign or dispute a unilateral admin money-move (acknowledgment, non-blocking).
-cash.post('/me/drops/:id/acknowledge', agent, acknowledgeDrop)
+cash.post('/me/drops/:id/acknowledge', agentOrAffiliate, acknowledgeDrop)
 cash.post(
   '/me/drops/:id/dispute',
-  agent,
+  agentOrAffiliate,
   zValidator('json', disputeSchema, validationHook),
   disputeDrop,
 )

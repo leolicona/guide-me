@@ -27,6 +27,7 @@ import AccountBalanceRounded from '@mui/icons-material/AccountBalanceRounded'
 import LinkRounded from '@mui/icons-material/LinkRounded'
 import { useConfirmSale } from '../features/pos/hooks'
 import { useMyOrganization } from '../features/organization'
+import { useCurrentUser } from '../features/auth/CurrentUserContext'
 import {
   usePosCart,
   toConfirmPayload,
@@ -139,9 +140,16 @@ export default function PosCheckoutPage() {
 
   const navigate = useNavigate()
   const confirm = useConfirmSale()
+  const user = useCurrentUser()
+  // Affiliate-portal D8: the ticket is addressed to the affiliate's own account email, so the
+  // customer email here is an OPTIONAL copy to the tourist. For an agent/admin it stays the
+  // mandatory delivery channel.
+  const isAffiliate = user.role === 'affiliate'
 
   const emailTrimmed = customerEmail.trim()
-  const emailValid = EMAIL_RE.test(emailTrimmed)
+  const emailValid = isAffiliate
+    ? emailTrimmed === '' || EMAIL_RE.test(emailTrimmed)
+    : EMAIL_RE.test(emailTrimmed)
 
   // US-AG07.2 — adaptive, amount-driven checkout. The amount input pre-loads the cart total; the
   // sale type / button / validity derive from it. A suggested-deposit chip reuses the org minimum %.
@@ -308,17 +316,19 @@ export default function PosCheckoutPage() {
                     onChange={(e) => setCustomer({ name: e.target.value })}
                   />
                   <TextField
-                    label="Correo electrónico"
+                    label={isAffiliate ? 'Copia al cliente (opcional)' : 'Correo electrónico'}
                     size="small"
                     type="email"
-                    required
+                    required={!isAffiliate}
                     value={customerEmail}
                     onChange={(e) => setCustomer({ email: e.target.value })}
                     error={emailTrimmed.length > 0 && !emailValid}
                     helperText={
                       emailTrimmed.length > 0 && !emailValid
                         ? 'Ingresa un correo electrónico válido.'
-                        : 'Obligatorio — el recibo y el boleto QR se envían a este correo.'
+                        : isAffiliate
+                          ? 'El boleto QR se envía a tu correo; agrega uno para enviarle copia al cliente.'
+                          : 'Obligatorio — el recibo y el boleto QR se envían a este correo.'
                     }
                   />
                   <TextField

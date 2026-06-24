@@ -28,6 +28,7 @@ const buildUserPayload = async (
       email: users.email,
       role: users.role,
       organizationId: users.organizationId,
+      affiliateCompanyId: users.affiliateCompanyId,
       status: users.status,
     })
     .from(users)
@@ -44,6 +45,7 @@ const buildUserPayload = async (
       email: user.email,
       role: user.role as UserRole,
       organizationId: user.organizationId,
+      affiliateCompanyId: user.affiliateCompanyId,
     },
     status: user.status,
   }
