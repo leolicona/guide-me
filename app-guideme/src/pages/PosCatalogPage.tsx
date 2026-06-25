@@ -20,7 +20,7 @@ import {
   useMediaQuery,
 } from '@mui/material'
 import { alpha, useTheme } from '@mui/material/styles'
-import type { SxProps, Theme } from '@mui/material/styles'
+import { datePillSx, chipPillSx, filterStripSx } from '../features/filters'
 import ShoppingCartRounded from '@mui/icons-material/ShoppingCartRounded'
 import CalendarMonthRounded from '@mui/icons-material/CalendarMonthRounded'
 import { usePosServices } from '../features/pos/hooks'
@@ -47,64 +47,6 @@ const WEEKDAYS_ES = ['DOM', 'LUN', 'MAR', 'MIÉ', 'JUE', 'VIE', 'SÁB']
 const dayPillLabel = (date: string): string => {
   const d = new Date(`${date}T00:00:00Z`)
   return `${WEEKDAYS_ES[d.getUTCDay()]} ${d.getUTCDate()}`
-}
-
-// A tall rounded date pill (Luminous): filled Indigo when active, hairline-bordered surface
-// otherwise.
-const datePillSx = (active: boolean): SxProps<Theme> => ({
-  flexShrink: 0,
-  height: 48,
-  px: 2,
-  gap: 1,
-  borderRadius: '0.75rem',
-  fontSize: 13,
-  fontWeight: active ? 600 : 500,
-  letterSpacing: '0.01em',
-  whiteSpace: 'nowrap',
-  transition: 'background-color 160ms ease, color 160ms ease',
-  color: active ? 'primary.contrastText' : 'text.secondary',
-  bgcolor: active ? 'primary.main' : 'background.paper',
-  border: active ? '1px solid transparent' : '1px solid',
-  borderColor: active ? 'transparent' : 'divider',
-  '&:hover': {
-    bgcolor: active ? 'primary.main' : 'action.hover',
-  },
-})
-
-// A short pill-shaped category chip: a soft Indigo tint when active, hairline surface
-// otherwise (rounded-full, Luminous low-saturation accent).
-const categoryPillSx = (active: boolean): SxProps<Theme> => ({
-  flexShrink: 0,
-  height: 36,
-  px: 2,
-  borderRadius: 999,
-  fontSize: 13,
-  fontWeight: active ? 600 : 500,
-  whiteSpace: 'nowrap',
-  transition: 'background-color 160ms ease, color 160ms ease',
-  color: active ? 'primary.main' : 'text.secondary',
-  bgcolor: (t: Theme) =>
-    active ? alpha(t.palette.primary.main, 0.1) : t.palette.background.paper,
-  border: active ? '1px solid transparent' : '1px solid',
-  borderColor: active ? 'transparent' : 'divider',
-  '&:hover': {
-    bgcolor: (t: Theme) =>
-      active ? alpha(t.palette.primary.main, 0.16) : t.palette.action.hover,
-  },
-})
-
-// A horizontally scrollable strip that bleeds to the screen edge on mobile (so the first/last
-// pill can sit flush) and hides its scrollbar.
-const stripSx = {
-  display: 'flex',
-  alignItems: 'center',
-  gap: 1,
-  overflowX: 'auto',
-  py: 0.5,
-  mx: { xs: -2, md: 0 },
-  px: { xs: 2, md: 0 },
-  scrollbarWidth: 'none',
-  '&::-webkit-scrollbar': { display: 'none' },
 }
 
 export default function PosCatalogPage() {
@@ -194,7 +136,7 @@ export default function PosCatalogPage() {
 
         {/* US-AG35 — quick-day strip: HOY (anchor) + the next two days + a calendar button
             opening the month picker (Bottom Sheet). */}
-        <Box sx={stripSx}>
+        <Box sx={filterStripSx}>
           <ButtonBase
             onClick={() => setSelectedDate(null)}
             sx={datePillSx(selectedDate === null)}
@@ -222,10 +164,10 @@ export default function PosCatalogPage() {
 
         {/* US-A37 — category pills, derived from the availability-filtered set. */}
         {presentCategories.length > 0 && (
-          <Box sx={{ ...stripSx, mt: 0.5 }}>
+          <Box sx={{ ...filterStripSx, mt: 0.5 }}>
             <ButtonBase
               onClick={() => setActiveCategory(null)}
-              sx={categoryPillSx(activeCategory === null)}
+              sx={chipPillSx(activeCategory === null)}
             >
               Todos
             </ButtonBase>
@@ -233,7 +175,7 @@ export default function PosCatalogPage() {
               <ButtonBase
                 key={c}
                 onClick={() => setActiveCategory((prev) => (prev === c ? null : c))}
-                sx={categoryPillSx(activeCategory === c)}
+                sx={chipPillSx(activeCategory === c)}
               >
                 {categoryLabel(c)}
               </ButtonBase>

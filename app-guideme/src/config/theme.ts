@@ -109,8 +109,20 @@ export const theme = createTheme({
           // Tonal layering: a hairline border + soft ambient elevation-1 shadow.
           boxShadow: ELEVATION_1,
           border: `1px solid ${theme.palette.divider}`,
-          borderRadius: 12,
+          // DESING.md "Container Radius: 1rem" — cards, section wrappers, modals.
+          borderRadius: 16,
         }),
+      },
+    },
+    MuiCardContent: {
+      styleOverrides: {
+        // DESING.md "internal padding generous (minimum 24px)" for the premium, uncluttered
+        // feel — replaces MUI's default 16px. The last-child override keeps the bottom symmetric
+        // (MUI otherwise pads the final child to 24px and the rest to 16px).
+        root: {
+          padding: 24,
+          '&:last-child': { paddingBottom: 24 },
+        },
       },
     },
     MuiLink: {

@@ -1,16 +1,9 @@
 import { useState } from 'react'
-import {
-  SwipeableDrawer,
-  Box,
-  Typography,
-  Button,
-  IconButton,
-  CircularProgress,
-} from '@mui/material'
+import { Box, Typography, Button, IconButton, CircularProgress } from '@mui/material'
 import { alpha } from '@mui/material/styles'
-import CloseRounded from '@mui/icons-material/CloseRounded'
 import ChevronLeftRounded from '@mui/icons-material/ChevronLeftRounded'
 import ChevronRightRounded from '@mui/icons-material/ChevronRightRounded'
+import { BottomSheet } from '../../filters'
 import { usePosAvailableDays } from '../hooks'
 import {
   monthOf,
@@ -46,10 +39,9 @@ const monthLabel = (month: string): string => {
 
 const pad2 = (n: number): string => String(n).padStart(2, '0')
 
-// US-AG35 — the calendar Bottom Sheet: a month grid of square day chips marking the
-// sellable days (from GET /api/pos/availability/days), with month navigation. Reuses the
-// US-AG31 sheet pattern (glass paper, puller). Past/unavailable days are disabled; picking
-// an available day commits it and closes.
+// US-AG35 — the calendar Bottom Sheet: a month grid of square day chips marking the sellable
+// days (from GET /api/pos/availability/days), with month navigation. Renders in the shared glass
+// BottomSheet shell. Past/unavailable days are disabled; picking an available day commits it.
 export function PosDatePickerSheet({
   open,
   onClose,
@@ -82,83 +74,49 @@ export function PosDatePickerSheet({
   const total = daysInMonth(visibleMonth)
   const days = Array.from({ length: total }, (_, i) => i + 1)
 
-  return (
-    <SwipeableDrawer
-      anchor="bottom"
-      open={open}
-      onClose={onClose}
-      onOpen={() => {}}
-      disableSwipeToOpen
-      slotProps={{
-        paper: {
-          sx: {
-            borderTopLeftRadius: 16,
-            borderTopRightRadius: 16,
-            maxHeight: '80vh',
-            display: 'flex',
-            flexDirection: 'column',
-            overflow: 'hidden',
-            backgroundColor: 'rgba(255,255,255,0.9)',
-            backdropFilter: 'blur(20px)',
-            WebkitBackdropFilter: 'blur(20px)',
-          },
-        },
+  const header = (
+    <Box
+      sx={{
+        px: 3,
+        pt: 1,
+        pb: 2,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
       }}
     >
-      {/* Puller + close — fixed. */}
-      <Box sx={{ position: 'relative', pt: 1.5, pb: 0.5, flexShrink: 0 }}>
-        <Box sx={{ width: 36, height: 4, borderRadius: 2, bgcolor: 'divider', mx: 'auto' }} />
-        <IconButton
-          size="small"
-          aria-label="Cerrar"
-          onClick={onClose}
-          sx={{ position: 'absolute', top: 4, right: 8 }}
-        >
-          <CloseRounded fontSize="small" />
-        </IconButton>
-      </Box>
-
-      {/* Month navigation. */}
-      <Box
-        sx={{
-          px: 3,
-          pt: 1,
-          pb: 2,
-          flexShrink: 0,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-        }}
+      <IconButton
+        aria-label="Mes anterior"
+        onClick={() => setVisibleMonth((m) => addMonths(m, -1))}
+        disabled={atCurrentMonth}
       >
-        <IconButton
-          aria-label="Mes anterior"
-          onClick={() => setVisibleMonth((m) => addMonths(m, -1))}
-          disabled={atCurrentMonth}
-        >
-          <ChevronLeftRounded />
-        </IconButton>
-        <Typography sx={{ fontWeight: 600, fontSize: 17 }}>
-          {monthLabel(visibleMonth)}
-        </Typography>
-        <IconButton
-          aria-label="Mes siguiente"
-          onClick={() => setVisibleMonth((m) => addMonths(m, 1))}
-        >
-          <ChevronRightRounded />
-        </IconButton>
-      </Box>
+        <ChevronLeftRounded />
+      </IconButton>
+      <Typography sx={{ fontWeight: 600, fontSize: 17 }}>
+        {monthLabel(visibleMonth)}
+      </Typography>
+      <IconButton
+        aria-label="Mes siguiente"
+        onClick={() => setVisibleMonth((m) => addMonths(m, 1))}
+      >
+        <ChevronRightRounded />
+      </IconButton>
+    </Box>
+  )
 
-      {/* Scrollable grid (the only overflow region). */}
-      <Box sx={{ flex: 1, minHeight: 0, overflowY: 'auto', px: 3, pb: 1 }}>
+  const footer = (
+    <Box sx={{ px: 3, py: 2 }}>
+      <Button fullWidth variant="outlined" onClick={onClearToToday}>
+        Hoy
+      </Button>
+    </Box>
+  )
+
+  return (
+    <BottomSheet open={open} onClose={onClose} header={header} footer={footer}>
+      <Box sx={{ px: 3, pb: 1 }}>
         {/* Weekday header. */}
-        <Box
-          sx={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(7, 1fr)',
-            gap: 1,
-            mb: 1,
-          }}
-        >
+        <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 1, mb: 1 }}>
           {WEEKDAY_HEADERS.map((w, i) => (
             <Typography
               key={i}
@@ -172,12 +130,7 @@ export function PosDatePickerSheet({
 
         {/* Day cells (square). */}
         <Box
-          sx={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(7, 1fr)',
-            gap: 1,
-            position: 'relative',
-          }}
+          sx={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 1, position: 'relative' }}
         >
           {isLoading && (
             <Box
@@ -259,8 +212,7 @@ export function PosDatePickerSheet({
                     height: 5,
                     mt: 0.25,
                     borderRadius: '50%',
-                    bgcolor:
-                      isAvailable && !isSelected ? 'primary.main' : 'transparent',
+                    bgcolor: isAvailable && !isSelected ? 'primary.main' : 'transparent',
                   }}
                 />
               </Box>
@@ -268,13 +220,6 @@ export function PosDatePickerSheet({
           })}
         </Box>
       </Box>
-
-      {/* Footer: "Hoy" shortcut — fixed. */}
-      <Box sx={{ px: 3, py: 2, flexShrink: 0 }}>
-        <Button fullWidth variant="outlined" onClick={onClearToToday}>
-          Hoy
-        </Button>
-      </Box>
-    </SwipeableDrawer>
+    </BottomSheet>
   )
 }
