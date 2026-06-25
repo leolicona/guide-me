@@ -13,6 +13,7 @@ import foliosRouter from './routes/folios'
 import portalRouter from './routes/portal'
 import posRouter from './routes/pos'
 import { sweepExpiredBookings } from './routes/pos/sweep'
+import reportsRouter from './routes/reports'
 import servicesRouter from './routes/services'
 import ticketsRouter from './routes/tickets'
 import type { AppVariables } from './types/context'
@@ -43,6 +44,7 @@ app.route('/api/pos', posRouter)
 app.route('/api/folios', foliosRouter)
 app.route('/api/tickets', ticketsRouter)
 app.route('/api/cash', cashRouter)
+app.route('/api/reports', reportsRouter)
 
 app.get('/api/me', authMiddleware, (c) => c.json({ user: c.get('user') }))
 

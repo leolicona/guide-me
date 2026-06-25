@@ -34,6 +34,7 @@ const FolioDetailPage = lazy(() => import('./pages/FolioDetailPage'))
 const BalancePage = lazy(() => import('./pages/BalancePage'))
 const CashBalancesPage = lazy(() => import('./pages/CashBalancesPage'))
 const CashDropDetailPage = lazy(() => import('./pages/CashDropDetailPage'))
+const ReportsPage = lazy(() => import('./pages/ReportsPage'))
 
 function PageLoader() {
   return (
@@ -214,6 +215,16 @@ function App() {
               element={
                 <RoleGuard role="admin">
                   <CashDropDetailPage />
+                </RoleGuard>
+              }
+            />
+
+            {/* Commission & settlement report by period — admin only (US-A17/A18/A20) */}
+            <Route
+              path={ROUTES.REPORTS}
+              element={
+                <RoleGuard role="admin">
+                  <ReportsPage />
                 </RoleGuard>
               }
             />

@@ -25,4 +25,5 @@ export const ROUTES = {
   BALANCE: '/balance', // agent — running balance, expenses, hand-ins
   CASH: '/cash', // admin — outstanding balances + drops review queue
   CASH_DROP_DETAIL: '/cash/drops/:id', // admin — one drop's detail
+  REPORTS: '/reports', // admin — commission & settlement report by period (US-A17/A18/A20)
 } as const

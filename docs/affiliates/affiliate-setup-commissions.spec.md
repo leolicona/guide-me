@@ -182,8 +182,10 @@ fixed footer *Anterior* / *Siguiente* → *Finalizar*. Create-only.
 - **Commissions spec** (`docs/commissions/service-based-commission.spec.md`): the affiliate rate is
   an *override source* selected at sale when the seller is an affiliate; math + snapshot rule
   unchanged. The affiliate path reads `affiliate_commissions`, not `services.commission_*`.
-- **Folio attribution** consumed by dashboards/reports (US-A16/A17/A18) — TODO: extend those reads
-  to group by `affiliate_company_id`.
+- **Folio attribution** consumed by dashboards/reports (US-A16/A17/A18) — the period commission &
+  settlement report groups by seller and surfaces `affiliate_company_id`; US-A53 is its per-affiliate
+  drill-down (`docs/reports/commission-report.spec.md`). The single-day dashboard (US-A16) extension
+  remains TODO.
 - **Auth/invitations** reuse the agent flow; only the created user's role + company link differ.
 
 ---

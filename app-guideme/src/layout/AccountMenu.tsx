@@ -21,6 +21,7 @@ import {
   Typography,
 } from '@mui/material'
 import type { SvgIconComponent } from '@mui/icons-material'
+import AssessmentRounded from '@mui/icons-material/AssessmentRounded'
 import GroupsRounded from '@mui/icons-material/GroupsRounded'
 import LogoutRounded from '@mui/icons-material/LogoutRounded'
 import MapRounded from '@mui/icons-material/MapRounded'
@@ -47,6 +48,7 @@ const MANAGEMENT_LINKS: ManagementLink[] = [
   { label: 'Agentes', to: ROUTES.AGENTS, icon: GroupsRounded },
   { label: 'Afiliados', to: ROUTES.AFFILIATES, icon: StorefrontRounded },
   { label: 'Catálogo', to: ROUTES.CATALOG, icon: MapRounded },
+  { label: 'Reportes', to: ROUTES.REPORTS, icon: AssessmentRounded },
   { label: 'Configuración', to: ROUTES.SETTINGS, icon: SettingsRounded },
 ]
 
