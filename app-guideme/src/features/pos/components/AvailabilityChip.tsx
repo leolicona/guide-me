@@ -6,10 +6,10 @@ interface AvailabilityChipProps {
   available: boolean
 }
 
-// Available / sold-out hint for a catalog card (Luminous SaaS): a low-saturation status
-// pill — a soft tinted background with a small status dot and an uppercase, wide-tracked
-// label. Green = availability (functional accent), neutral = sold out. The per-slot
-// remaining count lives on the detail screen — the catalog payload is count-free (US-AG30).
+// Available / sold-out hint for a catalog card: a low-saturation status pill — a soft tinted
+// background with a small status dot and an uppercase, wide-tracked label. Green = availability
+// (functional color, never the teal accent), neutral = sold out. The per-slot remaining count
+// lives on the detail screen — the catalog payload is count-free (US-AG30).
 export function AvailabilityChip({ available }: AvailabilityChipProps) {
   return (
     <Box

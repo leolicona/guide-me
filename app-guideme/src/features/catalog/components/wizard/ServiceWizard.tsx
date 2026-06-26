@@ -1,22 +1,8 @@
 import { useState } from 'react'
 import { useForm, FormProvider } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
-import {
-  Dialog,
-  Box,
-  Typography,
-  IconButton,
-  LinearProgress,
-  Button,
-  Stack,
-  Fade,
-  Alert,
-  CircularProgress,
-  Divider,
-} from '@mui/material'
-import CloseRounded from '@mui/icons-material/CloseRounded'
-import ArrowBackRounded from '@mui/icons-material/ArrowBackRounded'
-import CheckRounded from '@mui/icons-material/CheckRounded'
+import { Dialog, Box, Typography, Button, Stack, Alert } from '@mui/material'
+import { WizardShell } from '../../../../components'
 import { wizardSchema, STEP_FIELDS, type WizardFormData } from './wizardSchema'
 import {
   TOTAL_STEPS,
@@ -178,154 +164,47 @@ export function ServiceWizard({ open, onClose, onCreated }: ServiceWizardProps) 
   const saving = saveMutation.isPending
 
   return (
-    <Dialog
-      open={open}
-      onClose={handleClose}
-      fullWidth
-      slotProps={{
-        paper: {
-          sx: {
-            m: { xs: 0, sm: 2 },
-            position: { xs: 'fixed', sm: 'relative' },
-            bottom: { xs: 0, sm: 'auto' },
-            left: { xs: 0, sm: 'auto' },
-            right: { xs: 0, sm: 'auto' },
-            width: { xs: '100%', sm: '100%' },
-            maxWidth: { sm: 600 },
-            height: { xs: '90vh', sm: 'auto' },
-            maxHeight: { xs: '90vh', sm: '88vh' },
-            borderRadius: { xs: '20px 20px 0 0', sm: 3 },
-            display: 'flex',
-            flexDirection: 'column',
-            overflow: 'hidden',
-          },
-        },
-      }}
-    >
-      {/* Fixed header — title, close, step indicator, progress (US-A38) */}
-      <Box sx={{ px: 3, pt: 2.5, pb: 2, flexShrink: 0 }}>
-        <Stack
-          direction="row"
-          sx={{ alignItems: 'center', justifyContent: 'space-between' }}
-        >
-          <Typography variant="h6">Nuevo servicio</Typography>
-          <IconButton
-            edge="end"
-            onClick={handleClose}
-            disabled={saving}
-            aria-label="Cerrar"
-          >
-            <CloseRounded />
-          </IconButton>
-        </Stack>
-        <Stack
-          direction="row"
-          spacing={1}
-          sx={{ alignItems: 'baseline', mt: 0.25 }}
-        >
-          <Typography
-            variant="overline"
-            color="secondary"
-            sx={{ fontWeight: 700, letterSpacing: 1 }}
-          >
-            Paso {step} de {TOTAL_STEPS}
-          </Typography>
-          <Typography variant="body2" color="text.secondary">
-            · {STEP_TITLES[step]}
-          </Typography>
-        </Stack>
-        <LinearProgress
-          variant="determinate"
-          color="secondary"
-          value={(step / TOTAL_STEPS) * 100}
-          sx={{
-            mt: 1.5,
-            height: 6,
-            borderRadius: 3,
-            bgcolor: 'action.hover',
-          }}
-        />
-      </Box>
-
-      <Divider />
-
-      {/* Scrollable body */}
-      <Box sx={{ flex: 1, overflowY: 'auto', px: 3, py: 3 }}>
+    <>
+      <WizardShell
+        open={open}
+        onClose={handleClose}
+        title="Nuevo servicio"
+        step={step}
+        totalSteps={TOTAL_STEPS}
+        stepTitle={STEP_TITLES[step]}
+        onBack={goBack}
+        onNext={goNext}
+        onFinish={save}
+        isLastStep={isLast}
+        finishLabel="Guardar"
+        busy={saving}
+        error={
+          saveMutation.isError ? (
+            <Alert severity="error">
+              No se pudo crear el servicio. Revisa los datos e inténtalo de nuevo.
+            </Alert>
+          ) : undefined
+        }
+      >
         <FormProvider {...methods}>
-          <Fade in key={step} timeout={250}>
-            <Box>
-              {step === 1 && <StepBasicInfo />}
-              {step === 2 && <StepPricing />}
-              {step === 3 && (
-                <StepAvailability
-                  times={times}
-                  onTimesChange={setTimes}
-                  showTimesError={showTimesError}
-                />
-              )}
-              {step === 4 && <StepExtras extras={extras} onChange={setExtras} />}
-            </Box>
-          </Fade>
-        </FormProvider>
-      </Box>
-
-      {saveMutation.isError && (
-        <Alert severity="error" sx={{ mx: 3, mb: 1 }}>
-          No se pudo crear el servicio. Revisa los datos e inténtalo de nuevo.
-        </Alert>
-      )}
-
-      <Divider />
-
-      {/* Fixed footer (US-A38) */}
-      <Box sx={{ px: 3, py: 2, flexShrink: 0 }}>
-        <Stack
-          direction="row"
-          sx={{ justifyContent: 'space-between', alignItems: 'center' }}
-        >
-          <Button
-            onClick={goBack}
-            disabled={step === 1 || saving}
-            startIcon={<ArrowBackRounded />}
-            color="inherit"
-          >
-            Anterior
-          </Button>
-          {isLast ? (
-            <Button
-              onClick={save}
-              variant="contained"
-              color="secondary"
-              disableElevation
-              disabled={saving}
-              startIcon={
-                saving ? (
-                  <CircularProgress size={18} color="inherit" />
-                ) : (
-                  <CheckRounded />
-                )
-              }
-            >
-              Guardar
-            </Button>
-          ) : (
-            <Button
-              onClick={goNext}
-              variant="contained"
-              color="secondary"
-              disableElevation
-            >
-              Siguiente
-            </Button>
+          {step === 1 && <StepBasicInfo />}
+          {step === 2 && <StepPricing />}
+          {step === 3 && (
+            <StepAvailability
+              times={times}
+              onTimesChange={setTimes}
+              showTimesError={showTimesError}
+            />
           )}
-        </Stack>
-      </Box>
+          {step === 4 && <StepExtras extras={extras} onChange={setExtras} />}
+        </FormProvider>
+      </WizardShell>
 
       {/* Discard confirmation */}
       <Dialog
         open={confirmDiscard}
         onClose={() => setConfirmDiscard(false)}
-        slotProps={{ paper: { sx: { borderRadius: 3, p: 1 } } }}
+        slotProps={{ paper: { sx: { borderRadius: 'var(--radius-lg, 16px)', p: 1 } } }}
       >
         <Box sx={{ p: 2, maxWidth: 360 }}>
           <Typography variant="h6" sx={{ mb: 1 }}>
@@ -338,12 +217,12 @@ export function ServiceWizard({ open, onClose, onCreated }: ServiceWizardProps) 
             <Button color="inherit" onClick={() => setConfirmDiscard(false)}>
               Seguir editando
             </Button>
-            <Button color="error" variant="contained" disableElevation onClick={doClose}>
+            <Button color="error" variant="contained" onClick={doClose}>
               Descartar
             </Button>
           </Stack>
         </Box>
       </Dialog>
-    </Dialog>
+    </>
   )
 }

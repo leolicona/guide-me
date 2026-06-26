@@ -3,22 +3,16 @@ import {
   Dialog,
   Box,
   Typography,
-  IconButton,
-  LinearProgress,
   Button,
   Stack,
-  Fade,
   Alert,
   CircularProgress,
-  Divider,
   TextField,
   Chip,
 } from '@mui/material'
-import CloseRounded from '@mui/icons-material/CloseRounded'
-import ArrowBackRounded from '@mui/icons-material/ArrowBackRounded'
-import CheckRounded from '@mui/icons-material/CheckRounded'
 import AddRounded from '@mui/icons-material/AddRounded'
 import { useQuery } from '@tanstack/react-query'
+import { WizardShell } from '../../../components'
 import { listServices } from '../../../services/catalogService'
 import { useCreateAffiliate } from '../hooks/useAffiliates'
 import { CommissionCatalogEditor } from './CommissionCatalogEditor'
@@ -131,60 +125,30 @@ export function AffiliateWizard({ open, onClose, onCreated }: Props) {
   const saving = createMutation.isPending
 
   return (
-    <Dialog
-      open={open}
-      onClose={handleClose}
-      fullWidth
-      slotProps={{
-        paper: {
-          sx: {
-            m: { xs: 0, sm: 2 },
-            position: { xs: 'fixed', sm: 'relative' },
-            bottom: { xs: 0, sm: 'auto' },
-            left: { xs: 0, sm: 'auto' },
-            right: { xs: 0, sm: 'auto' },
-            width: { xs: '100%', sm: '100%' },
-            maxWidth: { sm: 600 },
-            height: { xs: '90vh', sm: 'auto' },
-            maxHeight: { xs: '90vh', sm: '88vh' },
-            borderRadius: { xs: '20px 20px 0 0', sm: 3 },
-            display: 'flex',
-            flexDirection: 'column',
-            overflow: 'hidden',
-          },
-        },
-      }}
-    >
-      {/* Fixed header */}
-      <Box sx={{ px: 3, pt: 2.5, pb: 2, flexShrink: 0 }}>
-        <Stack direction="row" sx={{ alignItems: 'center', justifyContent: 'space-between' }}>
-          <Typography variant="h6">Nuevo afiliado</Typography>
-          <IconButton edge="end" onClick={handleClose} disabled={saving} aria-label="Cerrar">
-            <CloseRounded />
-          </IconButton>
-        </Stack>
-        <Stack direction="row" spacing={1} sx={{ alignItems: 'baseline', mt: 0.25 }}>
-          <Typography variant="overline" color="secondary" sx={{ fontWeight: 700, letterSpacing: 1 }}>
-            Paso {step} de {TOTAL_STEPS}
-          </Typography>
-          <Typography variant="body2" color="text.secondary">
-            · {STEP_TITLES[step]}
-          </Typography>
-        </Stack>
-        <LinearProgress
-          variant="determinate"
-          color="secondary"
-          value={(step / TOTAL_STEPS) * 100}
-          sx={{ mt: 1.5, height: 6, borderRadius: 3, bgcolor: 'action.hover' }}
-        />
-      </Box>
-
-      <Divider />
-
-      {/* Scrollable body */}
-      <Box sx={{ flex: 1, overflowY: 'auto', px: 3, py: 3 }}>
-        <Fade in key={step} timeout={250}>
-          <Box>
+    <>
+      <WizardShell
+        open={open}
+        onClose={handleClose}
+        title="Nuevo afiliado"
+        step={step}
+        totalSteps={TOTAL_STEPS}
+        stepTitle={STEP_TITLES[step]}
+        onBack={() => setStep((s) => Math.max(1, s - 1))}
+        onNext={() => setStep((s) => s + 1)}
+        onFinish={finalize}
+        isLastStep={step === TOTAL_STEPS}
+        finishLabel="Finalizar"
+        canAdvance={canNext}
+        canFinish={nameValid && step2Valid}
+        busy={saving}
+        error={
+          createMutation.isError ? (
+            <Alert severity="error">
+              No se pudo crear el afiliado. Revisa los datos e inténtalo de nuevo.
+            </Alert>
+          ) : undefined
+        }
+      >
             {step === 1 && (
               <Stack spacing={2}>
                 <TextField
@@ -279,59 +243,13 @@ export function AffiliateWizard({ open, onClose, onCreated }: Props) {
                 </Stack>
               </Stack>
             )}
-          </Box>
-        </Fade>
-      </Box>
-
-      {createMutation.isError && (
-        <Alert severity="error" sx={{ mx: 3, mb: 1 }}>
-          No se pudo crear el afiliado. Revisa los datos e inténtalo de nuevo.
-        </Alert>
-      )}
-
-      <Divider />
-
-      {/* Fixed footer */}
-      <Box sx={{ px: 3, py: 2, flexShrink: 0 }}>
-        <Stack direction="row" sx={{ justifyContent: 'space-between', alignItems: 'center' }}>
-          <Button
-            onClick={() => setStep((s) => Math.max(1, s - 1))}
-            disabled={step === 1 || saving}
-            startIcon={<ArrowBackRounded />}
-            color="inherit"
-          >
-            Anterior
-          </Button>
-          {step === TOTAL_STEPS ? (
-            <Button
-              onClick={finalize}
-              variant="contained"
-              color="secondary"
-              disableElevation
-              disabled={saving || !nameValid || !step2Valid}
-              startIcon={saving ? <CircularProgress size={18} color="inherit" /> : <CheckRounded />}
-            >
-              Finalizar
-            </Button>
-          ) : (
-            <Button
-              onClick={() => setStep((s) => s + 1)}
-              variant="contained"
-              color="secondary"
-              disableElevation
-              disabled={!canNext}
-            >
-              Siguiente
-            </Button>
-          )}
-        </Stack>
-      </Box>
+      </WizardShell>
 
       {/* Discard confirmation */}
       <Dialog
         open={confirmDiscard}
         onClose={() => setConfirmDiscard(false)}
-        slotProps={{ paper: { sx: { borderRadius: 3, p: 1 } } }}
+        slotProps={{ paper: { sx: { borderRadius: 'var(--radius-lg, 16px)', p: 1 } } }}
       >
         <Box sx={{ p: 2, maxWidth: 360 }}>
           <Typography variant="h6" sx={{ mb: 1 }}>
@@ -344,12 +262,12 @@ export function AffiliateWizard({ open, onClose, onCreated }: Props) {
             <Button color="inherit" onClick={() => setConfirmDiscard(false)}>
               Seguir editando
             </Button>
-            <Button color="error" variant="contained" disableElevation onClick={doClose}>
+            <Button color="error" variant="contained" onClick={doClose}>
               Descartar
             </Button>
           </Stack>
         </Box>
       </Dialog>
-    </Dialog>
+    </>
   )
 }

@@ -74,11 +74,12 @@ const SORT_OPTIONS: { key: ReportSortKey; label: string }[] = [
 ]
 
 // Settlement direction — the one place color carries meaning. Mirrors the Caja BalanceRow:
-// net_owed > 0 → the seller holds the company's cash (indigo); < 0 → the company owes the
-// seller (red). One shared source so the header and the rows never disagree.
+// net_owed > 0 → the seller holds the company's cash (neutral ink — the normal state); < 0 →
+// the company owes the seller (error red — a liability). Money is never teal (teal = action).
+// One shared source so the header and the rows never disagree.
 function settlementColor(net: number) {
   if (net === 0) return 'text.secondary'
-  return net > 0 ? 'secondary.main' : 'error.main'
+  return net > 0 ? 'text.primary' : 'error.main'
 }
 function settlementStatement(net: number) {
   if (net === 0) return 'Cuentas saldadas en el período'

@@ -10,27 +10,15 @@ import {
   Fade,
   Stack,
   Divider,
-  Chip,
 } from '@mui/material'
 import ArrowBackRounded from '@mui/icons-material/ArrowBackRounded'
 import { useFolio } from '../features/pos/hooks'
 import { TicketQr } from '../features/pos/components/TicketQr'
 import { BookingActions, ExpiredBookingBanner, venceLabel } from '../features/bookings'
-import type { FolioStatus } from '../features/pos/types'
+import { FolioStatusChip } from '../features/folios'
+import { MoneyText } from '../components'
 import { formatMoney } from '../features/catalog/types'
 import { ROUTES } from '../config/routes'
-
-const STATUS_COLOR: Record<FolioStatus, 'success' | 'info' | 'error'> = {
-  paid: 'success',
-  booking: 'info',
-  cancelled: 'error',
-}
-
-const STATUS_LABEL: Record<FolioStatus, string> = {
-  paid: 'Pagado',
-  booking: 'Reserva',
-  cancelled: 'Cancelado',
-}
 
 const formatDate = (unixSeconds: number) =>
   new Date(unixSeconds * 1000).toLocaleString(undefined, {
@@ -84,11 +72,7 @@ export default function FolioHistoryDetailPage() {
                 <Typography variant="h5" component="h1">
                   Folio
                 </Typography>
-                <Chip
-                  size="small"
-                  color={STATUS_COLOR[folio.status]}
-                  label={STATUS_LABEL[folio.status]}
-                />
+                <FolioStatusChip status={folio.status} />
               </Stack>
               <Typography variant="caption" color="text.secondary">
                 {folio.id} · {formatDate(folio.created_at)}
@@ -169,20 +153,21 @@ export default function FolioHistoryDetailPage() {
                       <Typography>−{formatMoney(folio.discount_total)}</Typography>
                     </Stack>
                   )}
-                  <Stack direction="row" sx={{ justifyContent: 'space-between' }}>
+                  <Stack direction="row" sx={{ justifyContent: 'space-between', alignItems: 'baseline' }}>
                     <Typography variant="h6">Total</Typography>
-                    <Typography variant="h6">{formatMoney(folio.total)}</Typography>
+                    <MoneyText cents={folio.total} variant="h4" srLabel="Total" />
                   </Stack>
                   <Stack direction="row" sx={{ justifyContent: 'space-between' }}>
                     <Typography color="text.secondary">
                       {isBooking ? 'Anticipo' : 'Pagado'}
                     </Typography>
-                    <Typography>{formatMoney(folio.amount_paid)}</Typography>
+                    <Typography className="numeric">{formatMoney(folio.amount_paid)}</Typography>
                   </Stack>
                   {isBooking && (
                     <Stack direction="row" sx={{ justifyContent: 'space-between' }}>
                       <Typography color="text.secondary">Saldo pendiente</Typography>
-                      <Typography color="primary">
+                      {/* Owed by the customer — neutral ink, not teal. */}
+                      <Typography className="numeric">
                         {formatMoney(folio.pending_balance ?? folio.total - folio.amount_paid)}
                       </Typography>
                     </Stack>

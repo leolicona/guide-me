@@ -38,11 +38,16 @@ export default function CatalogListPage() {
   return (
     <Fade in timeout={400}>
       <Box>
+        {/* On mobile the shell's account avatar floats fixed at the top-right, so the header
+            action can't sit beside the title there (US-UX03). Stack on xs (title, then a
+            full-width action below the avatar zone); keep the side-by-side row from md up,
+            where the avatar lives in the rail. */}
         <Box
           sx={{
             display: 'flex',
+            flexDirection: { xs: 'column', md: 'row' },
             justifyContent: 'space-between',
-            alignItems: 'center',
+            alignItems: { xs: 'stretch', md: 'center' },
             gap: 2,
             mb: 3,
           }}
@@ -55,6 +60,7 @@ export default function CatalogListPage() {
             disableElevation
             startIcon={<AddRounded />}
             onClick={() => setCreating(true)}
+            sx={{ flexShrink: 0, alignSelf: { xs: 'stretch', md: 'auto' } }}
           >
             Nuevo servicio
           </Button>

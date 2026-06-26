@@ -3,8 +3,6 @@ import {
   Alert,
   Box,
   Button,
-  Card,
-  CardContent,
   Dialog,
   DialogActions,
   DialogContent,
@@ -19,6 +17,7 @@ import { CashBoxCard } from './CashBoxCard'
 import { SalesSummaryCard } from './SalesSummaryCard'
 import { CommissionsCard } from './CommissionsCard'
 import { formatMoney, amountToCents, centsToAmount } from '../../catalog/types'
+import { SectionCard, MoneyText } from '../../../components'
 
 const formatDate = (unixSeconds: number) =>
   new Date(unixSeconds * 1000).toLocaleString(undefined, {
@@ -94,14 +93,18 @@ export function TuCajaSection() {
 
       {negative ? (
         // The company owes the admin — offer a self-confirmed payout instead of a hand-in.
-        <Card variant="outlined">
-          <CardContent>
+        <SectionCard>
             <Typography variant="overline" color="text.secondary">
               La empresa te debe
             </Typography>
-            <Typography variant="h3" sx={{ fontWeight: 600, color: 'error.main' }}>
-              {formatMoney(Math.abs(balance.balance))}
-            </Typography>
+            <MoneyText
+              cents={balance.balance}
+              absolute
+              semantic="negative"
+              variant="h1"
+              srLabel="La empresa te debe"
+              sx={{ display: 'block', mt: 0.5 }}
+            />
             <Stack spacing={1} sx={{ mt: 1.5 }}>
               <Stack direction="row" sx={{ justifyContent: 'space-between' }}>
                 <Typography variant="body2" color="text.secondary">
@@ -126,8 +129,7 @@ export function TuCajaSection() {
             >
               Registrar pago
             </Button>
-          </CardContent>
-        </Card>
+        </SectionCard>
       ) : (
         <CashBoxCard balance={balance} onRegisterDrop={openDrop} />
       )}

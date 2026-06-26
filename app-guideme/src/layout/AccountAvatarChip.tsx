@@ -1,6 +1,5 @@
 import { useState } from 'react'
 import { Avatar, ButtonBase } from '@mui/material'
-import { alpha } from '@mui/material/styles'
 import { useCurrentUser } from '../features/auth/CurrentUserContext'
 import { AccountMenu } from './AccountMenu'
 
@@ -20,10 +19,11 @@ interface AccountAvatarChipProps {
 }
 
 // US-UX03 — the mobile account affordance: a small avatar chip. By default it is fixed at the
-// top-right of the viewport (safe-area aware, with a subtle frosted backdrop so it reads above
-// any content) and opens the account bottom sheet. Page titles stay left-aligned, so the fixed
-// variant never collides with them. Pages with a right-aligned top bar (POS) render the
-// `inline` variant so the avatar sits as a flowed sibling of their actions instead of overlapping.
+// top-right of the viewport (safe-area aware, on a solid surface with a hairline border + soft
+// overlay shadow so it reads above any content — structure-first, no glass) and opens the account
+// bottom sheet. Page titles stay left-aligned, so the fixed variant never collides with them.
+// Pages with a right-aligned top bar (POS) render the `inline` variant so the avatar sits as a
+// flowed sibling of their actions instead of overlapping.
 export function AccountAvatarChip({ inline = false }: AccountAvatarChipProps) {
   const user = useCurrentUser()
   const [open, setOpen] = useState(false)
@@ -43,8 +43,9 @@ export function AccountAvatarChip({ inline = false }: AccountAvatarChipProps) {
                 zIndex: (t) => t.zIndex.appBar + 1,
                 borderRadius: 999,
                 p: 0.5,
-                bgcolor: (t) => alpha(t.palette.background.paper, 0.7),
-                backdropFilter: 'blur(8px)',
+                // Solid floating chip — overlays are the one place we use real shadow.
+                bgcolor: 'background.paper',
+                boxShadow: 'var(--shadow-overlay-sm)',
                 border: '1px solid',
                 borderColor: 'divider',
               }

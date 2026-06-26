@@ -1,10 +1,11 @@
 import { alpha } from '@mui/material/styles'
 import type { SxProps, Theme } from '@mui/material/styles'
 
-// Shared Luminous filter primitives, lifted out of PosCatalogPage so the POS catalog and the
-// reports controls render the same chips/pills from one source.
+// Shared filter primitives, lifted out of PosCatalogPage so the POS catalog and the reports
+// controls render the same chips/pills from one source. Colors are theme-driven (teal accent).
 
-// A tall rounded date pill: filled Indigo when active, hairline-bordered surface otherwise.
+// A tall rounded date pill: filled teal when active (the one confident accent on the strip),
+// hairline-bordered surface otherwise.
 export const datePillSx = (active: boolean): SxProps<Theme> => ({
   flexShrink: 0,
   height: 48,
@@ -25,8 +26,8 @@ export const datePillSx = (active: boolean): SxProps<Theme> => ({
   },
 })
 
-// A short pill-shaped filter chip: a soft Indigo tint when active, hairline surface otherwise
-// (rounded-full, Luminous low-saturation accent).
+// A short pill-shaped filter chip: a soft teal tint when active, hairline surface otherwise
+// (rounded-full, low-saturation accent).
 export const chipPillSx = (active: boolean): SxProps<Theme> => ({
   flexShrink: 0,
   height: 36,

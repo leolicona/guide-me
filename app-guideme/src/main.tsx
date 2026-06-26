@@ -6,6 +6,7 @@ import { QueryClientProvider } from '@tanstack/react-query'
 import { theme } from './config/theme'
 import { queryClient } from './config/queryClient'
 import { AppErrorBoundary } from './layout/AppErrorBoundary'
+import './styles/tokens.css'
 import './index.css'
 import App from './App.tsx'
 

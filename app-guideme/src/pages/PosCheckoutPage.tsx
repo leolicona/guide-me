@@ -4,8 +4,6 @@ import {
   Box,
   Typography,
   Button,
-  Card,
-  CardContent,
   Alert,
   Fade,
   Stack,
@@ -40,6 +38,7 @@ import {
 import { ServiceError } from '../services/authService'
 import { formatMoney, amountToCents, centsToAmount } from '../features/catalog/types'
 import { ROUTES } from '../config/routes'
+import { SectionCard, MoneyText } from '../components'
 
 // customer_email is mandatory at POS — it's the only delivery channel for the ticket + QR
 // in Phase 1. Mirror the backend's validation so the agent gets immediate feedback.
@@ -236,8 +235,7 @@ export default function PosCheckoutPage() {
               <Alert severity="error">{errorMessage(confirm.error)}</Alert>
             )}
 
-            <Card>
-              <CardContent>
+            <SectionCard>
                 <Stack spacing={2} divider={<Divider flexItem />}>
                   {lines.map((line) => (
                     <Box key={line.slot.id}>
@@ -300,14 +298,9 @@ export default function PosCheckoutPage() {
                     </Box>
                   ))}
                 </Stack>
-              </CardContent>
-            </Card>
+            </SectionCard>
 
-            <Card>
-              <CardContent>
-                <Typography variant="h6" sx={{ mb: 2 }}>
-                  Cliente
-                </Typography>
+            <SectionCard title="Cliente">
                 <Stack spacing={2}>
                   <TextField
                     label="Nombre (opcional)"
@@ -338,14 +331,9 @@ export default function PosCheckoutPage() {
                     onChange={(e) => setCustomer({ phone: e.target.value })}
                   />
                 </Stack>
-              </CardContent>
-            </Card>
+            </SectionCard>
 
-            <Card>
-              <CardContent>
-                <Typography variant="h6" sx={{ mb: 2 }}>
-                  Método de pago
-                </Typography>
+            <SectionCard title="Método de pago">
                 {/* US-AG29 — four methods; everything except Efectivo is electronic (no
                     cash debt, commission still earned). Two rows so each stays tappable. */}
                 <Stack spacing={1}>
@@ -391,34 +379,31 @@ export default function PosCheckoutPage() {
                     ? 'Efectivo recibido — se suma al saldo de caja que entregas a la empresa.'
                     : 'Cobro electrónico — lo recibe la empresa: no suma efectivo a tu caja, pero sí genera comisión.'}
                 </Typography>
-              </CardContent>
-            </Card>
+            </SectionCard>
 
-            <Card>
-              <CardContent>
+            <SectionCard>
                 <Stack spacing={1}>
                   <Stack direction="row" sx={{ justifyContent: 'space-between' }}>
                     <Typography color="text.secondary">Subtotal</Typography>
-                    <Typography>{formatMoney(cartSubtotal(lines))}</Typography>
+                    <Typography className="numeric">{formatMoney(cartSubtotal(lines))}</Typography>
                   </Stack>
                   {cartDiscountTotal(lines) > 0 && (
                     <Stack direction="row" sx={{ justifyContent: 'space-between' }}>
                       <Typography color="text.secondary">Descuento</Typography>
-                      <Typography>−{formatMoney(cartDiscountTotal(lines))}</Typography>
+                      <Typography className="numeric">−{formatMoney(cartDiscountTotal(lines))}</Typography>
                     </Stack>
                   )}
                   <Divider sx={{ my: 1 }} />
-                  <Stack direction="row" sx={{ justifyContent: 'space-between' }}>
+                  {/* The dominant figure — money reads first. */}
+                  <Stack direction="row" sx={{ justifyContent: 'space-between', alignItems: 'baseline' }}>
                     <Typography variant="h6">Total</Typography>
-                    <Typography variant="h6">{formatMoney(cartTotal(lines))}</Typography>
+                    <MoneyText cents={cartTotal(lines)} variant="h2" srLabel="Total a cobrar" />
                   </Stack>
                 </Stack>
-              </CardContent>
-            </Card>
+            </SectionCard>
 
             {/* US-AG07.2 — adaptive amount: full total in one tap, or convert to an apartado. */}
-            <Card>
-              <CardContent>
+            <SectionCard>
                 <Stack
                   direction="row"
                   sx={{ justifyContent: 'space-between', alignItems: 'center', mb: 2 }}
@@ -464,23 +449,42 @@ export default function PosCheckoutPage() {
                     Un apartado requiere un teléfono válido para dar seguimiento por WhatsApp.
                   </Typography>
                 )}
-              </CardContent>
-            </Card>
+            </SectionCard>
 
-            <Button
-              variant="contained"
-              size="large"
-              disableElevation
-              onClick={handleConfirm}
-              disabled={!canSubmit}
+            {/* One confident teal action, pinned to the thumb zone — reachable one-handed as the
+                page scrolls (brief principle 3: reach & repetition). */}
+            <Box
+              sx={{
+                position: 'sticky',
+                bottom: 0,
+                pt: 2,
+                pb: 2,
+                mt: 1,
+                backgroundColor: 'background.default',
+                borderTop: '1px solid',
+                borderColor: 'divider',
+                zIndex: 1,
+              }}
             >
-              {buttonLabel}
-            </Button>
-            {!emailValid && (
-              <Typography variant="caption" color="text.secondary" sx={{ textAlign: 'center' }}>
-                Captura el correo del cliente para enviar el boleto y poder cobrar.
-              </Typography>
-            )}
+              <Button
+                variant="contained"
+                size="large"
+                fullWidth
+                onClick={handleConfirm}
+                disabled={!canSubmit}
+              >
+                {buttonLabel}
+              </Button>
+              {!emailValid && (
+                <Typography
+                  variant="caption"
+                  color="text.secondary"
+                  sx={{ display: 'block', textAlign: 'center', mt: 1 }}
+                >
+                  Captura el correo del cliente para enviar el boleto y poder cobrar.
+                </Typography>
+              )}
+            </Box>
           </Stack>
         )}
       </Box>

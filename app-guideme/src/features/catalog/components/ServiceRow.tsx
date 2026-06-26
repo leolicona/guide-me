@@ -9,6 +9,7 @@ import DeleteOutlineRounded from '@mui/icons-material/DeleteOutlineRounded'
 import type { Service } from '../types'
 import { formatMoney } from '../types'
 import { categoryLabel } from '../categories'
+import { StatusChip } from '../../../components'
 
 interface ServiceRowProps {
   service: Service
@@ -47,6 +48,9 @@ export function ServiceRow({
               component={RouterLink}
               to={`/catalog/${service.id}`}
               sx={{
+                // RouterLink renders an inline <a>; noWrap's ellipsis only works on a block,
+                // so without this a long title overflows the card instead of truncating (375px).
+                display: 'block',
                 fontWeight: 600,
                 color: 'text.primary',
                 textDecoration: 'none',
@@ -56,7 +60,7 @@ export function ServiceRow({
             >
               {service.name}
             </Typography>
-            <Typography variant="body2" color="text.secondary">
+            <Typography variant="body2" color="text.secondary" className="numeric">
               {formatMoney(service.base_price)} · mín {formatMoney(service.minimum_price)}
             </Typography>
             <Typography variant="body2" color="text.secondary">
@@ -70,10 +74,8 @@ export function ServiceRow({
             spacing={1}
             sx={{ alignItems: 'center', flexShrink: 0, flexWrap: 'wrap' }}
           >
-            <Chip
-              size="small"
-              variant="outlined"
-              color={inactive ? 'default' : 'success'}
+            <StatusChip
+              status={inactive ? 'suspended' : 'active'}
               label={inactive ? 'Inactivo' : 'Activo'}
             />
             {service.category && (

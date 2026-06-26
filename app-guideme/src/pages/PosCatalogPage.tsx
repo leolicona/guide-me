@@ -19,8 +19,9 @@ import {
   Snackbar,
   useMediaQuery,
 } from '@mui/material'
-import { alpha, useTheme } from '@mui/material/styles'
+import { useTheme } from '@mui/material/styles'
 import { datePillSx, chipPillSx, filterStripSx } from '../features/filters'
+import { MoneyText } from '../components'
 import ShoppingCartRounded from '@mui/icons-material/ShoppingCartRounded'
 import CalendarMonthRounded from '@mui/icons-material/CalendarMonthRounded'
 import { usePosServices } from '../features/pos/hooks'
@@ -30,7 +31,6 @@ import { PosDatePickerSheet } from '../features/pos/components/PosDatePickerShee
 import { AccountAvatarChip } from '../layout/AccountAvatarChip'
 import { usePosCart, cartCount } from '../store/posCart'
 import { usePosFilters } from '../store/posFilters'
-import { formatMoney } from '../features/catalog/types'
 import {
   SERVICE_CATEGORIES,
   categoryLabel,
@@ -220,16 +220,9 @@ export default function PosCatalogPage() {
           ) : (
             <Stack spacing={2}>
               {visibleServices.map((service) => (
-                <Card
-                  key={service.id}
-                  sx={{
-                    borderRadius: 2,
-                    border: '1px solid',
-                    borderColor: alpha('#000', 0.04),
-                    boxShadow:
-                      '0 4px 24px -4px rgba(0,0,0,0.03), 0 2px 8px -2px rgba(0,0,0,0.02)',
-                  }}
-                >
+                // Structure-first: the theme gives the card its hairline border + 16px radius
+                // and no resting shadow — readable in any light (replaces the old soft-shadow).
+                <Card key={service.id}>
                   <CardActionArea
                     onClick={() => setOpenServiceId(service.id)}
                     sx={{
@@ -300,11 +293,11 @@ export default function PosCatalogPage() {
                           >
                             Desde
                           </Typography>
-                          <Typography
-                            sx={{ fontSize: 22, fontWeight: 600, letterSpacing: '-0.01em' }}
-                          >
-                            {formatMoney(service.base_price)}
-                          </Typography>
+                          <MoneyText
+                            cents={service.base_price}
+                            variant="h3"
+                            srLabel={`${service.name}, desde`}
+                          />
                         </Box>
                         {service.next_slot_date && (
                           <Box

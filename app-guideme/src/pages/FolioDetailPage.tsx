@@ -22,24 +22,12 @@ import {
   Switch,
 } from '@mui/material'
 import ArrowBackRounded from '@mui/icons-material/ArrowBackRounded'
-import { useFolio, useCancelFolio, useConfirmRefund } from '../features/folios/hooks'
+import { useFolio, useCancelFolio, useConfirmRefund, FolioStatusChip } from '../features/folios'
 import { BookingActions, ExpiredBookingBanner, venceLabel } from '../features/bookings'
-import type { FolioStatus } from '../features/folios/types'
 import { ServiceError } from '../services/authService'
 import { formatMoney } from '../features/catalog/types'
+import { MoneyText } from '../components'
 import { ROUTES } from '../config/routes'
-
-const STATUS_COLOR: Record<FolioStatus, 'success' | 'info' | 'error'> = {
-  paid: 'success',
-  booking: 'info',
-  cancelled: 'error',
-}
-
-const STATUS_LABEL: Record<FolioStatus, string> = {
-  paid: 'Pagado',
-  booking: 'Reserva',
-  cancelled: 'Cancelado',
-}
 
 const formatDate = (unixSeconds: number) =>
   new Date(unixSeconds * 1000).toLocaleString(undefined, {
@@ -152,7 +140,7 @@ export default function FolioDetailPage() {
                 {folio.refund_status === 'refunded' && (
                   <Chip size="small" color="success" variant="outlined" label="Reembolsado" />
                 )}
-                <Chip size="small" color={STATUS_COLOR[folio.status]} label={STATUS_LABEL[folio.status]} />
+                <FolioStatusChip status={folio.status} />
               </Stack>
             </Stack>
 
@@ -244,20 +232,21 @@ export default function FolioDetailPage() {
                       <Typography>−{formatMoney(folio.discount_total)}</Typography>
                     </Stack>
                   )}
-                  <Stack direction="row" sx={{ justifyContent: 'space-between' }}>
+                  <Stack direction="row" sx={{ justifyContent: 'space-between', alignItems: 'baseline' }}>
                     <Typography variant="h6">Total</Typography>
-                    <Typography variant="h6">{formatMoney(folio.total)}</Typography>
+                    <MoneyText cents={folio.total} variant="h4" srLabel="Total" />
                   </Stack>
                   <Stack direction="row" sx={{ justifyContent: 'space-between' }}>
                     <Typography color="text.secondary">
                       {isBooking ? 'Anticipo' : 'Pagado'}
                     </Typography>
-                    <Typography>{formatMoney(folio.amount_paid)}</Typography>
+                    <Typography className="numeric">{formatMoney(folio.amount_paid)}</Typography>
                   </Stack>
                   {isBooking && (
                     <Stack direction="row" sx={{ justifyContent: 'space-between' }}>
                       <Typography color="text.secondary">Saldo pendiente</Typography>
-                      <Typography color="primary">
+                      {/* Owed by the customer — neutral ink, not teal. */}
+                      <Typography className="numeric">
                         {formatMoney(folio.pending_balance ?? folio.total - folio.amount_paid)}
                       </Typography>
                     </Stack>

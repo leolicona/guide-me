@@ -3,7 +3,7 @@ import { Box, Typography, Button, IconButton, CircularProgress } from '@mui/mate
 import { alpha } from '@mui/material/styles'
 import ChevronLeftRounded from '@mui/icons-material/ChevronLeftRounded'
 import ChevronRightRounded from '@mui/icons-material/ChevronRightRounded'
-import { BottomSheet } from '../../filters'
+import { BottomSheet } from '../../../components'
 import { usePosAvailableDays } from '../hooks'
 import {
   monthOf,
@@ -40,8 +40,8 @@ const monthLabel = (month: string): string => {
 const pad2 = (n: number): string => String(n).padStart(2, '0')
 
 // US-AG35 — the calendar Bottom Sheet: a month grid of square day chips marking the sellable
-// days (from GET /api/pos/availability/days), with month navigation. Renders in the shared glass
-// BottomSheet shell. Past/unavailable days are disabled; picking an available day commits it.
+// days (from GET /api/pos/availability/days), with month navigation. Renders in the shared
+// BottomSheet primitive. Past/unavailable days are disabled; picking an available day commits it.
 export function PosDatePickerSheet({
   open,
   onClose,

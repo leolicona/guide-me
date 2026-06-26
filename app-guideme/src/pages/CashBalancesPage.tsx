@@ -41,6 +41,7 @@ import { METHOD_LABEL } from '../features/cash/components/paymentPresentation'
 import type { BalanceListItem, DropStatus } from '../features/cash/types'
 import { formatMoney, amountToCents, centsToAmount } from '../features/catalog/types'
 import { ROUTES } from '../config/routes'
+import { MoneyText } from '../components'
 
 const DROP_COLOR: Record<DropStatus, 'warning' | 'success' | 'error'> = {
   pending: 'warning',
@@ -192,9 +193,14 @@ function BalanceRow({
                 <Chip size="small" variant="outlined" label="pendiente" />
               </Badge>
             )}
-            <Typography variant="h6" sx={{ color: negative ? 'error.main' : 'secondary.main' }}>
-              {formatMoney(Math.abs(row.balance))}
-            </Typography>
+            {/* Money is neutral ink (or error red when the company owes them) — never teal. */}
+            <MoneyText
+              cents={row.balance}
+              absolute
+              semantic={negative ? 'negative' : 'neutral'}
+              variant="h3"
+              srLabel={row.agent.name}
+            />
           </Stack>
         </Stack>
 

@@ -68,8 +68,8 @@ const initialsOf = (name: string) =>
  * Authenticated app shell. No top bar (US-UX03): the rail (md+) runs full-height with a
  * monogram on top, the daily destination pills in the middle, and a bottom-pinned avatar that
  * opens the account surface; on mobile a bottom navigation bar plus a fixed top-right avatar
- * chip. The active destination gets an indigo (`secondary`) pill — the single accent reserved
- * for active states.
+ * chip. The active destination gets a teal (`secondary`) pill — the single confident accent
+ * reserved for action/active states.
  */
 export function AppLayout() {
   const theme = useTheme()
@@ -146,7 +146,7 @@ export function AppLayout() {
             sx={{
               width: 44,
               height: 44,
-              borderRadius: 2.5,
+              borderRadius: 'var(--radius-md, 12px)', // crisp app-icon brand mark
               mb: 2,
               fontWeight: 700,
               fontSize: 18,

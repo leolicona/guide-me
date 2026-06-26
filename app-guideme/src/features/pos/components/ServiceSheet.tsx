@@ -49,19 +49,18 @@ export function ServiceSheet({ serviceId, onClose, onAdded }: ServiceSheetProps)
       slotProps={{
         paper: {
           sx: {
-            borderTopLeftRadius: 16,
-            borderTopRightRadius: 16,
+            borderTopLeftRadius: 'var(--radius-xl, 20px)',
+            borderTopRightRadius: 'var(--radius-xl, 20px)',
             // The sheet grows upward from the base as content is added; the matrix inside
             // scrolls once it would exceed this cap. The footer stays pinned to the base.
             maxHeight: '85vh',
             display: 'flex',
             flexDirection: 'column',
             overflow: 'hidden',
-            // Luminous glassmorphism — keep the catalog visible behind the sheet without
-            // clutter: a 90% white fill over a 20px backdrop blur (DESING.md § Elevation).
-            backgroundColor: 'rgba(255,255,255,0.9)',
-            backdropFilter: 'blur(20px)',
-            WebkitBackdropFilter: 'blur(20px)',
+            // Structure-first: a solid white sheet that casts a real upward shadow (overlays
+            // are the one place the system uses elevation). Mirrors the shared BottomSheet.
+            backgroundColor: '#FFFFFF',
+            boxShadow: 'var(--shadow-sheet, 0 -8px 30px rgba(15,23,42,0.12))',
           },
         },
       }}

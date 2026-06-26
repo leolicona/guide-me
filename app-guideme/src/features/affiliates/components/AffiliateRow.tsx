@@ -1,8 +1,9 @@
-import { Card, CardActionArea, CardContent, Box, Typography, Chip, Stack } from '@mui/material'
+import { Card, CardActionArea, CardContent, Box, Typography, Stack } from '@mui/material'
 import StorefrontRounded from '@mui/icons-material/StorefrontRounded'
 import GroupsRounded from '@mui/icons-material/GroupsRounded'
 import { useNavigate } from 'react-router-dom'
 import type { AffiliateListItem } from '../types'
+import { StatusChip } from '../../../components'
 
 // US-A48 — one affiliate company in the list. The whole card navigates to the detail/edit page.
 export function AffiliateRow({ affiliate }: { affiliate: AffiliateListItem }) {
@@ -40,11 +41,8 @@ export function AffiliateRow({ affiliate }: { affiliate: AffiliateListItem }) {
                 </Stack>
               </Stack>
             </Box>
-            <Chip
-              size="small"
-              variant="outlined"
-              color={suspended ? 'default' : 'success'}
-              label={suspended ? 'Suspendido' : 'Activo'}
+            <StatusChip
+              status={suspended ? 'suspended' : 'active'}
               sx={{ flexShrink: 0 }}
             />
           </Box>

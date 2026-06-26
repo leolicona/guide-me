@@ -3,7 +3,7 @@ import { Box, Typography, Button, IconButton } from '@mui/material'
 import { alpha } from '@mui/material/styles'
 import ChevronLeftRounded from '@mui/icons-material/ChevronLeftRounded'
 import ChevronRightRounded from '@mui/icons-material/ChevronRightRounded'
-import { BottomSheet } from './BottomSheet'
+import { BottomSheet } from '../../../components'
 import { monthOf, addMonths, daysInMonth, firstWeekdayMondayBased } from '../../pos/dates'
 
 interface DateRangeSheetProps {
@@ -36,9 +36,9 @@ const dayLabel = (date: string): string => {
   return `${day} ${MONTHS_ABBR[m - 1]}`
 }
 
-// A month-grid date-range picker in the shared glass sheet. Tap a start day, then an end day; the
-// span between highlights and the endpoints fill. Re-tapping (or picking earlier than the anchor)
-// restarts the selection. Reuses the POS calendar's pure date helpers and cell aesthetic.
+// A month-grid date-range picker in the shared BottomSheet primitive. Tap a start day, then an end
+// day; the span between highlights (teal tint) and the endpoints fill (teal). Re-tapping (or picking
+// earlier than the anchor) restarts the selection. Reuses the POS calendar's date helpers + cell aesthetic.
 export function DateRangeSheet({ open, onClose, from, to, maxDate, onApply }: DateRangeSheetProps) {
   // Pending selection while the sheet is open. `end === null` means "awaiting the end day".
   const [start, setStart] = useState(from)

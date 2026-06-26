@@ -1,7 +1,8 @@
-import { Box, Card, CardContent, Chip, Stack, Typography } from '@mui/material'
+import { Box, Chip, Stack, Typography } from '@mui/material'
 import type { SalesBreakdown } from '../types'
 import { formatMoney } from '../../catalog/types'
 import { ELECTRONIC_METHODS, METHOD_LABEL } from './paymentPresentation'
+import { SectionCard, MoneyText } from '../../../components'
 
 /**
  * US-AG29 block 2 — "Mis ventas": the shift's sales with the cash-vs-electronic split,
@@ -14,27 +15,25 @@ export function SalesSummaryCard({ sales }: { sales: SalesBreakdown }) {
   const showBar = sales.total > 0 && sales.cash >= 0
 
   return (
-    <Card variant="outlined">
-      <CardContent>
+    <SectionCard>
         <Typography variant="overline" color="text.secondary">
           Ventas del turno
         </Typography>
         <Stack direction="row" spacing={1} sx={{ alignItems: 'baseline' }}>
-          <Typography variant="h5" sx={{ fontWeight: 600 }}>
-            {formatMoney(sales.total)}
-          </Typography>
+          <MoneyText cents={sales.total} variant="h2" srLabel="Ventas del turno" />
           <Typography variant="body2" color="text.secondary">
             {count === 1 ? '1 venta' : `${count} ventas`}
           </Typography>
         </Stack>
 
         {showBar && (
+          // Data viz, not an action — cash in ink, electronic in slate. Teal stays reserved.
           <Stack direction="row" spacing={0.25} sx={{ mt: 1.5, height: 6 }}>
             {sales.cash > 0 && (
               <Box
                 sx={{
                   flexGrow: sales.cash,
-                  bgcolor: 'secondary.main',
+                  bgcolor: 'text.primary',
                   borderRadius: 3,
                 }}
               />
@@ -77,7 +76,6 @@ export function SalesSummaryCard({ sales }: { sales: SalesBreakdown }) {
             </Typography>
           </>
         )}
-      </CardContent>
-    </Card>
+    </SectionCard>
   )
 }

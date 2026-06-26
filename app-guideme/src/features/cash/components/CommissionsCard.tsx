@@ -1,6 +1,7 @@
-import { Card, CardContent, Stack, Typography } from '@mui/material'
+import { Stack, Typography } from '@mui/material'
 import type { CommissionBreakdown } from '../types'
 import { formatMoney } from '../../catalog/types'
+import { SectionCard, MoneyText } from '../../../components'
 
 /**
  * US-AG29 block 3 — "Mis comisiones": earnings presented as earnings (not a deduction line),
@@ -9,14 +10,18 @@ import { formatMoney } from '../../catalog/types'
  */
 export function CommissionsCard({ commissions }: { commissions: CommissionBreakdown }) {
   return (
-    <Card variant="outlined">
-      <CardContent>
+    <SectionCard>
         <Typography variant="overline" color="text.secondary">
           Comisiones ganadas
         </Typography>
-        <Typography variant="h5" sx={{ fontWeight: 600 }}>
-          {formatMoney(commissions.total)}
-        </Typography>
+        {/* Earnings, not a deduction — shown in success green (positive semantic). */}
+        <MoneyText
+          cents={commissions.total}
+          semantic="positive"
+          variant="h2"
+          srLabel="Comisiones ganadas"
+          sx={{ display: 'block' }}
+        />
 
         <Stack spacing={0.5} sx={{ mt: 1.5 }}>
           <Stack direction="row" sx={{ justifyContent: 'space-between' }}>
@@ -39,7 +44,6 @@ export function CommissionsCard({ commissions }: { commissions: CommissionBreakd
             tu deuda de efectivo — son ganancia directa.
           </Typography>
         )}
-      </CardContent>
-    </Card>
+    </SectionCard>
   )
 }

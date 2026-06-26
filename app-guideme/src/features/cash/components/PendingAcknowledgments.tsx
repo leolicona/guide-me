@@ -3,8 +3,6 @@ import {
   Alert,
   Box,
   Button,
-  Card,
-  CardContent,
   Dialog,
   DialogActions,
   DialogContent,
@@ -17,6 +15,7 @@ import { useAcknowledgeDrop, useDisputeDrop } from '../hooks'
 import type { PendingAck } from '../types'
 import { formatMoney } from '../../catalog/types'
 import { ackCountdown } from './ackPresentation'
+import { AlertCard, MoneyText } from '../../../components'
 
 // US-AG27/AG28 — the agent's outstanding signature obligations, rendered as a NON-BLOCKING
 // inline card list (never a modal: it must not interrupt a sale or the balance view). Each
@@ -45,58 +44,46 @@ export function PendingAcknowledgments({ items }: { items: PendingAck[] }) {
   }
 
   return (
-    <Card variant="outlined" sx={{ borderColor: 'warning.main' }}>
-      <CardContent>
-        <Typography variant="h6" sx={{ mb: 0.5 }}>
-          Pendientes de firma
-        </Typography>
-        <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-          El administrador registró estos movimientos en tu saldo. Revísalos y firma de
-          conformidad, o levanta una disputa si no estás de acuerdo.
-        </Typography>
+    <Box>
+      <Typography variant="h6" sx={{ mb: 0.5 }}>
+        Pendientes de firma
+      </Typography>
+      <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+        El administrador registró estos movimientos en tu saldo. Revísalos y firma de
+        conformidad, o levanta una disputa si no estás de acuerdo.
+      </Typography>
 
-        {(acknowledge.isError || dispute.isError) && (
-          <Alert severity="error" sx={{ mb: 2 }}>
-            No se pudo enviar tu respuesta. Inténtalo de nuevo.
-          </Alert>
-        )}
+      {(acknowledge.isError || dispute.isError) && (
+        <Alert severity="error" sx={{ mb: 2 }}>
+          No se pudo enviar tu respuesta. Inténtalo de nuevo.
+        </Alert>
+      )}
 
-        <Stack spacing={2}>
-          {items.map((item) => {
-            const adjusted = item.amount_requested != null
-            const countdown = ackCountdown(item.ack_due_at)
-            return (
-              <Box
-                key={item.id}
-                sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 2, p: 2 }}
-              >
-                <Typography variant="overline" color="text.secondary">
-                  {item.source === 'admin' ? 'Cobro directo del administrador' : 'Ajuste en tu entrega'}
-                </Typography>
-                <Typography variant="h6" sx={{ fontWeight: 600 }}>
-                  {formatMoney(item.amount)}
-                </Typography>
-                {adjusted && (
-                  <Typography variant="body2" color="text.secondary">
-                    Reportaste {formatMoney(item.amount_requested as number)} · registrado{' '}
-                    {formatMoney(item.amount)}
+      {/* Each obligation is its own top-of-screen alert that blocks attention until resolved —
+          the money reads first, the Firmar/Disputar actions sit in the card footer. */}
+      <Stack spacing={2}>
+        {items.map((item) => {
+          const adjusted = item.amount_requested != null
+          const countdown = ackCountdown(item.ack_due_at)
+          const source =
+            item.source === 'admin' ? 'Cobro directo del administrador' : 'Ajuste en tu entrega'
+          return (
+            <AlertCard
+              key={item.id}
+              tone="warning"
+              title={
+                <>
+                  <Typography variant="overline" sx={{ display: 'block', opacity: 0.85 }}>
+                    {source}
                   </Typography>
-                )}
-                {item.note && (
-                  <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-                    {item.note}
-                  </Typography>
-                )}
-                {countdown && (
-                  <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
-                    {countdown}
-                  </Typography>
-                )}
-                <Stack direction="row" spacing={1} sx={{ mt: 1.5 }}>
+                  <MoneyText cents={item.amount} variant="h3" srLabel={source} />
+                </>
+              }
+              actions={
+                <>
                   <Button
                     variant="contained"
                     size="small"
-                    disableElevation
                     onClick={() => acknowledge.mutate(item.id)}
                     disabled={acknowledge.isPending || dispute.isPending}
                   >
@@ -115,12 +102,29 @@ export function PendingAcknowledgments({ items }: { items: PendingAck[] }) {
                   >
                     Disputar
                   </Button>
-                </Stack>
-              </Box>
-            )
-          })}
-        </Stack>
-      </CardContent>
+                </>
+              }
+            >
+              {adjusted && (
+                <Box component="span" sx={{ display: 'block' }}>
+                  Reportaste {formatMoney(item.amount_requested as number)} · registrado{' '}
+                  {formatMoney(item.amount)}
+                </Box>
+              )}
+              {item.note && (
+                <Box component="span" sx={{ display: 'block' }}>
+                  {item.note}
+                </Box>
+              )}
+              {countdown && (
+                <Box component="span" sx={{ display: 'block', mt: 0.5, opacity: 0.85 }}>
+                  {countdown}
+                </Box>
+              )}
+            </AlertCard>
+          )
+        })}
+      </Stack>
 
       <Dialog
         open={!!disputeTarget}
@@ -163,6 +167,6 @@ export function PendingAcknowledgments({ items }: { items: PendingAck[] }) {
           </Button>
         </DialogActions>
       </Dialog>
-    </Card>
+    </Box>
   )
 }

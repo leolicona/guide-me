@@ -4,8 +4,6 @@ import {
   Box,
   Typography,
   Button,
-  Card,
-  CardContent,
   CircularProgress,
   Alert,
   Fade,
@@ -25,6 +23,7 @@ import { SOURCE_LABEL } from '../features/cash/components/ackPresentation'
 import type { DropStatus, ReviewDropInput } from '../features/cash/types'
 import { formatMoney, amountToCents } from '../features/catalog/types'
 import { ROUTES } from '../config/routes'
+import { SectionCard, MoneyText } from '../components'
 
 const DROP_COLOR: Record<DropStatus, 'warning' | 'success' | 'error'> = {
   pending: 'warning',
@@ -94,7 +93,7 @@ export default function CashDropDetailPage() {
     <Fade in timeout={400}>
       <Box sx={{ maxWidth: 560, mx: 'auto' }}>
         <Button component={RouterLink} to={ROUTES.CASH} startIcon={<ArrowBackRounded />} sx={{ mb: 2 }}>
-          Cash
+          Caja
         </Button>
 
         {isLoading && (
@@ -108,10 +107,8 @@ export default function CashDropDetailPage() {
           <Stack spacing={3}>
             <Stack direction="row" sx={{ justifyContent: 'space-between', alignItems: 'center' }}>
               <Box sx={{ minWidth: 0 }}>
-                <Typography variant="h4" sx={{ fontWeight: 600 }}>
-                  {formatMoney(drop.amount)}
-                </Typography>
-                <Typography variant="caption" color="text.secondary">
+                <MoneyText cents={drop.amount} variant="h2" srLabel="Monto de la entrega" />
+                <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
                   {drop.agent?.name} · {SOURCE_LABEL[drop.source]} · {formatDate(drop.created_at)}
                 </Typography>
               </Box>
@@ -121,12 +118,11 @@ export default function CashDropDetailPage() {
               </Stack>
             </Stack>
 
-            <Card variant="outlined">
-              <CardContent>
+            <SectionCard>
                 <Stack spacing={1}>
                   <Stack direction="row" sx={{ justifyContent: 'space-between' }}>
                     <Typography color="text.secondary">Saldo del agente al entregar</Typography>
-                    <Typography>{formatMoney(drop.balance_before)}</Typography>
+                    <Typography className="numeric">{formatMoney(drop.balance_before)}</Typography>
                   </Stack>
                   {drop.amount_requested != null && (
                     <Stack direction="row" sx={{ justifyContent: 'space-between' }}>
@@ -146,8 +142,7 @@ export default function CashDropDetailPage() {
                     </>
                   )}
                 </Stack>
-              </CardContent>
-            </Card>
+            </SectionCard>
 
             {/* Terminal: show the decision (mirrors the retired closure detail). */}
             {!isPending && (

@@ -1,16 +1,9 @@
 import { useState } from 'react'
-import {
-  Button,
-  Card,
-  CardContent,
-  Collapse,
-  Divider,
-  Stack,
-  Typography,
-} from '@mui/material'
+import { Button, Collapse, Divider, Stack, Typography } from '@mui/material'
 import ExpandMoreRounded from '@mui/icons-material/ExpandMoreRounded'
 import type { AgentBalance } from '../types'
 import { formatMoney } from '../../catalog/types'
+import { SectionCard, MoneyText } from '../../../components'
 
 // One labelled line in the balance breakdown. `sign` renders the +/− that ties each
 // component to the running-balance formula.
@@ -56,17 +49,20 @@ export function CashBoxCard({
   const negative = balance.balance < 0
 
   return (
-    <Card variant="outlined">
-      <CardContent>
+    <SectionCard>
         <Typography variant="overline" color="text.secondary">
           {negative ? 'La empresa te debe' : 'Efectivo por entregar'}
         </Typography>
-        <Typography
-          variant="h3"
-          sx={{ fontWeight: 600, color: negative ? 'error.main' : 'secondary.main' }}
-        >
-          {formatMoney(Math.abs(balance.balance))}
-        </Typography>
+        {/* Money reads first — the dominant figure. Neutral ink when it's cash the seller owes;
+            error red only when the company owes them. NEVER teal (teal marks the action below). */}
+        <MoneyText
+          cents={balance.balance}
+          absolute
+          semantic={negative ? 'negative' : 'neutral'}
+          variant="h1"
+          srLabel={negative ? 'La empresa te debe' : 'Efectivo por entregar'}
+          sx={{ display: 'block', mt: 0.5 }}
+        />
         {balance.pending_drops_total > 0 && (
           <Typography variant="body2" color="warning.main" sx={{ mt: 0.5 }}>
             {formatMoney(balance.pending_drops_total)} entregado, pendiente de confirmación
@@ -117,7 +113,6 @@ export function CashBoxCard({
         >
           Entregar efectivo
         </Button>
-      </CardContent>
-    </Card>
+    </SectionCard>
   )
 }

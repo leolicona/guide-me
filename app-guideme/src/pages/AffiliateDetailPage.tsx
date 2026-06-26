@@ -37,6 +37,7 @@ import {
   type CommissionDraftMap,
 } from '../features/affiliates/commission'
 import type { AffiliateDetail } from '../features/affiliates/types'
+import { StatusChip } from '../components'
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
@@ -152,12 +153,7 @@ function AffiliateEditor({ affiliate }: { affiliate: AffiliateDetail }) {
             <Typography variant="h5" component="h1" noWrap>
               {affiliate.name}
             </Typography>
-            <Chip
-              size="small"
-              variant="outlined"
-              color={suspended ? 'default' : 'success'}
-              label={suspended ? 'Suspendido' : 'Activo'}
-            />
+            <StatusChip status={suspended ? 'suspended' : 'active'} />
           </Stack>
           {suspended ? (
             <Button
@@ -277,12 +273,7 @@ function AffiliateEditor({ affiliate }: { affiliate: AffiliateDetail }) {
                         {u.email}
                       </Typography>
                     </Box>
-                    <Chip
-                      size="small"
-                      variant="outlined"
-                      color={u.status === 'suspended' ? 'default' : 'success'}
-                      label={u.status === 'suspended' ? 'Suspendido' : 'Activo'}
-                    />
+                    <StatusChip status={u.status === 'suspended' ? 'suspended' : 'active'} />
                   </Stack>
                 ))}
                 {affiliate.pending_invites.map((inv) => (

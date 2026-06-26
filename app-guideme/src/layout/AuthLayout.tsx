@@ -41,12 +41,13 @@ export function AuthLayout({ children, title, footer }: AuthLayoutProps) {
                 </Typography>
               )}
             </Box>
+            {/* Structure-first: hairline border, no shadow (elevation 0), container radius. */}
             <Card
               elevation={0}
               sx={{
                 border: '1px solid',
                 borderColor: 'divider',
-                borderRadius: '12px',
+                borderRadius: 'var(--radius-lg, 16px)',
               }}
             >
               <CardContent sx={{ p: 4, '&:last-child': { pb: 4 } }}>

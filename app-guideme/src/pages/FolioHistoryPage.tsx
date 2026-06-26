@@ -17,21 +17,10 @@ import {
 } from '@mui/material'
 import { useMyFolios } from '../features/pos/hooks'
 import { BookingWhatsAppButton, isUrgentBooking, venceLabel } from '../features/bookings'
+import { FolioStatusChip } from '../features/folios'
 import type { FolioStatus } from '../features/pos/types'
-import { formatMoney } from '../features/catalog/types'
+import { MoneyText } from '../components'
 import { ROUTES } from '../config/routes'
-
-const STATUS_COLOR: Record<FolioStatus, 'success' | 'info' | 'error'> = {
-  paid: 'success',
-  booking: 'info',
-  cancelled: 'error',
-}
-
-const STATUS_LABEL: Record<FolioStatus, string> = {
-  paid: 'Pagado',
-  booking: 'Reserva',
-  cancelled: 'Cancelado',
-}
 
 const formatDate = (unixSeconds: number) =>
   new Date(unixSeconds * 1000).toLocaleString(undefined, {
@@ -142,11 +131,7 @@ export default function FolioHistoryPage() {
                           spacing={0.5}
                           sx={{ alignItems: 'center', flexShrink: 0 }}
                         >
-                          <Chip
-                            size="small"
-                            color={STATUS_COLOR[f.status]}
-                            label={STATUS_LABEL[f.status]}
-                          />
+                          <FolioStatusChip status={f.status} />
                           {isBooking && <BookingWhatsAppButton folio={f} />}
                         </Stack>
                       </Stack>
@@ -156,24 +141,25 @@ export default function FolioHistoryPage() {
                           <Typography variant="caption" color="text.secondary">
                             Total
                           </Typography>
-                          <Typography variant="body2">{formatMoney(f.total)}</Typography>
+                          <MoneyText cents={f.total} variant="body2" sx={{ display: 'block' }} />
                         </Box>
                         <Box>
                           <Typography variant="caption" color="text.secondary">
                             {isBooking ? 'Anticipo' : 'Pagado'}
                           </Typography>
-                          <Typography variant="body2">
-                            {formatMoney(f.amount_paid)}
-                          </Typography>
+                          <MoneyText cents={f.amount_paid} variant="body2" sx={{ display: 'block' }} />
                         </Box>
                         {isBooking && (
                           <Box>
                             <Typography variant="caption" color="text.secondary">
                               Saldo pendiente
                             </Typography>
-                            <Typography variant="body2" color="primary">
-                              {formatMoney(f.pending_balance ?? f.total - f.amount_paid)}
-                            </Typography>
+                            {/* Owed by the customer — neutral ink, not teal. */}
+                            <MoneyText
+                              cents={f.pending_balance ?? f.total - f.amount_paid}
+                              variant="body2"
+                              sx={{ display: 'block' }}
+                            />
                           </Box>
                         )}
                       </Stack>

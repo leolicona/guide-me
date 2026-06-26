@@ -171,7 +171,8 @@ export function AccountMenu({ variant, open, onClose, anchorEl }: AccountMenuPro
                 ml: 1,
                 border: '1px solid',
                 borderColor: 'divider',
-                borderRadius: 3,
+                borderRadius: 'var(--radius-lg, 16px)',
+                boxShadow: 'var(--shadow-overlay-sm)',
                 overflow: 'hidden',
               },
             },
@@ -187,8 +188,9 @@ export function AccountMenu({ variant, open, onClose, anchorEl }: AccountMenuPro
           slotProps={{
             paper: {
               sx: {
-                borderTopLeftRadius: 16,
-                borderTopRightRadius: 16,
+                borderTopLeftRadius: 'var(--radius-xl, 20px)',
+                borderTopRightRadius: 'var(--radius-xl, 20px)',
+                boxShadow: 'var(--shadow-sheet)',
                 pb: 'env(safe-area-inset-bottom)',
               },
             },

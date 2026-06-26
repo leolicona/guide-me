@@ -1,8 +1,9 @@
-import { Card, CardContent, Box, Typography, Chip, Button } from '@mui/material'
+import { Card, CardContent, Box, Typography, Button } from '@mui/material'
 import EditRounded from '@mui/icons-material/EditRounded'
 import BlockRounded from '@mui/icons-material/BlockRounded'
 import CheckCircleRounded from '@mui/icons-material/CheckCircleRounded'
 import type { Agent } from '../types'
+import { StatusChip } from '../../../components'
 
 interface AgentRowProps {
   agent: Agent
@@ -53,12 +54,7 @@ export function AgentRow({
               flexShrink: 0,
             }}
           >
-            <Chip
-              size="small"
-              variant="outlined"
-              color={suspended ? 'default' : 'success'}
-              label={suspended ? 'Suspendido' : 'Activo'}
-            />
+            <StatusChip status={suspended ? 'suspended' : 'active'} />
             <Button
               size="small"
               startIcon={<EditRounded />}
