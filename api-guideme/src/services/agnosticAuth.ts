@@ -4,12 +4,29 @@ type AuthSuccess<T> = { success: true; data: T }
 type AuthError = { success: false; error?: { code?: string; message?: string } }
 type AuthResponse<T> = AuthSuccess<T> | AuthError
 
+// In local dev, set DEV_AUTH_SERVICE_URL (in .dev.vars) to call the deployed
+// agnostic-auth worker over HTTPS instead of the service binding (which isn't
+// available without running that worker locally). In prod the var is unset and
+// we use the AGNOSTIC_AUTH_API service binding.
+const authFetch = (
+  env: CloudflareBindings,
+  path: string,
+  init: RequestInit,
+): Promise<Response> => {
+  const devUrl = env.DEV_AUTH_SERVICE_URL
+  if (devUrl) {
+    const base = /^https?:\/\//.test(devUrl) ? devUrl : `https://${devUrl}`
+    return fetch(`${base}${path}`, init)
+  }
+  return env.AGNOSTIC_AUTH_API.fetch(`http://auth.local${path}`, init)
+}
+
 const callAuth = async <T>(
   env: CloudflareBindings,
   path: string,
   body: unknown,
 ): Promise<T> => {
-  const res = await env.AGNOSTIC_AUTH_API.fetch(`http://auth.local${path}`, {
+  const res = await authFetch(env, path, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -42,7 +59,7 @@ export const verifyToken = async (
   env: CloudflareBindings,
   token: string,
 ): Promise<{ jwt: string; refreshToken: string }> => {
-  const res = await env.AGNOSTIC_AUTH_API.fetch('http://auth.local/auth/verify', {
+  const res = await authFetch(env, '/auth/verify', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ appId: env.AGNOSTIC_AUTH_APP_ID, token }),
@@ -68,8 +85,9 @@ export const verifyPassword = async (
   env: CloudflareBindings,
   input: VerifyPasswordInput,
 ): Promise<{ jwt: string; refreshToken: string }> => {
-  const res = await env.AGNOSTIC_AUTH_API.fetch(
-    'http://auth.local/auth/verify-password',
+  const res = await authFetch(
+    env,
+    '/auth/verify-password',
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -96,7 +114,7 @@ export const refreshTokens = async (
   env: CloudflareBindings,
   refreshToken: string,
 ): Promise<{ jwt: string; refreshToken: string }> => {
-  const res = await env.AGNOSTIC_AUTH_API.fetch('http://auth.local/auth/refresh', {
+  const res = await authFetch(env, '/auth/refresh', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ appId: env.AGNOSTIC_AUTH_APP_ID, refreshToken }),
@@ -116,7 +134,7 @@ export const revokeToken = async (
   refreshToken: string,
 ): Promise<void> => {
   try {
-    await env.AGNOSTIC_AUTH_API.fetch('http://auth.local/auth/token/revoke', {
+    await authFetch(env, '/auth/token/revoke', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ appId: env.AGNOSTIC_AUTH_APP_ID, refreshToken }),

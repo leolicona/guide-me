@@ -22,6 +22,9 @@ export default defineConfig({
           TEST_MIGRATIONS: migrations,
           RESEND_API_KEY: 'test_resend_key',
           QR_SECRET: 'test_qr_secret',
+          // Force tests to use the (mocked) AGNOSTIC_AUTH_API service binding,
+          // overriding any DEV_AUTH_SERVICE_URL inherited from .dev.vars.
+          DEV_AUTH_SERVICE_URL: '',
         },
         serviceBindings: {
           AGNOSTIC_AUTH_API: () =>
