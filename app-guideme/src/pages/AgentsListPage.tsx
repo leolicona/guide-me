@@ -17,7 +17,7 @@ export default function AgentsListPage() {
 
   return (
     <Fade in timeout={400}>
-      <Box>
+      <Box sx={{ maxWidth: 720, mx: 'auto' }}>
         <Box
           sx={{
             display: 'flex',

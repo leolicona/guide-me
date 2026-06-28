@@ -14,9 +14,13 @@ import {
   CircularProgress,
   Fade,
   Divider,
+  FormControlLabel,
+  Switch,
 } from '@mui/material'
 import SavingsRounded from '@mui/icons-material/SavingsRounded'
+import StorefrontRounded from '@mui/icons-material/StorefrontRounded'
 import { useMyOrganization, useUpdateOrganization } from '../features/organization'
+import { usePosPreferences } from '../store/posPreferences'
 
 // US-A47 — the backend stores a SIGNED departure offset (+ = before, − = after). The admin never
 // types a negative: they enter a positive magnitude and pick a direction; the page translates.
@@ -86,6 +90,8 @@ function OffsetField({
 export default function SettingsPage() {
   const { data: org, isLoading, isError } = useMyOrganization()
   const update = useUpdateOrganization()
+  const hideSoldOut = usePosPreferences((s) => s.hideSoldOut)
+  const setHideSoldOut = usePosPreferences((s) => s.setHideSoldOut)
 
   const [minPct, setMinPct] = useState('')
   const [holdDays, setHoldDays] = useState('')
@@ -155,7 +161,7 @@ export default function SettingsPage() {
           Configuración
         </Typography>
         <Typography color="text.secondary" sx={{ mb: 3 }}>
-          Política de ventas y apartados de tu organización.
+          Política de ventas, apartados y preferencias del punto de venta.
         </Typography>
 
         {isLoading && (
@@ -260,6 +266,35 @@ export default function SettingsPage() {
             </CardContent>
           </Card>
         )}
+
+        <Card sx={{ mt: 3 }}>
+          <CardContent>
+            <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center', mb: 2 }}>
+              <StorefrontRounded color="primary" />
+              <Typography variant="h6">Punto de venta</Typography>
+            </Stack>
+
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={hideSoldOut}
+                  onChange={(e) => setHideSoldOut(e.target.checked)}
+                />
+              }
+              label={
+                <Box>
+                  <Typography variant="body1" sx={{ fontWeight: 500 }}>
+                    Ocultar agotados
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    El catálogo de venta solo muestra servicios con disponibilidad.
+                  </Typography>
+                </Box>
+              }
+              sx={{ alignItems: 'flex-start', mx: 0 }}
+            />
+          </CardContent>
+        </Card>
 
         <Snackbar
           open={saved}

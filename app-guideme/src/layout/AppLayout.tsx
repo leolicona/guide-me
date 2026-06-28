@@ -1,4 +1,5 @@
 import { Suspense, useState } from 'react'
+import type { ReactNode } from 'react'
 import { Outlet, Link as RouterLink, useLocation } from 'react-router-dom'
 import {
   Avatar,
@@ -22,7 +23,8 @@ import { usePendingAckCount, usePendingDropCount } from '../features/cash/hooks'
 import { usePendingCancellationCount } from '../features/folios/hooks'
 import { ROUTES } from '../config/routes'
 import { AccountMenu } from './AccountMenu'
-import { AccountAvatarChip } from './AccountAvatarChip'
+import { TopBar } from './TopBar'
+import { TopBarActionsSetterContext } from './TopBarContext'
 
 type Role = 'admin' | 'agent' | 'affiliate'
 
@@ -92,6 +94,8 @@ export function AppLayout() {
   const landingRoute = user.role === 'admin' ? ROUTES.DASHBOARD : ROUTES.POS
 
   const [accountAnchor, setAccountAnchor] = useState<HTMLElement | null>(null)
+  // Actions a page injects into the layout-owned TopBar (e.g. the POS cart) via useTopBarActions.
+  const [topBarActions, setTopBarActions] = useState<ReactNode>(null)
 
   const items = NAV_ITEMS.filter(
     (i) => !i.role || (Array.isArray(i.role) ? i.role.includes(user.role) : i.role === user.role),
@@ -112,6 +116,7 @@ export function AppLayout() {
   }
 
   return (
+    <TopBarActionsSetterContext.Provider value={setTopBarActions}>
     <Box
       sx={{
         minHeight: '100vh',
@@ -260,10 +265,9 @@ export function AppLayout() {
         </Suspense>
       </Box>
 
-      {/* Mobile: the account chip is the fixed top-right overlay — except on the POS catalog,
-          whose right-aligned top bar renders the avatar inline (as a Cart sibling), so the
-          floating chip is suppressed there to avoid a duplicate. */}
-      {!isDesktop && location.pathname !== ROUTES.POS && <AccountAvatarChip />}
+      {/* The fixed top-right cluster (account avatar on mobile + any page-injected actions like
+          the POS cart). Rendered once here so the avatar never unmounts on navigation — no jump. */}
+      <TopBar actions={topBarActions} />
 
       {!isDesktop && (
         <BottomNavigation
@@ -306,5 +310,6 @@ export function AppLayout() {
         </BottomNavigation>
       )}
     </Box>
+    </TopBarActionsSetterContext.Provider>
   )
 }

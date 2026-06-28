@@ -41,8 +41,8 @@ export default function PosServicePage() {
 
   return (
     <Fade in timeout={400}>
-      <Box>
-        <Box
+      <Box sx={{ maxWidth: 720, mx: 'auto' }}>
+      {/*   <Box
           sx={{
             display: 'flex',
             justifyContent: 'space-between',
@@ -65,7 +65,7 @@ export default function PosServicePage() {
             </Button>
           </Badge>
         </Box>
-
+ */}
         {isLoading && (
           <Box sx={{ display: 'flex', justifyContent: 'center', py: 6 }}>
             <CircularProgress />

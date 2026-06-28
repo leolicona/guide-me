@@ -32,7 +32,7 @@ export default function CatalogDetailPage() {
 
   return (
     <Fade in timeout={400}>
-      <Box>
+      <Box sx={{ maxWidth: 720, mx: 'auto' }}>
         <Button
           component={RouterLink}
           to={ROUTES.CATALOG}

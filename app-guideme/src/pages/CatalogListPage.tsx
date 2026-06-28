@@ -37,7 +37,7 @@ export default function CatalogListPage() {
 
   return (
     <Fade in timeout={400}>
-      <Box>
+      <Box sx={{ maxWidth: 760, mx: 'auto' }}>
         {/* On mobile the shell's account avatar floats fixed at the top-right, so the header
             action can't sit beside the title there (US-UX03). Stack on xs (title, then a
             full-width action below the avatar zone); keep the side-by-side row from md up,

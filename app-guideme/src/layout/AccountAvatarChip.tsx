@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Avatar, ButtonBase } from '@mui/material'
 import { useCurrentUser } from '../features/auth/CurrentUserContext'
 import { AccountMenu } from './AccountMenu'
+import { floatingControlSx } from './topBarStyles'
 
 const initialsOf = (name: string) =>
   name
@@ -11,20 +12,10 @@ const initialsOf = (name: string) =>
     .map((w) => w[0]?.toUpperCase() ?? '')
     .join('') || '?'
 
-interface AccountAvatarChipProps {
-  /** When set, the avatar flows as a normal in-bar element (a sibling of, e.g., the Cart
-   * button) instead of the fixed top-right overlay — no absolute positioning, no frosted
-   * backdrop. Used by pages that own a right-aligned top bar (US-AG31 POS). */
-  inline?: boolean
-}
-
-// US-UX03 — the mobile account affordance: a small avatar chip. By default it is fixed at the
-// top-right of the viewport (safe-area aware, on a solid surface with a hairline border + soft
-// overlay shadow so it reads above any content — structure-first, no glass) and opens the account
-// bottom sheet. Page titles stay left-aligned, so the fixed variant never collides with them.
-// Pages with a right-aligned top bar (POS) render the `inline` variant so the avatar sits as a
-// flowed sibling of their actions instead of overlapping.
-export function AccountAvatarChip({ inline = false }: AccountAvatarChipProps) {
+// US-UX03 — the mobile account affordance: the avatar button that opens the account sheet.
+// Positioning is owned by the parent (TopBar); the button itself is a self-contained floating
+// circle (floatingControlSx) so it reads as its own control beside any sibling action (e.g. cart).
+export function AccountAvatarChip() {
   const user = useCurrentUser()
   const [open, setOpen] = useState(false)
 
@@ -33,25 +24,9 @@ export function AccountAvatarChip({ inline = false }: AccountAvatarChipProps) {
       <ButtonBase
         onClick={() => setOpen(true)}
         aria-label={`Cuenta de ${user.name}`}
-        sx={
-          inline
-            ? { borderRadius: 999, p: 0.5 }
-            : {
-                position: 'fixed',
-                top: 'calc(env(safe-area-inset-top) + 12px)',
-                right: 'calc(env(safe-area-inset-right) + 12px)',
-                zIndex: (t) => t.zIndex.appBar + 1,
-                borderRadius: 999,
-                p: 0.5,
-                // Solid floating chip — overlays are the one place we use real shadow.
-                bgcolor: 'background.paper',
-                boxShadow: 'var(--shadow-overlay-sm)',
-                border: '1px solid',
-                borderColor: 'divider',
-              }
-        }
+        sx={floatingControlSx}
       >
-        <Avatar sx={{ bgcolor: 'secondary.main', width: 32, height: 32, fontSize: 13 }}>
+        <Avatar sx={{ bgcolor: 'secondary.main', width: 36, height: 36, fontSize: 14 }}>
           {initialsOf(user.name)}
         </Avatar>
       </ButtonBase>

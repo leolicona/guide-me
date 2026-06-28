@@ -70,8 +70,8 @@ export default function DashboardPage() {
 
   return (
     <Fade in timeout={400}>
-      <Box>
-        <Typography variant="h4" component="h1" gutterBottom>
+      <Box sx={{ maxWidth: 720, mx: 'auto' }}>
+        <Typography variant="h4" component="h1" sx={{ mb: 3 }}>
           Hoy
         </Typography>
         <Typography color="text.secondary" sx={{ mb: 4 }}>
