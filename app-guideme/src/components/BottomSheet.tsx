@@ -35,6 +35,11 @@ export function BottomSheet({
       onClose={onClose}
       onOpen={() => {}}
       disableSwipeToOpen
+      // A temporary Drawer defaults to the `drawer` z-index (1200), which sits BELOW a Dialog
+      // (`modal`, 1300). The BottomSheet is the canonical top-most config overlay and can be opened
+      // from inside a wizard Dialog (e.g. the lodging UnitDraftSheet), so it must outrank the modal
+      // layer — otherwise it renders behind the dialog and looks like nothing happened.
+      sx={{ zIndex: (theme) => theme.zIndex.modal + 1 }}
       slotProps={{
         paper: {
           sx: {

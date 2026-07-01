@@ -17,6 +17,7 @@ import EditRounded from '@mui/icons-material/EditRounded'
 import { useService } from '../features/catalog/hooks/useService'
 import { ExtrasPanel } from '../features/catalog/components/ExtrasPanel'
 import { ServiceFormDialog } from '../features/catalog/components/ServiceFormDialog'
+import { UnitsSection } from '../features/catalog/components/UnitsSection'
 import { SchedulesSection } from '../features/schedules/components/SchedulesSection'
 import { formatMoney } from '../features/catalog/types'
 import { ROUTES } from '../config/routes'
@@ -117,23 +118,30 @@ export default function CatalogDetailPage() {
               </CardContent>
             </Card>
 
-            <Card>
-              <CardContent>
-                <Typography variant="h6" sx={{ mb: 2 }}>
-                  Extras
-                </Typography>
-                <ExtrasPanel serviceId={service.id} />
-              </CardContent>
-            </Card>
+            {/* Lodging uses date-range units (no slots/extras); tours keep extras + schedules. */}
+            {service.category === 'lodging' ? (
+              <UnitsSection serviceId={service.id} />
+            ) : (
+              <>
+                <Card>
+                  <CardContent>
+                    <Typography variant="h6" sx={{ mb: 2 }}>
+                      Extras
+                    </Typography>
+                    <ExtrasPanel serviceId={service.id} />
+                  </CardContent>
+                </Card>
 
-            <Card>
-              <CardContent>
-                <SchedulesSection
-                  serviceId={service.id}
-                  defaultCapacity={service.default_capacity}
-                />
-              </CardContent>
-            </Card>
+                <Card>
+                  <CardContent>
+                    <SchedulesSection
+                      serviceId={service.id}
+                      defaultCapacity={service.default_capacity}
+                    />
+                  </CardContent>
+                </Card>
+              </>
+            )}
 
             <ServiceFormDialog
               service={editing ? service : null}

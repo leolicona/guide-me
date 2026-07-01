@@ -21,6 +21,48 @@ export interface PosServiceSummary {
   has_availability: boolean
   /** Earliest active slot date inside the availability window, or null when none. */
   next_slot_date: string | null
+  /** US-AG36 — lodging only: the lowest unit nightly rate (minor units), for "Desde $X / noche".
+   * Absent/0 for non-lodging services. */
+  from_nightly_rate?: number
+}
+
+// --- Accommodation / lodging POS reads (US-AG36 / AG37) ---
+
+/** One night's rate inside a stay quote. */
+export interface StayNight {
+  date: string // 'YYYY-MM-DD'
+  rate: number // minor units
+}
+
+/** A unit available for a whole [check_in, check_out) range, with its computed total. */
+export interface LodgingAvailabilityUnit {
+  unit_id: string
+  name: string
+  unit_type: string | null
+  beds: number
+  base_occupancy: number
+  max_capacity: number
+  amenities: string[]
+  checkin_time: string
+  checkout_time: string
+  nights: number
+  /** Stay total (minor units) — nights × nightly rate + extra-person surcharge. */
+  total: number
+  per_night: StayNight[]
+}
+
+export interface LodgingAvailability {
+  check_in: string
+  check_out: string
+  guests: number
+  units: LodgingAvailabilityUnit[]
+}
+
+/** One day in a unit's availability calendar (US-AG37). */
+export interface UnitCalendarDay {
+  date: string // 'YYYY-MM-DD'
+  status: 'available' | 'blocked' | 'booked'
+  rate: number // minor units
 }
 
 export interface PosSlot {
@@ -73,11 +115,21 @@ export interface FolioTicket {
 
 export interface FolioLine {
   id: string
+  /** 'slot' (tour) or 'stay' (lodging). Absent on folios read before this feature → treat as slot. */
+  line_type?: 'slot' | 'stay'
   service_id: string
-  slot_id: string
+  /** Null for a lodging stay line. */
+  slot_id: string | null
   service_name: string
-  slot_date: string
-  slot_start_time: string
+  /** Null for a lodging stay line. */
+  slot_date: string | null
+  slot_start_time: string | null
+  /** Lodging stay fields (null for a tour line). */
+  unit_id?: string | null
+  check_in?: string | null
+  check_out?: string | null
+  guests?: number | null
+  nights?: number | null
   quantity: number
   base_price: number
   minimum_price: number

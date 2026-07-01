@@ -24,3 +24,20 @@ export const STEP_TITLES: Record<WizardStep, string> = {
   3: 'Disponibilidad',
   4: 'Extras',
 }
+
+// US-A59 — the lodging track is 3 steps (no slots/extras; units replace availability).
+const LODGING_STEP_TITLES: Record<number, string> = {
+  1: 'Información',
+  2: 'Comisión',
+  3: 'Unidades',
+}
+
+/** Category-aware step count: tour 4 · lodging 3. */
+export const totalSteps = (category: string): number =>
+  category === 'lodging' ? 3 : TOTAL_STEPS
+
+/** Category-aware step title. */
+export const stepTitle = (category: string, step: number): string =>
+  category === 'lodging'
+    ? (LODGING_STEP_TITLES[step] ?? '')
+    : (STEP_TITLES[step as WizardStep] ?? '')

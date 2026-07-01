@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useParams, useNavigate, Link as RouterLink } from 'react-router-dom'
+import { useParams, useNavigate } from 'react-router-dom'
 import {
   Box,
   Button,
@@ -8,15 +8,11 @@ import {
   CircularProgress,
   Alert,
   Fade,
-  Badge,
   Snackbar,
 } from '@mui/material'
-import ArrowBackRounded from '@mui/icons-material/ArrowBackRounded'
-import ShoppingCartRounded from '@mui/icons-material/ShoppingCartRounded'
 import { usePosService } from '../features/pos/hooks'
 import { ServiceSelectionPanel } from '../features/pos/components/ServiceSelectionPanel'
 import { todayStr, addDays } from '../features/pos/dates'
-import { usePosCart, cartCount } from '../store/posCart'
 import { usePosFilters } from '../store/posFilters'
 import { ROUTES } from '../config/routes'
 
@@ -36,7 +32,6 @@ export default function PosServicePage() {
   const { data: service, isLoading, isError } = usePosService(id, range)
   const navigate = useNavigate()
 
-  const count = usePosCart((s) => cartCount(s.lines))
   const [added, setAdded] = useState(false)
 
   return (

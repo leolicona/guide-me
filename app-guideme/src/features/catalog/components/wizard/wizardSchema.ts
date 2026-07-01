@@ -40,6 +40,13 @@ export const wizardSchema = serviceCoreObject
         message: 'El porcentaje máximo es 100',
       })
     }
+    // Lodging skips the tour-only pricing/availability track entirely — its inventory is units
+    // (a wizard-local repeater), priced per night, with no slots/schedules. Stop here. The fixed-
+    // commission floor cap below is tour-only: lodging has no service price floor (units price per
+    // night) and a fixed base commission counts per stay line, so the cap must not apply.
+    if (v.category === 'lodging') return
+
+    // --- Tour-only: a fixed commission may never exceed the price floor (D3) ---
     if (v.commission_type === 'fixed' && v.commission_value > v.minimum_price) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
@@ -121,3 +128,19 @@ export const STEP_FIELDS = {
   ],
   4: [],
 } as const satisfies Record<number, readonly (keyof WizardFormData)[]>
+
+// Lodging track step fields (3 steps): básica · comisión · unidades (gated by units.length).
+const LODGING_STEP_FIELDS: Record<number, readonly (keyof WizardFormData)[]> = {
+  1: ['name', 'category'],
+  2: ['commission_type', 'commission_value'],
+  3: [],
+}
+
+/** Category-aware RHF fields to validate when leaving a step (tour 4 steps · lodging 3 steps). */
+export const stepFields = (
+  category: string,
+  step: number,
+): readonly (keyof WizardFormData)[] =>
+  category === 'lodging'
+    ? (LODGING_STEP_FIELDS[step] ?? [])
+    : (STEP_FIELDS[step as keyof typeof STEP_FIELDS] ?? [])

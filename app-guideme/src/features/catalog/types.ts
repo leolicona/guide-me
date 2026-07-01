@@ -1,4 +1,5 @@
 import type { ServiceCategory } from './categories'
+import type { AmenityKey } from './lodging'
 
 export type ServiceStatus = 'active' | 'inactive'
 
@@ -70,3 +71,79 @@ export const percentToBasisPoints = (percent: number): number =>
 /** basis points (500) → percent (5). */
 export const basisPointsToPercent = (basisPoints: number): number =>
   basisPoints / 100
+
+// Unit commission override (waterfall) ↔ API mapping — the single source of truth used by BOTH the
+// wizard (useCreateLodgingFull) and the detail editor (UnitFormDialog), so the two can't drift.
+// Form: 'inherit' | 'percent' | 'fixed' + a major-unit value (percent entered 0–100). API: nullable
+// commission_type + commission_value (basis points for percent, minor units for fixed).
+export const unitCommissionToApi = (
+  type: 'inherit' | 'percent' | 'fixed',
+  value: number | null,
+): { commission_type: 'percent' | 'fixed' | null; commission_value: number | null } =>
+  type === 'inherit' || value == null
+    ? { commission_type: null, commission_value: null }
+    : type === 'fixed'
+      ? { commission_type: 'fixed', commission_value: amountToCents(value) }
+      : { commission_type: 'percent', commission_value: percentToBasisPoints(value) }
+
+export const unitCommissionFromApi = (
+  type: 'percent' | 'fixed' | null,
+  value: number | null,
+): { commission_type: 'inherit' | 'percent' | 'fixed'; commission_value: number | null } =>
+  type == null || value == null
+    ? { commission_type: 'inherit', commission_value: null }
+    : type === 'fixed'
+      ? { commission_type: 'fixed', commission_value: centsToAmount(value) }
+      : { commission_type: 'percent', commission_value: basisPointsToPercent(value) }
+
+// --- Accommodation / lodging (docs/lodging/accommodation-stays.spec.md) ---
+// A lodging service owns named units; each unit has nightly rates, seasonal overrides, and
+// block-outs. All money fields are minor units (centavos) like the rest of the catalog.
+
+export interface AccommodationUnit {
+  id: string
+  service_id: string
+  name: string
+  unit_type: string | null
+  beds: number
+  base_occupancy: number
+  max_capacity: number
+  /** Base nightly rate (minor units). */
+  base_rate: number
+  /** Optional weekend nightly rate (minor units); null falls back to base. */
+  weekend_rate: number | null
+  /** Per-extra-person-per-night surcharge above base occupancy (minor units). */
+  extra_person_fee: number
+  min_nights: number
+  /** 'HH:MM'. */
+  checkin_time: string
+  /** 'HH:MM'. */
+  checkout_time: string
+  amenities: AmenityKey[]
+  /** Commission override (waterfall): null ⇒ inherits the service's base commission. When set,
+   * `commission_value` is basis points (percent) or minor units (fixed). */
+  commission_type: CommissionType | null
+  commission_value: number | null
+  status: ServiceStatus
+}
+
+export interface Season {
+  id: string
+  unit_id: string
+  name: string
+  /** 'YYYY-MM-DD'. */
+  start_date: string
+  end_date: string
+  /** Nightly rate during the season (minor units). */
+  nightly_rate: number
+  status: ServiceStatus
+}
+
+export interface Blockout {
+  id: string
+  unit_id: string
+  /** 'YYYY-MM-DD'. Half-open [start_date, end_date) like the reservation model. */
+  start_date: string
+  end_date: string
+  reason: string | null
+}

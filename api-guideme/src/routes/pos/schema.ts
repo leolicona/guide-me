@@ -13,12 +13,26 @@ const extraSchema = z.object({
   quantity: z.number().int().min(1),
 })
 
-const lineSchema = z.object({
+// A tour/activity line — a slot + quantity + (discountable) unit price.
+const slotLineSchema = z.object({
   slot_id: z.string().min(1),
   quantity: z.number().int().min(1),
   unit_price: z.number().int().min(0),
   extras: z.array(extraSchema).optional().default([]),
 })
+
+// US-AG36/AG38 — a lodging STAY line: a unit + date range + guests. No slot, no client price
+// (the server re-quotes via the shared engine). Distinguished from a slot line by `unit_id`.
+const stayLineSchema = z.object({
+  unit_id: z.string().min(1),
+  check_in: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Expected YYYY-MM-DD'),
+  check_out: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Expected YYYY-MM-DD'),
+  guests: z.number().int().min(1),
+})
+
+// A cart line is EITHER a stay (has unit_id) or a slot (has slot_id). union tries stay first;
+// a slot line lacks unit_id so it falls through to the slot shape.
+const lineSchema = z.union([stayLineSchema, slotLineSchema])
 
 export const confirmSaleSchema = z
   .object({
@@ -41,12 +55,18 @@ export const confirmSaleSchema = z
     down_payment: z.number().int().min(1).optional(),
     lines: z.array(lineSchema).nonempty('Cart must have at least one line'),
   })
-  // Business rule 6 — a slot may appear at most once (the UI merges quantities). This
-  // keeps the inventory decrement one-update-per-slot and avoids intra-cart self-contention.
-  .refine((v) => new Set(v.lines.map((l) => l.slot_id)).size === v.lines.length, {
-    message: 'Each slot may appear at most once',
-    path: ['lines'],
-  })
+  // Business rule 6 — a slot may appear at most once (the UI merges quantities). This keeps the
+  // inventory decrement one-update-per-slot. Only applies to slot lines; stay lines are exempt
+  // (the same unit can be booked for non-overlapping ranges in one cart).
+  .refine(
+    (v) => {
+      const slotIds = v.lines
+        .filter((l): l is { slot_id: string } => 'slot_id' in l)
+        .map((l) => l.slot_id)
+      return new Set(slotIds).size === slotIds.length
+    },
+    { message: 'Each slot may appear at most once', path: ['lines'] },
+  )
 
 export type ConfirmSaleInput = z.infer<typeof confirmSaleSchema>
 

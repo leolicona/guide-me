@@ -33,8 +33,10 @@ import {
   cartSubtotal,
   cartDiscountTotal,
   cartTotal,
-  type CartLine,
+  lineKey,
+  type SlotCartLine,
 } from '../store/posCart'
+import { StayCartLine } from '../features/pos/components/StayCartLine'
 import { ServiceError } from '../services/authService'
 import { formatMoney, amountToCents, centsToAmount } from '../features/catalog/types'
 import { ROUTES } from '../config/routes'
@@ -67,6 +69,13 @@ function errorMessage(error: unknown): string {
     if (error.code === 'NOT_FOUND') {
       return 'Un servicio u horario seleccionado ya no está disponible. Por favor, vuelve a armar tu carrito.'
     }
+    // US-AG38 — lodging confirm errors.
+    if (error.code === 'UNIT_UNAVAILABLE') {
+      return 'La unidad ya no está disponible para esas fechas. Quítala del carrito o elige otras fechas.'
+    }
+    if (error.code === 'MIN_STAY_NOT_MET') {
+      return 'Una estancia no cumple la estancia mínima de noches. Ajústala e inténtalo de nuevo.'
+    }
   }
   return 'No se pudo completar la venta. Por favor, inténtalo de nuevo.'
 }
@@ -74,7 +83,7 @@ function errorMessage(error: unknown): string {
 // The discount lives here now (US: moved out of the Bottom Sheet, which only secures
 // inventory). Edits are kept local so typing isn't fought by the store's clamp; on blur the
 // price commits and snaps back into [minimum, base]. The store remains authoritative.
-function LinePriceField({ line }: { line: CartLine }) {
+function LinePriceField({ line }: { line: SlotCartLine }) {
   const setUnitPrice = usePosCart((s) => s.setUnitPrice)
   const [value, setValue] = useState(String(centsToAmount(line.unit_price)))
 
@@ -237,66 +246,74 @@ export default function PosCheckoutPage() {
 
             <SectionCard>
                 <Stack spacing={2} divider={<Divider flexItem />}>
-                  {lines.map((line) => (
-                    <Box key={line.slot.id}>
-                      <Stack
-                        direction="row"
-                        spacing={1}
-                        sx={{ justifyContent: 'space-between', alignItems: 'flex-start' }}
-                      >
-                        <Box sx={{ minWidth: 0 }}>
-                          <Typography variant="subtitle2">{line.service.name}</Typography>
-                          <Typography variant="caption" color="text.secondary">
-                            {line.slot.date} · {line.slot.start_time}
-                          </Typography>
-                          {line.extras.map((e) => (
-                            <Typography
-                              key={e.extra.id}
-                              variant="caption"
-                              color="text.secondary"
-                              sx={{ display: 'block' }}
-                            >
-                              + {e.quantity}× {e.extra.name} ({formatMoney(e.extra.price)})
+                  {lines.map((line) =>
+                    line.kind === 'stay' ? (
+                      <StayCartLine
+                        key={lineKey(line)}
+                        line={line}
+                        onRemove={() => removeLine(lineKey(line))}
+                      />
+                    ) : (
+                      <Box key={lineKey(line)}>
+                        <Stack
+                          direction="row"
+                          spacing={1}
+                          sx={{ justifyContent: 'space-between', alignItems: 'flex-start' }}
+                        >
+                          <Box sx={{ minWidth: 0 }}>
+                            <Typography variant="subtitle2">{line.service.name}</Typography>
+                            <Typography variant="caption" color="text.secondary">
+                              {line.slot.date} · {line.slot.start_time}
                             </Typography>
-                          ))}
-                          <LinePriceField line={line} />
-                        </Box>
-                        <Stack spacing={0.5} sx={{ alignItems: 'flex-end' }}>
-                          <Typography variant="subtitle2">
-                            {formatMoney(cartLineTotal(line))}
-                          </Typography>
-                          <Stack direction="row" spacing={0.5} sx={{ alignItems: 'center' }}>
-                            <IconButton
-                              size="small"
-                              aria-label="Menos personas"
-                              onClick={() => updateQuantity(line.slot.id, line.quantity - 1)}
-                              disabled={line.quantity <= 1}
-                            >
-                              <RemoveRounded fontSize="small" />
-                            </IconButton>
-                            <Typography sx={{ minWidth: 24, textAlign: 'center' }}>
-                              {line.quantity}
+                            {line.extras.map((e) => (
+                              <Typography
+                                key={e.extra.id}
+                                variant="caption"
+                                color="text.secondary"
+                                sx={{ display: 'block' }}
+                              >
+                                + {e.quantity}× {e.extra.name} ({formatMoney(e.extra.price)})
+                              </Typography>
+                            ))}
+                            <LinePriceField line={line} />
+                          </Box>
+                          <Stack spacing={0.5} sx={{ alignItems: 'flex-end' }}>
+                            <Typography variant="subtitle2">
+                              {formatMoney(cartLineTotal(line))}
                             </Typography>
-                            <IconButton
-                              size="small"
-                              aria-label="Más personas"
-                              onClick={() => updateQuantity(line.slot.id, line.quantity + 1)}
-                              disabled={line.quantity >= line.slot.remaining}
-                            >
-                              <AddRounded fontSize="small" />
-                            </IconButton>
-                            <IconButton
-                              size="small"
-                              aria-label="Eliminar artículo"
-                              onClick={() => removeLine(line.slot.id)}
-                            >
-                              <DeleteOutlineRounded fontSize="small" />
-                            </IconButton>
+                            <Stack direction="row" spacing={0.5} sx={{ alignItems: 'center' }}>
+                              <IconButton
+                                size="small"
+                                aria-label="Menos personas"
+                                onClick={() => updateQuantity(line.slot.id, line.quantity - 1)}
+                                disabled={line.quantity <= 1}
+                              >
+                                <RemoveRounded fontSize="small" />
+                              </IconButton>
+                              <Typography sx={{ minWidth: 24, textAlign: 'center' }}>
+                                {line.quantity}
+                              </Typography>
+                              <IconButton
+                                size="small"
+                                aria-label="Más personas"
+                                onClick={() => updateQuantity(line.slot.id, line.quantity + 1)}
+                                disabled={line.quantity >= line.slot.remaining}
+                              >
+                                <AddRounded fontSize="small" />
+                              </IconButton>
+                              <IconButton
+                                size="small"
+                                aria-label="Eliminar artículo"
+                                onClick={() => removeLine(lineKey(line))}
+                              >
+                                <DeleteOutlineRounded fontSize="small" />
+                              </IconButton>
+                            </Stack>
                           </Stack>
                         </Stack>
-                      </Stack>
-                    </Box>
-                  ))}
+                      </Box>
+                    ),
+                  )}
                 </Stack>
             </SectionCard>
 

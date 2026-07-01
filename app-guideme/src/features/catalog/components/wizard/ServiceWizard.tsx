@@ -3,10 +3,10 @@ import { useForm, FormProvider } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { Dialog, Box, Typography, Button, Stack, Alert } from '@mui/material'
 import { WizardShell } from '../../../../components'
-import { wizardSchema, STEP_FIELDS, type WizardFormData } from './wizardSchema'
+import { wizardSchema, STEP_FIELDS, stepFields, type WizardFormData } from './wizardSchema'
 import {
-  TOTAL_STEPS,
-  STEP_TITLES,
+  totalSteps,
+  stepTitle,
   type WizardStep,
   type DepartureTime,
   type ExtraDraft,
@@ -15,7 +15,13 @@ import { StepBasicInfo } from './StepBasicInfo'
 import { StepPricing } from './StepPricing'
 import { StepAvailability } from './StepAvailability'
 import { StepExtras } from './StepExtras'
+import { StepCommission } from './StepCommission'
+import { StepUnits } from './StepUnits'
 import { useCreateServiceFull } from '../../hooks/useCreateServiceFull'
+import {
+  useCreateLodgingFull,
+  type UnitDraft,
+} from '../../hooks/useCreateLodgingFull'
 import { amountToCents, percentToBasisPoints } from '../../types'
 import type { ServiceCategory } from '../../categories'
 import type { ServiceInput, ExtraInput } from '../../../../services/catalogService'
@@ -52,27 +58,36 @@ export function ServiceWizard({ open, onClose, onCreated }: ServiceWizardProps) 
     defaultValues: EMPTY,
     mode: 'onTouched',
   })
-  const { trigger, getValues, reset, formState } = methods
+  const { trigger, getValues, reset, formState, watch } = methods
 
   const [step, setStep] = useState<WizardStep>(1)
   const [times, setTimes] = useState<DepartureTime[]>([])
   const [extras, setExtras] = useState<ExtraDraft[]>([])
+  const [units, setUnits] = useState<UnitDraft[]>([])
   const [showTimesError, setShowTimesError] = useState(false)
+  const [showUnitsError, setShowUnitsError] = useState(false)
   const [confirmDiscard, setConfirmDiscard] = useState(false)
 
+  const category = watch('category')
+  const isLodging = category === 'lodging'
+
   const saveMutation = useCreateServiceFull()
+  const lodgingSave = useCreateLodgingFull()
 
   const isDirty =
-    formState.isDirty || times.length > 0 || extras.length > 0
+    formState.isDirty || times.length > 0 || extras.length > 0 || units.length > 0
 
   const resetAll = () => {
     reset(EMPTY)
     setStep(1)
     setTimes([])
     setExtras([])
+    setUnits([])
     setShowTimesError(false)
+    setShowUnitsError(false)
     setConfirmDiscard(false)
     saveMutation.reset()
+    lodgingSave.reset()
   }
 
   const doClose = () => {
@@ -87,10 +102,16 @@ export function ServiceWizard({ open, onClose, onCreated }: ServiceWizardProps) 
   }
 
   const goNext = async () => {
-    const ok = await trigger([...STEP_FIELDS[step]])
+    const ok = await trigger([...stepFields(category, step)])
     if (!ok) return
-    // Step 3 also needs ≥1 departure time (an array, not an RHF field).
-    if (step === 3 && times.length === 0) {
+    // The final inventory step gates on a local array (not an RHF field): tours need ≥1 departure
+    // time, lodging needs ≥1 unit.
+    if (isLodging) {
+      if (step === 3 && units.length === 0) {
+        setShowUnitsError(true)
+        return
+      }
+    } else if (step === 3 && times.length === 0) {
       setShowTimesError(true)
       return
     }
@@ -99,7 +120,49 @@ export function ServiceWizard({ open, onClose, onCreated }: ServiceWizardProps) 
 
   const goBack = () => setStep((s) => Math.max(1, s - 1) as WizardStep)
 
+  const saveLodging = async () => {
+    const ok = await trigger(['name', 'category', 'commission_type', 'commission_value'])
+    if (!ok) {
+      // Jump to the earliest lodging step still holding an error (1: identidad · 2: comisión).
+      const e = methods.formState.errors
+      setStep(e.name || e.category ? 1 : 2)
+      return
+    }
+    if (units.length === 0) {
+      setShowUnitsError(true)
+      setStep(3)
+      return
+    }
+    const data = getValues()
+    const core: ServiceInput = {
+      name: data.name.trim(),
+      description: data.description?.trim() ? data.description.trim() : null,
+      // Lodging prices per night on its units — the service carries no slot price/capacity.
+      base_price: 0,
+      minimum_price: 0,
+      default_capacity: 1,
+      category: 'lodging',
+      commission_type: data.commission_type,
+      commission_value:
+        data.commission_type === 'fixed'
+          ? amountToCents(data.commission_value)
+          : percentToBasisPoints(data.commission_value),
+      is_flexible: false,
+      flex_capacity_pct: 0,
+    }
+    lodgingSave.mutate(
+      { core, units },
+      {
+        onSuccess: ({ serviceId, failures }) => {
+          onCreated(serviceId, failures)
+          resetAll()
+        },
+      },
+    )
+  }
+
   const save = async () => {
+    if (isLodging) return saveLodging()
     const ok = await trigger()
     if (!ok) {
       // Jump back to the earliest step that still holds an error.
@@ -160,8 +223,9 @@ export function ServiceWizard({ open, onClose, onCreated }: ServiceWizardProps) 
     )
   }
 
-  const isLast = step === TOTAL_STEPS
-  const saving = saveMutation.isPending
+  const total = totalSteps(category)
+  const isLast = step === total
+  const saving = saveMutation.isPending || lodgingSave.isPending
 
   return (
     <>
@@ -170,8 +234,8 @@ export function ServiceWizard({ open, onClose, onCreated }: ServiceWizardProps) 
         onClose={handleClose}
         title="Nuevo servicio"
         step={step}
-        totalSteps={TOTAL_STEPS}
-        stepTitle={STEP_TITLES[step]}
+        totalSteps={total}
+        stepTitle={stepTitle(category, step)}
         onBack={goBack}
         onNext={goNext}
         onFinish={save}
@@ -179,7 +243,7 @@ export function ServiceWizard({ open, onClose, onCreated }: ServiceWizardProps) 
         finishLabel="Guardar"
         busy={saving}
         error={
-          saveMutation.isError ? (
+          saveMutation.isError || lodgingSave.isError ? (
             <Alert severity="error">
               No se pudo crear el servicio. Revisa los datos e inténtalo de nuevo.
             </Alert>
@@ -188,15 +252,18 @@ export function ServiceWizard({ open, onClose, onCreated }: ServiceWizardProps) 
       >
         <FormProvider {...methods}>
           {step === 1 && <StepBasicInfo />}
-          {step === 2 && <StepPricing />}
-          {step === 3 && (
-            <StepAvailability
-              times={times}
-              onTimesChange={setTimes}
-              showTimesError={showTimesError}
-            />
-          )}
-          {step === 4 && <StepExtras extras={extras} onChange={setExtras} />}
+          {step === 2 && (isLodging ? <StepCommission /> : <StepPricing />)}
+          {step === 3 &&
+            (isLodging ? (
+              <StepUnits units={units} onChange={setUnits} showUnitsError={showUnitsError} />
+            ) : (
+              <StepAvailability
+                times={times}
+                onTimesChange={setTimes}
+                showTimesError={showTimesError}
+              />
+            ))}
+          {step === 4 && !isLodging && <StepExtras extras={extras} onChange={setExtras} />}
         </FormProvider>
       </WizardShell>
 

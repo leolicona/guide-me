@@ -19,6 +19,7 @@ import { useFolio } from '../features/pos/hooks'
 import { TicketQr } from '../features/pos/components/TicketQr'
 import { BookingActions, ExpiredBookingBanner } from '../features/bookings'
 import { formatMoney } from '../features/catalog/types'
+import { folioLineMeta } from '../features/folios/folioLineLabel'
 import { ROUTES } from '../config/routes'
 
 export default function FolioReceiptPage() {
@@ -106,8 +107,7 @@ export default function FolioReceiptPage() {
                         <Box sx={{ minWidth: 0 }}>
                           <Typography variant="subtitle2">{line.service_name}</Typography>
                           <Typography variant="caption" color="text.secondary">
-                            {line.slot_date} · {line.slot_start_time} · {line.quantity}×{' '}
-                            {formatMoney(line.unit_price)}
+                            {folioLineMeta(line)} · {formatMoney(line.unit_price)}
                           </Typography>
                           {line.extras.map((e) => (
                             <Typography
@@ -166,7 +166,9 @@ export default function FolioReceiptPage() {
               </CardContent>
             </Card>
 
-            {folio.status === 'paid' && (
+            {/* Access QRs apply to scannable (tour) lines only — a lodging stay's access is its
+                reservation, not a per-line QR, so it's excluded here. */}
+            {folio.status === 'paid' && folio.lines.some((l) => l.qr_token) && (
               <Box>
                 <Typography variant="h6" sx={{ mb: 1.5 }}>
                   Boletos de acceso
@@ -176,9 +178,11 @@ export default function FolioReceiptPage() {
                   para canjear un pase.
                 </Typography>
                 <Stack spacing={2}>
-                  {folio.lines.map((line) => (
-                    <TicketQr key={line.id} line={line} />
-                  ))}
+                  {folio.lines
+                    .filter((line) => line.qr_token)
+                    .map((line) => (
+                      <TicketQr key={line.id} line={line} />
+                    ))}
                 </Stack>
               </Box>
             )}

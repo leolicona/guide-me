@@ -17,6 +17,11 @@ export type ErrorCode =
   | 'SERVICE_INACTIVE'
   | 'SERVICE_NOT_ALLOWED'
   | 'SERVICE_HAS_FOLIOS'
+  // Accommodation/lodging (docs/lodging/accommodation-stays.spec.md §4.6) — introduced &
+  // consumed by this feature (see docs/TECH_DEBT.md).
+  | 'UNIT_UNAVAILABLE'
+  | 'SEASON_OVERLAP'
+  | 'MIN_STAY_NOT_MET'
   | 'ALREADY_INVITED'
   | 'DROP_EXCEEDS_BALANCE'
   | 'INTERNAL_ERROR'

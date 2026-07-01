@@ -23,6 +23,7 @@ import CalendarMonthRounded from '@mui/icons-material/CalendarMonthRounded'
 import { usePosServices } from '../features/pos/hooks'
 import { AvailabilityChip } from '../features/pos/components/AvailabilityChip'
 import { ServiceSheet } from '../features/pos/components/ServiceSheet'
+import { LodgingStaySheet } from '../features/pos/components/LodgingStaySheet'
 import { PosDatePickerSheet } from '../features/pos/components/PosDatePickerSheet'
 import { PosCategorySheet } from '../features/pos/components/PosCategorySheet'
 import { useTopBarActions } from '../layout/TopBarContext'
@@ -91,6 +92,8 @@ export default function PosCatalogPage() {
   // US-AG31 — tapping a card opens this service in the Bottom Sheet (no navigation, the
   // catalog stays mounted). `added` drives the success Snackbar lifted up from the sheet.
   const [openServiceId, setOpenServiceId] = useState<string | null>(null)
+  // US-AG36 — a lodging card opens the range-first stay sheet instead of the slot sheet.
+  const [openLodging, setOpenLodging] = useState<{ id: string; name: string } | null>(null)
   const [added, setAdded] = useState(false)
   // US-AG35 — the calendar Bottom Sheet (any-day picker) toggles off this state.
   const [datePickerOpen, setDatePickerOpen] = useState(false)
@@ -170,12 +173,18 @@ export default function PosCatalogPage() {
             </Typography>
           ) : (
             <Stack spacing={2}>
-              {visibleServices.map((service) => (
+              {visibleServices.map((service) => {
+                const isLodgingCard = service.category === 'lodging'
+                return (
                 // Structure-first: the theme gives the card its hairline border + 16px radius
                 // and no resting shadow — readable in any light (replaces the old soft-shadow).
                 <Card key={service.id}>
                   <CardActionArea
-                    onClick={() => setOpenServiceId(service.id)}
+                    onClick={() =>
+                      isLodgingCard
+                        ? setOpenLodging({ id: service.id, name: service.name })
+                        : setOpenServiceId(service.id)
+                    }
                     sx={{
                       height: '100%',
                       transition: 'transform 240ms ease',
@@ -240,13 +249,20 @@ export default function PosCatalogPage() {
                           >
                             Desde
                           </Typography>
-                          <MoneyText
-                            cents={service.base_price}
-                            variant="h3"
-                            srLabel={`${service.name}, desde`}
-                          />
+                          <Stack direction="row" spacing={0.5} sx={{ alignItems: 'baseline' }}>
+                            <MoneyText
+                              cents={isLodgingCard ? (service.from_nightly_rate ?? 0) : service.base_price}
+                              variant="h3"
+                              srLabel={`${service.name}, desde`}
+                            />
+                            {isLodgingCard && (
+                              <Typography variant="body2" color="text.secondary">
+                                / noche
+                              </Typography>
+                            )}
+                          </Stack>
                         </Box>
-                        {service.next_slot_date && (
+                        {!isLodgingCard && service.next_slot_date && (
                           <Box
                             sx={{
                               textAlign: 'right',
@@ -275,7 +291,8 @@ export default function PosCatalogPage() {
                     </CardContent>
                   </CardActionArea>
                 </Card>
-              ))}
+                )
+              })}
             </Stack>
           ))}
 
@@ -312,6 +329,16 @@ export default function PosCatalogPage() {
         onClose={() => setOpenServiceId(null)}
         onAdded={() => {
           setOpenServiceId(null)
+          setAdded(true)
+        }}
+      />
+
+      {/* US-AG36 — lodging range-first stay sheet. */}
+      <LodgingStaySheet
+        service={openLodging}
+        onClose={() => setOpenLodging(null)}
+        onAdded={() => {
+          setOpenLodging(null)
           setAdded(true)
         }}
       />

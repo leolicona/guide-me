@@ -16,9 +16,12 @@ import {
   Divider,
   FormControlLabel,
   Switch,
+  ToggleButton,
+  ToggleButtonGroup,
 } from '@mui/material'
 import SavingsRounded from '@mui/icons-material/SavingsRounded'
 import StorefrontRounded from '@mui/icons-material/StorefrontRounded'
+import HotelRounded from '@mui/icons-material/HotelRounded'
 import { useMyOrganization, useUpdateOrganization } from '../features/organization'
 import { usePosPreferences } from '../store/posPreferences'
 
@@ -29,6 +32,18 @@ const splitOffset = (v: number): { mag: number; dir: OffsetDir } =>
   v >= 0 ? { mag: v, dir: 'before' } : { mag: -v, dir: 'after' }
 const joinOffset = (mag: number, dir: OffsetDir): number => (dir === 'after' ? -mag : mag)
 const OFFSET_MAX = 240
+
+// US-A60 — weekend-rate days. Values are JS weekday ints (0=Sun…6=Sat, matching the engine's
+// weekdayOf); displayed Mon→Sun for familiarity. Default org weekend is Fri+Sat ([5,6]).
+const WEEKDAY_OPTIONS: { value: number; label: string }[] = [
+  { value: 1, label: 'L' },
+  { value: 2, label: 'M' },
+  { value: 3, label: 'X' },
+  { value: 4, label: 'J' },
+  { value: 5, label: 'V' },
+  { value: 6, label: 'S' },
+  { value: 0, label: 'D' },
+]
 
 // A positive-magnitude minutes input + a Before/After "de la salida" selector (US-A47).
 function OffsetField({
@@ -101,10 +116,15 @@ export default function SettingsPage() {
   const [graceDir, setGraceDir] = useState<OffsetDir>('before')
   const [saved, setSaved] = useState(false)
 
+  // US-A60/A63 — lodging org policy: weekend days, free-cancel window, penalty %.
+  const [weekendDays, setWeekendDays] = useState<number[]>([])
+  const [freeCancelDays, setFreeCancelDays] = useState('')
+  const [penaltyPct, setPenaltyPct] = useState('')
+
   // Seed the form from the org's saved values (render-phase, no effect). Re-seeds whenever the
   // saved values change — i.e. on first load and after a successful save — resetting the dirty flag.
   const savedSig = org
-    ? `${org.booking_min_down_payment_pct}|${org.booking_hold_days}|${org.sales_cutoff_offset_minutes}|${org.booking_grace_offset_minutes}`
+    ? `${org.booking_min_down_payment_pct}|${org.booking_hold_days}|${org.sales_cutoff_offset_minutes}|${org.booking_grace_offset_minutes}|${org.lodging_weekend_days.join(',')}|${org.lodging_free_cancel_days}|${org.lodging_cancel_penalty_pct}`
     : null
   const [seededSig, setSeededSig] = useState<string | null>(null)
   if (org && savedSig !== seededSig) {
@@ -117,6 +137,9 @@ export default function SettingsPage() {
     const g = splitOffset(org.booking_grace_offset_minutes)
     setGraceMag(String(g.mag))
     setGraceDir(g.dir)
+    setWeekendDays(org.lodging_weekend_days)
+    setFreeCancelDays(String(org.lodging_free_cancel_days))
+    setPenaltyPct(String(org.lodging_cancel_penalty_pct))
   }
 
   const pctNum = Number(minPct)
@@ -149,6 +172,31 @@ export default function SettingsPage() {
         booking_hold_days: holdNum,
         sales_cutoff_offset_minutes: cutoffSigned,
         booking_grace_offset_minutes: graceSigned,
+      },
+      { onSuccess: () => setSaved(true) },
+    )
+  }
+
+  // --- Lodging (Hospedaje) settings ---
+  const freeCancelNum = Number(freeCancelDays)
+  const penaltyNum = Number(penaltyPct)
+  const freeCancelInvalid =
+    freeCancelDays === '' || !Number.isInteger(freeCancelNum) || freeCancelNum < 0
+  const penaltyInvalid =
+    penaltyPct === '' || !Number.isInteger(penaltyNum) || penaltyNum < 0 || penaltyNum > 100
+  const lodgingInvalid = freeCancelInvalid || penaltyInvalid || weekendDays.length === 0
+  const lodgingDirty =
+    !!org &&
+    ([...weekendDays].sort().join(',') !== [...org.lodging_weekend_days].sort().join(',') ||
+      freeCancelNum !== org.lodging_free_cancel_days ||
+      penaltyNum !== org.lodging_cancel_penalty_pct)
+
+  const handleSaveLodging = () => {
+    update.mutate(
+      {
+        lodging_weekend_days: weekendDays,
+        lodging_free_cancel_days: freeCancelNum,
+        lodging_cancel_penalty_pct: penaltyNum,
       },
       { onSuccess: () => setSaved(true) },
     )
@@ -259,6 +307,86 @@ export default function SettingsPage() {
                   disableElevation
                   onClick={handleSave}
                   disabled={invalid || !dirty || update.isPending}
+                >
+                  {update.isPending ? 'Guardando…' : 'Guardar cambios'}
+                </Button>
+              </Stack>
+            </CardContent>
+          </Card>
+        )}
+
+        {org && (
+          <Card sx={{ mt: 3 }}>
+            <CardContent>
+              <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center', mb: 2 }}>
+                <HotelRounded color="primary" />
+                <Typography variant="h6">Hospedaje</Typography>
+              </Stack>
+
+              <Stack spacing={3}>
+                <Box>
+                  <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 1 }}>
+                    Días de fin de semana
+                  </Typography>
+                  <ToggleButtonGroup
+                    value={weekendDays}
+                    onChange={(_, next: number[]) => setWeekendDays(next)}
+                    size="small"
+                    aria-label="Días de fin de semana"
+                  >
+                    {WEEKDAY_OPTIONS.map((d) => (
+                      <ToggleButton key={d.value} value={d.value} sx={{ width: 44 }}>
+                        {d.label}
+                      </ToggleButton>
+                    ))}
+                  </ToggleButtonGroup>
+                  <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.75 }}>
+                    {weekendDays.length === 0
+                      ? 'Selecciona al menos un día.'
+                      : 'Estos días usan la tarifa de fin de semana de cada unidad.'}
+                  </Typography>
+                </Box>
+
+                <TextField
+                  label="Cancelación gratuita"
+                  type="number"
+                  value={freeCancelDays}
+                  onChange={(e) => setFreeCancelDays(e.target.value)}
+                  error={freeCancelDays !== '' && freeCancelInvalid}
+                  helperText={
+                    freeCancelDays !== '' && freeCancelInvalid
+                      ? 'Captura un número de días válido (0 o más).'
+                      : 'Días antes del check-in en que la cancelación de una estancia pagada se reembolsa al 100%.'
+                  }
+                  slotProps={{
+                    input: { endAdornment: <InputAdornment position="end">días</InputAdornment> },
+                    htmlInput: { min: 0, step: 1, inputMode: 'numeric' },
+                  }}
+                />
+
+                <TextField
+                  label="Penalización"
+                  type="number"
+                  value={penaltyPct}
+                  onChange={(e) => setPenaltyPct(e.target.value)}
+                  error={penaltyPct !== '' && penaltyInvalid}
+                  helperText={
+                    penaltyPct !== '' && penaltyInvalid
+                      ? 'Captura un porcentaje entre 0 y 100.'
+                      : 'Porcentaje del total que se retiene si la cancelación cae dentro de la ventana.'
+                  }
+                  slotProps={{
+                    input: { endAdornment: <InputAdornment position="end">%</InputAdornment> },
+                    htmlInput: { min: 0, max: 100, step: 1, inputMode: 'numeric' },
+                  }}
+                />
+
+                <Button
+                  variant="contained"
+                  size="large"
+                  disableElevation
+                  onClick={handleSaveLodging}
+                  disabled={lodgingInvalid || !lodgingDirty || update.isPending}
                 >
                   {update.isPending ? 'Guardando…' : 'Guardar cambios'}
                 </Button>

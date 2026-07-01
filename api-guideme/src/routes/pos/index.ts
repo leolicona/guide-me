@@ -16,6 +16,7 @@ import {
   reactivateBooking,
   settleBooking,
 } from './handler'
+import { getLodgingAvailability, getUnitCalendar } from './lodging.handler'
 import { availabilityDaysQuerySchema, confirmSaleSchema } from './schema'
 
 const pos = new Hono<{
@@ -44,6 +45,9 @@ pos.get(
   listAvailabilityDays,
 )
 pos.get('/services/:id', getPosService)
+// Accommodation/lodging availability (US-AG36/AG37). Range-first units search + unit calendar.
+pos.get('/lodging/:serviceId/availability', getLodgingAvailability)
+pos.get('/lodging/units/:unitId/calendar', getUnitCalendar)
 pos.post(
   '/folios',
   zValidator('json', confirmSaleSchema, validationHook),

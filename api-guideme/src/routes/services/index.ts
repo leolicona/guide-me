@@ -37,6 +37,27 @@ import {
   createSlotSchema,
   updateSlotSchema,
 } from './slots.schema'
+import {
+  addBlockout,
+  addSeason,
+  createUnit,
+  deactivateUnit,
+  deleteBlockout,
+  deleteSeason,
+  listBlockouts,
+  listSeasons,
+  listUnits,
+  reactivateUnit,
+  updateSeason,
+  updateUnit,
+} from './lodging.handler'
+import {
+  createBlockoutSchema,
+  createSeasonSchema,
+  createUnitSchema,
+  updateSeasonSchema,
+  updateUnitSchema,
+} from './lodging.schema'
 
 const services = new Hono<{
   Bindings: CloudflareBindings
@@ -103,5 +124,42 @@ services.post(
 )
 services.get('/:id/schedules', listSchedules)
 services.post('/:id/schedules/:scheduleId/deactivate', deactivateSchedule)
+
+// Accommodation / lodging (US-A59–A63) — units + per-unit seasons & blockouts, nested under a
+// lodging service. Admin-only via the `*` middleware above. Spec: docs/lodging/accommodation-stays.spec.md.
+services.post(
+  '/:id/units',
+  zValidator('json', createUnitSchema, validationHook),
+  createUnit,
+)
+services.get('/:id/units', listUnits)
+services.put(
+  '/:id/units/:unitId',
+  zValidator('json', updateUnitSchema, validationHook),
+  updateUnit,
+)
+services.post('/:id/units/:unitId/deactivate', deactivateUnit)
+services.post('/:id/units/:unitId/reactivate', reactivateUnit)
+
+services.post(
+  '/:id/units/:unitId/seasons',
+  zValidator('json', createSeasonSchema, validationHook),
+  addSeason,
+)
+services.get('/:id/units/:unitId/seasons', listSeasons)
+services.put(
+  '/:id/units/:unitId/seasons/:seasonId',
+  zValidator('json', updateSeasonSchema, validationHook),
+  updateSeason,
+)
+services.delete('/:id/units/:unitId/seasons/:seasonId', deleteSeason)
+
+services.post(
+  '/:id/units/:unitId/blockouts',
+  zValidator('json', createBlockoutSchema, validationHook),
+  addBlockout,
+)
+services.get('/:id/units/:unitId/blockouts', listBlockouts)
+services.delete('/:id/units/:unitId/blockouts/:blockoutId', deleteBlockout)
 
 export default services

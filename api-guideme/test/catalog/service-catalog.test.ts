@@ -201,6 +201,42 @@ describe('US-A09 — create service (POST /api/services)', () => {
     expect(row).toMatchObject({ status: 'active', base_price: 200000 })
   })
 
+  it('a lodging service may carry a fixed base commission (D3 cap exempts lodging)', async () => {
+    await seedUser({ email: ADMIN_EMAIL, role: 'admin' })
+    // Lodging has no service price floor (base/minimum = 0, units price per night); a fixed
+    // commission counts per stay line, so the `fixed ≤ minimum_price` cap must not apply.
+    const lodging = await SELF.fetch('http://api.local/api/services', {
+      method: 'POST',
+      headers: jsonAuth(ADMIN_EMAIL),
+      body: JSON.stringify({
+        name: 'Hotel Vista',
+        base_price: 0,
+        minimum_price: 0,
+        default_capacity: 1,
+        category: 'lodging',
+        commission_type: 'fixed',
+        commission_value: 50000,
+      }),
+    })
+    expect(lodging.status).toBe(201)
+
+    // A TOUR with the same shape is still capped (fixed 50000 > minimum_price 0) → 400.
+    const tour = await SELF.fetch('http://api.local/api/services', {
+      method: 'POST',
+      headers: jsonAuth(ADMIN_EMAIL),
+      body: JSON.stringify({
+        name: 'Canyon',
+        base_price: 0,
+        minimum_price: 0,
+        default_capacity: 5,
+        category: 'tours',
+        commission_type: 'fixed',
+        commission_value: 50000,
+      }),
+    })
+    expect(tour.status).toBe(400)
+  })
+
   it('Scenario 2 — minimum_price > base_price / negative / capacity 0 → 400, no row', async () => {
     await seedUser({ email: ADMIN_EMAIL, role: 'admin' })
 

@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { PosExtra, PosSlot } from '../features/pos/types'
+import type { PosExtra, PosSlot, StayNight } from '../features/pos/types'
 import type { ConfirmSaleInput, PaymentMethod } from '../services/posService'
 
 // The cart is client-only state — the server only sees the final cart on confirm
@@ -19,7 +19,9 @@ export interface CartExtra {
   quantity: number
 }
 
-export interface CartLine {
+/** A tour/activity line — a slot + quantity + discountable unit price. */
+export interface SlotCartLine {
+  kind: 'slot'
   service: CartService
   slot: PosSlot
   /** Number of people; >= 1, soft-capped at the slot's remaining. */
@@ -27,6 +29,44 @@ export interface CartLine {
   /** Discounted unit price (minor units), clamped to [minimum_price, base_price]. */
   unit_price: number
   extras: CartExtra[]
+}
+
+/** US-AG38 — a lodging stay line: a unit + date range + guests. No per-night discounting in v1;
+ * the server re-quotes + snapshots the total on confirm (cart `total` mirrors it for display). */
+export interface StayCartLine {
+  kind: 'stay'
+  /** Stable client key (a stay has no slot id). */
+  id: string
+  service: CartService
+  unit_id: string
+  unit_name: string
+  check_in: string
+  check_out: string
+  guests: number
+  nights: number
+  /** Stay total in minor units (server is authoritative). */
+  total: number
+  /** Per-night rate breakdown (display only). */
+  per_night: StayNight[]
+}
+
+export type CartLine = SlotCartLine | StayCartLine
+
+/** A line's stable key — the slot id for a tour line, the client id for a stay line. */
+export const lineKey = (line: CartLine): string =>
+  line.kind === 'slot' ? line.slot.id : line.id
+
+/** Input for adding a stay line (US-AG38). */
+export interface AddStayInput {
+  service: CartService
+  unit_id: string
+  unit_name: string
+  check_in: string
+  check_out: string
+  guests: number
+  nights: number
+  total: number
+  per_night: StayNight[]
 }
 
 interface PosCartState {
@@ -45,6 +85,8 @@ interface PosCartState {
     unit_price?: number
     extras?: CartExtra[]
   }) => void
+  /** US-AG38 — add a lodging stay line. */
+  addStayLine: (input: AddStayInput) => void
   updateQuantity: (slotId: string, quantity: number) => void
   setUnitPrice: (slotId: string, unitPrice: number) => void
   addExtra: (slotId: string, extra: PosExtra) => void
@@ -73,13 +115,17 @@ export const usePosCart = create<PosCartState>((set) => ({
         service.minimum_price,
         service.base_price,
       )
-      const existing = state.lines.find((l) => l.slot.id === slot.id)
+      const existing = state.lines.find(
+        (l): l is SlotCartLine => l.kind === 'slot' && l.slot.id === slot.id,
+      )
       if (existing) {
         // Merge quantities (distinct-slot rule), soft-capped at remaining.
         const merged = Math.min(existing.quantity + quantity, slot.remaining || quantity)
         return {
           lines: state.lines.map((l) =>
-            l.slot.id === slot.id ? { ...l, quantity: Math.max(merged, 1) } : l,
+            l.kind === 'slot' && l.slot.id === slot.id
+              ? { ...l, quantity: Math.max(merged, 1) }
+              : l,
           ),
         }
       }
@@ -87,15 +133,20 @@ export const usePosCart = create<PosCartState>((set) => ({
       return {
         lines: [
           ...state.lines,
-          { service, slot, quantity: Math.max(capped, 1), unit_price: price, extras },
+          { kind: 'slot', service, slot, quantity: Math.max(capped, 1), unit_price: price, extras },
         ],
       }
     }),
 
+  addStayLine: (input) =>
+    set((state) => ({
+      lines: [...state.lines, { kind: 'stay', id: crypto.randomUUID(), ...input }],
+    })),
+
   updateQuantity: (slotId, quantity) =>
     set((state) => ({
       lines: state.lines.map((l) =>
-        l.slot.id === slotId
+        l.kind === 'slot' && l.slot.id === slotId
           ? {
               ...l,
               quantity: clamp(
@@ -111,7 +162,7 @@ export const usePosCart = create<PosCartState>((set) => ({
   setUnitPrice: (slotId, unitPrice) =>
     set((state) => ({
       lines: state.lines.map((l) =>
-        l.slot.id === slotId
+        l.kind === 'slot' && l.slot.id === slotId
           ? {
               ...l,
               unit_price: clamp(
@@ -127,7 +178,7 @@ export const usePosCart = create<PosCartState>((set) => ({
   addExtra: (slotId, extra) =>
     set((state) => ({
       lines: state.lines.map((l) => {
-        if (l.slot.id !== slotId) return l
+        if (l.kind !== 'slot' || l.slot.id !== slotId) return l
         const found = l.extras.find((e) => e.extra.id === extra.id)
         return {
           ...l,
@@ -143,7 +194,7 @@ export const usePosCart = create<PosCartState>((set) => ({
   updateExtraQuantity: (slotId, extraId, quantity) =>
     set((state) => ({
       lines: state.lines.map((l) =>
-        l.slot.id === slotId
+        l.kind === 'slot' && l.slot.id === slotId
           ? {
               ...l,
               extras: l.extras
@@ -161,14 +212,14 @@ export const usePosCart = create<PosCartState>((set) => ({
   removeExtra: (slotId, extraId) =>
     set((state) => ({
       lines: state.lines.map((l) =>
-        l.slot.id === slotId
+        l.kind === 'slot' && l.slot.id === slotId
           ? { ...l, extras: l.extras.filter((e) => e.extra.id !== extraId) }
           : l,
       ),
     })),
 
-  removeLine: (slotId) =>
-    set((state) => ({ lines: state.lines.filter((l) => l.slot.id !== slotId) })),
+  removeLine: (key) =>
+    set((state) => ({ lines: state.lines.filter((l) => lineKey(l) !== key) })),
 
   setCustomer: (fields) =>
     set((state) => ({
@@ -192,17 +243,22 @@ export const usePosCart = create<PosCartState>((set) => ({
 // --- Pure money/selectors (mirror the server math; server remains authoritative) ---
 
 export const cartExtrasTotal = (line: CartLine): number =>
-  line.extras.reduce((sum, e) => sum + e.extra.price * e.quantity, 0)
+  line.kind === 'slot'
+    ? line.extras.reduce((sum, e) => sum + e.extra.price * e.quantity, 0)
+    : 0
 
 export const cartLineTotal = (line: CartLine): number =>
-  line.unit_price * line.quantity + cartExtrasTotal(line)
+  line.kind === 'slot'
+    ? line.unit_price * line.quantity + cartExtrasTotal(line)
+    : line.total
 
 export const cartSubtotal = (lines: CartLine[]): number =>
   lines.reduce((sum, l) => sum + cartLineTotal(l), 0)
 
 export const cartDiscountTotal = (lines: CartLine[]): number =>
   lines.reduce(
-    (sum, l) => sum + (l.service.base_price - l.unit_price) * l.quantity,
+    (sum, l) =>
+      sum + (l.kind === 'slot' ? (l.service.base_price - l.unit_price) * l.quantity : 0),
     0,
   )
 
@@ -217,10 +273,19 @@ export const toConfirmPayload = (state: PosCartState): ConfirmSaleInput => ({
   customer_email: state.customerEmail.trim() || null,
   customer_phone: state.customerPhone.trim() || null,
   payment_method: state.paymentMethod,
-  lines: state.lines.map((l) => ({
-    slot_id: l.slot.id,
-    quantity: l.quantity,
-    unit_price: l.unit_price,
-    extras: l.extras.map((e) => ({ extra_id: e.extra.id, quantity: e.quantity })),
-  })),
+  lines: state.lines.map((l) =>
+    l.kind === 'slot'
+      ? {
+          slot_id: l.slot.id,
+          quantity: l.quantity,
+          unit_price: l.unit_price,
+          extras: l.extras.map((e) => ({ extra_id: e.extra.id, quantity: e.quantity })),
+        }
+      : {
+          unit_id: l.unit_id,
+          check_in: l.check_in,
+          check_out: l.check_out,
+          guests: l.guests,
+        },
+  ),
 })

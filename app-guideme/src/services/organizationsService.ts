@@ -11,6 +11,11 @@ export interface MyOrganization {
   // salesCutoff closes new walk-in sales; bookingGrace times the unsettled same-day auto-cancel.
   sales_cutoff_offset_minutes: number
   booking_grace_offset_minutes: number
+  // US-A60/A63 — lodging org settings. weekend days as ISO weekday ints (0=Sun…6=Sat; default
+  // [5,6] = Fri+Sat); free-cancel window (days) + penalty (%) for paid-stay cancellations.
+  lodging_weekend_days: number[]
+  lodging_free_cancel_days: number
+  lodging_cancel_penalty_pct: number
 }
 
 export const getMyOrganization = async (): Promise<MyOrganization> => {
@@ -23,6 +28,9 @@ export interface UpdateOrganizationInput {
   booking_hold_days?: number
   sales_cutoff_offset_minutes?: number
   booking_grace_offset_minutes?: number
+  lodging_weekend_days?: number[]
+  lodging_free_cancel_days?: number
+  lodging_cancel_penalty_pct?: number
 }
 
 // US-A46 — admin updates the org booking policy.

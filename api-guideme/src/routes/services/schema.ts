@@ -62,10 +62,16 @@ export const createServiceSchema = z
   })
   // D3 — a fixed commission may never exceed the price floor, so commission can never exceed
   // the revenue of even a maximally-discounted pass (kills the discount-incentive trap).
-  .refine((v) => v.commission_type !== 'fixed' || v.commission_value <= v.minimum_price, {
-    message: 'fixed commission must be ≤ minimum_price',
-    path: ['commission_value'],
-  })
+  // Exempt lodging: it has NO service price floor (base/minimum are 0 — units price per night), and
+  // a fixed commission counts per stay line (spec §"Commission"). The cap would otherwise force
+  // every lodging fixed commission to 0. Per-unit overrides apply the same exemption.
+  .refine(
+    (v) =>
+      v.category === 'lodging' ||
+      v.commission_type !== 'fixed' ||
+      v.commission_value <= v.minimum_price,
+    { message: 'fixed commission must be ≤ minimum_price', path: ['commission_value'] },
+  )
 
 // Same shape as create — PUT is a full replace.
 export const updateServiceSchema = createServiceSchema

@@ -1,7 +1,7 @@
 import type { BatchItem } from 'drizzle-orm/batch'
 import { and, eq, lte, sql } from 'drizzle-orm'
 import { getDb } from '../../db/client'
-import { folioLines, folios, slots } from '../../db/schema'
+import { accommodationReservations, folioLines, folios, slots } from '../../db/schema'
 
 // US-AG07 (P3) — auto-expiry sweep. Cancels every booking past its `booking_expires_at`, releasing
 // its held spots back into inventory (so the seats free up for last-minute walk-ins). The deposit
@@ -48,6 +48,7 @@ export async function sweepExpiredBookings(env: CloudflareBindings): Promise<num
         ),
     ]
     for (const line of lineRows) {
+      if (!line.slotId) continue // a lodging stay line has no slot (released via reservations below)
       statements.push(
         db
           .update(slots)
@@ -63,6 +64,19 @@ export async function sweepExpiredBookings(env: CloudflareBindings): Promise<num
           ),
       )
     }
+    // Lodging: free the stay's dates by cancelling its active reservations (deposit retained, D7).
+    statements.push(
+      db
+        .update(accommodationReservations)
+        .set({ status: 'cancelled', updatedAt: new Date() })
+        .where(
+          and(
+            eq(accommodationReservations.folioId, folio.id),
+            eq(accommodationReservations.organizationId, folio.organizationId),
+            eq(accommodationReservations.status, 'active'),
+          ),
+        ),
+    )
     await db.batch(statements as [BatchItem<'sqlite'>, ...BatchItem<'sqlite'>[]])
     swept++
   }

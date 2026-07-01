@@ -3,6 +3,9 @@ import type { BatchItem } from 'drizzle-orm/batch'
 import { and, asc, desc, eq, gte, lte, sql } from 'drizzle-orm'
 import { getDb, type Db } from '../../db/client'
 import {
+  accommodationReservations,
+  accommodationSeasons,
+  accommodationUnits,
   affiliateCommissions,
   folioAccessTokens,
   folioLineExtras,
@@ -27,6 +30,13 @@ import {
   type TicketPayload,
 } from '../../utils/qr'
 import { generatePortalToken, portalTokenExpiry } from '../../utils/portal'
+import {
+  nightsBetween,
+  parseCsvInts,
+  quoteStay,
+  type SeasonRate,
+} from '../../utils/lodging'
+import { lodgingCatalogInfo } from './lodging.handler'
 import type { ConfirmSaleInput } from './schema'
 
 export type PosContext = Context<{
@@ -214,8 +224,22 @@ export const listPosServices = async (c: PosContext) => {
     availabilityRows.map((r) => [r.serviceId, r]),
   )
 
+  // Lodging (docs/lodging/accommodation-stays.spec.md §4.3) has no slots: its availability comes
+  // from units/reservations/blockouts, and the card shows "Desde $X / noche" (from_nightly_rate)
+  // rather than a per-ticket base_price. Tours are unchanged.
+  const lodgingIds = serviceRows.filter((s) => s.category === 'lodging').map((s) => s.id)
+  const lodgingInfo = await lodgingCatalogInfo(
+    db,
+    agent.organizationId,
+    lodgingIds,
+    windowFrom,
+    windowTo,
+  )
+
   const result = serviceRows.map((s) => {
     const a = availability.get(s.id)
+    const isLodging = s.category === 'lodging'
+    const lodging = isLodging ? lodgingInfo.get(s.id) : undefined
     return {
       id: s.id,
       name: s.name,
@@ -230,11 +254,17 @@ export const listPosServices = async (c: PosContext) => {
       // US-A37 — primary category (or null for a pre-migration service); drives the POS
       // filter chips, which the client derives from the present, non-null categories.
       category: s.category,
-      // US-AG30 — lightweight boolean (no count): true when any in-window slot is sellable.
-      // availableSpots is the Σ EFFECTIVE remaining over the window; since effective
-      // remaining is always ≥ 0, sum > 0 ⟺ ≥ 1 slot has a sellable spot.
-      has_availability: a ? Number(a.availableSpots) > 0 : false,
-      next_slot_date: a ? a.nextSlotDate : null,
+      // Lodging-only: min nightly rate across active units (null if none). Absent for tours.
+      from_nightly_rate: isLodging ? (lodging?.fromNightlyRate ?? null) : undefined,
+      // US-AG30 — lightweight boolean (no count). For a tour: ≥ 1 in-window slot is sellable.
+      // For lodging: ≥ 1 active unit has a free night in the window.
+      has_availability: isLodging
+        ? (lodging?.hasAvailability ?? false)
+        : a
+          ? Number(a.availableSpots) > 0
+          : false,
+      // Lodging has no slot dates; tours keep their earliest in-window slot date.
+      next_slot_date: isLodging ? null : a ? a.nextSlotDate : null,
     }
   })
 
@@ -429,25 +459,33 @@ interface PreparedExtra {
 
 interface PreparedLine {
   id: string
-  slotId: string
+  // 'slot' = tour line (slotId set); 'stay' = lodging line (unitId/checkIn/checkOut set, slotId null).
+  lineType: 'slot' | 'stay'
+  slotId: string | null
   serviceId: string
   serviceName: string
-  slotDate: string
-  slotStartTime: string
+  slotDate: string | null
+  slotStartTime: string | null
   quantity: number
   basePrice: number
   minimumPrice: number
   unitPrice: number
   lineTotal: number
   // Service-based commission snapshot (US-A12 rev.): percent → value is basis points of the
-  // line total; fixed → value is minor units per spot (× quantity).
+  // line total; fixed → value is minor units per spot (× quantity; for a stay quantity = 1).
   commissionType: 'percent' | 'fixed'
   commissionValue: number
-  // US-A36 — capacity mode, used to build the effective-capacity guard at decrement time.
+  // US-A36 — capacity mode, used to build the effective-capacity guard at decrement time (slot only).
   isFlexible: boolean
   flexCapacityPct: number
   extras: PreparedExtra[]
-  // Signed at confirm time, once all decrements succeed (below).
+  // Lodging stay fields (lineType === 'stay').
+  unitId?: string
+  checkIn?: string
+  checkOut?: string
+  guests?: number
+  nights?: number
+  // Signed at confirm time, once all decrements succeed (below). Stay lines have no QR.
   qrToken?: string
   qr?: ReturnType<typeof qrEcho>
 }
@@ -688,11 +726,13 @@ export const confirmSale = async (c: PosContext) => {
       bookingHoldDays: organizations.bookingHoldDays,
       salesCutoffOffsetMinutes: organizations.salesCutoffOffsetMinutes,
       bookingGraceOffsetMinutes: organizations.bookingGraceOffsetMinutes,
+      lodgingWeekendDays: organizations.lodgingWeekendDays,
     })
     .from(organizations)
     .where(eq(organizations.id, org))
     .limit(1)
   const orgRow = orgRows[0]
+  const weekendDays = parseCsvInts(orgRow?.lodgingWeekendDays ?? '5,6')
   // US-A47 — the sales cutoff gates EVERY new folio (walk-in sale + booking creation): a slot
   // past its cutoff is no longer sellable. Evaluated once against the request's start instant.
   const saleNowSec = Math.floor(Date.now() / 1000)
@@ -701,6 +741,141 @@ export const confirmSale = async (c: PosContext) => {
   // 1. VALIDATE (reads only) — snapshot prices/names from active, in-org inventory.
   const prepared: PreparedLine[] = []
   for (const line of input.lines) {
+    // --- Lodging STAY line (docs/lodging — has unit_id). Re-quote via the shared engine and
+    // snapshot the total; the atomic overlap guard runs at the reservation insert below. ---
+    if ('unit_id' in line) {
+      const unitRows = await db
+        .select({
+          id: accommodationUnits.id,
+          serviceId: accommodationUnits.serviceId,
+          name: accommodationUnits.name,
+          baseRate: accommodationUnits.baseRate,
+          weekendRate: accommodationUnits.weekendRate,
+          extraPersonFee: accommodationUnits.extraPersonFee,
+          baseOccupancy: accommodationUnits.baseOccupancy,
+          maxCapacity: accommodationUnits.maxCapacity,
+          minNights: accommodationUnits.minNights,
+          // Waterfall commission inputs: the unit's own override (nullable) + the service base.
+          unitCommissionType: accommodationUnits.commissionType,
+          unitCommissionValue: accommodationUnits.commissionValue,
+          svcCommissionType: services.commissionType,
+          svcCommissionValue: services.commissionValue,
+        })
+        .from(accommodationUnits)
+        .innerJoin(services, eq(accommodationUnits.serviceId, services.id))
+        .where(
+          and(
+            eq(accommodationUnits.id, line.unit_id),
+            eq(accommodationUnits.organizationId, org),
+            eq(accommodationUnits.status, 'active'),
+            eq(services.status, 'active'),
+            eq(services.category, 'lodging'),
+          ),
+        )
+        .limit(1)
+      const unit = unitRows[0]
+      if (!unit) {
+        throw new ApiError('NOT_FOUND', 404, 'Unit not found or unavailable')
+      }
+
+      if (!(line.check_out > line.check_in)) {
+        throw new ApiError('VALIDATION_ERROR', 400, 'check_out must be after check_in')
+      }
+      const nights = nightsBetween(line.check_in, line.check_out)
+      if (nights < unit.minNights) {
+        throw new ApiError(
+          'MIN_STAY_NOT_MET',
+          400,
+          `Minimum stay is ${unit.minNights} night(s)`,
+        )
+      }
+      if (line.guests < 1 || line.guests > unit.maxCapacity) {
+        throw new ApiError('VALIDATION_ERROR', 400, 'guests exceeds the unit capacity')
+      }
+
+      // Active seasons overlapping the stay → the rate engine.
+      const seasonRows = await db
+        .select({
+          startDate: accommodationSeasons.startDate,
+          endDate: accommodationSeasons.endDate,
+          nightlyRate: accommodationSeasons.nightlyRate,
+        })
+        .from(accommodationSeasons)
+        .where(
+          and(
+            eq(accommodationSeasons.organizationId, org),
+            eq(accommodationSeasons.unitId, unit.id),
+            eq(accommodationSeasons.status, 'active'),
+            lte(accommodationSeasons.startDate, line.check_out),
+            gte(accommodationSeasons.endDate, line.check_in),
+          ),
+        )
+      const seasons: SeasonRate[] = seasonRows.map((s) => ({
+        startDate: s.startDate,
+        endDate: s.endDate,
+        nightlyRate: s.nightlyRate,
+      }))
+      const quote = quoteStay(
+        {
+          baseRate: unit.baseRate,
+          weekendRate: unit.weekendRate,
+          extraPersonFee: unit.extraPersonFee,
+          baseOccupancy: unit.baseOccupancy,
+          maxCapacity: unit.maxCapacity,
+          minNights: unit.minNights,
+        },
+        line.check_in,
+        line.check_out,
+        line.guests,
+        seasons,
+        weekendDays,
+      )
+
+      // Commission waterfall (US-A12): unit override ?? service base; affiliate's per-affiliate
+      // rate still wins over both (its own allow-list-gated system, unchanged).
+      let stayCommType = unit.unitCommissionType ?? unit.svcCommissionType
+      let stayCommValue =
+        unit.unitCommissionType != null ? (unit.unitCommissionValue ?? 0) : unit.svcCommissionValue
+      if (isAffiliate) {
+        const rate = affiliateRates.get(unit.serviceId)
+        if (!rate) {
+          throw new ApiError(
+            'SERVICE_NOT_ALLOWED',
+            403,
+            'This service is not enabled for your affiliate account',
+          )
+        }
+        stayCommType = rate.type
+        stayCommValue = rate.value
+      }
+
+      prepared.push({
+        id: crypto.randomUUID(),
+        lineType: 'stay',
+        slotId: null,
+        serviceId: unit.serviceId,
+        serviceName: unit.name, // unit name snapshot
+        slotDate: null,
+        slotStartTime: null,
+        quantity: 1, // a stay line is one unit for the range; fixed commission counts per stay
+        basePrice: quote.total, // no per-night discounting in v1 → base == sold
+        minimumPrice: 0,
+        unitPrice: quote.total,
+        lineTotal: quote.total,
+        commissionType: stayCommType,
+        commissionValue: stayCommValue,
+        isFlexible: false,
+        flexCapacityPct: 0,
+        extras: [],
+        unitId: unit.id,
+        checkIn: line.check_in,
+        checkOut: line.check_out,
+        guests: line.guests,
+        nights,
+      })
+      continue
+    }
+
     const slotRows = await db
       .select({
         slotId: slots.id,
@@ -813,6 +988,7 @@ export const confirmSale = async (c: PosContext) => {
     const lineTotal = line.unit_price * line.quantity + extrasTotal
     prepared.push({
       id: crypto.randomUUID(),
+      lineType: 'slot',
       slotId: slot.slotId,
       serviceId: slot.serviceId,
       serviceName: slot.serviceName,
@@ -895,10 +1071,14 @@ export const confirmSale = async (c: PosContext) => {
     // Percent on the amount collected; fixed accrues nothing until the folio reaches `paid` (D8).
     commissionAmount = Math.round((fullPercentCommission * downPayment) / total)
     const nowSec = Math.floor(Date.now() / 1000)
+    // Earliest "departure" across the cart: a slot's start, or a stay's check-in (midnight). Drives
+    // the release timestamp (US-AG07.1). A stay uses its check-in date as the protected instant.
     const earliest = prepared.reduce(
       (min, l) => {
-        const e = slotEpoch(l.slotDate, l.slotStartTime)
-        return e < min.epoch ? { epoch: e, date: l.slotDate } : min
+        const date = l.lineType === 'stay' ? l.checkIn! : l.slotDate!
+        const time = l.lineType === 'stay' ? '00:00' : l.slotStartTime!
+        const e = slotEpoch(date, time)
+        return e < min.epoch ? { epoch: e, date } : min
       },
       { epoch: Infinity, date: '' },
     )
@@ -910,13 +1090,98 @@ export const confirmSale = async (c: PosContext) => {
     )
   }
 
-  // 2. DECREMENT each slot atomically & conditionally; track successes.
+  // A stay reservation FK-references the folio, so the folio row must exist BEFORE the reserve
+  // step. Insert it now; compensation deletes it if any line fails (mirrors the slot re-increment).
+  const folioId = crypto.randomUUID()
+  await db.insert(folios).values({
+    id: folioId,
+    organizationId: org,
+    agentId: agent.userId,
+    // D5 — stamp the seller's company on an affiliate sale; null for in-house (agent/admin).
+    affiliateCompanyId,
+    customerName: input.customer_name ?? null,
+    customerEmail: input.customer_email ?? null,
+    customerPhone: input.customer_phone ?? null,
+    status,
+    paymentMethod: input.payment_method ?? 'cash',
+    subtotal,
+    discountTotal,
+    total,
+    amountPaid,
+    commissionAmount,
+    bookingExpiresAt,
+  })
+
+  // 2. RESERVE INVENTORY — per line, conditionally & atomically, tracking successes so a later
+  //    failure can be compensated. Slot lines decrement booked (effective-capacity guard); stay
+  //    lines insert a reservation guarded by a half-open overlap probe (the lodging analogue).
   const applied: { slotId: string; qty: number }[] = []
+  const appliedReservations: string[] = []
+  const compensate = async () => {
+    for (const a of applied) {
+      await db
+        .update(slots)
+        .set({ booked: sql`${slots.booked} - ${a.qty}`, updatedAt: new Date() })
+        .where(and(eq(slots.id, a.slotId), eq(slots.organizationId, org)))
+    }
+    for (const rid of appliedReservations) {
+      await db
+        .delete(accommodationReservations)
+        .where(and(eq(accommodationReservations.id, rid), eq(accommodationReservations.organizationId, org)))
+    }
+    await db.delete(folios).where(and(eq(folios.id, folioId), eq(folios.organizationId, org)))
+  }
+
   for (const line of prepared) {
-    // US-A36 — guard against EFFECTIVE capacity, not the raw cap. For a Soft Cap service the
-    // ceiling is capacity + floor(capacity × pct / 100); SQLite integer division truncates
-    // toward zero, so `capacity * pct / 100` is exactly that floor (pct ≥ 0). Hard Cap
-    // (isFlexible=false) adds 0 — byte-identical to the previous `capacity - booked` guard.
+    if (line.lineType === 'stay') {
+      // Atomic conditional INSERT (spec §2.4): create the reservation only if no ACTIVE
+      // reservation and no block-out overlaps [check_in, check_out) (half-open → checkout-day
+      // reuse). 0 rows written ⟺ taken → 409 UNIT_UNAVAILABLE. Raw D1 for an exact rows-written.
+      const reservationId = crypto.randomUUID()
+      const ins = await c.env.DB.prepare(
+        `INSERT INTO accommodation_reservations
+           (id, organization_id, service_id, unit_id, folio_id, check_in, check_out, guests, status)
+         SELECT ?, ?, ?, ?, ?, ?, ?, ?, 'active'
+         WHERE NOT EXISTS (
+           SELECT 1 FROM accommodation_reservations r
+           WHERE r.unit_id = ? AND r.status = 'active'
+             AND r.check_in < ? AND ? < r.check_out
+         ) AND NOT EXISTS (
+           SELECT 1 FROM accommodation_blockouts b
+           WHERE b.unit_id = ? AND b.start_date < ? AND ? < b.end_date
+         )`,
+      )
+        .bind(
+          reservationId,
+          org,
+          line.serviceId,
+          line.unitId!,
+          folioId,
+          line.checkIn!,
+          line.checkOut!,
+          line.guests!,
+          line.unitId!,
+          line.checkOut!,
+          line.checkIn!,
+          line.unitId!,
+          line.checkOut!,
+          line.checkIn!,
+        )
+        .run()
+      if (!ins.meta.changes) {
+        await compensate()
+        throw new ApiError(
+          'UNIT_UNAVAILABLE',
+          409,
+          'This unit is no longer available for those dates',
+        )
+      }
+      appliedReservations.push(reservationId)
+      continue
+    }
+
+    // US-A36 — guard against EFFECTIVE capacity, not the raw cap (Soft Cap adds floor(cap×pct/100);
+    // Hard Cap adds 0). SQLite integer division truncates → exactly that floor.
     const flexMargin =
       line.isFlexible && line.flexCapacityPct > 0
         ? sql`((${slots.capacity} * ${line.flexCapacityPct}) / 100)`
@@ -929,7 +1194,7 @@ export const confirmSale = async (c: PosContext) => {
       })
       .where(
         and(
-          eq(slots.id, line.slotId),
+          eq(slots.id, line.slotId!),
           eq(slots.organizationId, org),
           eq(slots.status, 'active'),
           gte(sql`${slots.capacity} + ${flexMargin} - ${slots.booked}`, line.quantity),
@@ -938,59 +1203,50 @@ export const confirmSale = async (c: PosContext) => {
       .returning({ id: slots.id })
 
     if (decremented.length === 0) {
-      // 3. COMPENSATE every decrement already applied, then fail. No folio yet.
-      for (const a of applied) {
-        await db
-          .update(slots)
-          .set({
-            booked: sql`${slots.booked} - ${a.qty}`,
-            updatedAt: new Date(),
-          })
-          .where(and(eq(slots.id, a.slotId), eq(slots.organizationId, org)))
-      }
+      await compensate()
       throw new ApiError(
         'SLOT_UNAVAILABLE',
         409,
         'A selected time just sold out — please review your cart',
       )
     }
-    applied.push({ slotId: line.slotId, qty: line.quantity })
+    applied.push({ slotId: line.slotId!, qty: line.quantity })
   }
 
-  // 4. SIGN one QR access ticket per line — ONLY for a paid sale. A booking has no scannable QR
-  //    until it settles (the scanner refuses any non-`paid` folio); settle signs the tickets then.
-  const folioId = crypto.randomUUID()
+  // 4. SIGN one QR access ticket per SLOT line — ONLY for a paid sale. A booking has no scannable
+  //    QR until it settles; a lodging stay line has no slot QR (its access is the reservation).
+  const slotLines = prepared.filter((l) => l.lineType === 'slot' && l.slotId && l.slotDate)
   if (!isBooking) {
-    const identity = clientIdentity(input, folioId)
-    const tickets = await signLineTickets(c.env, org, folioId, identity, prepared)
-    for (const line of prepared) {
-      const t = tickets.get(line.id)!
-      line.qrToken = t.token
-      line.qr = t.qr
+    // The folio + holds are already committed (the reservation FK needs the folio first), so a
+    // signing failure must compensate too — otherwise it would orphan the folio.
+    try {
+      const identity = clientIdentity(input, folioId)
+      const tickets = await signLineTickets(
+        c.env,
+        org,
+        folioId,
+        identity,
+        slotLines.map((l) => ({
+          id: l.id,
+          serviceId: l.serviceId,
+          slotId: l.slotId!,
+          quantity: l.quantity,
+          slotDate: l.slotDate!,
+        })),
+      )
+      for (const line of slotLines) {
+        const t = tickets.get(line.id)!
+        line.qrToken = t.token
+        line.qr = t.qr
+      }
+    } catch (err) {
+      await compensate()
+      throw err
     }
   }
 
-  // 5. PERSIST — folio + lines + extras in one atomic batch (D1 batch rolls back on error).
-  const statements: BatchItem<'sqlite'>[] = [
-    db.insert(folios).values({
-      id: folioId,
-      organizationId: org,
-      agentId: agent.userId,
-      // D5 — stamp the seller's company on an affiliate sale; null for in-house (agent/admin).
-      affiliateCompanyId,
-      customerName: input.customer_name ?? null,
-      customerEmail: input.customer_email ?? null,
-      customerPhone: input.customer_phone ?? null,
-      status,
-      paymentMethod: input.payment_method ?? 'cash',
-      subtotal,
-      discountTotal,
-      total,
-      amountPaid,
-      commissionAmount,
-      bookingExpiresAt,
-    }),
-  ]
+  // 5. PERSIST — lines + extras in one atomic batch (the folio row was inserted above).
+  const statements: BatchItem<'sqlite'>[] = []
 
   for (const line of prepared) {
     statements.push(
@@ -1011,6 +1267,12 @@ export const confirmSale = async (c: PosContext) => {
         commissionType: line.commissionType,
         commissionValue: line.commissionValue,
         qrToken: line.qrToken,
+        lineType: line.lineType,
+        unitId: line.unitId ?? null,
+        checkIn: line.checkIn ?? null,
+        checkOut: line.checkOut ?? null,
+        guests: line.guests ?? null,
+        nights: line.nights ?? null,
       }),
     )
     for (const ex of line.extras) {
@@ -1029,7 +1291,16 @@ export const confirmSale = async (c: PosContext) => {
     }
   }
 
-  await db.batch(statements as [BatchItem<'sqlite'>, ...BatchItem<'sqlite'>[]])
+  // The folio + its inventory holds were committed above (the folio must precede the reservation
+  // FK). If persisting the lines fails, compensate everything (re-increment slots, drop the
+  // reservations + the folio) so no orphaned folio is left behind — restoring the all-or-nothing
+  // guarantee D1's lack of interactive transactions can't give us directly.
+  try {
+    await db.batch(statements as [BatchItem<'sqlite'>, ...BatchItem<'sqlite'>[]])
+  } catch (err) {
+    await compensate()
+    throw err
+  }
 
   const orgName = orgRow?.name ?? 'GuideMe'
 
@@ -1065,8 +1336,9 @@ export const confirmSale = async (c: PosContext) => {
             bookingExpiresAt: expiresAt,
             lines: prepared.map((l) => ({
               serviceName: l.serviceName,
-              slotDate: l.slotDate,
-              slotStartTime: l.slotStartTime,
+              // A stay line shows its check-in date in place of a slot date/time.
+              slotDate: l.slotDate ?? l.checkIn ?? '',
+              slotStartTime: l.slotStartTime ?? '',
               quantity: l.quantity,
             })),
           }).catch((err) =>
@@ -1081,12 +1353,14 @@ export const confirmSale = async (c: PosContext) => {
       c.env,
       org,
       folioId,
-      prepared.map((l) => l.slotDate),
+      // Portal validity spans the trip: slot dates, plus a stay's checkout as its last date.
+      prepared.map((l) => l.slotDate ?? l.checkOut ?? l.checkIn!).filter((d): d is string => !!d),
     )
-    const ticketLines = prepared.map((line) => ({
+    // Only slot lines carry a QR ticket; a stay line's access is its reservation (no per-line QR).
+    const ticketLines = slotLines.map((line) => ({
       serviceName: line.serviceName,
-      slotDate: line.slotDate,
-      slotStartTime: line.slotStartTime,
+      slotDate: line.slotDate!,
+      slotStartTime: line.slotStartTime!,
       quantity: line.quantity,
       unitPrice: line.unitPrice,
       lineTotal: line.lineTotal,
@@ -1135,11 +1409,18 @@ export const confirmSale = async (c: PosContext) => {
         commission_amount: commissionAmount,
         lines: prepared.map((line) => ({
           id: line.id,
+          line_type: line.lineType,
           service_id: line.serviceId,
           slot_id: line.slotId,
           service_name: line.serviceName,
           slot_date: line.slotDate,
           slot_start_time: line.slotStartTime,
+          // Lodging stay fields (null for a tour line).
+          unit_id: line.unitId ?? null,
+          check_in: line.checkIn ?? null,
+          check_out: line.checkOut ?? null,
+          guests: line.guests ?? null,
+          nights: line.nights ?? null,
           quantity: line.quantity,
           base_price: line.basePrice,
           minimum_price: line.minimumPrice,
@@ -1213,6 +1494,12 @@ const readFolio = async (
       unitPrice: folioLines.unitPrice,
       lineTotal: folioLines.lineTotal,
       qrToken: folioLines.qrToken,
+      lineType: folioLines.lineType,
+      unitId: folioLines.unitId,
+      checkIn: folioLines.checkIn,
+      checkOut: folioLines.checkOut,
+      guests: folioLines.guests,
+      nights: folioLines.nights,
     })
     .from(folioLines)
     .where(and(eq(folioLines.folioId, folioId), eq(folioLines.organizationId, org)))
@@ -1252,11 +1539,18 @@ const readFolio = async (
         : null
       return {
         id: line.id,
+        line_type: line.lineType,
         service_id: line.serviceId,
         slot_id: line.slotId,
         service_name: line.serviceName,
         slot_date: line.slotDate,
         slot_start_time: line.slotStartTime,
+        // Lodging stay fields (null for a tour line).
+        unit_id: line.unitId,
+        check_in: line.checkIn,
+        check_out: line.checkOut,
+        guests: line.guests,
+        nights: line.nights,
         quantity: line.quantity,
         base_price: line.basePrice,
         minimum_price: line.minimumPrice,
@@ -1361,6 +1655,8 @@ export const settleBooking = async (c: PosContext) => {
       serviceName: folioLines.serviceName,
       slotDate: folioLines.slotDate,
       slotStartTime: folioLines.slotStartTime,
+      checkIn: folioLines.checkIn,
+      checkOut: folioLines.checkOut,
       quantity: folioLines.quantity,
       unitPrice: folioLines.unitPrice,
       lineTotal: folioLines.lineTotal,
@@ -1381,10 +1677,24 @@ export const settleBooking = async (c: PosContext) => {
     0,
   )
 
-  // Sign the per-line tickets now (the booking had none).
+  // Sign the per-line tickets now (the booking had none) — SLOT lines only; a lodging stay line
+  // has no scannable QR (its access is the reservation).
+  const slotLineRows = lineRows.filter((l) => l.slotId && l.slotDate)
   const identity =
     folio.customerName?.trim() || folio.customerEmail?.trim() || `folio:${id}`
-  const tickets = await signLineTickets(c.env, org, id, identity, lineRows)
+  const tickets = await signLineTickets(
+    c.env,
+    org,
+    id,
+    identity,
+    slotLineRows.map((l) => ({
+      id: l.id,
+      serviceId: l.serviceId,
+      slotId: l.slotId!,
+      quantity: l.quantity,
+      slotDate: l.slotDate!,
+    })),
+  )
 
   const statements: BatchItem<'sqlite'>[] = [
     db
@@ -1399,7 +1709,7 @@ export const settleBooking = async (c: PosContext) => {
       })
       .where(and(eq(folios.id, id), eq(folios.organizationId, org))),
   ]
-  for (const line of lineRows) {
+  for (const line of slotLineRows) {
     statements.push(
       db
         .update(folioLines)
@@ -1415,7 +1725,8 @@ export const settleBooking = async (c: PosContext) => {
     c.env,
     org,
     id,
-    lineRows.map((l) => l.slotDate),
+    // Slot dates, plus a stay's checkout as its last date; drop nulls.
+    lineRows.map((l) => l.slotDate ?? l.checkOut ?? l.checkIn).filter((d): d is string => !!d),
   )
 
   const extraRows = await db
@@ -1450,10 +1761,11 @@ export const settleBooking = async (c: PosContext) => {
       total: folio.total,
       createdAt: new Date(),
     },
-    lineRows.map((line) => ({
+    // Access-ticket lines are slot lines only (a stay has no per-line QR).
+    slotLineRows.map((line) => ({
       serviceName: line.serviceName,
-      slotDate: line.slotDate,
-      slotStartTime: line.slotStartTime,
+      slotDate: line.slotDate!,
+      slotStartTime: line.slotStartTime!,
       quantity: line.quantity,
       unitPrice: line.unitPrice,
       lineTotal: line.lineTotal,
@@ -1512,13 +1824,29 @@ export const cancelBooking = async (c: PosContext) => {
       .where(and(eq(folios.id, id), eq(folios.organizationId, org))),
   ]
   for (const line of lineRows) {
-    statements.push(
-      db
-        .update(slots)
-        .set({ booked: sql`${slots.booked} - ${line.quantity}`, updatedAt: new Date() })
-        .where(and(eq(slots.id, line.slotId), eq(slots.organizationId, org))),
-    )
+    if (line.slotId) {
+      statements.push(
+        db
+          .update(slots)
+          .set({ booked: sql`${slots.booked} - ${line.quantity}`, updatedAt: new Date() })
+          .where(and(eq(slots.id, line.slotId), eq(slots.organizationId, org))),
+      )
+    }
   }
+  // Lodging: release the stay's dates by cancelling its active reservations (frees inventory,
+  // mirroring the slot re-increment). Deposit stays non-refundable (D7), set above.
+  statements.push(
+    db
+      .update(accommodationReservations)
+      .set({ status: 'cancelled', updatedAt: new Date() })
+      .where(
+        and(
+          eq(accommodationReservations.folioId, id),
+          eq(accommodationReservations.organizationId, org),
+          eq(accommodationReservations.status, 'active'),
+        ),
+      ),
+  )
   await db.batch(statements as [BatchItem<'sqlite'>, ...BatchItem<'sqlite'>[]])
 
   const updated = await readFolio(db, org, agent.userId, id, c.env.QR_SECRET)
@@ -1690,12 +2018,72 @@ export const reactivateBooking = async (c: PosContext) => {
     applied.push({ slotId: line.slotId, qty: line.quantity })
   }
 
-  // Fresh expiry from the current org policy (read above) + earliest slot.
-  const earliest = lineRows.reduce(
-    (min, l) => {
-      const e = slotEpoch(l.slotDate, l.slotStartTime)
-      return e < min.epoch ? { epoch: e, date: l.slotDate } : min
-    },
+  // Lodging: re-claim each cancelled stay reservation under the SAME atomic overlap guard as the
+  // sale (a competing booking may have taken the dates while this one was expired). The lineRows
+  // above inner-join slots, so stays are queried separately here. On conflict → compensate (revert
+  // slots + re-cancel any already-reactivated stays) and 409.
+  const stayReservations = await db
+    .select({
+      id: accommodationReservations.id,
+      unitId: accommodationReservations.unitId,
+      checkIn: accommodationReservations.checkIn,
+      checkOut: accommodationReservations.checkOut,
+    })
+    .from(accommodationReservations)
+    .where(
+      and(
+        eq(accommodationReservations.folioId, id),
+        eq(accommodationReservations.organizationId, org),
+        eq(accommodationReservations.status, 'cancelled'),
+      ),
+    )
+  const reactivatedReservations: string[] = []
+  for (const r of stayReservations) {
+    const upd = await c.env.DB.prepare(
+      `UPDATE accommodation_reservations
+         SET status = 'active', updated_at = unixepoch()
+       WHERE id = ? AND organization_id = ? AND status = 'cancelled'
+         AND NOT EXISTS (
+           SELECT 1 FROM accommodation_reservations o
+           WHERE o.unit_id = ? AND o.status = 'active' AND o.id != ?
+             AND o.check_in < ? AND ? < o.check_out
+         ) AND NOT EXISTS (
+           SELECT 1 FROM accommodation_blockouts b
+           WHERE b.unit_id = ? AND b.start_date < ? AND ? < b.end_date
+         )`,
+    )
+      .bind(r.id, org, r.unitId, r.id, r.checkOut, r.checkIn, r.unitId, r.checkOut, r.checkIn)
+      .run()
+    if (!upd.meta.changes) {
+      for (const a of applied) {
+        await db
+          .update(slots)
+          .set({ booked: sql`${slots.booked} - ${a.qty}`, updatedAt: new Date() })
+          .where(and(eq(slots.id, a.slotId), eq(slots.organizationId, org)))
+      }
+      for (const rid of reactivatedReservations) {
+        await db
+          .update(accommodationReservations)
+          .set({ status: 'cancelled', updatedAt: new Date() })
+          .where(and(eq(accommodationReservations.id, rid), eq(accommodationReservations.organizationId, org)))
+      }
+      throw new ApiError(
+        'UNIT_UNAVAILABLE',
+        409,
+        'Esas fechas ya no están disponibles para reactivar el apartado',
+      )
+    }
+    reactivatedReservations.push(r.id)
+  }
+
+  // Fresh expiry from the current org policy (read above) + earliest departure — a slot start or a
+  // stay check-in (midnight), whichever comes first across the cart.
+  const departures: { epoch: number; date: string }[] = [
+    ...lineRows.map((l) => ({ epoch: slotEpoch(l.slotDate, l.slotStartTime), date: l.slotDate })),
+    ...stayReservations.map((r) => ({ epoch: slotEpoch(r.checkIn!, '00:00'), date: r.checkIn! })),
+  ]
+  const earliest = departures.reduce(
+    (min, d) => (d.epoch < min.epoch ? d : min),
     { epoch: Infinity, date: '' },
   )
   const bookingExpiresAt = bookingExpiryDate(

@@ -313,7 +313,11 @@ export const requireService = async (
   serviceId: string,
 ) => {
   const result = await db
-    .select({ id: services.id, defaultCapacity: services.defaultCapacity })
+    .select({
+      id: services.id,
+      defaultCapacity: services.defaultCapacity,
+      category: services.category,
+    })
     .from(services)
     .where(
       and(

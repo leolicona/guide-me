@@ -17,6 +17,14 @@ export const organizations = sqliteTable('organizations', {
   bookingHoldDays: integer('booking_hold_days').notNull().default(7),
   salesCutoffOffsetMinutes: integer('sales_cutoff_offset_minutes').notNull().default(0),
   bookingGraceOffsetMinutes: integer('booking_grace_offset_minutes').notNull().default(15),
+  // Accommodation/lodging settings (docs/lodging/accommodation-stays.spec.md §2.5). weekendDays:
+  // CSV of ISO weekday ints (0=Sun … 6=Sat) — which nights use a unit's weekend_rate (default
+  // Fri+Sat). A PAID stay cancels free until lodgingFreeCancelDays before check-in; inside that
+  // window lodgingCancelPenaltyPct (% of stay total) is retained. Booking deposits stay
+  // non-refundable (US-AG07.4) regardless of these.
+  lodgingWeekendDays: text('lodging_weekend_days').notNull().default('5,6'),
+  lodgingFreeCancelDays: integer('lodging_free_cancel_days').notNull().default(0),
+  lodgingCancelPenaltyPct: integer('lodging_cancel_penalty_pct').notNull().default(0),
   createdAt: integer('created_at', { mode: 'timestamp' })
     .notNull()
     .default(sql`(unixepoch())`),
@@ -292,12 +300,11 @@ export const folioLines = sqliteTable('folio_lines', {
   serviceId: text('service_id')
     .notNull()
     .references(() => services.id),
-  slotId: text('slot_id')
-    .notNull()
-    .references(() => slots.id),
-  serviceName: text('service_name').notNull(), // snapshot at sale time
-  slotDate: text('slot_date').notNull(), // snapshot 'YYYY-MM-DD'
-  slotStartTime: text('slot_start_time').notNull(), // snapshot 'HH:MM'
+  // Slot fields are NULL for a lodging stay line (docs/lodging — Option A); set for tour lines.
+  slotId: text('slot_id').references(() => slots.id),
+  serviceName: text('service_name').notNull(), // snapshot at sale time (unit name for a stay)
+  slotDate: text('slot_date'), // snapshot 'YYYY-MM-DD' (null for a stay)
+  slotStartTime: text('slot_start_time'), // snapshot 'HH:MM' (null for a stay)
   quantity: integer('quantity').notNull(),
   basePrice: integer('base_price').notNull(), // snapshot unit base price
   minimumPrice: integer('minimum_price').notNull(), // snapshot unit floor
@@ -311,6 +318,16 @@ export const folioLines = sqliteTable('folio_lines', {
   commissionValue: integer('commission_value').notNull().default(0),
   qrToken: text('qr_token'), // signed access ticket; null for folios sold pre-feature
   redeemedCount: integer('redeemed_count').notNull().default(0), // passes redeemed; <= quantity
+  // Accommodation stay line (docs/lodging/accommodation-stays.spec.md §4.4, Option A). lineType
+  // 'slot' (tour, default) vs 'stay' (lodging). A stay line carries the unit + date range +
+  // guests + nights instead of a slot; its price is snapshotted in line_total (base_price =
+  // unit_price = line_total, minimum_price = 0, quantity = 1) so existing totals/commission work.
+  lineType: text('line_type', { enum: ['slot', 'stay'] }).notNull().default('slot'),
+  unitId: text('unit_id').references(() => accommodationUnits.id), // null for a tour line
+  checkIn: text('check_in'), // 'YYYY-MM-DD' (stay only)
+  checkOut: text('check_out'), // 'YYYY-MM-DD' (stay only)
+  guests: integer('guests'), // stay only
+  nights: integer('nights'), // stay only
   createdAt: integer('created_at', { mode: 'timestamp' })
     .notNull()
     .default(sql`(unixepoch())`),
@@ -476,6 +493,133 @@ export const cancellationRequests = sqliteTable('cancellation_requests', {
     .default(sql`(unixepoch())`),
 })
 
+// ── Accommodation / Lodging ──────────────────────────────────────────────────────────────
+// docs/lodging/accommodation-stays.spec.md. A `lodging` service (services.category='lodging') is
+// a property/listing that owns named, individually-bookable units. A unit is sold for a DATE RANGE
+// (multi-night stay) rather than a per-day slot — a new inventory primitive beside `slots`. Each
+// table carries organization_id directly (Rule 5) for per-query org filtering + org-leading index.
+
+// A named, bookable unit (US-A59). Money in minor units; amenities a CSV of enum keys (mirrors
+// schedules.weekdays). Per-unit rate rules, occupancy, min-stay, check-in/out. Soft-deactivated.
+export const accommodationUnits = sqliteTable('accommodation_units', {
+  id: text('id').primaryKey(),
+  organizationId: text('organization_id')
+    .notNull()
+    .references(() => organizations.id),
+  serviceId: text('service_id')
+    .notNull()
+    .references(() => services.id),
+  name: text('name').notNull(),
+  unitType: text('unit_type'), // free label: 'cabin' / 'suite' (admin-defined, not a closed enum)
+  beds: integer('beds').notNull(),
+  baseOccupancy: integer('base_occupancy').notNull(), // guests included in the nightly rate
+  maxCapacity: integer('max_capacity').notNull(), // hard cap on guests (>= base_occupancy)
+  baseRate: integer('base_rate').notNull(), // per-night, minor units
+  weekendRate: integer('weekend_rate'), // nullable → use base_rate on weekend nights
+  extraPersonFee: integer('extra_person_fee').notNull().default(0), // per extra person per night
+  minNights: integer('min_nights').notNull().default(1),
+  checkinTime: text('checkin_time').notNull().default('15:00'), // 'HH:MM'
+  checkoutTime: text('checkout_time').notNull().default('11:00'), // 'HH:MM'
+  amenities: text('amenities').notNull().default(''), // CSV of amenity enum keys
+  // Per-unit commission override (waterfall): NULL type ⇒ inherit the service's base commission.
+  // When set, commissionValue mirrors services.commission_*: basis points (percent) / minor units (fixed).
+  commissionType: text('commission_type', { enum: ['percent', 'fixed'] }),
+  commissionValue: integer('commission_value'),
+  status: text('status', { enum: ['active', 'inactive'] })
+    .notNull()
+    .default('active'),
+  createdAt: integer('created_at', { mode: 'timestamp' })
+    .notNull()
+    .default(sql`(unixepoch())`),
+  updatedAt: integer('updated_at', { mode: 'timestamp' })
+    .notNull()
+    .default(sql`(unixepoch())`),
+})
+
+// Per-unit seasonal rate override (US-A60). A flat nightly rate for every night in
+// [start_date, end_date]; outranks the weekend rate (seasonal > weekend > base). Overlapping
+// active seasons for the same unit are rejected (409 SEASON_OVERLAP). Soft-deactivated.
+export const accommodationSeasons = sqliteTable('accommodation_seasons', {
+  id: text('id').primaryKey(),
+  organizationId: text('organization_id')
+    .notNull()
+    .references(() => organizations.id),
+  serviceId: text('service_id')
+    .notNull()
+    .references(() => services.id),
+  unitId: text('unit_id')
+    .notNull()
+    .references(() => accommodationUnits.id),
+  name: text('name').notNull(),
+  startDate: text('start_date').notNull(), // 'YYYY-MM-DD'
+  endDate: text('end_date').notNull(), // 'YYYY-MM-DD' (>= start_date)
+  nightlyRate: integer('nightly_rate').notNull(), // minor units
+  status: text('status', { enum: ['active', 'inactive'] })
+    .notNull()
+    .default('active'),
+  createdAt: integer('created_at', { mode: 'timestamp' })
+    .notNull()
+    .default(sql`(unixepoch())`),
+  updatedAt: integer('updated_at', { mode: 'timestamp' })
+    .notNull()
+    .default(sql`(unixepoch())`),
+})
+
+// Per-unit block-out range (US-A61). Half-open [start_date, end_date) to match turnover.
+// Hard-deletable (no historical value), so no status column.
+export const accommodationBlockouts = sqliteTable('accommodation_blockouts', {
+  id: text('id').primaryKey(),
+  organizationId: text('organization_id')
+    .notNull()
+    .references(() => organizations.id),
+  serviceId: text('service_id')
+    .notNull()
+    .references(() => services.id),
+  unitId: text('unit_id')
+    .notNull()
+    .references(() => accommodationUnits.id),
+  startDate: text('start_date').notNull(), // 'YYYY-MM-DD'
+  endDate: text('end_date').notNull(), // 'YYYY-MM-DD' (> start_date)
+  reason: text('reason'),
+  createdAt: integer('created_at', { mode: 'timestamp' })
+    .notNull()
+    .default(sql`(unixepoch())`),
+  updatedAt: integer('updated_at', { mode: 'timestamp' })
+    .notNull()
+    .default(sql`(unixepoch())`),
+})
+
+// THE inventory unit (US-AG36/38). One row per sold stay line; occupies nights
+// [check_in, check_out). `active` holds the dates (covers 'booking' + 'paid' folios);
+// cancel/expiry → 'cancelled' frees them. Overlap enforced by a conditional INSERT in confirmSale.
+export const accommodationReservations = sqliteTable('accommodation_reservations', {
+  id: text('id').primaryKey(),
+  organizationId: text('organization_id')
+    .notNull()
+    .references(() => organizations.id),
+  serviceId: text('service_id')
+    .notNull()
+    .references(() => services.id),
+  unitId: text('unit_id')
+    .notNull()
+    .references(() => accommodationUnits.id),
+  folioId: text('folio_id')
+    .notNull()
+    .references(() => folios.id),
+  checkIn: text('check_in').notNull(), // 'YYYY-MM-DD'
+  checkOut: text('check_out').notNull(), // 'YYYY-MM-DD' (> check_in)
+  guests: integer('guests').notNull(),
+  status: text('status', { enum: ['active', 'cancelled'] })
+    .notNull()
+    .default('active'),
+  createdAt: integer('created_at', { mode: 'timestamp' })
+    .notNull()
+    .default(sql`(unixepoch())`),
+  updatedAt: integer('updated_at', { mode: 'timestamp' })
+    .notNull()
+    .default(sql`(unixepoch())`),
+})
+
 // ── Affiliate program ────────────────────────────────────────────────────────────────────
 // docs/affiliates/affiliate-setup-commissions.spec.md. An affiliate is an external reseller
 // (hotel / agency / restaurant). The admin models the company, curates which services it may
@@ -597,3 +741,11 @@ export type FolioAccessToken = typeof folioAccessTokens.$inferSelect
 export type NewFolioAccessToken = typeof folioAccessTokens.$inferInsert
 export type CancellationRequest = typeof cancellationRequests.$inferSelect
 export type NewCancellationRequest = typeof cancellationRequests.$inferInsert
+export type AccommodationUnit = typeof accommodationUnits.$inferSelect
+export type NewAccommodationUnit = typeof accommodationUnits.$inferInsert
+export type AccommodationSeason = typeof accommodationSeasons.$inferSelect
+export type NewAccommodationSeason = typeof accommodationSeasons.$inferInsert
+export type AccommodationBlockout = typeof accommodationBlockouts.$inferSelect
+export type NewAccommodationBlockout = typeof accommodationBlockouts.$inferInsert
+export type AccommodationReservation = typeof accommodationReservations.$inferSelect
+export type NewAccommodationReservation = typeof accommodationReservations.$inferInsert

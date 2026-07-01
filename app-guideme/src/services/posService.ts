@@ -15,13 +15,24 @@ export interface ConfirmExtraInput {
   quantity: number
 }
 
-export interface ConfirmLineInput {
+export interface ConfirmSlotLineInput {
   slot_id: string
   quantity: number
   /** Discounted unit price (minor units); server re-validates against [minimum_price, base_price]. */
   unit_price: number
   extras?: ConfirmExtraInput[]
 }
+
+// US-AG38 — a lodging stay line (the server re-quotes the total from the unit + range).
+export interface ConfirmStayLineInput {
+  unit_id: string
+  check_in: string
+  check_out: string
+  guests: number
+}
+
+/** A cart line is either a tour slot or a lodging stay. */
+export type ConfirmLineInput = ConfirmSlotLineInput | ConfirmStayLineInput
 
 /** How the agent collected payment. 'card' earns commission but adds no cash debt (US-AG25). */
 export type PaymentMethod = 'cash' | 'card'

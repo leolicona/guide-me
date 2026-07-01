@@ -18,6 +18,7 @@ import { BookingActions, ExpiredBookingBanner, venceLabel } from '../features/bo
 import { FolioStatusChip } from '../features/folios'
 import { MoneyText } from '../components'
 import { formatMoney } from '../features/catalog/types'
+import { folioLineMeta } from '../features/folios/folioLineLabel'
 import { ROUTES } from '../config/routes'
 
 const formatDate = (unixSeconds: number) =>
@@ -119,8 +120,7 @@ export default function FolioHistoryDetailPage() {
                         <Box sx={{ minWidth: 0 }}>
                           <Typography variant="subtitle2">{line.service_name}</Typography>
                           <Typography variant="caption" color="text.secondary">
-                            {line.slot_date} · {line.slot_start_time} · {line.quantity}×{' '}
-                            {formatMoney(line.unit_price)}
+                            {folioLineMeta(line)} · {formatMoney(line.unit_price)}
                           </Typography>
                           {line.extras.map((e) => (
                             <Typography

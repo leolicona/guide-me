@@ -2,6 +2,35 @@
 
 This document tracks known technical debt, deferred tasks, and architectural improvements that are planned for future phases.
 
+## 18. Accommodation Stays — Error Codes & `folio_lines` Rebuild — ✅ INTRODUCED & CONSUMED (no open debt)
+
+**Status:** The accommodation/lodging feature (`docs/lodging/accommodation-stays.spec.md`) added three
+error codes to the `ErrorCode` union in `src/types/errors.ts`, each thrown by a handler and asserted
+by a test (`test/lodging/accommodation-stays.test.ts`) — introduced **and** consumed, no open debt:
+- `UNIT_UNAVAILABLE` (409) — the atomic reservation guard at sale/reactivate found the dates taken
+  (`confirmSale`, `reactivateBooking`).
+- `SEASON_OVERLAP` (409) — a new season overlaps an existing active season for the unit (admin API).
+- `MIN_STAY_NOT_MET` (400) — a stay shorter than the unit's `min_nights` (availability + sale).
+
+**`folio_lines` rebuild (Option A):** migration `0040_alter_folio_lines_for_stays.sql` rebuilt
+`folio_lines` to make `slot_id`/`slot_date`/`slot_start_time` nullable and add the stay columns
+(`line_type`, `unit_id`, `check_in`, `check_out`, `guests`, `nights`) so a unified line list carries
+both tour slots and lodging stays. SQLite can't drop NOT NULL/FK in place, so it is a table rebuild.
+
+⚠️ **D1 remote per-statement FK enforcement (learned the hard way):** the first cut used the
+Cloudflare-documented `PRAGMA defer_foreign_keys = TRUE` + drop/rename. It passed the test suite
+(local Miniflare runs the migration file as one transaction, so the deferred check holds) but
+**rolled back on `wrangler d1 migrations apply --remote`** with `FOREIGN KEY constraint failed`
+(SQLITE_CONSTRAINT_FOREIGNKEY 7500). On remote, D1's `/query` endpoint enforces FKs **per
+statement** and does **not** honor `defer_foreign_keys`, so `DROP TABLE folio_lines` orphaned the
+`folio_line_extras` rows (the only inbound FK) the instant it ran. The rewrite keeps every statement
+FK-valid: rebuild `folio_line_extras` *without* its `folio_lines` FK → swap `folio_lines` → rebuild
+`folio_line_extras` again to restore all four FKs. Row ids are preserved across both copies, so each
+check passes. **Takeaway for future table rebuilds: never rely on `defer_foreign_keys` for D1
+`--remote`; order statements so no single statement violates a FK, or temporarily drop the inbound
+FK.** Verified by the full suite via `applyD1Migrations` (the PRAGMA is kept as a harmless no-op
+safety net for engines that do defer).
+
 ## 17. Cash Drawer — Retained Booking-Deposit Carve-Out — ⚠️ OPEN (cross-feature follow-up)
 
 **Status:** Bookings/down-payments (`docs/bookings/bookings-down-payments.spec.md`, decision D7 /

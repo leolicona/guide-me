@@ -41,11 +41,19 @@ export interface FolioLineExtra {
 
 export interface FolioDetailLine {
   id: string
+  /** 'slot' (tour) or 'stay' (lodging); absent on pre-feature folios → treat as slot. */
+  line_type?: 'slot' | 'stay'
   service_id: string
-  slot_id: string
+  slot_id: string | null
   service_name: string
-  slot_date: string
-  slot_start_time: string
+  slot_date: string | null
+  slot_start_time: string | null
+  /** Lodging stay fields (null for a tour line). */
+  unit_id?: string | null
+  check_in?: string | null
+  check_out?: string | null
+  guests?: number | null
+  nights?: number | null
   quantity: number
   base_price: number
   minimum_price: number

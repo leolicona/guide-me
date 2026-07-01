@@ -20,6 +20,9 @@ const orgColumns = {
   bookingHoldDays: organizations.bookingHoldDays,
   salesCutoffOffsetMinutes: organizations.salesCutoffOffsetMinutes,
   bookingGraceOffsetMinutes: organizations.bookingGraceOffsetMinutes,
+  lodgingWeekendDays: organizations.lodgingWeekendDays,
+  lodgingFreeCancelDays: organizations.lodgingFreeCancelDays,
+  lodgingCancelPenaltyPct: organizations.lodgingCancelPenaltyPct,
 } as const
 
 const serializeOrg = (o: {
@@ -29,6 +32,9 @@ const serializeOrg = (o: {
   bookingHoldDays: number
   salesCutoffOffsetMinutes: number
   bookingGraceOffsetMinutes: number
+  lodgingWeekendDays: string
+  lodgingFreeCancelDays: number
+  lodgingCancelPenaltyPct: number
 }) => ({
   id: o.id,
   name: o.name,
@@ -36,6 +42,11 @@ const serializeOrg = (o: {
   booking_hold_days: o.bookingHoldDays,
   sales_cutoff_offset_minutes: o.salesCutoffOffsetMinutes,
   booking_grace_offset_minutes: o.bookingGraceOffsetMinutes,
+  lodging_weekend_days: o.lodgingWeekendDays
+    ? o.lodgingWeekendDays.split(',').map(Number)
+    : [],
+  lodging_free_cancel_days: o.lodgingFreeCancelDays,
+  lodging_cancel_penalty_pct: o.lodgingCancelPenaltyPct,
 })
 
 export const getMyOrganization = async (c: OrganizationsContext) => {
@@ -75,6 +86,12 @@ export const updateMyOrganization = async (c: OrganizationsContext) => {
     updates.salesCutoffOffsetMinutes = input.sales_cutoff_offset_minutes
   if (input.booking_grace_offset_minutes !== undefined)
     updates.bookingGraceOffsetMinutes = input.booking_grace_offset_minutes
+  if (input.lodging_weekend_days !== undefined)
+    updates.lodgingWeekendDays = input.lodging_weekend_days.join(',')
+  if (input.lodging_free_cancel_days !== undefined)
+    updates.lodgingFreeCancelDays = input.lodging_free_cancel_days
+  if (input.lodging_cancel_penalty_pct !== undefined)
+    updates.lodgingCancelPenaltyPct = input.lodging_cancel_penalty_pct
 
   await db
     .update(organizations)

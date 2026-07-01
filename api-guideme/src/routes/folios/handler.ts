@@ -3,6 +3,7 @@ import type { BatchItem } from 'drizzle-orm/batch'
 import { and, asc, desc, eq, ne, sql } from 'drizzle-orm'
 import { getDb, type Db } from '../../db/client'
 import {
+  accommodationReservations,
   cancellationRequests,
   folioLineExtras,
   folioLines,
@@ -11,6 +12,7 @@ import {
   slots,
   users,
 } from '../../db/schema'
+import { nightsBetween } from '../../utils/lodging'
 import { ApiError } from '../../types/errors'
 import type { AppVariables } from '../../types/context'
 import type {
@@ -93,6 +95,12 @@ const readFolio = async (db: Db, org: string, folioId: string) => {
       minimumPrice: folioLines.minimumPrice,
       unitPrice: folioLines.unitPrice,
       lineTotal: folioLines.lineTotal,
+      lineType: folioLines.lineType,
+      unitId: folioLines.unitId,
+      checkIn: folioLines.checkIn,
+      checkOut: folioLines.checkOut,
+      guests: folioLines.guests,
+      nights: folioLines.nights,
     })
     .from(folioLines)
     .where(and(eq(folioLines.folioId, folioId), eq(folioLines.organizationId, org)))
@@ -152,11 +160,17 @@ const readFolio = async (db: Db, org: string, folioId: string) => {
     created_at: Math.floor(folio.createdAt.getTime() / 1000),
     lines: lineRows.map((line) => ({
       id: line.id,
+      line_type: line.lineType,
       service_id: line.serviceId,
       slot_id: line.slotId,
       service_name: line.serviceName,
       slot_date: line.slotDate,
       slot_start_time: line.slotStartTime,
+      unit_id: line.unitId,
+      check_in: line.checkIn,
+      check_out: line.checkOut,
+      guests: line.guests,
+      nights: line.nights,
       quantity: line.quantity,
       base_price: line.basePrice,
       minimum_price: line.minimumPrice,
@@ -272,7 +286,7 @@ const applyCancellation = async (
   db: Db,
   org: string,
   folioId: string,
-  lines: Array<{ slotId: string; quantity: number }>,
+  lines: Array<{ slotId: string | null; quantity: number }>,
   now: Date,
   folioUpdate: Partial<typeof folios.$inferInsert>,
 ): Promise<boolean> => {
@@ -289,18 +303,31 @@ const applyCancellation = async (
     .returning({ id: folios.id })
   if (won.length === 0) return false
 
-  if (lines.length > 0) {
-    const statements = lines.map((line) =>
+  const statements: BatchItem<'sqlite'>[] = lines
+    .filter((line) => line.slotId)
+    .map((line) =>
       db
         .update(slots)
         .set({
           booked: sql`MAX(0, ${slots.booked} - ${line.quantity})`,
           updatedAt: now,
         })
-        .where(and(eq(slots.id, line.slotId), eq(slots.organizationId, org))),
+        .where(and(eq(slots.id, line.slotId!), eq(slots.organizationId, org))),
     )
-    await db.batch(statements as [BatchItem<'sqlite'>, ...BatchItem<'sqlite'>[]])
-  }
+  // Lodging: release any stay reservations on this folio (US-A21 / tourist-approved cancel).
+  statements.push(
+    db
+      .update(accommodationReservations)
+      .set({ status: 'cancelled', updatedAt: now })
+      .where(
+        and(
+          eq(accommodationReservations.folioId, folioId),
+          eq(accommodationReservations.organizationId, org),
+          eq(accommodationReservations.status, 'active'),
+        ),
+      ),
+  )
+  await db.batch(statements as [BatchItem<'sqlite'>, ...BatchItem<'sqlite'>[]])
   return true
 }
 
@@ -372,17 +399,56 @@ export const cancelFolio = async (c: FoliosContext) => {
   }
 
   const lines = await db
-    .select({ slotId: folioLines.slotId, quantity: folioLines.quantity })
+    .select({
+      slotId: folioLines.slotId,
+      quantity: folioLines.quantity,
+      lineType: folioLines.lineType,
+      lineTotal: folioLines.lineTotal,
+      checkIn: folioLines.checkIn,
+    })
     .from(folioLines)
     .where(and(eq(folioLines.folioId, id), eq(folioLines.organizationId, org)))
 
   const now = new Date()
+
+  // D9 — a PAID stay cancellation computes a structured refund (free-window then penalty %) on the
+  // stay portion; a booking-status deposit stays non-refundable (handled on the POS cancel path,
+  // US-AG07.4). Org settings drive the policy; tour-only or booking folios keep the default (none).
+  const refundUpdate: Partial<typeof folios.$inferInsert> = {}
+  const stayLines = lines.filter((l) => l.lineType === 'stay')
+  if (folio.status === 'paid' && stayLines.length > 0) {
+    const orgRows = await db
+      .select({
+        freeCancelDays: organizations.lodgingFreeCancelDays,
+        penaltyPct: organizations.lodgingCancelPenaltyPct,
+      })
+      .from(organizations)
+      .where(eq(organizations.id, org))
+      .limit(1)
+    const freeCancelDays = orgRows[0]?.freeCancelDays ?? 0
+    const penaltyPct = orgRows[0]?.penaltyPct ?? 0
+    const stayTotal = stayLines.reduce((sum, l) => sum + l.lineTotal, 0)
+    const today = new Date().toISOString().slice(0, 10)
+    const earliestCheckIn = stayLines
+      .map((l) => l.checkIn)
+      .filter((d): d is string => !!d)
+      .sort()[0]
+    const daysBefore = earliestCheckIn ? nightsBetween(today, earliestCheckIn) : 0
+    const refund =
+      daysBefore >= freeCancelDays
+        ? stayTotal
+        : Math.floor((stayTotal * (100 - penaltyPct)) / 100)
+    refundUpdate.refundStatus = 'pending'
+    refundUpdate.refundAmount = refund
+  }
+
   const won = await applyCancellation(db, org, id, lines, now, {
     status: 'cancelled',
     cancelledAt: now,
     cancelledBy: admin.userId,
     cancellationReason: input.reason ?? null,
     cancellationClawback: input.clawback ?? false,
+    ...refundUpdate,
   })
   if (!won) {
     // A concurrent cancellation won the guarded flip after our pre-check.
