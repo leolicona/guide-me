@@ -16,7 +16,7 @@ import {
   Badge,
   Snackbar,
 } from '@mui/material'
-import { datePillSx, filterStripSx } from '../features/filters'
+import { filterChipSx, filterStripSx } from '../features/filters'
 import { MoneyText } from '../components'
 import ShoppingCartRounded from '@mui/icons-material/ShoppingCartRounded'
 import CalendarMonthRounded from '@mui/icons-material/CalendarMonthRounded'
@@ -25,20 +25,20 @@ import { AvailabilityChip } from '../features/pos/components/AvailabilityChip'
 import { ServiceSheet } from '../features/pos/components/ServiceSheet'
 import { LodgingStaySheet } from '../features/pos/components/LodgingStaySheet'
 import { PosDatePickerSheet } from '../features/pos/components/PosDatePickerSheet'
-import { PosCategorySheet } from '../features/pos/components/PosCategorySheet'
 import { useTopBarActions } from '../layout/TopBarContext'
 import { floatingControlSx } from '../layout/topBarStyles'
 import { usePosCart, cartCount } from '../store/posCart'
 import { usePosFilters } from '../store/posFilters'
 import { usePosPreferences } from '../store/posPreferences'
 import {
+  SERVICE_CATEGORIES,
   categoryLabel,
   type ServiceCategory,
 } from '../features/catalog/categories'
 import { ROUTES } from '../config/routes'
 // Org-local "today" (device-local calendar string, BUG-007) — the anchor for the default
-// 3-day window and the floor for the date picker; shared with the sheet/detail views.
-import { todayStr, addDays } from '../features/pos/dates'
+// week context and the floor for the date picker; shared with the sheet/detail views.
+import { todayStr, contextPills } from '../features/pos/dates'
 
 const WEEKDAYS_ES = ['DOM', 'LUN', 'MAR', 'MIÉ', 'JUE', 'VIE', 'SÁB']
 const MONTHS_ES = ['ENE', 'FEB', 'MAR', 'ABR', 'MAY', 'JUN', 'JUL', 'AGO', 'SEP', 'OCT', 'NOV', 'DIC']
@@ -49,6 +49,15 @@ const dayPillLabel = (date: string): string => {
   return `${WEEKDAYS_ES[d.getUTCDay()]} ${d.getUTCDate()}`
 }
 
+// "9–12 JUL" (same month) or "29 JUN – 2 JUL" — compact span for the calendar button.
+const rangePillLabel = (from: string, to: string): string => {
+  const a = new Date(`${from}T00:00:00Z`)
+  const b = new Date(`${to}T00:00:00Z`)
+  return a.getUTCMonth() === b.getUTCMonth()
+    ? `${a.getUTCDate()}–${b.getUTCDate()} ${MONTHS_ES[b.getUTCMonth()]}`
+    : `${a.getUTCDate()} ${MONTHS_ES[a.getUTCMonth()]} – ${b.getUTCDate()} ${MONTHS_ES[b.getUTCMonth()]}`
+}
+
 // "VIE 27 JUN" — fuller label for the "Próximo" footer field (adds month for context).
 const nextDateLabel = (date: string): string => {
   const d = new Date(`${date}T00:00:00Z`)
@@ -56,16 +65,22 @@ const nextDateLabel = (date: string): string => {
 }
 
 export default function PosCatalogPage() {
-  // US-AG30 — the selected day is global (inherited by the detail view); null = "Hoy"
-  // (the default rolling 3-day window). The category chip stays local (resets on navigation);
+  // US-AG30/AG35 — the selection is global (inherited by the detail view); null = no explicit
+  // pick → the contextual default week. The category chips stay local (reset on navigation);
   // hide-sold-out is a persisted preference from Settings.
-  const selectedDate = usePosFilters((s) => s.selectedDate)
-  const setSelectedDate = usePosFilters((s) => s.setSelectedDate)
+  const selection = usePosFilters((s) => s.selection)
+  const setSelection = usePosFilters((s) => s.setSelection)
   const today = todayStr()
+
+  // US-AG35 — when no explicit selection is made, the catalog defaults to the contextual week
+  // (today → Sunday). The date filter is picked from the calendar sheet; the week is the anchor.
+  const defaultWeek = contextPills(today)[0]
+  const effective = selection ?? { from: defaultWeek.from, to: defaultWeek.to }
 
   const { data: services, isLoading, isError } = usePosServices(
     today,
-    selectedDate ?? undefined,
+    effective.from,
+    effective.to ?? effective.from,
   )
   const count = usePosCart((s) => cartCount(s.lines))
   const navigate = useNavigate()
@@ -88,29 +103,39 @@ export default function PosCatalogPage() {
   )
 
   const hideSoldOut = usePosPreferences((s) => s.hideSoldOut)
-  const [activeCategory, setActiveCategory] = useState<ServiceCategory | null>(null)
+  // US-A37 — multi-select category filter: empty = "Todos" (no filter); the catalog shows the
+  // union of the selected categories and the calendar dots scope to the same set.
+  const [activeCategories, setActiveCategories] = useState<ServiceCategory[]>([])
+  const toggleCategory = (c: ServiceCategory) =>
+    setActiveCategories((prev) =>
+      prev.includes(c) ? prev.filter((x) => x !== c) : [...prev, c],
+    )
   // US-AG31 — tapping a card opens this service in the Bottom Sheet (no navigation, the
   // catalog stays mounted). `added` drives the success Snackbar lifted up from the sheet.
   const [openServiceId, setOpenServiceId] = useState<string | null>(null)
   // US-AG36 — a lodging card opens the range-first stay sheet instead of the slot sheet.
   const [openLodging, setOpenLodging] = useState<{ id: string; name: string } | null>(null)
   const [added, setAdded] = useState(false)
-  // US-AG35 — the calendar Bottom Sheet (any-day picker) toggles off this state.
+  // US-AG35 — the calendar Bottom Sheet (single-day or range picker) toggles off this state.
   const [datePickerOpen, setDatePickerOpen] = useState(false)
-  const [categorySheetOpen, setCategorySheetOpen] = useState(false)
-
-  // US-AG35 — the quick-day strip shows HOY (the anchor) + the next two days; any other day
-  // is picked from the calendar. When the selection is outside the strip, the calendar
-  // button itself goes active and shows the chosen date (so the selection is never hidden).
-  const stripDays = [addDays(today, 1), addDays(today, 2)]
-  const calendarActive = selectedDate !== null && !stripDays.includes(selectedDate)
 
   const all = services ?? []
   const byAvailability = hideSoldOut ? all.filter((s) => s.has_availability) : all
   const visibleServices =
-    activeCategory === null
+    activeCategories.length === 0
       ? byAvailability
-      : byAvailability.filter((s) => s.category === activeCategory)
+      : byAvailability.filter(
+          (s) => s.category !== null && activeCategories.includes(s.category),
+        )
+
+  // US-A37 — a category chip renders only for a category present in the current catalog.
+  const presentCategories = SERVICE_CATEGORIES.filter((c) =>
+    all.some((s) => s.category === c),
+  )
+
+  // The calendar button lights up (and shows the picked day/range) whenever there's an explicit
+  // selection; the default contextual week leaves it in its resting state.
+  const calendarSelection = selection
 
   return (
     <Box sx={{ maxWidth: 720, mx: 'auto' }}>
@@ -120,39 +145,38 @@ export default function PosCatalogPage() {
 
       <Fade in timeout={400}>
         <Box>
-        {/* Single filter strip: quick-day picks + calendar opener + category sheet trigger.
-            All chips share datePillSx — same height, radius, and active state. The 24px bottom
-            margin (section gap) separates this control group from the service list below. */}
+        {/* US-AG35 — Inline Filter Strip: multi-select category chips + a calendar button,
+            all in one horizontally scrollable row (the calendar scrolls with the chips). The
+            24px bottom margin separates this control group from the service list below. */}
         <Box sx={{ ...filterStripSx, mb: 3 }}>
+          {/* Category chips — "Todas" clears the filter; each category toggles (US-A37). */}
           <ButtonBase
-            onClick={() => setSelectedDate(null)}
-            sx={datePillSx(selectedDate === null)}
+            onClick={() => setActiveCategories([])}
+            sx={filterChipSx(activeCategories.length === 0)}
           >
-            HOY
+            Todas
           </ButtonBase>
-          {stripDays.map((d) => (
+          {presentCategories.map((c) => (
             <ButtonBase
-              key={d}
-              onClick={() => setSelectedDate(d)}
-              sx={datePillSx(selectedDate === d)}
+              key={c}
+              onClick={() => toggleCategory(c)}
+              sx={filterChipSx(activeCategories.includes(c))}
             >
-              {dayPillLabel(d)}
+              {categoryLabel(c)}
             </ButtonBase>
           ))}
+
+          {/* Calendar button — opens the sheet; shows any explicit day/range pick. */}
           <ButtonBase
             onClick={() => setDatePickerOpen(true)}
-            sx={datePillSx(calendarActive)}
+            sx={filterChipSx(calendarSelection !== null)}
             aria-label="Abrir calendario"
           >
             <CalendarMonthRounded sx={{ fontSize: 20 }} />
-            {calendarActive && selectedDate && dayPillLabel(selectedDate)}
-          </ButtonBase>
-          <ButtonBase
-            onClick={() => setCategorySheetOpen(true)}
-            sx={datePillSx(activeCategory !== null)}
-            aria-label="Filtrar por categoría"
-          >
-            {activeCategory ? categoryLabel(activeCategory) : 'Todos'}
+            {calendarSelection &&
+              (calendarSelection.to
+                ? rangePillLabel(calendarSelection.from, calendarSelection.to)
+                : dayPillLabel(calendarSelection.from))}
           </ButtonBase>
         </Box>
 
@@ -299,26 +323,20 @@ export default function PosCatalogPage() {
         </Box>
       </Fade>
 
-      <PosCategorySheet
-        open={categorySheetOpen}
-        onClose={() => setCategorySheetOpen(false)}
-        activeCategory={activeCategory}
-        onPick={(c) => setActiveCategory(c)}
-      />
-
-      {/* US-AG35 — calendar Bottom Sheet (any-day picker). Picking a day scopes the catalog
-          to it; "Hoy" clears back to the default window. */}
+      {/* US-AG35 — calendar Bottom Sheet: single-day or range picker. Picking scopes the catalog. */}
       <PosDatePickerSheet
         open={datePickerOpen}
         onClose={() => setDatePickerOpen(false)}
-        selectedDate={selectedDate}
+        selectedDate={selection?.from ?? null}
+        dateRange={selection?.to ? { from: selection.from, to: selection.to } : null}
         today={today}
-        onPick={(d) => {
-          setSelectedDate(d)
+        categories={activeCategories}
+        onPickDay={(d) => {
+          setSelection({ from: d })
           setDatePickerOpen(false)
         }}
-        onClearToToday={() => {
-          setSelectedDate(null)
+        onPickRange={(r) => {
+          setSelection(r)
           setDatePickerOpen(false)
         }}
       />
@@ -336,6 +354,11 @@ export default function PosCatalogPage() {
       {/* US-AG36 — lodging range-first stay sheet. */}
       <LodgingStaySheet
         service={openLodging}
+        initialRange={
+          selection?.to
+            ? { check_in: selection.from, check_out: selection.to }
+            : null
+        }
         onClose={() => setOpenLodging(null)}
         onAdded={() => {
           setOpenLodging(null)

@@ -184,6 +184,40 @@ describe('US-AG30 — POS catalog lightweight windowed availability', () => {
 })
 
 // ---------------------------------------------------------------------------
+// US-AG35 — availability over the selected semantic date range (from/to)
+// ---------------------------------------------------------------------------
+describe('US-AG35 — catalog availability over a selected date range', () => {
+  it('a from/to range widens the window beyond the default 3 days', async () => {
+    const { organizationId } = await seedUser({ email: AGENT_EMAIL, role: 'agent' })
+    const { serviceId } = await seedService({ organizationId })
+    await seedSlot({ organizationId, serviceId, date: PLUS_5 }) // 06-20, outside the default window
+
+    // Default window [TODAY, TODAY+2] excludes it…
+    const dflt = await listCatalog(AGENT_EMAIL, `?today=${TODAY}`)
+    expect(dflt.services[0].has_availability).toBe(false)
+
+    // …but a range covering 06-20 includes it (evaluated over the whole [from, to] span).
+    const ranged = await listCatalog(
+      AGENT_EMAIL,
+      `?today=${TODAY}&from=2026-06-18&to=2026-06-22`,
+    )
+    expect(ranged.services[0].has_availability).toBe(true)
+    expect(ranged.services[0].next_slot_date).toBe(PLUS_5)
+  })
+
+  it('a bare from (no to) collapses the window to that single day', async () => {
+    const { organizationId } = await seedUser({ email: AGENT_EMAIL, role: 'agent' })
+    const { serviceId } = await seedService({ organizationId })
+    await seedSlot({ organizationId, serviceId, date: TOMORROW })
+
+    const sameDay = await listCatalog(AGENT_EMAIL, `?today=${TODAY}&from=${TODAY}`)
+    expect(sameDay.services[0].has_availability).toBe(false) // tomorrow's slot is outside [TODAY,TODAY]
+    const nextDay = await listCatalog(AGENT_EMAIL, `?today=${TODAY}&from=${TOMORROW}`)
+    expect(nextDay.services[0].has_availability).toBe(true)
+  })
+})
+
+// ---------------------------------------------------------------------------
 // Multitenancy isolation (required — Scenario 11, B4)
 // ---------------------------------------------------------------------------
 describe('US-AG30 — multitenancy isolation', () => {

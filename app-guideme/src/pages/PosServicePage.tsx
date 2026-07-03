@@ -21,12 +21,12 @@ import { ROUTES } from '../config/routes'
 // the selection logic lives in exactly one place.
 export default function PosServicePage() {
   const { id } = useParams<{ id: string }>()
-  // US-AG30/AG33 — inherit the catalog's selected day. An explicit date stays a single day;
-  // the "Hoy" anchor (null) expands to the 3-day window [today, today+2].
-  const selectedDate = usePosFilters((s) => s.selectedDate)
+  // US-AG30/AG33/AG35 — inherit the catalog's selection start day. An explicit pick stays a
+  // single day; the "Hoy" default (null) expands to the 3-day window [today, today+2].
+  const anchor = usePosFilters((s) => s.selection?.from ?? null)
   const today = todayStr()
-  const days = selectedDate
-    ? [selectedDate]
+  const days = anchor
+    ? [anchor]
     : [today, addDays(today, 1), addDays(today, 2)]
   const range = { from: days[0], to: days[days.length - 1] }
   const { data: service, isLoading, isError } = usePosService(id, range)

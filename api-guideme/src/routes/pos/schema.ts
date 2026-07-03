@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { SERVICE_CATEGORIES } from '../services/schema'
 
 // Cart confirm payload. Money is integer minor units (centavos). Per Multitenancy
 // Rule 1, no `organizationId` / `agent_id` / `status` / totals fields — those come
@@ -75,6 +76,11 @@ export type ConfirmSaleInput = z.infer<typeof confirmSaleSchema>
 // is no caller-controlled width to bound. `month` must be a real calendar month (01–12);
 // `today` is the optional org-local anchor (past days are never returned). Validated via
 // `zValidator('query', …)` → 400 on a malformed value.
+//
+// `categories` (optional CSV of US-A37 category keys) scopes the availability dots to the
+// agent's selected category filter: only slots of a service in that set count. Unknown
+// keys are dropped; an empty/absent value means "all categories" (the default). Lodging
+// has no slots, so it never contributes a dot here regardless of selection.
 export const availabilityDaysQuerySchema = z.object({
   month: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/, 'Expected YYYY-MM'),
   today: z
@@ -82,6 +88,19 @@ export const availabilityDaysQuerySchema = z.object({
     .regex(/^\d{4}-\d{2}-\d{2}$/, 'Expected YYYY-MM-DD')
     .refine((s) => !Number.isNaN(Date.parse(`${s}T00:00:00Z`)), 'Invalid calendar date')
     .optional(),
+  categories: z
+    .string()
+    .optional()
+    .transform((s) =>
+      s
+        ? (s
+            .split(',')
+            .filter((k): k is (typeof SERVICE_CATEGORIES)[number] =>
+              (SERVICE_CATEGORIES as readonly string[]).includes(k),
+            ) as (typeof SERVICE_CATEGORIES)[number][])
+        : undefined,
+    )
+    .transform((arr) => (arr && arr.length > 0 ? arr : undefined)),
 })
 
 export type AvailabilityDaysQuery = z.infer<typeof availabilityDaysQuerySchema>

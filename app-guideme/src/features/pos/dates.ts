@@ -45,3 +45,53 @@ export const firstWeekdayMondayBased = (month: string): number => {
   const jsDay = new Date(Date.UTC(y, m - 1, 1)).getUTCDay() // 0 = Sunday … 6 = Saturday
   return (jsDay + 6) % 7
 }
+
+/** Monday-based weekday index (0 = Mon … 6 = Sun) of a YYYY-MM-DD date. */
+const mondayIndexOf = (date: string): number =>
+  (new Date(`${date}T00:00:00Z`).getUTCDay() + 6) % 7
+
+export type ContextPillKey = 'esta_semana' | 'este_fin' | 'sig_semana'
+
+export interface ContextPill {
+  key: ContextPillKey
+  label: string
+  from: string
+  to: string
+}
+
+const PILL_LABELS: Record<ContextPillKey, string> = {
+  esta_semana: 'ESTA SEMANA',
+  este_fin: 'ESTE FIN',
+  sig_semana: 'SIG. SEMANA',
+}
+
+// US-AG35 — the dynamic, week-based context pills that adapt to the current day of the week
+// (Monday-first, es-MX). Mon–Thu offer "ESTA SEMANA" (today → Sunday, default) + "ESTE FIN"
+// (Fri → Sun); Fri–Sun offer "ESTE FIN" (today → Sun, default) + "SIG. SEMANA" (next Mon → Sun).
+// The FIRST pill is the contextual default. All ranges are inclusive naive YYYY-MM-DD.
+export const contextPills = (today: string): ContextPill[] => {
+  const idx = mondayIndexOf(today) // 0 = Mon … 6 = Sun
+  const comingSunday = addDays(today, 6 - idx)
+  const pill = (key: ContextPillKey, from: string, to: string): ContextPill => ({
+    key,
+    label: PILL_LABELS[key],
+    from,
+    to,
+  })
+
+  if (idx <= 3) {
+    // Monday–Thursday.
+    const thisFriday = addDays(today, 4 - idx)
+    return [
+      pill('esta_semana', today, comingSunday),
+      pill('este_fin', thisFriday, comingSunday),
+    ]
+  }
+  // Friday–Sunday.
+  const nextMonday = addDays(comingSunday, 1)
+  const nextSunday = addDays(nextMonday, 6)
+  return [
+    pill('este_fin', today, comingSunday),
+    pill('sig_semana', nextMonday, nextSunday),
+  ]
+}

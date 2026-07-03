@@ -26,6 +26,33 @@ export const datePillSx = (active: boolean): SxProps<Theme> => ({
   },
 })
 
+// A pill-shaped filter chip at the FULL control height (the design-system "selected"
+// treatment): a soft teal-50 tint + teal-700 text/border when active, hairline surface
+// otherwise. Reserves the solid teal fill (datePillSx / buttons) for true CTAs, so a strip
+// of these reads as filters, not actions. Kept at 48px — unlike the denser chipPillSx (36px)
+// — for outdoor one-handed touch (brief: reach & repetition).
+export const filterChipSx = (active: boolean): SxProps<Theme> => ({
+  flexShrink: 0,
+  height: 48,
+  px: 2,
+  gap: 1,
+  borderRadius: 999,
+  fontSize: 13,
+  fontWeight: active ? 600 : 500,
+  letterSpacing: '0.01em',
+  whiteSpace: 'nowrap',
+  transition: 'background-color 160ms ease, color 160ms ease, border-color 160ms ease',
+  color: active ? 'primary.main' : 'text.secondary',
+  bgcolor: (t: Theme) =>
+    active ? alpha(t.palette.primary.main, 0.1) : t.palette.background.paper,
+  border: '1px solid',
+  borderColor: active ? 'primary.main' : 'divider',
+  '&:hover': {
+    bgcolor: (t: Theme) =>
+      active ? alpha(t.palette.primary.main, 0.16) : t.palette.action.hover,
+  },
+})
+
 // A short pill-shaped filter chip: a soft teal tint when active, hairline surface otherwise
 // (rounded-full, low-saturation accent).
 export const chipPillSx = (active: boolean): SxProps<Theme> => ({

@@ -1,6 +1,6 @@
 import type { Context } from 'hono'
 import type { BatchItem } from 'drizzle-orm/batch'
-import { and, asc, desc, eq, gte, lte, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, gte, inArray, lte, sql } from 'drizzle-orm'
 import { getDb, type Db } from '../../db/client'
 import {
   accommodationReservations,
@@ -128,20 +128,24 @@ const extraReadColumns = {
   price: serviceExtras.price,
 } as const
 
-// US-AG03 / US-AG10 / US-AG30 — POS catalog: active services with a LIGHTWEIGHT,
+// US-AG03 / US-AG10 / US-AG30 / US-AG35 — POS catalog: active services with a LIGHTWEIGHT,
 // windowed availability flag (no slot details, no spot count). `has_availability` is
 // true when the service has ≥ 1 active slot with effective remaining > 0 inside the
 // availability window; `next_slot_date` = earliest active slot date in that window
-// (or null). The window is a rolling 3-day span (today … today + 2) by default, or the
-// single `date` the agent selected (US-AG30).
+// (or null). The window is the SEMANTIC DATE RANGE the agent selected — `from`/`to`
+// (US-AG35's context pills or a calendar range) — or a single `date` (legacy single-day
+// pick), or a rolling 3-day span (today … today + 2) by default (US-AG30).
 export const listPosServices = async (c: PosContext) => {
   const agent = c.get('user')
   const today = c.req.query('today') ?? utcToday()
-  // US-AG30 — an explicit selected date collapses the window to that single day; absent,
-  // the window is today … today + AVAILABILITY_WINDOW_DAYS (the default "next 3 days").
-  const selectedDate = c.req.query('date')
-  const windowFrom = selectedDate ?? today
-  const windowTo = selectedDate ?? addDays(today, AVAILABILITY_WINDOW_DAYS)
+  // US-AG35 — the selected range `[from, to]` bounds availability. A bare `from` (or the
+  // legacy single `date`) collapses the window to that one day; absent both, the window is
+  // today … today + AVAILABILITY_WINDOW_DAYS (the default "next 3 days").
+  const from = c.req.query('from') ?? c.req.query('date') ?? null
+  const windowFrom = from ?? today
+  const windowTo = from
+    ? (c.req.query('to') ?? from)
+    : addDays(today, AVAILABILITY_WINDOW_DAYS)
   const db = getDb(c.env)
 
   // Curated catalog (affiliate-portal.spec.md §4.2): for an `affiliate` caller, INNER JOIN the
@@ -280,7 +284,7 @@ export const listPosServices = async (c: PosContext) => {
 // day for this org. Returns only date strings — no slot-level or per-service data.
 export const listAvailabilityDays = async (c: PosContext) => {
   const agent = c.get('user')
-  const { month, today: todayParam } = c.req.valid('query')
+  const { month, today: todayParam, categories } = c.req.valid('query')
   const today = todayParam ?? utcToday()
 
   const monthStart = `${month}-01`
@@ -317,6 +321,9 @@ export const listAvailabilityDays = async (c: PosContext) => {
         gte(slots.date, windowFrom),
         lte(slots.date, monthEnd),
         sellableSlotSql(sellableThreshold),
+        // US-A37 — scope the dots to the agent's selected category filter (when any).
+        // Lodging carries no slots, so it never surfaces here regardless of the set.
+        ...(categories ? [inArray(services.category, categories)] : []),
         // US-A36 — effective remaining > 0 per slot: raw remaining plus the flexible margin
         // (floor(capacity × pct / 100)) for a Soft Cap service. Grouping by date then yields
         // exactly the days with at least one sellable slot.

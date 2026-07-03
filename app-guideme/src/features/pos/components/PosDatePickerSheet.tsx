@@ -5,6 +5,8 @@ import ChevronLeftRounded from '@mui/icons-material/ChevronLeftRounded'
 import ChevronRightRounded from '@mui/icons-material/ChevronRightRounded'
 import { BottomSheet } from '../../../components'
 import { usePosAvailableDays } from '../hooks'
+import type { ServiceCategory } from '../../catalog/categories'
+import type { PosDateRange } from '../../../store/posFilters'
 import {
   monthOf,
   addMonths,
@@ -15,14 +17,18 @@ import {
 interface PosDatePickerSheetProps {
   open: boolean
   onClose: () => void
-  /** The currently filtered day (`null` = the "Hoy" anchor). */
+  /** The currently filtered day (`null` = the "Hoy" anchor / range start). */
   selectedDate: string | null
+  /** The active multi-day range, if any — pre-loads the draft when the sheet opens. */
+  dateRange: PosDateRange | null
   /** Org-local today (`YYYY-MM-DD`) — the floor; earlier days are disabled. */
   today: string
-  /** Commit a concrete day (the owner sets `selectedDate` and closes the sheet). */
-  onPick: (date: string) => void
-  /** The "Hoy" shortcut — clears back to the default anchor. */
-  onClearToToday: () => void
+  /** US-A37 — scopes the availability dots to the agent's category filter (empty = all). */
+  categories: ServiceCategory[]
+  /** Commit a single day (the owner sets the day and closes the sheet). */
+  onPickDay: (date: string) => void
+  /** Commit a multi-day range (lodging-only; tours anchor on `from`). */
+  onPickRange: (range: PosDateRange) => void
 }
 
 const MONTHS_ES = [
@@ -39,40 +45,100 @@ const monthLabel = (month: string): string => {
 
 const pad2 = (n: number): string => String(n).padStart(2, '0')
 
+// Inclusive whole-day span between two YYYY-MM-DD strings (UTC midnight arithmetic).
+const spanDays = (from: string, to: string): number =>
+  Math.round(
+    (Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000,
+  ) + 1
+
+interface Draft {
+  from: string | null
+  to: string | null
+}
+
+// The draft the sheet opens with: an active range, else the single selected day, else empty.
+const initialDraft = (dateRange: PosDateRange | null, selectedDate: string | null): Draft =>
+  dateRange
+    ? { from: dateRange.from, to: dateRange.to }
+    : { from: selectedDate, to: null }
+
 // US-AG35 — the calendar Bottom Sheet: a month grid of square day chips marking the sellable
-// days (from GET /api/pos/availability/days), with month navigation. Renders in the shared
-// BottomSheet primitive. Past/unavailable days are disabled; picking an available day commits it.
+// days (from GET /api/pos/availability/days), with month navigation. Smart tap-tap: one tap +
+// Aplicar commits a single day; a second, later tap forms a range (an earlier second tap
+// restarts). Past/unavailable days are disabled; the dots scope to the selected categories.
 export function PosDatePickerSheet({
   open,
   onClose,
   selectedDate,
+  dateRange,
   today,
-  onPick,
-  onClearToToday,
+  categories,
+  onPickDay,
+  onPickRange,
 }: PosDatePickerSheetProps) {
   const currentMonth = monthOf(today)
-  // The visible month resets to the selection's month (or today's) each time the sheet opens.
-  // Done in render (not an effect) via the "store previous prop" pattern, so the reset lands
-  // before paint with no cascading-render effect.
-  const [visibleMonth, setVisibleMonth] = useState(() => monthOf(selectedDate ?? today))
+  // The visible month + the draft selection reset each time the sheet opens. Done in render
+  // (not an effect) via the "store previous prop" pattern, so the reset lands before paint.
+  const [visibleMonth, setVisibleMonth] = useState(() =>
+    monthOf(dateRange?.from ?? selectedDate ?? today),
+  )
+  const [draft, setDraft] = useState<Draft>(() => initialDraft(dateRange, selectedDate))
   const [wasOpen, setWasOpen] = useState(open)
   if (open !== wasOpen) {
     setWasOpen(open)
-    if (open) setVisibleMonth(monthOf(selectedDate ?? today))
+    if (open) {
+      setVisibleMonth(monthOf(dateRange?.from ?? selectedDate ?? today))
+      setDraft(initialDraft(dateRange, selectedDate))
+    }
   }
 
-  // Only fetch while the sheet is open; refetches as the visible month changes.
+  // Only fetch while the sheet is open; refetches as the visible month / category set changes.
   const { data: availableDays, isLoading } = usePosAvailableDays(
     visibleMonth,
     today,
     open,
+    categories,
   )
   const available = new Set(availableDays ?? [])
+
+  // Lodging has no slots, so it never lights an availability dot. When the agent has scoped the
+  // filter to lodging, dot-gating would leave the whole calendar unselectable — so in that case
+  // any non-past day is pickable (the real per-unit availability is resolved in the stay sheet),
+  // with the dots staying advisory. Tours-only / default filters keep the strict dot-gating.
+  const lodgingInScope = categories.includes('lodging')
+
+  // Tap-tap: no start (or a complete range) → start fresh; else close the range if the tap is
+  // later than the start, otherwise restart at the tap. Only enabled (pickable) days reach here.
+  const handleTap = (date: string) => {
+    if (!draft.from || (draft.from && draft.to)) {
+      setDraft({ from: date, to: null })
+      return
+    }
+    if (date > draft.from) setDraft({ from: draft.from, to: date })
+    else setDraft({ from: date, to: null })
+  }
+
+  const inDraftRange = (date: string): boolean =>
+    !!draft.from && !!draft.to && date >= draft.from && date <= draft.to
+
+  const apply = () => {
+    if (!draft.from) return
+    if (draft.to && draft.to !== draft.from) {
+      onPickRange({ from: draft.from, to: draft.to })
+    } else {
+      onPickDay(draft.from)
+    }
+  }
 
   const atCurrentMonth = visibleMonth <= currentMonth
   const leadingBlanks = firstWeekdayMondayBased(visibleMonth)
   const total = daysInMonth(visibleMonth)
   const days = Array.from({ length: total }, (_, i) => i + 1)
+
+  const applyLabel =
+    draft.from && draft.to && draft.to !== draft.from
+      ? `Aplicar · ${spanDays(draft.from, draft.to)} días`
+      : 'Aplicar'
 
   const header = (
     <Box
@@ -106,8 +172,8 @@ export function PosDatePickerSheet({
 
   const footer = (
     <Box sx={{ px: 3, py: 2 }}>
-      <Button fullWidth variant="outlined" onClick={onClearToToday}>
-        Hoy
+      <Button fullWidth variant="contained" onClick={apply} disabled={!draft.from}>
+        {applyLabel}
       </Button>
     </Box>
   )
@@ -153,10 +219,12 @@ export function PosDatePickerSheet({
             const date = `${visibleMonth}-${pad2(day)}`
             const isPast = date < today
             const isToday = date === today
-            const isSelected = date === selectedDate
+            const isEndpoint = date === draft.from || date === draft.to
+            const isInRange = inDraftRange(date)
             const isAvailable = available.has(date)
-            // While availability is loading, today-onward days stay neutral & inert.
-            const disabled = isPast || isLoading || !isAvailable
+            // While availability is loading, today-onward days stay neutral & inert. A day is
+            // pickable when it has a dot, or unconditionally (non-past) when lodging is in scope.
+            const disabled = isPast || isLoading || (!isAvailable && !lodgingInScope)
 
             return (
               <Box
@@ -164,9 +232,9 @@ export function PosDatePickerSheet({
                 component="button"
                 type="button"
                 disabled={disabled}
-                onClick={() => onPick(date)}
+                onClick={() => handleTap(date)}
                 aria-label={date}
-                aria-pressed={isSelected}
+                aria-pressed={isEndpoint}
                 sx={{
                   appearance: 'none',
                   border: 'none',
@@ -181,38 +249,46 @@ export function PosDatePickerSheet({
                   position: 'relative',
                   cursor: disabled ? 'default' : 'pointer',
                   fontSize: 15,
-                  fontWeight: isSelected ? 700 : 500,
+                  fontWeight: isEndpoint ? 700 : 500,
                   fontVariantNumeric: 'tabular-nums',
                   transition: 'background-color 140ms ease, color 140ms ease',
-                  color: isSelected
+                  color: isEndpoint
                     ? 'primary.contrastText'
-                    : isPast || (!isAvailable && !isLoading)
-                      ? 'text.disabled'
-                      : 'text.primary',
-                  bgcolor: isSelected ? 'primary.main' : 'transparent',
+                    : isInRange
+                      ? 'var(--teal-700, #0F766E)'
+                      : isPast || (!isAvailable && !isLoading && !lodgingInScope)
+                        ? 'text.disabled'
+                        : 'text.primary',
+                  bgcolor: isEndpoint
+                    ? 'primary.main'
+                    : isInRange
+                      ? 'var(--teal-50, #F0FDFA)'
+                      : 'transparent',
                   boxShadow:
-                    isToday && !isSelected
+                    isToday && !isEndpoint
                       ? (t) => `inset 0 0 0 1px ${alpha(t.palette.primary.main, 0.4)}`
                       : 'none',
                   '&:hover': {
                     bgcolor: (t) =>
                       disabled
-                        ? isSelected
+                        ? isEndpoint
                           ? t.palette.primary.main
-                          : 'transparent'
+                          : isInRange
+                            ? 'var(--teal-50, #F0FDFA)'
+                            : 'transparent'
                         : alpha(t.palette.primary.main, 0.1),
                   },
                 }}
               >
                 {day}
-                {/* Availability dot — hidden when the day is selected (the fill says it). */}
+                {/* Availability dot — hidden on endpoints (the fill says it). */}
                 <Box
                   sx={{
                     width: 5,
                     height: 5,
                     mt: 0.25,
                     borderRadius: '50%',
-                    bgcolor: isAvailable && !isSelected ? 'primary.main' : 'transparent',
+                    bgcolor: isAvailable && !isEndpoint ? 'primary.main' : 'transparent',
                   }}
                 />
               </Box>

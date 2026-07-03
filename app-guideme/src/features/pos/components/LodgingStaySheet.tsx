@@ -24,16 +24,33 @@ interface LodgingStaySheetProps {
   service: { id: string; name: string } | null
   onClose: () => void
   onAdded: () => void
+  /** Lodging-only date range picked in the catalog Date filter — pre-loads the stay range. */
+  initialRange?: DateRangeValue | null
 }
 
 // US-AG36 — range-first: pick a check-in/check-out range + guests, see the units available for the
-// whole range with their computed totals (total reads first), tap one to add a stay line.
-export function LodgingStaySheet({ service, onClose, onAdded }: LodgingStaySheetProps) {
+// whole range with their computed totals (total reads first), tap one to add a stay line. When the
+// agent picked a date range in the catalog Date filter it flows in as `initialRange` (lodging-only).
+export function LodgingStaySheet({
+  service,
+  onClose,
+  onAdded,
+  initialRange,
+}: LodgingStaySheetProps) {
   const today = todayStr()
   const addStayLine = usePosCart((s) => s.addStayLine)
-  const [range, setRange] = useState<DateRangeValue>({ check_in: null, check_out: null })
+  const emptyRange: DateRangeValue = { check_in: null, check_out: null }
+  const [range, setRange] = useState<DateRangeValue>(() => initialRange ?? emptyRange)
   const [guests, setGuests] = useState(2)
   const [calendarUnit, setCalendarUnit] = useState<{ unitId: string; unitName: string } | null>(null)
+
+  // Reset the range each time the sheet opens (service goes truthy), pre-loading any range the
+  // agent picked in the catalog filter. "Store previous prop" pattern — reset lands before paint.
+  const [wasOpen, setWasOpen] = useState(!!service)
+  if (!!service !== wasOpen) {
+    setWasOpen(!!service)
+    if (service) setRange(initialRange ?? emptyRange)
+  }
 
   const { data, isLoading, isError } = useLodgingAvailability(service?.id ?? '', {
     check_in: range.check_in ?? '',

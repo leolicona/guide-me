@@ -54,17 +54,19 @@ export interface ServiceDetailRange {
   to?: string
 }
 
-// US-AG03 / AG10 / AG30 — POS catalog with a lightweight windowed availability flag.
+// US-AG03 / AG10 / AG30 / AG35 — POS catalog with a lightweight windowed availability flag.
 // `today` pins the org-local anchor (defaults server-side to the server's UTC date);
-// `date` collapses the availability window to that single day (omit for the default
-// rolling 3-day window).
+// `from`/`to` bound the availability window to the selected semantic range (a bare `from`
+// = a single day). Omit both for the default rolling 3-day window.
 export const listPosServices = async (
   today?: string,
-  date?: string,
+  from?: string,
+  to?: string,
 ): Promise<PosServiceSummary[]> => {
   const params = new URLSearchParams()
   if (today) params.set('today', today)
-  if (date) params.set('date', date)
+  if (from) params.set('from', from)
+  if (to) params.set('to', to)
   const qs = params.toString()
   const res = await request<{ services: PosServiceSummary[] }>(
     `/api/pos/services${qs ? `?${qs}` : ''}`,
@@ -74,13 +76,17 @@ export const listPosServices = async (
 
 // US-AG35 — month availability for the POS calendar Bottom Sheet. `month` is `YYYY-MM`;
 // the server owns the scan range (first…last of that month) and never returns past days.
-// Returns the ascending list of `YYYY-MM-DD` dates that have a sellable slot.
+// `categories` (US-A37) scopes the dots to the agent's selected category filter; omit or
+// pass an empty list for "all categories". Returns the ascending list of `YYYY-MM-DD`
+// dates that have a sellable slot.
 export const getPosAvailabilityDays = async (
   month: string,
   today?: string,
+  categories?: readonly string[],
 ): Promise<string[]> => {
   const params = new URLSearchParams({ month })
   if (today) params.set('today', today)
+  if (categories && categories.length > 0) params.set('categories', categories.join(','))
   const res = await request<{ days: string[] }>(
     `/api/pos/availability/days?${params.toString()}`,
   )

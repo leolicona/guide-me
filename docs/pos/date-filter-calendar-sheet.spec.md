@@ -14,10 +14,10 @@ makes it explicit that **both the agent and the admin-seller** get it on the sam
 
 The Date filter becomes two cooperating pieces:
 
-1. **Quick-day strip** — a compact, always-visible row showing **`HOY`** plus the
-   **next two days**, then a **calendar button**. One tap covers the overwhelmingly
-   common case (today or the next couple of days) with no modal.
-   > Example: `HOY · SÁB 14 · DOM 15 · 🗓️` — or, the day after: `HOY · LUN 16 · MAR 17 · 🗓️`.
+1. **Inline Filter Strip (Categories + Semantic Date)** — a single, horizontally scrollable row that packs the **category chips** and a **dynamic, week-based date filter**, separated by a visual divider `|`, plus a **calendar button**. It adapts intelligently to the day of the week:
+   - *Mon-Thu:* `[ Todas ] [ Tours ] ... | [ ESTA SEMANA ] [ ESTE FIN ] [ 🗓️ ]`
+   - *Fri-Sun:* `[ Todas ] [ Tours ] ... | [ ESTE FIN ] [ SIG. SEMANA ] [ 🗓️ ]`
+   The calendar supports single-day and multi-night **date ranges** (vital for lodging).
 
 2. **Calendar Bottom Sheet** — tapping the calendar button slides up a Bottom Sheet
    (the same overlay+slide-up pattern as US-AG31) holding a **month grid of square day
@@ -32,9 +32,7 @@ UI** for the date that US-AG30 already models (`selectedDate: string | null`).
 
 **User Stories:**
 
-- **US-AG35** *(agent)* — the quick-day strip (`HOY` + next two days + calendar button)
-  and the calendar Bottom Sheet (month grid of square day chips marking available days,
-  with month navigation), defaulting to today.
+- **US-AG35** *(agent)* — an inline horizontally scrollable strip combining category chips, semantic dynamic date context (`ESTA SEMANA`, `ESTE FIN`, etc.) based on the day of the week, and a calendar Bottom Sheet that supports date ranges for lodging, defaulting to the current contextual week.
 - **US-A45** *(admin-seller)* — the **same** Date filter and calendar sheet on `/pos`,
   by virtue of selling through the same POS flow (US-A31). No admin-specific divergence.
 
@@ -114,21 +112,18 @@ Still the single `selectedDate: string | null` from `store/posFilters.ts` (US-AG
 `null` = the "Hoy" anchor (rolling 3-day window); a concrete `YYYY-MM-DD` = that single
 day. The **visible month** in the sheet is **local** component state (resets on close).
 
-### Quick-day strip (`PosCatalogPage`)
+### Inline Filter Strip (`PosCatalogPage`)
 
-A compact row, in order:
+A single `overflow-x: auto` row, separated by a visual divider `|`:
 
-1. **`HOY`** pill — active when `selectedDate === null`. Tapping it clears to `null`
-   (back to the default window).
-2. **Next-two-day** pills — `addDays(today, 1)` and `addDays(today, 2)`, labelled
-   `WEEKDAY DD` in Spanish (`SÁB 14`, `DOM 15`). Active when `selectedDate` equals that
-   date. Tapping sets `selectedDate` to that exact day (single-day scope, US-AG30).
-3. **Calendar button** (`🗓️`, `calendar_month`) — opens the **Calendar Bottom Sheet**.
-   When `selectedDate` is a day **outside** the three pills, the button adopts the
-   **active** style and shows the chosen date (so the selection is never hidden).
-   *(Open decision 3.)*
+1. **Category Chips** — e.g. `[ Todas ]`, `[ Tours ]`, `[ Aventura ]`. One tap filters the list locally (US-A37). Replaces the old `PosCategorySheet`.
+2. **Divider** — `|`
+3. **Dynamic Context Pills** — intelligent date range shortcuts that adapt to the current day of the week:
+   - **Lunes a Jueves:** `[ ESTA SEMANA ]` (default, from today to Sunday) and `[ ESTE FIN ]` (Friday to Sunday).
+   - **Viernes a Domingo:** `[ ESTE FIN ]` (default, today to Sunday) and `[ SIG. SEMANA ]` (next Mon to Sun).
+4. **Calendar button** (`🗓️`, `calendar_month`) — opens the **Calendar Bottom Sheet** for precise single-day or **range selection**.
 
-(The interim strip's `Elegir fecha` text pill and the 14 day pills are removed.)
+The `selectedDate` state is upgraded from `string | null` to `DateSelection | null`, where `DateSelection = { from: string; to?: string }`.
 
 ### Calendar Bottom Sheet (`PosDatePickerSheet`, new)
 
@@ -157,22 +152,19 @@ day chips render in a neutral (not-yet-known) state and become enabled as data a
 
 ## Scenarios
 
-### US-AG35 — Quick-day strip (frontend)
+### US-AG35 — Inline Filter Strip (frontend)
 
-#### Scenario 1 — Defaults to today
-**Given** the agent opens `/pos`
-**Then** `selectedDate` is `null`, the **`HOY`** pill is active, and the catalog shows
-the default windowed availability (US-AG30 unchanged).
+#### Scenario 1 — Defaults to current week context (Mon-Thu)
+**Given** today is `2026-06-15` (Mon) and the agent opens `/pos`
+**Then** the strip shows `[ ESTA SEMANA ]` (active) and `[ ESTE FIN ]` alongside the calendar, and the catalog fetches availability from today to Sunday.
 
-#### Scenario 2 — Strip shows Hoy + the next two days
-**Given** today is `2026-06-15` (Mon)
-**Then** the strip reads **`HOY · MAR 16 · MIÉ 17 · 🗓️`** (weekday+day in es-MX), then
-the calendar button.
+#### Scenario 2 — Defaults to weekend context (Fri-Sun)
+**Given** today is `2026-06-19` (Fri)
+**Then** the strip reads `[ ESTE FIN ]` (active) and `[ SIG. SEMANA ]`, filtering from today to Sunday.
 
-#### Scenario 3 — Tapping a day pill scopes to that single day
-**When** the agent taps `MAR 16`
-**Then** `selectedDate = 2026-06-16`, the catalog re-reads with `?date=2026-06-16`
-(single-day window), and the pill is active; tapping **`HOY`** returns to `null`.
+#### Scenario 3 — Tapping a context pill changes the range
+**When** the agent taps `[ ESTE FIN ]` on a Tuesday
+**Then** the catalog re-reads with `?from=...&to=...` scoping exactly to Friday-Sunday of the current week.
 
 ### US-AG35 — Calendar Bottom Sheet (frontend)
 
@@ -224,22 +216,21 @@ light up a day for `org_a`.
 
 ## Definition of Done
 
-- [ ] `GET /api/pos/availability/days?month=YYYY-MM` returns org-scoped available dates
+- [x] `GET /api/pos/availability/days?month=YYYY-MM` returns org-scoped available dates
       within that month (effective remaining > 0, US-A36); the server derives the
       `[firstOfMonth, lastOfMonth]` range itself (no caller-controlled width); never
-      returns days `< today`; malformed `month` → `400`.
-- [ ] Quick-day strip renders `HOY` + the next two days + a calendar button; tapping a
-      pill sets/clears `selectedDate` per US-AG30; the calendar button reflects an
-      out-of-strip selection.
-- [ ] `PosDatePickerSheet`: Bottom Sheet with a month grid of square day chips, month
+      returns days `< today`; malformed `month` → `400`. *(+ optional `categories` filter — Open decision 2 alternative, scopes the dots to the active category chips.)*
+- [x] Inline filter strip renders horizontally scrollable category chips, a visual divider, and dynamic week-based context pills (`ESTA SEMANA` / `ESTE FIN` / `SIG. SEMANA`) plus a calendar button. State supports date ranges.
+- [~] Calendar supports range selection for lodging. **Deviation:** Tours evaluate availability over the **whole selected range** `[from, to]` (per SPEC.md §Inventory "availability window" / US-AG30), **not** the start date only (Option 3). Confirm which reading is intended.
+- [x] `PosDatePickerSheet`: Bottom Sheet with a month grid of square day chips, month
       navigation, availability marks from `usePosAvailableDays`, past/unavailable days
-      disabled, and a `Hoy` shortcut. Picking a day sets `selectedDate` and closes.
-- [ ] The interim 14-pill strip + native `Elegir fecha` picker are removed.
-- [ ] Admin and agent render the identical control on `/pos` (US-A45 / US-A31).
-- [ ] Scenarios 5, 10 covered in `test/pos/pos-availability-days.test.ts` (B4 via
-      `seedTwoOrgs`). Scenarios 1–9 are frontend behaviours.
-- [ ] SPEC.md updated (US-AG35, US-A45, Phase-2 entry, glossary, US-AG30 cross-ref).
-- [ ] `pnpm --filter api-guideme test` green; `pnpm build:app` clean (`tsc -b` + vite).
+      disabled, and a `Hoy` shortcut. Picking a day/range sets the selection and closes.
+- [x] The interim 14-pill strip + native `Elegir fecha` picker (and the interim 3-pill quick-day strip + category sheet) are removed.
+- [x] Admin and agent render the identical control on `/pos` (US-A45 / US-A31) — one shared component, no role branching.
+- [x] Scenarios 5, 10 covered in `test/pos/pos-availability-days.test.ts` (B4 via
+      `seedTwoOrgs`). Scenarios 1–9 are frontend behaviours. *(Range window also covered in `pos-catalog-availability.test.ts`.)*
+- [x] SPEC.md updated (US-AG35, US-A45, Phase-2 entry, glossary, US-AG30 cross-ref).
+- [x] `pnpm --filter api-guideme test` green; `pnpm build:app` clean (`tsc -b` + vite).
 
 ---
 

@@ -26,6 +26,7 @@ interface SeedServiceOptions {
   isFlexible?: boolean
   flexCapacityPct?: number
   status?: 'active' | 'inactive'
+  category?: 'lodging' | 'tours' | 'dining' | 'adventure' | 'culture'
 }
 
 const seedService = async ({
@@ -34,6 +35,7 @@ const seedService = async ({
   isFlexible = false,
   flexCapacityPct = 0,
   status = 'active',
+  category = 'tours',
 }: SeedServiceOptions): Promise<{ serviceId: string }> => {
   const serviceId = crypto.randomUUID()
   const ts = Math.floor(Date.now() / 1000)
@@ -41,9 +43,9 @@ const seedService = async ({
     `INSERT INTO services
        (id, organization_id, name, description, base_price, minimum_price, default_capacity,
         commission_type, commission_value, is_flexible, flex_capacity_pct, category, status, created_at, updated_at)
-     VALUES (?, ?, ?, NULL, 150000, 100000, 12, 'percent', 0, ?, ?, 'tours', ?, ?, ?)`,
+     VALUES (?, ?, ?, NULL, 150000, 100000, 12, 'percent', 0, ?, ?, ?, ?, ?, ?)`,
   )
-    .bind(serviceId, organizationId, name, isFlexible ? 1 : 0, flexCapacityPct, status, ts, ts)
+    .bind(serviceId, organizationId, name, isFlexible ? 1 : 0, flexCapacityPct, category, status, ts, ts)
     .run()
   return { serviceId }
 }
@@ -150,6 +152,64 @@ describe('US-AG35 — POS month availability for the calendar sheet', () => {
     expect((await listDays(AGENT_EMAIL, `?month=2026-13&today=${TODAY}`)).status).toBe(400)
     expect((await listDays(AGENT_EMAIL, `?month=June&today=${TODAY}`)).status).toBe(400)
     expect((await listDays(AGENT_EMAIL, `?today=${TODAY}`)).status).toBe(400) // missing month
+  })
+})
+
+// ---------------------------------------------------------------------------
+// US-A37 — category-scoped availability dots
+// ---------------------------------------------------------------------------
+describe('US-A37 — category filter on the calendar dots', () => {
+  it('scopes the days to a single selected category', async () => {
+    const { organizationId } = await seedUser({ email: AGENT_EMAIL, role: 'agent' })
+    const tour = await seedService({ organizationId, name: 'Tour', category: 'tours' })
+    const dining = await seedService({ organizationId, name: 'Cena', category: 'dining' })
+    await seedSlot({ organizationId, serviceId: tour.serviceId, date: '2026-06-19' })
+    await seedSlot({ organizationId, serviceId: dining.serviceId, date: '2026-06-20' })
+
+    const { days } = await listDays(AGENT_EMAIL, `?month=2026-06&today=${TODAY}&categories=tours`)
+    expect(days).toEqual(['2026-06-19']) // dining day excluded
+  })
+
+  it('returns the union of multiple selected categories', async () => {
+    const { organizationId } = await seedUser({ email: AGENT_EMAIL, role: 'agent' })
+    const tour = await seedService({ organizationId, name: 'Tour', category: 'tours' })
+    const dining = await seedService({ organizationId, name: 'Cena', category: 'dining' })
+    const culture = await seedService({ organizationId, name: 'Museo', category: 'culture' })
+    await seedSlot({ organizationId, serviceId: tour.serviceId, date: '2026-06-19' })
+    await seedSlot({ organizationId, serviceId: dining.serviceId, date: '2026-06-20' })
+    await seedSlot({ organizationId, serviceId: culture.serviceId, date: '2026-06-25' })
+
+    const { days } = await listDays(
+      AGENT_EMAIL,
+      `?month=2026-06&today=${TODAY}&categories=tours,culture`,
+    )
+    expect(days).toEqual(['2026-06-19', '2026-06-25']) // dining excluded
+  })
+
+  it('an absent categories param means all categories (unchanged default)', async () => {
+    const { organizationId } = await seedUser({ email: AGENT_EMAIL, role: 'agent' })
+    const tour = await seedService({ organizationId, name: 'Tour', category: 'tours' })
+    const dining = await seedService({ organizationId, name: 'Cena', category: 'dining' })
+    await seedSlot({ organizationId, serviceId: tour.serviceId, date: '2026-06-19' })
+    await seedSlot({ organizationId, serviceId: dining.serviceId, date: '2026-06-20' })
+
+    const { days } = await listDays(AGENT_EMAIL, `?month=2026-06&today=${TODAY}`)
+    expect(days).toEqual(['2026-06-19', '2026-06-20'])
+  })
+
+  it('unknown category keys are ignored, falling back to all categories', async () => {
+    const { organizationId } = await seedUser({ email: AGENT_EMAIL, role: 'agent' })
+    const tour = await seedService({ organizationId, name: 'Tour', category: 'tours' })
+    const dining = await seedService({ organizationId, name: 'Cena', category: 'dining' })
+    await seedSlot({ organizationId, serviceId: tour.serviceId, date: '2026-06-19' })
+    await seedSlot({ organizationId, serviceId: dining.serviceId, date: '2026-06-20' })
+
+    const { status, days } = await listDays(
+      AGENT_EMAIL,
+      `?month=2026-06&today=${TODAY}&categories=bogus`,
+    )
+    expect(status).toBe(200)
+    expect(days).toEqual(['2026-06-19', '2026-06-20']) // filtered to nothing → all
   })
 })
 

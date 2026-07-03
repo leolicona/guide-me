@@ -27,10 +27,12 @@ export function ServiceSheet({ serviceId, onClose, onAdded }: ServiceSheetProps)
   // US-AG30/AG33 — inherit the catalog's selected day. An explicit date stays a single day
   // (a hyper-specific search shouldn't get extra noise); the "Hoy" anchor (null) expands to
   // the 3-day window [today, today+2], matching the catalog's availability window.
-  const selectedDate = usePosFilters((s) => s.selectedDate)
+  // Tours anchor on the selection's start day (US-AG35); the "Hoy" default (null) expands
+  // to the 3-day window [today, today+2], matching the catalog's default availability window.
+  const anchor = usePosFilters((s) => s.selection?.from ?? null)
   const today = todayStr()
-  const days = selectedDate
-    ? [selectedDate]
+  const days = anchor
+    ? [anchor]
     : [today, addDays(today, 1), addDays(today, 2)]
   const range = { from: days[0], to: days[days.length - 1] }
   const {
