@@ -3,7 +3,11 @@
 
 import type { ServiceCategory } from '../catalog/categories'
 
-export interface PosServiceSummary {
+// --- Flattened POS catalog (spec §4.3, D14) — a MIXED list discriminated by `item_type` ---
+
+/** A tour/activity card (the pre-v2 service card shape + the discriminator). */
+export interface PosTourCard {
+  item_type: 'tour'
   id: string
   name: string
   description: string | null
@@ -16,29 +20,54 @@ export interface PosServiceSummary {
   /** US-A37 — primary category (null for a pre-migration service); seeds the POS filter chips. */
   category: ServiceCategory | null
   /** US-AG30 — lightweight availability flag: true when ≥ 1 active slot inside the availability
-   * window (a rolling 3-day span or the selected date) has effective remaining > 0. Replaces the
-   * Σ-remaining count — the per-slot count lives on the service-detail read. */
+   * window (a rolling 3-day span or the selected range) has effective remaining > 0. */
   has_availability: boolean
   /** Earliest active slot date inside the availability window, or null when none. */
   next_slot_date: string | null
-  /** US-AG36 — lodging only: the lowest unit nightly rate (minor units), for "Desde $X / noche".
-   * Absent/0 for non-lodging services. */
-  from_nightly_rate?: number
 }
 
-// --- Accommodation / lodging POS reads (US-AG36 / AG37) ---
+/** v2 (D14) — a lodging UNIT-TYPE card: the parent property is never a card; each active type
+ * is, with its exact nightly rate and per-night-windowed availability. */
+export interface PosUnitTypeCard {
+  item_type: 'unit_type'
+  /** The unit type's id (stable key; also what the stay sheet + cart sell). */
+  id: string
+  service_id: string
+  name: string
+  /** The parent property, for card context ("Habitación Estándar · Hotel Centro"). */
+  property_name: string
+  description: string | null
+  unit_type: string | null
+  category: 'lodging'
+  /** Exact per-night base rate (minor units) — not an aggregated "Desde $X". */
+  nightly_rate: number
+  /** Hard guest cap per room (D12) — pre-caps the stay sheet's guests stepper. */
+  max_capacity: number
+  /** Per-night min remaining ≥ 1 over the selected window. */
+  has_availability: boolean
+  /** Min remaining rooms across the window — drives the "Quedan N" badge. */
+  remaining: number
+  next_slot_date: null
+}
 
-/** One night's rate inside a stay quote. */
+export type PosCatalogItem = PosTourCard | PosUnitTypeCard
+
+// --- Accommodation / lodging POS reads (US-AG36 / AG37, v2 unit-type inventory) ---
+
+/** One night's rate inside a stay quote (summed across the quoted rooms). */
 export interface StayNight {
   date: string // 'YYYY-MM-DD'
   rate: number // minor units
 }
 
-/** A unit available for a whole [check_in, check_out) range, with its computed total. */
-export interface LodgingAvailabilityUnit {
-  unit_id: string
+/** A unit type with enough per-night inventory for the whole range × quantity. */
+export interface LodgingAvailabilityUnitType {
+  unit_type_id: string
   name: string
   unit_type: string | null
+  inventory_count: number
+  /** Min free rooms across the requested range. */
+  min_remaining: number
   beds: number
   base_occupancy: number
   max_capacity: number
@@ -46,7 +75,9 @@ export interface LodgingAvailabilityUnit {
   checkin_time: string
   checkout_time: string
   nights: number
-  /** Stay total (minor units) — nights × nightly rate + extra-person surcharge. */
+  /** Rooms quoted (echoes the request). */
+  quantity: number
+  /** Stay total (minor units) — rooms × nights × nightly rate + extra-person surcharge (D12). */
   total: number
   per_night: StayNight[]
 }
@@ -55,13 +86,14 @@ export interface LodgingAvailability {
   check_in: string
   check_out: string
   guests: number
-  units: LodgingAvailabilityUnit[]
+  quantity: number
+  unit_types: LodgingAvailabilityUnitType[]
 }
 
-/** One day in a unit's availability calendar (US-AG37). */
-export interface UnitCalendarDay {
+/** One day in a unit type's calendar (US-AG37, v2): rooms REMAINING + that day's rate. */
+export interface UnitTypeCalendarDay {
   date: string // 'YYYY-MM-DD'
-  status: 'available' | 'blocked' | 'booked'
+  remaining: number
   rate: number // minor units
 }
 
@@ -81,7 +113,7 @@ export interface PosExtra {
 }
 
 export interface PosServiceDetail
-  extends Omit<PosServiceSummary, 'has_availability' | 'next_slot_date'> {
+  extends Omit<PosTourCard, 'item_type' | 'has_availability' | 'next_slot_date'> {
   extras: PosExtra[]
   slots: PosSlot[]
 }
@@ -124,8 +156,8 @@ export interface FolioLine {
   /** Null for a lodging stay line. */
   slot_date: string | null
   slot_start_time: string | null
-  /** Lodging stay fields (null for a tour line). */
-  unit_id?: string | null
+  /** Lodging stay fields (null for a tour line). For a stay, `quantity` = rooms reserved. */
+  unit_type_id?: string | null
   check_in?: string | null
   check_out?: string | null
   guests?: number | null

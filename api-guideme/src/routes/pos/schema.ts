@@ -22,17 +22,19 @@ const slotLineSchema = z.object({
   extras: z.array(extraSchema).optional().default([]),
 })
 
-// US-AG36/AG38 — a lodging STAY line: a unit + date range + guests. No slot, no client price
-// (the server re-quotes via the shared engine). Distinguished from a slot line by `unit_id`.
+// US-AG36/AG38 (v2) — a lodging STAY line: `quantity` rooms of a unit type + date range + total
+// guests (D12). No slot, no client price (the server re-quotes via the shared engine).
+// Distinguished from a slot line by `unit_type_id`.
 const stayLineSchema = z.object({
-  unit_id: z.string().min(1),
+  unit_type_id: z.string().min(1),
   check_in: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Expected YYYY-MM-DD'),
   check_out: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Expected YYYY-MM-DD'),
   guests: z.number().int().min(1),
+  quantity: z.number().int().min(1),
 })
 
-// A cart line is EITHER a stay (has unit_id) or a slot (has slot_id). union tries stay first;
-// a slot line lacks unit_id so it falls through to the slot shape.
+// A cart line is EITHER a stay (has unit_type_id) or a slot (has slot_id). union tries stay
+// first; a slot line lacks unit_type_id so it falls through to the slot shape.
 const lineSchema = z.union([stayLineSchema, slotLineSchema])
 
 export const confirmSaleSchema = z

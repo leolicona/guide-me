@@ -3,8 +3,8 @@ import type {
   Folio,
   FolioHistoryItem,
   FolioStatus,
+  PosCatalogItem,
   PosServiceDetail,
-  PosServiceSummary,
 } from '../features/pos/types'
 
 // US-AG03 / AG04 / AG05 / AG06 / AG08 — agent-facing POS. All endpoints require
@@ -23,12 +23,14 @@ export interface ConfirmSlotLineInput {
   extras?: ConfirmExtraInput[]
 }
 
-// US-AG38 — a lodging stay line (the server re-quotes the total from the unit + range).
+// US-AG38 (v2) — a lodging stay line: `quantity` rooms of a unit type + range + total guests
+// (the server re-quotes the total via the D12 even-split engine).
 export interface ConfirmStayLineInput {
-  unit_id: string
+  unit_type_id: string
   check_in: string
   check_out: string
   guests: number
+  quantity: number
 }
 
 /** A cart line is either a tour slot or a lodging stay. */
@@ -54,21 +56,21 @@ export interface ServiceDetailRange {
   to?: string
 }
 
-// US-AG03 / AG10 / AG30 / AG35 — POS catalog with a lightweight windowed availability flag.
-// `today` pins the org-local anchor (defaults server-side to the server's UTC date);
-// `from`/`to` bound the availability window to the selected semantic range (a bare `from`
-// = a single day). Omit both for the default rolling 3-day window.
+// US-AG03 / AG10 / AG30 / AG35 — flattened POS catalog (v2, D14): a MIXED list of tour cards
+// and lodging unit-type cards, discriminated by `item_type`. `today` pins the org-local anchor
+// (defaults server-side to the server's UTC date); `from`/`to` bound the availability window to
+// the selected semantic range (a bare `from` = a single day). Omit both for the default window.
 export const listPosServices = async (
   today?: string,
   from?: string,
   to?: string,
-): Promise<PosServiceSummary[]> => {
+): Promise<PosCatalogItem[]> => {
   const params = new URLSearchParams()
   if (today) params.set('today', today)
   if (from) params.set('from', from)
   if (to) params.set('to', to)
   const qs = params.toString()
-  const res = await request<{ services: PosServiceSummary[] }>(
+  const res = await request<{ services: PosCatalogItem[] }>(
     `/api/pos/services${qs ? `?${qs}` : ''}`,
   )
   return res.services

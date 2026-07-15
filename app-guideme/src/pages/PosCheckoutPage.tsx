@@ -69,9 +69,9 @@ function errorMessage(error: unknown): string {
     if (error.code === 'NOT_FOUND') {
       return 'Un servicio u horario seleccionado ya no está disponible. Por favor, vuelve a armar tu carrito.'
     }
-    // US-AG38 — lodging confirm errors.
-    if (error.code === 'UNIT_UNAVAILABLE') {
-      return 'La unidad ya no está disponible para esas fechas. Quítala del carrito o elige otras fechas.'
+    // US-AG38 (v2) — lodging confirm errors (per-night count guard).
+    if (error.code === 'INSUFFICIENT_INVENTORY') {
+      return 'Ya no hay habitaciones suficientes para esas fechas — alguien más las tomó. Quita la estancia del carrito y vuelve a elegirla.'
     }
     if (error.code === 'MIN_STAY_NOT_MET') {
       return 'Una estancia no cumple la estancia mínima de noches. Ajústala e inténtalo de nuevo.'

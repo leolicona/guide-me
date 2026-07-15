@@ -4,7 +4,7 @@ import AddRounded from '@mui/icons-material/AddRounded'
 import { SectionCard } from '../../../components'
 import { useUnits } from '../hooks/useUnits'
 import { useUnitMutations } from '../hooks/useUnitMutations'
-import type { AccommodationUnit } from '../types'
+import type { AccommodationUnitType } from '../types'
 import { UnitRow } from './UnitRow'
 import { fromNightlyRate } from '../lodging'
 import { UnitFormDialog } from './UnitFormDialog'
@@ -15,20 +15,21 @@ interface UnitsSectionProps {
   serviceId: string
 }
 
-type SheetTarget = { kind: 'seasons' | 'blockouts'; unit: AccommodationUnit } | null
+type SheetTarget = { kind: 'seasons' | 'blockouts'; unit: AccommodationUnitType } | null
 
-// US-A59 — the lodging service detail's Units section (Detail-screen archetype). The single accent
-// affordance is "Agregar unidad"; rows expose Editar / Temporadas / Bloqueos / Desactivar.
+// US-A59 (v2) — the lodging service detail's Unit Types section (Detail-screen archetype). The
+// single accent affordance is "Agregar tipo"; rows expose Editar / Temporadas / Bloqueos /
+// Desactivar. Each row carries its inventory count (rooms of the type).
 export function UnitsSection({ serviceId }: UnitsSectionProps) {
   const { data: units, isLoading } = useUnits(serviceId)
   const { deactivate, reactivate } = useUnitMutations(serviceId)
-  const [editing, setEditing] = useState<AccommodationUnit | null>(null)
+  const [editing, setEditing] = useState<AccommodationUnitType | null>(null)
   const [creating, setCreating] = useState(false)
   const [sheet, setSheet] = useState<SheetTarget>(null)
 
   return (
     <SectionCard
-      title="Unidades"
+      title="Tipos de unidad"
       action={
         <Button
           variant="contained"
@@ -36,7 +37,7 @@ export function UnitsSection({ serviceId }: UnitsSectionProps) {
           startIcon={<AddRounded />}
           onClick={() => setCreating(true)}
         >
-          Agregar unidad
+          Agregar tipo
         </Button>
       }
     >
@@ -52,6 +53,7 @@ export function UnitsSection({ serviceId }: UnitsSectionProps) {
               unit={{
                 name: unit.name,
                 unit_type: unit.unit_type,
+                inventory_count: unit.inventory_count,
                 beds: unit.beds,
                 base_occupancy: unit.base_occupancy,
                 max_capacity: unit.max_capacity,
@@ -95,7 +97,7 @@ export function UnitsSection({ serviceId }: UnitsSectionProps) {
         </Stack>
       ) : (
         <Typography color="text.secondary">
-          Aún no hay unidades — agrega la primera para poder vender.
+          Aún no hay tipos de unidad — agrega el primero para poder vender.
         </Typography>
       )}
 

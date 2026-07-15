@@ -1,7 +1,7 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { createService, type ServiceInput } from '../../../services/catalogService'
 import {
-  createUnit,
+  createUnitType,
   createSeason,
   createBlockout,
 } from '../../../services/lodgingCatalogService'
@@ -43,6 +43,7 @@ const toUnitInput = (u: UnitDraft) => ({
   // (unit_type is `z.string().min(1).nullable().optional()`), so an empty/blank value must become
   // null — matching UnitFormDialog's mapping. (Found via live smoke test: POST /units → 400.)
   unit_type: u.unit_type?.trim() ? u.unit_type.trim() : null,
+  inventory_count: u.inventory_count,
   beds: u.beds,
   base_occupancy: u.base_occupancy,
   max_capacity: u.max_capacity,
@@ -73,7 +74,7 @@ async function createLodgingFull(
   for (const draft of payload.units) {
     let unitId: string
     try {
-      const unit = await createUnit(service.id, toUnitInput(draft))
+      const unit = await createUnitType(service.id, toUnitInput(draft))
       unitId = unit.id
     } catch {
       failures += 1
@@ -93,6 +94,7 @@ async function createLodgingFull(
         createBlockout(service.id, unitId, {
           start_date: b.start_date,
           end_date: b.end_date,
+          quantity: b.quantity,
           reason: b.reason ?? null,
         }),
       ),

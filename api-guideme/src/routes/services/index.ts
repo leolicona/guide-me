@@ -40,23 +40,23 @@ import {
 import {
   addBlockout,
   addSeason,
-  createUnit,
-  deactivateUnit,
+  createUnitType,
+  deactivateUnitType,
   deleteBlockout,
   deleteSeason,
   listBlockouts,
   listSeasons,
-  listUnits,
-  reactivateUnit,
+  listUnitTypes,
+  reactivateUnitType,
   updateSeason,
-  updateUnit,
+  updateUnitType,
 } from './lodging.handler'
 import {
   createBlockoutSchema,
   createSeasonSchema,
-  createUnitSchema,
+  createUnitTypeSchema,
   updateSeasonSchema,
-  updateUnitSchema,
+  updateUnitTypeSchema,
 } from './lodging.schema'
 
 const services = new Hono<{
@@ -125,41 +125,42 @@ services.post(
 services.get('/:id/schedules', listSchedules)
 services.post('/:id/schedules/:scheduleId/deactivate', deactivateSchedule)
 
-// Accommodation / lodging (US-A59–A63) — units + per-unit seasons & blockouts, nested under a
-// lodging service. Admin-only via the `*` middleware above. Spec: docs/lodging/accommodation-stays.spec.md.
+// Accommodation / lodging (US-A59–A63, v2 unit-type inventory) — unit types + per-type seasons &
+// quantity block-outs, nested under a lodging service. Admin-only via the `*` middleware above.
+// Spec: docs/lodging/accommodation-stays.spec.md (v2, per docs/RFCs/rfc-airbnb-inventory-model.md).
 services.post(
-  '/:id/units',
-  zValidator('json', createUnitSchema, validationHook),
-  createUnit,
+  '/:id/unit-types',
+  zValidator('json', createUnitTypeSchema, validationHook),
+  createUnitType,
 )
-services.get('/:id/units', listUnits)
+services.get('/:id/unit-types', listUnitTypes)
 services.put(
-  '/:id/units/:unitId',
-  zValidator('json', updateUnitSchema, validationHook),
-  updateUnit,
+  '/:id/unit-types/:typeId',
+  zValidator('json', updateUnitTypeSchema, validationHook),
+  updateUnitType,
 )
-services.post('/:id/units/:unitId/deactivate', deactivateUnit)
-services.post('/:id/units/:unitId/reactivate', reactivateUnit)
+services.post('/:id/unit-types/:typeId/deactivate', deactivateUnitType)
+services.post('/:id/unit-types/:typeId/reactivate', reactivateUnitType)
 
 services.post(
-  '/:id/units/:unitId/seasons',
+  '/:id/unit-types/:typeId/seasons',
   zValidator('json', createSeasonSchema, validationHook),
   addSeason,
 )
-services.get('/:id/units/:unitId/seasons', listSeasons)
+services.get('/:id/unit-types/:typeId/seasons', listSeasons)
 services.put(
-  '/:id/units/:unitId/seasons/:seasonId',
+  '/:id/unit-types/:typeId/seasons/:seasonId',
   zValidator('json', updateSeasonSchema, validationHook),
   updateSeason,
 )
-services.delete('/:id/units/:unitId/seasons/:seasonId', deleteSeason)
+services.delete('/:id/unit-types/:typeId/seasons/:seasonId', deleteSeason)
 
 services.post(
-  '/:id/units/:unitId/blockouts',
+  '/:id/unit-types/:typeId/blockouts',
   zValidator('json', createBlockoutSchema, validationHook),
   addBlockout,
 )
-services.get('/:id/units/:unitId/blockouts', listBlockouts)
-services.delete('/:id/units/:unitId/blockouts/:blockoutId', deleteBlockout)
+services.get('/:id/unit-types/:typeId/blockouts', listBlockouts)
+services.delete('/:id/unit-types/:typeId/blockouts/:blockoutId', deleteBlockout)
 
 export default services

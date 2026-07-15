@@ -96,15 +96,18 @@ export const unitCommissionFromApi = (
       ? { commission_type: 'fixed', commission_value: centsToAmount(value) }
       : { commission_type: 'percent', commission_value: basisPointsToPercent(value) }
 
-// --- Accommodation / lodging (docs/lodging/accommodation-stays.spec.md) ---
-// A lodging service owns named units; each unit has nightly rates, seasonal overrides, and
-// block-outs. All money fields are minor units (centavos) like the rest of the catalog.
+// --- Accommodation / lodging (docs/lodging/accommodation-stays.spec.md, v2) ---
+// A lodging service owns UNIT TYPES (Airbnb/OTA model): each type has an inventory count,
+// nightly rates, seasonal overrides, and quantity block-outs. All money fields are minor
+// units (centavos) like the rest of the catalog.
 
-export interface AccommodationUnit {
+export interface AccommodationUnitType {
   id: string
   service_id: string
   name: string
   unit_type: string | null
+  /** How many interchangeable rooms of this type exist (1 = boutique). */
+  inventory_count: number
   beds: number
   base_occupancy: number
   max_capacity: number
@@ -129,7 +132,7 @@ export interface AccommodationUnit {
 
 export interface Season {
   id: string
-  unit_id: string
+  unit_type_id: string
   name: string
   /** 'YYYY-MM-DD'. */
   start_date: string
@@ -141,7 +144,9 @@ export interface Season {
 
 export interface Blockout {
   id: string
-  unit_id: string
+  unit_type_id: string
+  /** v2 (D11) — rooms of the type removed from inventory; overlapping block-outs sum. */
+  quantity: number
   /** 'YYYY-MM-DD'. Half-open [start_date, end_date) like the reservation model. */
   start_date: string
   end_date: string

@@ -14,15 +14,15 @@ import {
 } from '@mui/material'
 import { unitFormSchema, type UnitFormData } from '../schemas'
 import { centsToAmount, unitCommissionToApi, unitCommissionFromApi } from '../types'
-import type { AccommodationUnit } from '../types'
+import type { AccommodationUnitType } from '../types'
 import { useUnitMutations } from '../hooks/useUnitMutations'
 import { ServiceError } from '../../../services/authService'
 import { UnitFields } from './UnitFields'
 
 interface UnitFormDialogProps {
   serviceId: string
-  /** null → create; a unit → edit (prefilled). */
-  unit: AccommodationUnit | null
+  /** null → create; a unit type → edit (prefilled). */
+  unit: AccommodationUnitType | null
   open: boolean
   onClose: () => void
 }
@@ -30,6 +30,7 @@ interface UnitFormDialogProps {
 const EMPTY: UnitFormData = {
   name: '',
   unit_type: '',
+  inventory_count: 1,
   beds: 1,
   base_occupancy: 2,
   max_capacity: 4,
@@ -47,6 +48,7 @@ const EMPTY: UnitFormData = {
 const toInput = (data: UnitFormData) => ({
   name: data.name.trim(),
   unit_type: data.unit_type?.trim() ? data.unit_type.trim() : null,
+  inventory_count: data.inventory_count,
   beds: data.beds,
   base_occupancy: data.base_occupancy,
   max_capacity: data.max_capacity,
@@ -82,6 +84,7 @@ export function UnitFormDialog({ serviceId, unit, open, onClose }: UnitFormDialo
         methods.reset({
           name: unit.name,
           unit_type: unit.unit_type ?? '',
+          inventory_count: unit.inventory_count,
           beds: unit.beds,
           base_occupancy: unit.base_occupancy,
           max_capacity: unit.max_capacity,

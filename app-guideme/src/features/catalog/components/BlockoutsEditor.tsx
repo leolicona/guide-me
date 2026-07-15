@@ -21,6 +21,7 @@ export function BlockoutsEditor({ serviceId, unitId, unitName, open, onClose }: 
     id: b.id,
     start_date: b.start_date,
     end_date: b.end_date,
+    quantity: b.quantity,
     reason: b.reason ?? undefined,
   }))
 
@@ -29,7 +30,12 @@ export function BlockoutsEditor({ serviceId, unitId, unitName, open, onClose }: 
     const added = next.find((r) => !rows.some((v) => v.id === r.id))
     if (added) {
       create.mutate(
-        { start_date: added.start_date, end_date: added.end_date, reason: added.reason ?? null },
+        {
+          start_date: added.start_date,
+          end_date: added.end_date,
+          quantity: added.quantity,
+          reason: added.reason ?? null,
+        },
         { onError: () => setError('No se pudo guardar el bloqueo.') },
       )
       return

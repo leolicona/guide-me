@@ -17,6 +17,8 @@ export interface BlockoutRowValue {
   id: string
   start_date: string
   end_date: string
+  /** v2 (D11) — rooms of the type taken out of inventory (≥ 1). */
+  quantity: number
   reason?: string
 }
 
@@ -26,7 +28,7 @@ interface BlockoutsFieldProps {
   disabled?: boolean
 }
 
-const EMPTY = { start_date: '', end_date: '', reason: '' }
+const EMPTY = { start_date: '', end_date: '', quantity: '1', reason: '' }
 
 // Controlled list + add-row core (mode-agnostic, no network). Reused by BlockoutsEditor (mutations)
 // and the wizard's UnitDraftSheet (local draft array).
@@ -38,6 +40,7 @@ export function BlockoutsField({ value, onChange, disabled }: BlockoutsFieldProp
     const parsed = blockoutFormSchema.safeParse({
       start_date: draft.start_date,
       end_date: draft.end_date,
+      quantity: Number(draft.quantity),
       reason: draft.reason.trim() || undefined,
     })
     if (!parsed.success) {
@@ -73,6 +76,7 @@ export function BlockoutsField({ value, onChange, disabled }: BlockoutsFieldProp
           <Box sx={{ minWidth: 0 }}>
             <Typography variant="body2" sx={{ fontWeight: 600 }}>
               {b.start_date} → {b.end_date}
+              {b.quantity > 1 ? ` · ${b.quantity} hab.` : ''}
             </Typography>
             {b.reason && (
               <Typography variant="caption" color="text.secondary" noWrap>
@@ -112,6 +116,17 @@ export function BlockoutsField({ value, onChange, disabled }: BlockoutsFieldProp
           value={draft.end_date}
           onChange={(e) => setDraft({ ...draft, end_date: e.target.value })}
           slotProps={{ inputLabel: { shrink: true } }}
+        />
+        {/* v2 (D11) — rooms taken out of the pool; 1 covers the boutique (count-1) case. */}
+        <TextField
+          label="Habitaciones"
+          type="number"
+          size="small"
+          fullWidth
+          disabled={disabled}
+          value={draft.quantity}
+          onChange={(e) => setDraft({ ...draft, quantity: e.target.value })}
+          slotProps={{ htmlInput: { step: 1, min: 1, inputMode: 'numeric' } }}
         />
         <TextField
           label="Motivo (opcional)"

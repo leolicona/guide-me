@@ -21,15 +21,16 @@ interface LabelableLine {
   quantity: number
 }
 
-/** The secondary meta line under a folio line's name: a stay shows its range · nights · guests,
- * a tour shows its date · time · quantity. */
+/** The secondary meta line under a folio line's name: a stay shows its range · nights · guests
+ * (· rooms when > 1 — v2 unit-type quantities), a tour shows its date · time · quantity. */
 export function folioLineMeta(line: LabelableLine): string {
   if (line.line_type === 'stay' && line.check_in && line.check_out) {
     const nights = line.nights ?? 0
     const guests = line.guests ?? 0
+    const rooms = line.quantity > 1 ? ` · ${line.quantity} habitaciones` : ''
     return `${dayShort(line.check_in)} → ${dayShort(line.check_out)} · ${nights} ${
       nights === 1 ? 'noche' : 'noches'
-    } · ${guests} ${guests === 1 ? 'huésped' : 'huéspedes'}`
+    } · ${guests} ${guests === 1 ? 'huésped' : 'huéspedes'}${rooms}`
   }
   return `${line.slot_date ?? ''} · ${line.slot_start_time ?? ''} · ${line.quantity}×`
 }

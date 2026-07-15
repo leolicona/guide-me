@@ -3,7 +3,7 @@ import { Box, Typography, IconButton, Stack } from '@mui/material'
 import { alpha } from '@mui/material/styles'
 import ChevronLeftRounded from '@mui/icons-material/ChevronLeftRounded'
 import ChevronRightRounded from '@mui/icons-material/ChevronRightRounded'
-import { monthOf, addMonths, daysInMonth, firstWeekdayMondayBased } from '../dates'
+import { monthOf, addMonths, addDays, daysInMonth, firstWeekdayMondayBased } from '../dates'
 
 const MONTHS_ES = [
   'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
@@ -21,23 +21,43 @@ export interface DateRangeValue {
   check_out: string | null
 }
 
-export type DayStatus = 'available' | 'blocked' | 'booked'
-
 interface DateRangeCalendarProps {
   value: DateRangeValue
   onChange: (v: DateRangeValue) => void
   /** Floor — earlier days are disabled. */
   today: string
-  /** Optional per-day status (unit-first calendar). Non-available days are disabled + tinted. */
-  dayStatus?: Map<string, DayStatus>
+  /** v2 (type-first calendar) — rooms REMAINING per night. A night with fewer rooms free than
+   * `requiredQuantity` is disabled + tinted. Days absent from the map count as available
+   * (outside the fetched window the server stays authoritative at confirm). */
+  dayRemaining?: Map<string, number>
+  /** Rooms the agent wants (D12); a night needs `remaining ≥ requiredQuantity`. Default 1. */
+  requiredQuantity?: number
 }
 
 // US-AG36/AG37 — the US-AG35 day grid extended to RANGE selection: first tap = check-in, second =
-// check-out (an earlier second tap restarts). The inclusive range fills teal; blocked/booked days
-// render disabled with a legend. Checkout-day reuse means a stay's last night frees the checkout.
-export function DateRangeCalendar({ value, onChange, today, dayStatus }: DateRangeCalendarProps) {
+// check-out (an earlier second tap restarts). The inclusive range fills teal; nights without
+// enough remaining rooms render disabled with a legend. Checkout-day reuse means a stay's last
+// night frees the checkout.
+export function DateRangeCalendar({
+  value,
+  onChange,
+  today,
+  dayRemaining,
+  requiredQuantity = 1,
+}: DateRangeCalendarProps) {
   const currentMonth = monthOf(today)
   const [visibleMonth, setVisibleMonth] = useState(() => monthOf(value.check_in ?? today))
+
+  // Every night in [from, to) has enough remaining rooms. Nights missing from the map count as
+  // available (outside the fetched window the server stays authoritative at confirm).
+  const spanAvailable = (from: string, to: string): boolean => {
+    if (!dayRemaining) return true
+    for (let d = from; d < to; d = addDays(d, 1)) {
+      const remaining = dayRemaining.get(d)
+      if (remaining !== undefined && remaining < requiredQuantity) return false
+    }
+    return true
+  }
 
   const handleTap = (date: string) => {
     // No range yet, or a complete range exists → start fresh at this date.
@@ -45,9 +65,15 @@ export function DateRangeCalendar({ value, onChange, today, dayStatus }: DateRan
       onChange({ check_in: date, check_out: null })
       return
     }
-    // Second tap: after the check-in → close the range; on/before → restart.
-    if (date > value.check_in) onChange({ check_in: value.check_in, check_out: date })
-    else onChange({ check_in: date, check_out: null })
+    // Second tap after the check-in → close the range, but ONLY if no night inside it lacks
+    // inventory — a span across a full night can never be sold, so the tap restarts there
+    // instead (the Airbnb pattern; prevents dead-end "not available" quotes). On/before the
+    // check-in → restart.
+    if (date > value.check_in && spanAvailable(value.check_in, date)) {
+      onChange({ check_in: value.check_in, check_out: date })
+    } else {
+      onChange({ check_in: date, check_out: null })
+    }
   }
 
   const inRange = (date: string): boolean =>
@@ -89,8 +115,8 @@ export function DateRangeCalendar({ value, onChange, today, dayStatus }: DateRan
         {days.map((day) => {
           const date = `${visibleMonth}-${pad2(day)}`
           const isPast = date < today
-          const status = dayStatus?.get(date)
-          const unavailable = !!dayStatus && status !== undefined && status !== 'available'
+          const remaining = dayRemaining?.get(date)
+          const unavailable = remaining !== undefined && remaining < requiredQuantity
           const disabled = isPast || unavailable
           const isEndpoint = date === value.check_in || date === value.check_out
           const isInRange = inRange(date)
@@ -129,7 +155,7 @@ export function DateRangeCalendar({ value, onChange, today, dayStatus }: DateRan
                   ? 'primary.main'
                   : isInRange
                     ? 'var(--teal-50, #F0FDFA)'
-                    : status === 'blocked' || status === 'booked'
+                    : unavailable
                       ? 'var(--slate-100, #F1F5F9)'
                       : 'transparent',
                 '&:hover': {
@@ -137,7 +163,7 @@ export function DateRangeCalendar({ value, onChange, today, dayStatus }: DateRan
                     disabled
                       ? isEndpoint
                         ? t.palette.primary.main
-                        : status === 'blocked' || status === 'booked'
+                        : unavailable
                           ? 'var(--slate-100, #F1F5F9)'
                           : 'transparent'
                       : alpha(t.palette.primary.main, 0.1),
@@ -150,10 +176,9 @@ export function DateRangeCalendar({ value, onChange, today, dayStatus }: DateRan
         })}
       </Box>
 
-      {dayStatus && (
+      {dayRemaining && (
         <Stack direction="row" spacing={2} sx={{ mt: 1.5, justifyContent: 'center' }}>
-          <Legend color="var(--slate-300, #CBD5E1)" label="No disponible" />
-          <Legend color="var(--amber-600, #B45309)" label="Ocupado" />
+          <Legend color="var(--slate-300, #CBD5E1)" label="Sin disponibilidad" />
         </Stack>
       )}
     </Box>

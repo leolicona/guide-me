@@ -2,17 +2,33 @@ import { useFormContext } from 'react-hook-form'
 import {
   Stack,
   TextField,
+  Typography,
   InputAdornment,
   ToggleButton,
   ToggleButtonGroup,
 } from '@mui/material'
 import { StepIntro } from './StepIntro'
+import { amountToCents, formatMoney } from '../../types'
+import type { UnitDraft } from '../../hooks/useCreateLodgingFull'
 import type { WizardFormData } from './wizardSchema'
 
-// Lodging Step 2 — the service-level commission ANY seller earns for this property (US-A12). One
-// rate for the whole property; per-unit rates are out of scope. Mirrors the catalog form's
-// commission control (percent ↔ $ per stay).
-export function StepCommission() {
+// The nightly-rate context line derived from the type drafts (major-unit values). The commission
+// step CLOSES the lodging track precisely so this anchor exists — a fixed $-per-stay commission
+// set blind is how nonsense values happen (lodging has no backend cap, unlike tours).
+const rateContext = (units: UnitDraft[]): string | null => {
+  const rates = units.map((u) => u.base_rate).filter((r) => r > 0)
+  if (rates.length === 0) return null
+  const min = Math.min(...rates)
+  const max = Math.max(...rates)
+  return min === max
+    ? `Tus tipos cuestan ${formatMoney(amountToCents(min))} por noche.`
+    : `Tus tipos van de ${formatMoney(amountToCents(min))} a ${formatMoney(amountToCents(max))} por noche.`
+}
+
+// Lodging Step 3 — the service-level commission ANY seller earns for this property (US-A12),
+// decided WITH the nightly rates from Step 2 in view. One base rate for the whole property; each
+// type can override it individually (the Heredar/%/$ control on the type form).
+export function StepCommission({ units }: { units: UnitDraft[] }) {
   const {
     register,
     watch,
@@ -20,12 +36,17 @@ export function StepCommission() {
     formState: { errors },
   } = useFormContext<WizardFormData>()
   const commissionType = watch('commission_type')
+  const context = rateContext(units)
 
   return (
     <Stack spacing={2.5}>
       <StepIntro
         title="Comisión"
-        subtitle="La comisión que gana quien venda este hospedaje. Aplica a toda la propiedad."
+        subtitle={
+          context
+            ? `${context} Define lo que gana quien venda este hospedaje.`
+            : 'La comisión que gana quien venda este hospedaje. Aplica a toda la propiedad.'
+        }
       />
       <Stack direction="row" spacing={2}>
         <ToggleButtonGroup
@@ -65,6 +86,9 @@ export function StepCommission() {
           {...register('commission_value', { valueAsNumber: true })}
         />
       </Stack>
+      <Typography variant="caption" color="text.secondary">
+        Es la comisión base de la propiedad — puedes ajustar la de cada tipo al editarlo.
+      </Typography>
     </Stack>
   )
 }

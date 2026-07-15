@@ -25,11 +25,13 @@ export const STEP_TITLES: Record<WizardStep, string> = {
   4: 'Extras',
 }
 
-// US-A59 — the lodging track is 3 steps (no slots/extras; units replace availability).
+// US-A59 (v2) — the lodging track is 3 steps (no slots/extras; unit types replace availability).
+// The types come BEFORE the commission so the property-wide rate is decided with the nightly
+// prices in view (a fixed $-per-stay commission is meaningless without a rate anchor).
 const LODGING_STEP_TITLES: Record<number, string> = {
   1: 'Información',
-  2: 'Comisión',
-  3: 'Unidades',
+  2: 'Tipos de unidad',
+  3: 'Comisión',
 }
 
 /** Category-aware step count: tour 4 · lodging 3. */

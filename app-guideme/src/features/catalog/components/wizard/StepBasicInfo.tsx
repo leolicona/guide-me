@@ -27,7 +27,13 @@ export function StepBasicInfo() {
         fullWidth
         autoFocus
         error={!!errors.name}
-        helperText={errors.name?.message}
+        // Lodging registers the PROPERTY here (its accommodations come in the next step).
+        helperText={
+          errors.name?.message ??
+          (category === 'lodging'
+            ? 'El nombre de la propiedad — p. ej. Cabañas Alcatraz, Hotel Centro'
+            : undefined)
+        }
         {...register('name')}
       />
 

@@ -88,6 +88,8 @@ export const unitFormSchema = z
   .object({
     name: z.string().min(1, 'El nombre es obligatorio'),
     unit_type: z.string().optional(),
+    // v2 — how many interchangeable rooms of this type exist (1 = a unique boutique unit).
+    inventory_count: positiveInt('el inventario'),
     beds: positiveInt('las camas'),
     base_occupancy: positiveInt('la ocupación base'),
     max_capacity: positiveInt('la capacidad máxima'),
@@ -139,6 +141,8 @@ export const blockoutFormSchema = z
   .object({
     start_date: dateStr,
     end_date: dateStr,
+    // v2 (D11) — rooms of the type taken out of inventory for the range (≥ 1).
+    quantity: positiveInt('la cantidad'),
     reason: z.string().optional(),
   })
   .refine((v) => v.end_date > v.start_date, {

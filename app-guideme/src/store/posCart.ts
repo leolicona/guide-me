@@ -31,22 +31,25 @@ export interface SlotCartLine {
   extras: CartExtra[]
 }
 
-/** US-AG38 — a lodging stay line: a unit + date range + guests. No per-night discounting in v1;
- * the server re-quotes + snapshots the total on confirm (cart `total` mirrors it for display). */
+/** US-AG38 (v2) — a lodging stay line: `quantity` rooms of a unit type + date range + total
+ * guests (D12). No per-night discounting; the server re-quotes + snapshots the total on confirm
+ * (cart `total` mirrors it for display). */
 export interface StayCartLine {
   kind: 'stay'
   /** Stable client key (a stay has no slot id). */
   id: string
   service: CartService
-  unit_id: string
-  unit_name: string
+  unit_type_id: string
+  unit_type_name: string
   check_in: string
   check_out: string
   guests: number
+  /** Rooms reserved (≥ 1). */
+  quantity: number
   nights: number
   /** Stay total in minor units (server is authoritative). */
   total: number
-  /** Per-night rate breakdown (display only). */
+  /** Per-night rate breakdown, summed across rooms (display only). */
   per_night: StayNight[]
 }
 
@@ -56,14 +59,16 @@ export type CartLine = SlotCartLine | StayCartLine
 export const lineKey = (line: CartLine): string =>
   line.kind === 'slot' ? line.slot.id : line.id
 
-/** Input for adding a stay line (US-AG38). */
+/** Input for adding a stay line (US-AG38, v2). */
 export interface AddStayInput {
   service: CartService
-  unit_id: string
-  unit_name: string
+  unit_type_id: string
+  unit_type_name: string
   check_in: string
   check_out: string
   guests: number
+  /** Rooms reserved (≥ 1). */
+  quantity: number
   nights: number
   total: number
   per_night: StayNight[]
@@ -282,10 +287,11 @@ export const toConfirmPayload = (state: PosCartState): ConfirmSaleInput => ({
           extras: l.extras.map((e) => ({ extra_id: e.extra.id, quantity: e.quantity })),
         }
       : {
-          unit_id: l.unit_id,
+          unit_type_id: l.unit_type_id,
           check_in: l.check_in,
           check_out: l.check_out,
           guests: l.guests,
+          quantity: l.quantity,
         },
   ),
 })

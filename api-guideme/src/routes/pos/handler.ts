@@ -5,7 +5,7 @@ import { getDb, type Db } from '../../db/client'
 import {
   accommodationReservations,
   accommodationSeasons,
-  accommodationUnits,
+  accommodationUnitTypes,
   affiliateCommissions,
   folioAccessTokens,
   folioLineExtras,
@@ -36,7 +36,7 @@ import {
   quoteStay,
   type SeasonRate,
 } from '../../utils/lodging'
-import { lodgingCatalogInfo } from './lodging.handler'
+import { lodgingAvailableDays, lodgingTypeCards } from './lodging.handler'
 import type { ConfirmSaleInput } from './schema'
 
 export type PosContext = Context<{
@@ -228,49 +228,75 @@ export const listPosServices = async (c: PosContext) => {
     availabilityRows.map((r) => [r.serviceId, r]),
   )
 
-  // Lodging (docs/lodging/accommodation-stays.spec.md §4.3) has no slots: its availability comes
-  // from units/reservations/blockouts, and the card shows "Desde $X / noche" (from_nightly_rate)
-  // rather than a per-ticket base_price. Tours are unchanged.
-  const lodgingIds = serviceRows.filter((s) => s.category === 'lodging').map((s) => s.id)
-  const lodgingInfo = await lodgingCatalogInfo(
+  // Lodging (spec §4.3, D14 — FLATTENED catalog): the parent lodging service is never a card;
+  // it contributes one `unit_type` card per active type, each with its exact nightly rate,
+  // per-night-windowed availability, and the `remaining` count ("Quedan N"). Tours are unchanged
+  // apart from the `item_type` discriminator.
+  const lodgingServices = serviceRows.filter((s) => s.category === 'lodging')
+  const typeCards = await lodgingTypeCards(
     db,
     agent.organizationId,
-    lodgingIds,
+    lodgingServices.map((s) => s.id),
     windowFrom,
     windowTo,
   )
+  const lodgingServiceById = new Map(lodgingServices.map((s) => [s.id, s]))
 
-  const result = serviceRows.map((s) => {
-    const a = availability.get(s.id)
-    const isLodging = s.category === 'lodging'
-    const lodging = isLodging ? lodgingInfo.get(s.id) : undefined
+  const tourCards = serviceRows
+    .filter((s) => s.category !== 'lodging')
+    .map((s) => {
+      const a = availability.get(s.id)
+      return {
+        item_type: 'tour' as const,
+        id: s.id,
+        name: s.name,
+        description: s.description,
+        base_price: s.basePrice,
+        minimum_price: s.minimumPrice,
+        // US-A36 — capacity-mode flags let the client badge a flexible service and compute the
+        // effective margin per slot on the detail screen. available_spots already reflects the
+        // effective Σ remaining (see the availability query above).
+        is_flexible: s.isFlexible,
+        flex_capacity_pct: s.flexCapacityPct,
+        // US-A37 — primary category (or null for a pre-migration service); drives the POS
+        // filter chips, which the client derives from the present, non-null categories.
+        category: s.category,
+        // US-AG30 — lightweight boolean (no count): ≥ 1 in-window slot is sellable.
+        has_availability: a ? Number(a.availableSpots) > 0 : false,
+        next_slot_date: a ? a.nextSlotDate : null,
+      }
+    })
+
+  const unitTypeCards = typeCards.map((t) => {
+    const parent = lodgingServiceById.get(t.serviceId)
     return {
-      id: s.id,
-      name: s.name,
-      description: s.description,
-      base_price: s.basePrice,
-      minimum_price: s.minimumPrice,
-      // US-A36 — capacity-mode flags let the client badge a flexible service and compute the
-      // effective margin per slot on the detail screen. available_spots already reflects the
-      // effective Σ remaining (see the availability query above).
-      is_flexible: s.isFlexible,
-      flex_capacity_pct: s.flexCapacityPct,
-      // US-A37 — primary category (or null for a pre-migration service); drives the POS
-      // filter chips, which the client derives from the present, non-null categories.
-      category: s.category,
-      // Lodging-only: min nightly rate across active units (null if none). Absent for tours.
-      from_nightly_rate: isLodging ? (lodging?.fromNightlyRate ?? null) : undefined,
-      // US-AG30 — lightweight boolean (no count). For a tour: ≥ 1 in-window slot is sellable.
-      // For lodging: ≥ 1 active unit has a free night in the window.
-      has_availability: isLodging
-        ? (lodging?.hasAvailability ?? false)
-        : a
-          ? Number(a.availableSpots) > 0
-          : false,
-      // Lodging has no slot dates; tours keep their earliest in-window slot date.
-      next_slot_date: isLodging ? null : a ? a.nextSlotDate : null,
+      item_type: 'unit_type' as const,
+      // Stable id = the unit type's id (frontend keys / folio deep-links / filters hang on it).
+      id: t.id,
+      service_id: t.serviceId,
+      name: t.name,
+      // The parent property, for card context ("Habitación Estándar · Hotel Centro").
+      property_name: parent?.name ?? '',
+      description: parent?.description ?? null,
+      unit_type: t.unitType,
+      category: 'lodging' as const,
+      // Exact per-night price (the type's own base rate) — no aggregated "Desde $X".
+      nightly_rate: t.nightlyRate,
+      // Hard guest cap per room (D12) — the stay sheet caps guests at max_capacity × rooms
+      // before the first quote, so an over-capacity request can never be formed.
+      max_capacity: t.maxCapacity,
+      // Per-night min remaining ≥ 1 over the selected window (§3.3).
+      has_availability: t.hasAvailability,
+      // Drives the "Quedan N" low-inventory badge.
+      remaining: t.remaining,
+      next_slot_date: null,
     }
   })
+
+  // One mixed list, alphabetical like the v1 catalog (tour names + type names interleaved).
+  const result = [...tourCards, ...unitTypeCards].sort((x, y) =>
+    x.name.localeCompare(y.name),
+  )
 
   return c.json({ services: result })
 }
@@ -322,7 +348,6 @@ export const listAvailabilityDays = async (c: PosContext) => {
         lte(slots.date, monthEnd),
         sellableSlotSql(sellableThreshold),
         // US-A37 — scope the dots to the agent's selected category filter (when any).
-        // Lodging carries no slots, so it never surfaces here regardless of the set.
         ...(categories ? [inArray(services.category, categories)] : []),
         // US-A36 — effective remaining > 0 per slot: raw remaining plus the flexible margin
         // (floor(capacity × pct / 100)) for a Soft Cap service. Grouping by date then yields
@@ -336,7 +361,21 @@ export const listAvailabilityDays = async (c: PosContext) => {
     .groupBy(slots.date)
     .orderBy(asc(slots.date))
 
-  return c.json({ days: rows.map((r) => r.date) })
+  // Lodging (spec §4.3, v2): REAL availability dots from per-night counts — a day lights up when
+  // any active unit type of an active lodging service has remaining ≥ 1 that night. Included when
+  // the category filter is absent or names 'lodging' (this retires the frontend lodgingInScope hack).
+  const days = new Set(rows.map((r) => r.date))
+  if (!categories || categories.includes('lodging')) {
+    const lodgingDays = await lodgingAvailableDays(
+      db,
+      agent.organizationId,
+      windowFrom,
+      monthEnd,
+    )
+    for (const d of lodgingDays) days.add(d)
+  }
+
+  return c.json({ days: [...days].sort() })
 }
 
 // US-AG03 / AG04 / AG05 — POS service detail: one active service in the caller's org
@@ -466,7 +505,7 @@ interface PreparedExtra {
 
 interface PreparedLine {
   id: string
-  // 'slot' = tour line (slotId set); 'stay' = lodging line (unitId/checkIn/checkOut set, slotId null).
+  // 'slot' = tour line (slotId set); 'stay' = lodging line (unitTypeId/checkIn/checkOut set, slotId null).
   lineType: 'slot' | 'stay'
   slotId: string | null
   serviceId: string
@@ -479,7 +518,8 @@ interface PreparedLine {
   unitPrice: number
   lineTotal: number
   // Service-based commission snapshot (US-A12 rev.): percent → value is basis points of the
-  // line total; fixed → value is minor units per spot (× quantity; for a stay quantity = 1).
+  // line total; fixed → value is minor units per spot (× quantity; for a stay quantity = rooms,
+  // so a fixed commission counts per room-stay — D13).
   commissionType: 'percent' | 'fixed'
   commissionValue: number
   // US-A36 — capacity mode, used to build the effective-capacity guard at decrement time (slot only).
@@ -487,7 +527,7 @@ interface PreparedLine {
   flexCapacityPct: number
   extras: PreparedExtra[]
   // Lodging stay fields (lineType === 'stay').
-  unitId?: string
+  unitTypeId?: string
   checkIn?: string
   checkOut?: string
   guests?: number
@@ -748,56 +788,66 @@ export const confirmSale = async (c: PosContext) => {
   // 1. VALIDATE (reads only) — snapshot prices/names from active, in-org inventory.
   const prepared: PreparedLine[] = []
   for (const line of input.lines) {
-    // --- Lodging STAY line (docs/lodging — has unit_id). Re-quote via the shared engine and
-    // snapshot the total; the atomic overlap guard runs at the reservation insert below. ---
-    if ('unit_id' in line) {
-      const unitRows = await db
+    // --- Lodging STAY line (docs/lodging v2 — has unit_type_id): `quantity` rooms of a type.
+    // Re-quote via the shared engine (D12) and snapshot the total; the atomic per-night count
+    // guard (D10) runs at the reservation insert below. ---
+    if ('unit_type_id' in line) {
+      const typeRows = await db
         .select({
-          id: accommodationUnits.id,
-          serviceId: accommodationUnits.serviceId,
-          name: accommodationUnits.name,
-          baseRate: accommodationUnits.baseRate,
-          weekendRate: accommodationUnits.weekendRate,
-          extraPersonFee: accommodationUnits.extraPersonFee,
-          baseOccupancy: accommodationUnits.baseOccupancy,
-          maxCapacity: accommodationUnits.maxCapacity,
-          minNights: accommodationUnits.minNights,
-          // Waterfall commission inputs: the unit's own override (nullable) + the service base.
-          unitCommissionType: accommodationUnits.commissionType,
-          unitCommissionValue: accommodationUnits.commissionValue,
+          id: accommodationUnitTypes.id,
+          serviceId: accommodationUnitTypes.serviceId,
+          name: accommodationUnitTypes.name,
+          inventoryCount: accommodationUnitTypes.inventoryCount,
+          baseRate: accommodationUnitTypes.baseRate,
+          weekendRate: accommodationUnitTypes.weekendRate,
+          extraPersonFee: accommodationUnitTypes.extraPersonFee,
+          baseOccupancy: accommodationUnitTypes.baseOccupancy,
+          maxCapacity: accommodationUnitTypes.maxCapacity,
+          minNights: accommodationUnitTypes.minNights,
+          // Waterfall commission inputs: the type's own override (nullable) + the service base.
+          typeCommissionType: accommodationUnitTypes.commissionType,
+          typeCommissionValue: accommodationUnitTypes.commissionValue,
           svcCommissionType: services.commissionType,
           svcCommissionValue: services.commissionValue,
         })
-        .from(accommodationUnits)
-        .innerJoin(services, eq(accommodationUnits.serviceId, services.id))
+        .from(accommodationUnitTypes)
+        .innerJoin(services, eq(accommodationUnitTypes.serviceId, services.id))
         .where(
           and(
-            eq(accommodationUnits.id, line.unit_id),
-            eq(accommodationUnits.organizationId, org),
-            eq(accommodationUnits.status, 'active'),
+            eq(accommodationUnitTypes.id, line.unit_type_id),
+            eq(accommodationUnitTypes.organizationId, org),
+            eq(accommodationUnitTypes.status, 'active'),
             eq(services.status, 'active'),
             eq(services.category, 'lodging'),
           ),
         )
         .limit(1)
-      const unit = unitRows[0]
-      if (!unit) {
-        throw new ApiError('NOT_FOUND', 404, 'Unit not found or unavailable')
+      const unitType = typeRows[0]
+      if (!unitType) {
+        throw new ApiError('NOT_FOUND', 404, 'Unit type not found or unavailable')
       }
 
       if (!(line.check_out > line.check_in)) {
         throw new ApiError('VALIDATION_ERROR', 400, 'check_out must be after check_in')
       }
       const nights = nightsBetween(line.check_in, line.check_out)
-      if (nights < unit.minNights) {
+      if (nights < unitType.minNights) {
         throw new ApiError(
           'MIN_STAY_NOT_MET',
           400,
-          `Minimum stay is ${unit.minNights} night(s)`,
+          `Minimum stay is ${unitType.minNights} night(s)`,
         )
       }
-      if (line.guests < 1 || line.guests > unit.maxCapacity) {
-        throw new ApiError('VALIDATION_ERROR', 400, 'guests exceeds the unit capacity')
+      if (line.quantity > unitType.inventoryCount) {
+        throw new ApiError(
+          'VALIDATION_ERROR',
+          400,
+          `quantity exceeds this type's inventory (${unitType.inventoryCount})`,
+        )
+      }
+      // D12 — capacity is per room × rooms (guests split evenly at quote time).
+      if (line.guests < 1 || line.guests > unitType.maxCapacity * line.quantity) {
+        throw new ApiError('VALIDATION_ERROR', 400, 'guests exceeds the capacity of the rooms')
       }
 
       // Active seasons overlapping the stay → the rate engine.
@@ -811,7 +861,7 @@ export const confirmSale = async (c: PosContext) => {
         .where(
           and(
             eq(accommodationSeasons.organizationId, org),
-            eq(accommodationSeasons.unitId, unit.id),
+            eq(accommodationSeasons.unitTypeId, unitType.id),
             eq(accommodationSeasons.status, 'active'),
             lte(accommodationSeasons.startDate, line.check_out),
             gte(accommodationSeasons.endDate, line.check_in),
@@ -824,27 +874,30 @@ export const confirmSale = async (c: PosContext) => {
       }))
       const quote = quoteStay(
         {
-          baseRate: unit.baseRate,
-          weekendRate: unit.weekendRate,
-          extraPersonFee: unit.extraPersonFee,
-          baseOccupancy: unit.baseOccupancy,
-          maxCapacity: unit.maxCapacity,
-          minNights: unit.minNights,
+          baseRate: unitType.baseRate,
+          weekendRate: unitType.weekendRate,
+          extraPersonFee: unitType.extraPersonFee,
+          baseOccupancy: unitType.baseOccupancy,
+          maxCapacity: unitType.maxCapacity,
+          minNights: unitType.minNights,
         },
         line.check_in,
         line.check_out,
         line.guests,
+        line.quantity,
         seasons,
         weekendDays,
       )
 
-      // Commission waterfall (US-A12): unit override ?? service base; affiliate's per-affiliate
+      // Commission waterfall (US-A12): type override ?? service base; affiliate's per-affiliate
       // rate still wins over both (its own allow-list-gated system, unchanged).
-      let stayCommType = unit.unitCommissionType ?? unit.svcCommissionType
+      let stayCommType = unitType.typeCommissionType ?? unitType.svcCommissionType
       let stayCommValue =
-        unit.unitCommissionType != null ? (unit.unitCommissionValue ?? 0) : unit.svcCommissionValue
+        unitType.typeCommissionType != null
+          ? (unitType.typeCommissionValue ?? 0)
+          : unitType.svcCommissionValue
       if (isAffiliate) {
-        const rate = affiliateRates.get(unit.serviceId)
+        const rate = affiliateRates.get(unitType.serviceId)
         if (!rate) {
           throw new ApiError(
             'SERVICE_NOT_ALLOWED',
@@ -860,12 +913,12 @@ export const confirmSale = async (c: PosContext) => {
         id: crypto.randomUUID(),
         lineType: 'stay',
         slotId: null,
-        serviceId: unit.serviceId,
-        serviceName: unit.name, // unit name snapshot
+        serviceId: unitType.serviceId,
+        serviceName: unitType.name, // type name snapshot
         slotDate: null,
         slotStartTime: null,
-        quantity: 1, // a stay line is one unit for the range; fixed commission counts per stay
-        basePrice: quote.total, // no per-night discounting in v1 → base == sold
+        quantity: line.quantity, // rooms — a fixed commission counts per room-stay (D13)
+        basePrice: quote.total, // no per-night discounting → base == sold (whole line)
         minimumPrice: 0,
         unitPrice: quote.total,
         lineTotal: quote.total,
@@ -874,7 +927,7 @@ export const confirmSale = async (c: PosContext) => {
         isFlexible: false,
         flexCapacityPct: 0,
         extras: [],
-        unitId: unit.id,
+        unitTypeId: unitType.id,
         checkIn: line.check_in,
         checkOut: line.check_out,
         guests: line.guests,
@@ -1141,46 +1194,57 @@ export const confirmSale = async (c: PosContext) => {
 
   for (const line of prepared) {
     if (line.lineType === 'stay') {
-      // Atomic conditional INSERT (spec §2.4): create the reservation only if no ACTIVE
-      // reservation and no block-out overlaps [check_in, check_out) (half-open → checkout-day
-      // reuse). 0 rows written ⟺ taken → 409 UNIT_UNAVAILABLE. Raw D1 for an exact rows-written.
+      // Atomic conditional INSERT — the PER-NIGHT COUNT GUARD (spec §2.4, D10): create the
+      // reservation only if, for EVERY night of [check_in, check_out) (recursive-CTE expansion),
+      // reserved(night) + blocked(night) + requested ≤ inventory_count. A naive SUM over all
+      // overlapping reservations would over-count non-mutually-overlapping stays → false 409s.
+      // 0 rows written ⟺ insufficient → 409 INSUFFICIENT_INVENTORY. Raw D1 for exact rows-written.
       const reservationId = crypto.randomUUID()
       const ins = await c.env.DB.prepare(
         `INSERT INTO accommodation_reservations
-           (id, organization_id, service_id, unit_id, folio_id, check_in, check_out, guests, status)
-         SELECT ?, ?, ?, ?, ?, ?, ?, ?, 'active'
+           (id, organization_id, service_id, unit_type_id, folio_id, check_in, check_out, guests, quantity, status)
+         SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active'
          WHERE NOT EXISTS (
-           SELECT 1 FROM accommodation_reservations r
-           WHERE r.unit_id = ? AND r.status = 'active'
-             AND r.check_in < ? AND ? < r.check_out
-         ) AND NOT EXISTS (
-           SELECT 1 FROM accommodation_blockouts b
-           WHERE b.unit_id = ? AND b.start_date < ? AND ? < b.end_date
+           WITH RECURSIVE nights(d) AS (
+             SELECT ?
+             UNION ALL
+             SELECT date(d, '+1 day') FROM nights WHERE date(d, '+1 day') < ?
+           )
+           SELECT 1 FROM nights n
+           WHERE COALESCE((SELECT SUM(r.quantity) FROM accommodation_reservations r
+                           WHERE r.unit_type_id = ? AND r.status = 'active'
+                             AND r.check_in <= n.d AND n.d < r.check_out), 0)
+               + COALESCE((SELECT SUM(b.quantity) FROM accommodation_blockouts b
+                           WHERE b.unit_type_id = ?
+                             AND b.start_date <= n.d AND n.d < b.end_date), 0)
+               + ?
+               > (SELECT t.inventory_count FROM accommodation_unit_types t WHERE t.id = ?)
          )`,
       )
         .bind(
           reservationId,
           org,
           line.serviceId,
-          line.unitId!,
+          line.unitTypeId!,
           folioId,
           line.checkIn!,
           line.checkOut!,
           line.guests!,
-          line.unitId!,
-          line.checkOut!,
+          line.quantity,
           line.checkIn!,
-          line.unitId!,
           line.checkOut!,
-          line.checkIn!,
+          line.unitTypeId!,
+          line.unitTypeId!,
+          line.quantity,
+          line.unitTypeId!,
         )
         .run()
       if (!ins.meta.changes) {
         await compensate()
         throw new ApiError(
-          'UNIT_UNAVAILABLE',
+          'INSUFFICIENT_INVENTORY',
           409,
-          'This unit is no longer available for those dates',
+          'Not enough rooms of this type are available for those dates',
         )
       }
       appliedReservations.push(reservationId)
@@ -1275,7 +1339,7 @@ export const confirmSale = async (c: PosContext) => {
         commissionValue: line.commissionValue,
         qrToken: line.qrToken,
         lineType: line.lineType,
-        unitId: line.unitId ?? null,
+        unitTypeId: line.unitTypeId ?? null,
         checkIn: line.checkIn ?? null,
         checkOut: line.checkOut ?? null,
         guests: line.guests ?? null,
@@ -1423,7 +1487,7 @@ export const confirmSale = async (c: PosContext) => {
           slot_date: line.slotDate,
           slot_start_time: line.slotStartTime,
           // Lodging stay fields (null for a tour line).
-          unit_id: line.unitId ?? null,
+          unit_type_id: line.unitTypeId ?? null,
           check_in: line.checkIn ?? null,
           check_out: line.checkOut ?? null,
           guests: line.guests ?? null,
@@ -1502,7 +1566,7 @@ const readFolio = async (
       lineTotal: folioLines.lineTotal,
       qrToken: folioLines.qrToken,
       lineType: folioLines.lineType,
-      unitId: folioLines.unitId,
+      unitTypeId: folioLines.unitTypeId,
       checkIn: folioLines.checkIn,
       checkOut: folioLines.checkOut,
       guests: folioLines.guests,
@@ -1553,7 +1617,7 @@ const readFolio = async (
         slot_date: line.slotDate,
         slot_start_time: line.slotStartTime,
         // Lodging stay fields (null for a tour line).
-        unit_id: line.unitId,
+        unit_type_id: line.unitTypeId,
         check_in: line.checkIn,
         check_out: line.checkOut,
         guests: line.guests,
@@ -2025,14 +2089,16 @@ export const reactivateBooking = async (c: PosContext) => {
     applied.push({ slotId: line.slotId, qty: line.quantity })
   }
 
-  // Lodging: re-claim each cancelled stay reservation under the SAME atomic overlap guard as the
-  // sale (a competing booking may have taken the dates while this one was expired). The lineRows
-  // above inner-join slots, so stays are queried separately here. On conflict → compensate (revert
-  // slots + re-cancel any already-reactivated stays) and 409.
+  // Lodging: re-claim each cancelled stay reservation under the SAME per-night count guard as
+  // the sale (D10 — competing bookings may have consumed the inventory while this one was
+  // expired). The lineRows above inner-join slots, so stays are queried separately here. The
+  // guard excludes the row being revived (o.id != ?) and re-checks every night of its range.
+  // On conflict → compensate (revert slots + re-cancel any already-reactivated stays) and 409.
   const stayReservations = await db
     .select({
       id: accommodationReservations.id,
-      unitId: accommodationReservations.unitId,
+      unitTypeId: accommodationReservations.unitTypeId,
+      quantity: accommodationReservations.quantity,
       checkIn: accommodationReservations.checkIn,
       checkOut: accommodationReservations.checkOut,
     })
@@ -2051,15 +2117,33 @@ export const reactivateBooking = async (c: PosContext) => {
          SET status = 'active', updated_at = unixepoch()
        WHERE id = ? AND organization_id = ? AND status = 'cancelled'
          AND NOT EXISTS (
-           SELECT 1 FROM accommodation_reservations o
-           WHERE o.unit_id = ? AND o.status = 'active' AND o.id != ?
-             AND o.check_in < ? AND ? < o.check_out
-         ) AND NOT EXISTS (
-           SELECT 1 FROM accommodation_blockouts b
-           WHERE b.unit_id = ? AND b.start_date < ? AND ? < b.end_date
+           WITH RECURSIVE nights(d) AS (
+             SELECT ?
+             UNION ALL
+             SELECT date(d, '+1 day') FROM nights WHERE date(d, '+1 day') < ?
+           )
+           SELECT 1 FROM nights n
+           WHERE COALESCE((SELECT SUM(o.quantity) FROM accommodation_reservations o
+                           WHERE o.unit_type_id = ? AND o.status = 'active' AND o.id != ?
+                             AND o.check_in <= n.d AND n.d < o.check_out), 0)
+               + COALESCE((SELECT SUM(b.quantity) FROM accommodation_blockouts b
+                           WHERE b.unit_type_id = ?
+                             AND b.start_date <= n.d AND n.d < b.end_date), 0)
+               + ?
+               > (SELECT t.inventory_count FROM accommodation_unit_types t WHERE t.id = ?)
          )`,
     )
-      .bind(r.id, org, r.unitId, r.id, r.checkOut, r.checkIn, r.unitId, r.checkOut, r.checkIn)
+      .bind(
+        r.id,
+        org,
+        r.checkIn,
+        r.checkOut,
+        r.unitTypeId,
+        r.id,
+        r.unitTypeId,
+        r.quantity,
+        r.unitTypeId,
+      )
       .run()
     if (!upd.meta.changes) {
       for (const a of applied) {
@@ -2075,7 +2159,7 @@ export const reactivateBooking = async (c: PosContext) => {
           .where(and(eq(accommodationReservations.id, rid), eq(accommodationReservations.organizationId, org)))
       }
       throw new ApiError(
-        'UNIT_UNAVAILABLE',
+        'INSUFFICIENT_INVENTORY',
         409,
         'Esas fechas ya no están disponibles para reactivar el apartado',
       )

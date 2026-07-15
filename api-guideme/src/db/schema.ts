@@ -319,11 +319,12 @@ export const folioLines = sqliteTable('folio_lines', {
   qrToken: text('qr_token'), // signed access ticket; null for folios sold pre-feature
   redeemedCount: integer('redeemed_count').notNull().default(0), // passes redeemed; <= quantity
   // Accommodation stay line (docs/lodging/accommodation-stays.spec.md §4.4, Option A). lineType
-  // 'slot' (tour, default) vs 'stay' (lodging). A stay line carries the unit + date range +
+  // 'slot' (tour, default) vs 'stay' (lodging). A stay line carries the unit type + date range +
   // guests + nights instead of a slot; its price is snapshotted in line_total (base_price =
-  // unit_price = line_total, minimum_price = 0, quantity = 1) so existing totals/commission work.
+  // unit_price = line_total, minimum_price = 0) and `quantity` = rooms reserved (v2, D12) so
+  // existing totals work and a fixed commission counts per room-stay (value × quantity, D13).
   lineType: text('line_type', { enum: ['slot', 'stay'] }).notNull().default('slot'),
-  unitId: text('unit_id').references(() => accommodationUnits.id), // null for a tour line
+  unitTypeId: text('unit_type_id').references(() => accommodationUnitTypes.id), // null for a tour line
   checkIn: text('check_in'), // 'YYYY-MM-DD' (stay only)
   checkOut: text('check_out'), // 'YYYY-MM-DD' (stay only)
   guests: integer('guests'), // stay only
@@ -501,7 +502,7 @@ export const cancellationRequests = sqliteTable('cancellation_requests', {
 
 // A named, bookable unit (US-A59). Money in minor units; amenities a CSV of enum keys (mirrors
 // schedules.weekdays). Per-unit rate rules, occupancy, min-stay, check-in/out. Soft-deactivated.
-export const accommodationUnits = sqliteTable('accommodation_units', {
+export const accommodationUnitTypes = sqliteTable('accommodation_unit_types', {
   id: text('id').primaryKey(),
   organizationId: text('organization_id')
     .notNull()
@@ -511,6 +512,9 @@ export const accommodationUnits = sqliteTable('accommodation_units', {
     .references(() => services.id),
   name: text('name').notNull(),
   unitType: text('unit_type'), // free label: 'cabin' / 'suite' (admin-defined, not a closed enum)
+  // v2 (RFC) — how many interchangeable rooms of this type exist. 1 = the boutique case
+  // (a unique cabin is its own type). The per-night guard sells against this pool.
+  inventoryCount: integer('inventory_count').notNull().default(1),
   beds: integer('beds').notNull(),
   baseOccupancy: integer('base_occupancy').notNull(), // guests included in the nightly rate
   maxCapacity: integer('max_capacity').notNull(), // hard cap on guests (>= base_occupancy)
@@ -536,9 +540,9 @@ export const accommodationUnits = sqliteTable('accommodation_units', {
     .default(sql`(unixepoch())`),
 })
 
-// Per-unit seasonal rate override (US-A60). A flat nightly rate for every night in
+// Per-type seasonal rate override (US-A60). A flat nightly rate for every night in
 // [start_date, end_date]; outranks the weekend rate (seasonal > weekend > base). Overlapping
-// active seasons for the same unit are rejected (409 SEASON_OVERLAP). Soft-deactivated.
+// active seasons for the same type are rejected (409 SEASON_OVERLAP). Soft-deactivated.
 export const accommodationSeasons = sqliteTable('accommodation_seasons', {
   id: text('id').primaryKey(),
   organizationId: text('organization_id')
@@ -547,9 +551,9 @@ export const accommodationSeasons = sqliteTable('accommodation_seasons', {
   serviceId: text('service_id')
     .notNull()
     .references(() => services.id),
-  unitId: text('unit_id')
+  unitTypeId: text('unit_type_id')
     .notNull()
-    .references(() => accommodationUnits.id),
+    .references(() => accommodationUnitTypes.id),
   name: text('name').notNull(),
   startDate: text('start_date').notNull(), // 'YYYY-MM-DD'
   endDate: text('end_date').notNull(), // 'YYYY-MM-DD' (>= start_date)
@@ -565,7 +569,8 @@ export const accommodationSeasons = sqliteTable('accommodation_seasons', {
     .default(sql`(unixepoch())`),
 })
 
-// Per-unit block-out range (US-A61). Half-open [start_date, end_date) to match turnover.
+// Type-level quantity block-out (US-A61, v2 D11): removes `quantity` rooms of the type from the
+// pool for the half-open [start_date, end_date) (matches turnover). Overlapping block-outs SUM.
 // Hard-deletable (no historical value), so no status column.
 export const accommodationBlockouts = sqliteTable('accommodation_blockouts', {
   id: text('id').primaryKey(),
@@ -575,9 +580,10 @@ export const accommodationBlockouts = sqliteTable('accommodation_blockouts', {
   serviceId: text('service_id')
     .notNull()
     .references(() => services.id),
-  unitId: text('unit_id')
+  unitTypeId: text('unit_type_id')
     .notNull()
-    .references(() => accommodationUnits.id),
+    .references(() => accommodationUnitTypes.id),
+  quantity: integer('quantity').notNull().default(1), // rooms out of inventory (≤ inventory_count)
   startDate: text('start_date').notNull(), // 'YYYY-MM-DD'
   endDate: text('end_date').notNull(), // 'YYYY-MM-DD' (> start_date)
   reason: text('reason'),
@@ -589,9 +595,10 @@ export const accommodationBlockouts = sqliteTable('accommodation_blockouts', {
     .default(sql`(unixepoch())`),
 })
 
-// THE inventory unit (US-AG36/38). One row per sold stay line; occupies nights
-// [check_in, check_out). `active` holds the dates (covers 'booking' + 'paid' folios);
-// cancel/expiry → 'cancelled' frees them. Overlap enforced by a conditional INSERT in confirmSale.
+// THE inventory unit (US-AG36/38, v2). One row per sold stay line: `quantity` rooms of a type
+// for the nights [check_in, check_out). `active` holds the quantity (covers 'booking' + 'paid'
+// folios); cancel/expiry → 'cancelled' frees it. Enforced by the per-night atomic count guard
+// (D10) — a conditional INSERT in confirmSale / conditional UPDATE on reactivate.
 export const accommodationReservations = sqliteTable('accommodation_reservations', {
   id: text('id').primaryKey(),
   organizationId: text('organization_id')
@@ -600,15 +607,16 @@ export const accommodationReservations = sqliteTable('accommodation_reservations
   serviceId: text('service_id')
     .notNull()
     .references(() => services.id),
-  unitId: text('unit_id')
+  unitTypeId: text('unit_type_id')
     .notNull()
-    .references(() => accommodationUnits.id),
+    .references(() => accommodationUnitTypes.id),
+  quantity: integer('quantity').notNull().default(1), // rooms reserved
   folioId: text('folio_id')
     .notNull()
     .references(() => folios.id),
   checkIn: text('check_in').notNull(), // 'YYYY-MM-DD'
   checkOut: text('check_out').notNull(), // 'YYYY-MM-DD' (> check_in)
-  guests: integer('guests').notNull(),
+  guests: integer('guests').notNull(), // total for the line (≤ max_capacity × quantity)
   status: text('status', { enum: ['active', 'cancelled'] })
     .notNull()
     .default('active'),
@@ -741,8 +749,8 @@ export type FolioAccessToken = typeof folioAccessTokens.$inferSelect
 export type NewFolioAccessToken = typeof folioAccessTokens.$inferInsert
 export type CancellationRequest = typeof cancellationRequests.$inferSelect
 export type NewCancellationRequest = typeof cancellationRequests.$inferInsert
-export type AccommodationUnit = typeof accommodationUnits.$inferSelect
-export type NewAccommodationUnit = typeof accommodationUnits.$inferInsert
+export type AccommodationUnitType = typeof accommodationUnitTypes.$inferSelect
+export type NewAccommodationUnitType = typeof accommodationUnitTypes.$inferInsert
 export type AccommodationSeason = typeof accommodationSeasons.$inferSelect
 export type NewAccommodationSeason = typeof accommodationSeasons.$inferInsert
 export type AccommodationBlockout = typeof accommodationBlockouts.$inferSelect

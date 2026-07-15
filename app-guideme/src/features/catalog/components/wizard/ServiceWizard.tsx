@@ -104,10 +104,10 @@ export function ServiceWizard({ open, onClose, onCreated }: ServiceWizardProps) 
   const goNext = async () => {
     const ok = await trigger([...stepFields(category, step)])
     if (!ok) return
-    // The final inventory step gates on a local array (not an RHF field): tours need ≥1 departure
-    // time, lodging needs ≥1 unit.
+    // The inventory step gates on a local array (not an RHF field): tours need ≥1 departure
+    // time (step 3), lodging needs ≥1 unit type (step 2 — types come before the commission).
     if (isLodging) {
-      if (step === 3 && units.length === 0) {
+      if (step === 2 && units.length === 0) {
         setShowUnitsError(true)
         return
       }
@@ -123,14 +123,14 @@ export function ServiceWizard({ open, onClose, onCreated }: ServiceWizardProps) 
   const saveLodging = async () => {
     const ok = await trigger(['name', 'category', 'commission_type', 'commission_value'])
     if (!ok) {
-      // Jump to the earliest lodging step still holding an error (1: identidad · 2: comisión).
+      // Jump to the earliest lodging step still holding an error (1: identidad · 3: comisión).
       const e = methods.formState.errors
-      setStep(e.name || e.category ? 1 : 2)
+      setStep(e.name || e.category ? 1 : 3)
       return
     }
     if (units.length === 0) {
       setShowUnitsError(true)
-      setStep(3)
+      setStep(2)
       return
     }
     const data = getValues()
@@ -252,10 +252,15 @@ export function ServiceWizard({ open, onClose, onCreated }: ServiceWizardProps) 
       >
         <FormProvider {...methods}>
           {step === 1 && <StepBasicInfo />}
-          {step === 2 && (isLodging ? <StepCommission /> : <StepPricing />)}
-          {step === 3 &&
+          {step === 2 &&
             (isLodging ? (
               <StepUnits units={units} onChange={setUnits} showUnitsError={showUnitsError} />
+            ) : (
+              <StepPricing />
+            ))}
+          {step === 3 &&
+            (isLodging ? (
+              <StepCommission units={units} />
             ) : (
               <StepAvailability
                 times={times}

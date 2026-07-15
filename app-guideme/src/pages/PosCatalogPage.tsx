@@ -23,7 +23,10 @@ import CalendarMonthRounded from '@mui/icons-material/CalendarMonthRounded'
 import { usePosServices } from '../features/pos/hooks'
 import { AvailabilityChip } from '../features/pos/components/AvailabilityChip'
 import { ServiceSheet } from '../features/pos/components/ServiceSheet'
-import { LodgingStaySheet } from '../features/pos/components/LodgingStaySheet'
+import {
+  LodgingStaySheet,
+  type LodgingStayTarget,
+} from '../features/pos/components/LodgingStaySheet'
 import { PosDatePickerSheet } from '../features/pos/components/PosDatePickerSheet'
 import { useTopBarActions } from '../layout/TopBarContext'
 import { floatingControlSx } from '../layout/topBarStyles'
@@ -113,8 +116,8 @@ export default function PosCatalogPage() {
   // US-AG31 — tapping a card opens this service in the Bottom Sheet (no navigation, the
   // catalog stays mounted). `added` drives the success Snackbar lifted up from the sheet.
   const [openServiceId, setOpenServiceId] = useState<string | null>(null)
-  // US-AG36 — a lodging card opens the range-first stay sheet instead of the slot sheet.
-  const [openLodging, setOpenLodging] = useState<{ id: string; name: string } | null>(null)
+  // US-AG36 (v2) — a unit-type card opens the type-centric stay sheet instead of the slot sheet.
+  const [openLodging, setOpenLodging] = useState<LodgingStayTarget | null>(null)
   const [added, setAdded] = useState(false)
   // US-AG35 — the calendar Bottom Sheet (single-day or range picker) toggles off this state.
   const [datePickerOpen, setDatePickerOpen] = useState(false)
@@ -197,17 +200,23 @@ export default function PosCatalogPage() {
             </Typography>
           ) : (
             <Stack spacing={2}>
-              {visibleServices.map((service) => {
-                const isLodgingCard = service.category === 'lodging'
+              {visibleServices.map((item) => {
+                const isTypeCard = item.item_type === 'unit_type'
                 return (
                 // Structure-first: the theme gives the card its hairline border + 16px radius
                 // and no resting shadow — readable in any light (replaces the old soft-shadow).
-                <Card key={service.id}>
+                <Card key={item.id}>
                   <CardActionArea
                     onClick={() =>
-                      isLodgingCard
-                        ? setOpenLodging({ id: service.id, name: service.name })
-                        : setOpenServiceId(service.id)
+                      item.item_type === 'unit_type'
+                        ? setOpenLodging({
+                            serviceId: item.service_id,
+                            typeId: item.id,
+                            name: item.name,
+                            propertyName: item.property_name || undefined,
+                            maxCapacity: item.max_capacity,
+                          })
+                        : setOpenServiceId(item.id)
                     }
                     sx={{
                       height: '100%',
@@ -216,8 +225,22 @@ export default function PosCatalogPage() {
                     }}
                   >
                     <CardContent sx={{ p: 3, '&:last-child': { pb: 3 } }}>
-                      {/* Availability leads — the agent reads this before the name. */}
-                      <AvailabilityChip available={service.has_availability} />
+                      {/* Availability leads — the agent reads this before the name. The type
+                          card adds the low-inventory "Quedan N" urgency chip (icon-paired
+                          semantics live in the chip color; never teal). */}
+                      <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+                        <AvailabilityChip available={item.has_availability} />
+                        {item.item_type === 'unit_type' &&
+                          item.has_availability &&
+                          item.remaining <= 2 && (
+                            <Typography
+                              variant="caption"
+                              sx={{ color: 'var(--amber-700, #B45309)', fontWeight: 600 }}
+                            >
+                              Quedan {item.remaining}
+                            </Typography>
+                          )}
+                      </Stack>
 
                       <Typography
                         component="h2"
@@ -229,25 +252,32 @@ export default function PosCatalogPage() {
                           letterSpacing: '-0.01em',
                         }}
                       >
-                        {service.name}
+                        {item.name}
                       </Typography>
 
-                      {service.description && (
-                        <Typography
-                          variant="body2"
-                          color="text.secondary"
-                          sx={{
-                            mt: 0.5,
-                            fontWeight: 300,
-                            lineHeight: 1.6,
-                            display: '-webkit-box',
-                            WebkitLineClamp: 1,
-                            WebkitBoxOrient: 'vertical',
-                            overflow: 'hidden',
-                          }}
-                        >
-                          {service.description}
+                      {/* A type card grounds itself in its property; a tour keeps its blurb. */}
+                      {item.item_type === 'unit_type' && item.property_name ? (
+                        <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+                          {item.property_name}
                         </Typography>
+                      ) : (
+                        item.description && (
+                          <Typography
+                            variant="body2"
+                            color="text.secondary"
+                            sx={{
+                              mt: 0.5,
+                              fontWeight: 300,
+                              lineHeight: 1.6,
+                              display: '-webkit-box',
+                              WebkitLineClamp: 1,
+                              WebkitBoxOrient: 'vertical',
+                              overflow: 'hidden',
+                            }}
+                          >
+                            {item.description}
+                          </Typography>
+                        )
                       )}
 
                       <Box
@@ -271,22 +301,29 @@ export default function PosCatalogPage() {
                               color: 'text.secondary',
                             }}
                           >
-                            Desde
+                            {/* v2 — a type card's rate is EXACT (its own base rate), not "Desde". */}
+                            {isTypeCard ? 'Por noche' : 'Desde'}
                           </Typography>
                           <Stack direction="row" spacing={0.5} sx={{ alignItems: 'baseline' }}>
                             <MoneyText
-                              cents={isLodgingCard ? (service.from_nightly_rate ?? 0) : service.base_price}
+                              cents={
+                                item.item_type === 'unit_type'
+                                  ? item.nightly_rate
+                                  : item.base_price
+                              }
                               variant="h3"
-                              srLabel={`${service.name}, desde`}
+                              srLabel={
+                                isTypeCard ? `${item.name}, por noche` : `${item.name}, desde`
+                              }
                             />
-                            {isLodgingCard && (
+                            {isTypeCard && (
                               <Typography variant="body2" color="text.secondary">
                                 / noche
                               </Typography>
                             )}
                           </Stack>
                         </Box>
-                        {!isLodgingCard && service.next_slot_date && (
+                        {item.item_type === 'tour' && item.next_slot_date && (
                           <Box
                             sx={{
                               textAlign: 'right',
@@ -307,7 +344,7 @@ export default function PosCatalogPage() {
                               Próximo
                             </Typography>
                             <Typography sx={{ fontSize: 13, fontWeight: 500 }}>
-                              {nextDateLabel(service.next_slot_date)}
+                              {nextDateLabel(item.next_slot_date)}
                             </Typography>
                           </Box>
                         )}
@@ -351,9 +388,9 @@ export default function PosCatalogPage() {
         }}
       />
 
-      {/* US-AG36 — lodging range-first stay sheet. */}
+      {/* US-AG36 (v2) — type-centric stay sheet (calendar + guests + rooms). */}
       <LodgingStaySheet
-        service={openLodging}
+        target={openLodging}
         initialRange={
           selection?.to
             ? { check_in: selection.from, check_out: selection.to }

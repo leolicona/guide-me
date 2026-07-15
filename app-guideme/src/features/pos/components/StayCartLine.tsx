@@ -28,8 +28,12 @@ export function StayCartLine({ line, onRemove }: StayCartLineProps) {
     <Box>
       <Stack direction="row" spacing={1} sx={{ justifyContent: 'space-between', alignItems: 'flex-start' }}>
         <Box sx={{ minWidth: 0 }}>
-          <Typography variant="subtitle2">{line.unit_name}</Typography>
+          <Typography variant="subtitle2">
+            {line.unit_type_name}
+            {line.quantity > 1 ? ` × ${line.quantity}` : ''}
+          </Typography>
           <Typography variant="caption" color="text.secondary">
+            {/* Rooms live in the title ("× 2") — the meta stays dates · nights · guests. */}
             {dayLabel(line.check_in)} → {dayLabel(line.check_out)} · {line.nights}{' '}
             {line.nights === 1 ? 'noche' : 'noches'} · {line.guests}{' '}
             {line.guests === 1 ? 'huésped' : 'huéspedes'}

@@ -129,11 +129,13 @@ export const STEP_FIELDS = {
   4: [],
 } as const satisfies Record<number, readonly (keyof WizardFormData)[]>
 
-// Lodging track step fields (3 steps): básica · comisión · unidades (gated by units.length).
+// Lodging track step fields (3 steps): básica · tipos de unidad · comisión. Step 2 gates on the
+// wizard-local `units` array (not RHF fields); the commission closes the track so it's decided
+// with the nightly rates in view.
 const LODGING_STEP_FIELDS: Record<number, readonly (keyof WizardFormData)[]> = {
   1: ['name', 'category'],
-  2: ['commission_type', 'commission_value'],
-  3: [],
+  2: [],
+  3: ['commission_type', 'commission_value'],
 }
 
 /** Category-aware RHF fields to validate when leaving a step (tour 4 steps · lodging 3 steps). */

@@ -101,11 +101,9 @@ export function PosDatePickerSheet({
   )
   const available = new Set(availableDays ?? [])
 
-  // Lodging has no slots, so it never lights an availability dot. When the agent has scoped the
-  // filter to lodging, dot-gating would leave the whole calendar unselectable — so in that case
-  // any non-past day is pickable (the real per-unit availability is resolved in the stay sheet),
-  // with the dots staying advisory. Tours-only / default filters keep the strict dot-gating.
-  const lodgingInScope = categories.includes('lodging')
+  // v2 — lodging days light real dots now (the server computes per-night remaining counts for
+  // unit types in /availability/days), so dot-gating is uniform across categories. The v1
+  // lodging exception (any non-past day pickable when lodging was in scope) is gone.
 
   // Tap-tap: no start (or a complete range) → start fresh; else close the range if the tap is
   // later than the start, otherwise restart at the tap. Only enabled (pickable) days reach here.
@@ -223,8 +221,8 @@ export function PosDatePickerSheet({
             const isInRange = inDraftRange(date)
             const isAvailable = available.has(date)
             // While availability is loading, today-onward days stay neutral & inert. A day is
-            // pickable when it has a dot, or unconditionally (non-past) when lodging is in scope.
-            const disabled = isPast || isLoading || (!isAvailable && !lodgingInScope)
+            // pickable exactly when it has an availability dot.
+            const disabled = isPast || isLoading || !isAvailable
 
             return (
               <Box
@@ -256,7 +254,7 @@ export function PosDatePickerSheet({
                     ? 'primary.contrastText'
                     : isInRange
                       ? 'var(--teal-700, #0F766E)'
-                      : isPast || (!isAvailable && !isLoading && !lodgingInScope)
+                      : isPast || (!isAvailable && !isLoading)
                         ? 'text.disabled'
                         : 'text.primary',
                   bgcolor: isEndpoint

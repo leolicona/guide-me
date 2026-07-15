@@ -6,6 +6,8 @@ import { amenityLabel } from '../lodging'
 export interface UnitRowData {
   name: string
   unit_type?: string | null
+  /** v2 — rooms of this type in inventory (1 = boutique/unique). */
+  inventory_count?: number
   beds: number
   base_occupancy: number
   max_capacity: number
@@ -45,6 +47,9 @@ export function UnitRow({ unit, actions }: UnitRowProps) {
           </Typography>
           <Typography variant="body2" color="text.secondary">
             {unit.unit_type ? `${unit.unit_type} · ` : ''}
+            {unit.inventory_count != null
+              ? `${unit.inventory_count} ${unit.inventory_count === 1 ? 'habitación' : 'habitaciones'} · `
+              : ''}
             {unit.beds} {unit.beds === 1 ? 'cama' : 'camas'} · {unit.base_occupancy}–
             {unit.max_capacity} personas
           </Typography>

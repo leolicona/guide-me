@@ -1,6 +1,7 @@
-// Accommodation pricing & availability engine (docs/lodging/accommodation-stays.spec.md §3).
+// Accommodation pricing & availability engine (docs/lodging/accommodation-stays.spec.md §3, v2 —
+// unit-type inventory per docs/RFCs/rfc-airbnb-inventory-model.md).
 //
-// Pure, dependency-free. Imported by BOTH the POS availability serializer (display) and
+// Pure, dependency-free. Imported by BOTH the POS availability serializers (display) and
 // confirmSale (enforcement) so the quote shown can never drift from the quote charged — the same
 // single-source discipline as effectiveCapacity(). All dates are naive org-local 'YYYY-MM-DD';
 // a stay occupies the half-open night range [check_in, check_out) (standard hotel turnover, D4).
@@ -38,7 +39,7 @@ export const parseCsvInts = (csv: string): number[] =>
 /**
  * Do two half-open date ranges [aStart, aEnd) and [bStart, bEnd) overlap on any day?
  * `aStart < bEnd && bStart < aEnd` — so a stay ending on day X and another starting on day X do
- * NOT overlap (the check-out day is reusable, D4). Used for reservation AND block-out conflicts.
+ * NOT overlap (the check-out day is reusable, D4). Used for reservation AND block-out windows.
  */
 export const rangesOverlap = (
   aStart: string,
@@ -49,7 +50,7 @@ export const rangesOverlap = (
 
 // --- Pricing ---
 
-export interface UnitRateInfo {
+export interface UnitTypeRateInfo {
   baseRate: number
   weekendRate: number | null
   extraPersonFee: number
@@ -65,48 +66,64 @@ export interface SeasonRate {
 }
 
 /**
- * Rate for a single night. Precedence (D3): a season override (the night falls inside an active
- * season's inclusive [start,end]) beats the weekend rate (the night is a weekend weekday and a
- * weekend rate is set) beats the base rate.
+ * Rate for a single night, per room. Precedence (D3): a season override (the night falls inside
+ * an active season's inclusive [start,end]) beats the weekend rate (the night is a weekend
+ * weekday and a weekend rate is set) beats the base rate.
  */
 export const nightlyRate = (
   date: string,
-  unit: Pick<UnitRateInfo, 'baseRate' | 'weekendRate'>,
+  type: Pick<UnitTypeRateInfo, 'baseRate' | 'weekendRate'>,
   seasons: SeasonRate[],
   weekendDays: number[],
 ): number => {
   const season = seasons.find((s) => date >= s.startDate && date <= s.endDate)
   if (season) return season.nightlyRate
-  if (unit.weekendRate != null && weekendDays.includes(weekdayOf(date))) {
-    return unit.weekendRate
+  if (type.weekendRate != null && weekendDays.includes(weekdayOf(date))) {
+    return type.weekendRate
   }
-  return unit.baseRate
+  return type.baseRate
+}
+
+/**
+ * D12 — split total guests across `quantity` rooms as evenly as possible (5/2 → [3,2]).
+ * Deterministic; exact for the common case (guests ≤ base_occupancy × quantity ⇒ split moot).
+ */
+export const splitGuests = (guests: number, quantity: number): number[] => {
+  const base = Math.floor(guests / quantity)
+  const remainder = guests % quantity
+  return Array.from({ length: quantity }, (_, i) => base + (i < remainder ? 1 : 0))
 }
 
 export interface StayQuote {
   nights: number
   total: number
+  /** Per-night rate SUMMED across the `quantity` rooms (incl. extra-person surcharges). */
   perNight: { date: string; rate: number }[]
 }
 
 /**
- * Full price of a stay: Σ over each night (room rate + extra-person surcharge). The extra-person
- * fee is a flat per-extra-guest, per-night amount above the unit's base occupancy (D3). All money
- * in minor units.
+ * Full price of a stay line (D12): guests split evenly across `quantity` rooms; each room is
+ * Σ over each night (room rate + extra-person surcharge above base occupancy); the line total is
+ * the sum over rooms. All money in minor units.
  */
 export const quoteStay = (
-  unit: UnitRateInfo,
+  type: UnitTypeRateInfo,
   checkIn: string,
   checkOut: string,
   guests: number,
+  quantity: number,
   seasons: SeasonRate[],
   weekendDays: number[],
 ): StayQuote => {
-  const extraGuests = Math.max(0, guests - unit.baseOccupancy)
-  const extraPerNight = extraGuests * unit.extraPersonFee
+  // Σ over rooms of the per-room extra-person fee — constant across nights (D3).
+  const extraPerNight = splitGuests(guests, quantity).reduce(
+    (sum, roomGuests) =>
+      sum + Math.max(0, roomGuests - type.baseOccupancy) * type.extraPersonFee,
+    0,
+  )
   const perNight = eachNight(checkIn, checkOut).map((date) => ({
     date,
-    rate: nightlyRate(date, unit, seasons, weekendDays) + extraPerNight,
+    rate: nightlyRate(date, type, seasons, weekendDays) * quantity + extraPerNight,
   }))
   return {
     nights: perNight.length,
@@ -115,48 +132,79 @@ export const quoteStay = (
   }
 }
 
-// --- Availability ---
+// --- Availability (per-night counts, D10) ---
+
+export interface QuantityRange {
+  /** Half-open [start, end) window the quantity applies to. */
+  start: string
+  end: string
+  quantity: number
+}
+
+/**
+ * Rooms of a type still free on ONE night: inventory_count − Σ active reservation quantities
+ * covering the night − Σ block-out quantities covering the night. Never below 0 (a lowered
+ * inventory_count may leave past overselling; clamp for display).
+ */
+export const remainingOnNight = (
+  inventoryCount: number,
+  night: string,
+  occupancies: QuantityRange[],
+): number => {
+  const taken = occupancies.reduce(
+    (sum, o) => (o.start <= night && night < o.end ? sum + o.quantity : sum),
+    0,
+  )
+  return Math.max(0, inventoryCount - taken)
+}
+
+/**
+ * The display-side range value (spec §3.3): min over the stay's nights of remainingOnNight.
+ * Powers `has_availability` (≥ 1) and the "Quedan N" low-inventory badge.
+ */
+export const minRemaining = (
+  inventoryCount: number,
+  checkIn: string,
+  checkOut: string,
+  occupancies: QuantityRange[],
+): number =>
+  eachNight(checkIn, checkOut).reduce(
+    (min, night) => Math.min(min, remainingOnNight(inventoryCount, night, occupancies)),
+    inventoryCount,
+  )
 
 export type Unavailable =
   | 'INVALID_RANGE'
   | 'MIN_STAY_NOT_MET'
   | 'OVER_CAPACITY'
-  | 'BLOCKED'
-  | 'OVERLAP'
+  | 'INSUFFICIENT_INVENTORY'
   | 'INACTIVE'
 
-export interface DateRangeRow {
-  startDate: string
-  endDate: string
-}
-
-export interface ReservationRange {
-  checkIn: string
-  checkOut: string
-}
-
 /**
- * Why a unit can't take a stay for [check_in, check_out) with `guests` — or `null` if it can.
- * Returns the FIRST failing rule (spec §3.3). Blockouts are half-open [start, end); reservations
- * compare on [check_in, check_out). Callers pass only ACTIVE units + ACTIVE reservations.
+ * Why a unit type can't take a stay of `quantity` rooms for [check_in, check_out) with `guests`
+ * total — or `null` if it can. Returns the FIRST failing rule (spec §3.3). `occupancies` are the
+ * type's active reservations + block-outs as half-open quantity ranges. This is the DISPLAY-side
+ * check; the ENFORCEMENT is the atomic per-night conditional INSERT in confirmSale (same math).
  */
-export const checkUnitAvailable = (
-  unit: { status: string } & Pick<UnitRateInfo, 'maxCapacity' | 'minNights'>,
+export const checkTypeAvailable = (
+  type: { status: string; inventoryCount: number } & Pick<
+    UnitTypeRateInfo,
+    'maxCapacity' | 'minNights'
+  >,
   checkIn: string,
   checkOut: string,
   guests: number,
-  blockouts: DateRangeRow[],
-  reservations: ReservationRange[],
+  quantity: number,
+  occupancies: QuantityRange[],
 ): Unavailable | null => {
-  if (unit.status !== 'active') return 'INACTIVE'
+  if (type.status !== 'active') return 'INACTIVE'
   if (!(checkOut > checkIn)) return 'INVALID_RANGE'
-  if (nightsBetween(checkIn, checkOut) < unit.minNights) return 'MIN_STAY_NOT_MET'
-  if (guests < 1 || guests > unit.maxCapacity) return 'OVER_CAPACITY'
-  if (blockouts.some((b) => rangesOverlap(checkIn, checkOut, b.startDate, b.endDate))) {
-    return 'BLOCKED'
+  if (nightsBetween(checkIn, checkOut) < type.minNights) return 'MIN_STAY_NOT_MET'
+  if (quantity < 1 || guests < 1 || guests > type.maxCapacity * quantity) {
+    return 'OVER_CAPACITY'
   }
-  if (reservations.some((r) => rangesOverlap(checkIn, checkOut, r.checkIn, r.checkOut))) {
-    return 'OVERLAP'
+  if (minRemaining(type.inventoryCount, checkIn, checkOut, occupancies) < quantity) {
+    return 'INSUFFICIENT_INVENTORY'
   }
   return null
 }

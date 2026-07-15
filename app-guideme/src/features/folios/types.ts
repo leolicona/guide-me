@@ -48,8 +48,8 @@ export interface FolioDetailLine {
   service_name: string
   slot_date: string | null
   slot_start_time: string | null
-  /** Lodging stay fields (null for a tour line). */
-  unit_id?: string | null
+  /** Lodging stay fields (null for a tour line). For a stay, `quantity` = rooms reserved. */
+  unit_type_id?: string | null
   check_in?: string | null
   check_out?: string | null
   guests?: number | null

@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { FormProvider, useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import {
+  Alert,
   Box,
   Button,
   Collapse,
@@ -21,14 +22,22 @@ import type { UnitDraft } from '../../hooks/useCreateLodgingFull'
 interface UnitDraftSheetProps {
   open: boolean
   onClose: () => void
-  /** null → add; a draft → edit. */
+  /** null → add; a draft → edit or duplicate (see `mode`). */
   initial: UnitDraft | null
+  /** Which action opened the sheet. `duplicate` gets a prefilled draft that is NOT yet in the
+   * parent list — it's only added on save, so the labels must read as "add", not "edit". */
+  mode?: 'add' | 'edit' | 'duplicate'
   onSave: (draft: UnitDraft) => void
+  /** Names of the property's OTHER type drafts — powers the non-blocking duplicate-name
+   * warning (distinct names are what tell the POS type cards apart; the API doesn't enforce
+   * uniqueness, so this is a nudge, not a gate). */
+  existingNames?: string[]
 }
 
 const EMPTY: UnitFormData = {
   name: '',
   unit_type: '',
+  inventory_count: 1,
   beds: 1,
   base_occupancy: 2,
   max_capacity: 4,
@@ -81,11 +90,24 @@ function DisclosureHeader({
 // US-A59 — add/edit one unit inside the wizard. Own RHF form (unitFormSchema) wrapping the shared
 // UnitFields, plus collapsed-by-default Temporadas/Bloqueos disclosures bound to the draft's local
 // arrays (controlled, no network). Pushes/replaces the full draft in the parent `units` array.
-export function UnitDraftSheet({ open, onClose, initial, onSave }: UnitDraftSheetProps) {
+export function UnitDraftSheet({
+  open,
+  onClose,
+  initial,
+  mode = initial ? 'edit' : 'add',
+  onSave,
+  existingNames = [],
+}: UnitDraftSheetProps) {
   const methods = useForm<UnitFormData>({
     resolver: zodResolver(unitFormSchema),
     defaultValues: EMPTY,
   })
+
+  // Non-blocking duplicate-name nudge (case-insensitive, trimmed).
+  const draftName = methods.watch('name')
+  const isDuplicateName =
+    !!draftName?.trim() &&
+    existingNames.some((n) => n.trim().toLowerCase() === draftName.trim().toLowerCase())
 
   const [seasons, setSeasons] = useState<SeasonRowValue[]>([])
   const [blockouts, setBlockouts] = useState<BlockoutRowValue[]>([])
@@ -113,7 +135,13 @@ export function UnitDraftSheet({ open, onClose, initial, onSave }: UnitDraftShee
           })),
         )
         setBlockouts(
-          b.map((x) => ({ id: x.tempId, start_date: x.start_date, end_date: x.end_date, reason: x.reason })),
+          b.map((x) => ({
+            id: x.tempId,
+            start_date: x.start_date,
+            end_date: x.end_date,
+            quantity: x.quantity,
+            reason: x.reason,
+          })),
         )
         setSeasonsOpen(s.length > 0) // a draft with seasons opens that section expanded
         setBlockoutsOpen(b.length > 0)
@@ -142,6 +170,7 @@ export function UnitDraftSheet({ open, onClose, initial, onSave }: UnitDraftShee
         tempId: b.id,
         start_date: b.start_date,
         end_date: b.end_date,
+        quantity: b.quantity,
         reason: b.reason,
       })),
     })
@@ -154,18 +183,24 @@ export function UnitDraftSheet({ open, onClose, initial, onSave }: UnitDraftShee
       onClose={onClose}
       header={
         <Typography variant="h6" sx={{ px: 2, pb: 1 }}>
-          {initial ? 'Editar unidad' : 'Nueva unidad'}
+          {mode === 'edit' ? 'Editar unidad' : mode === 'duplicate' ? 'Duplicar tipo' : 'Nueva unidad'}
         </Typography>
       }
       footer={
         <Box sx={{ p: 2 }}>
           <Button fullWidth variant="contained" disableElevation onClick={submit}>
-            {initial ? 'Guardar' : 'Agregar'}
+            {mode === 'edit' ? 'Guardar' : 'Agregar'}
           </Button>
         </Box>
       }
     >
       <Box sx={{ px: 2, pb: 2 }}>
+        {isDuplicateName && (
+          <Alert severity="warning" sx={{ mb: 2 }}>
+            Ya existe un tipo con este nombre en la propiedad — usa nombres distintos para
+            diferenciarlos en el punto de venta.
+          </Alert>
+        )}
         <FormProvider {...methods}>
           <UnitFields />
         </FormProvider>

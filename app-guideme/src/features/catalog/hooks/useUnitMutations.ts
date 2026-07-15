@@ -1,16 +1,16 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import {
-  createUnit,
-  updateUnit,
-  deactivateUnit,
-  reactivateUnit,
-  type UnitInput,
+  createUnitType,
+  updateUnitType,
+  deactivateUnitType,
+  reactivateUnitType,
+  type UnitTypeInput,
 } from '../../../services/lodgingCatalogService'
 import { SERVICES_QUERY_KEY } from './useServices'
 import { unitsQueryKey } from './useUnits'
 
-// US-A59 — unit mutations. Each invalidates the unit list for the service (and the catalog
-// list, since "Desde $X/noche" on the service card derives from the units).
+// US-A59 (v2) — unit-type mutations. Each invalidates the type list for the service (and the
+// catalog list, since availability/rates on the POS type cards derive from the types).
 export function useUnitMutations(serviceId: string) {
   const queryClient = useQueryClient()
   const invalidate = () => {
@@ -19,20 +19,20 @@ export function useUnitMutations(serviceId: string) {
   }
 
   const create = useMutation({
-    mutationFn: (data: UnitInput) => createUnit(serviceId, data),
+    mutationFn: (data: UnitTypeInput) => createUnitType(serviceId, data),
     onSuccess: invalidate,
   })
   const update = useMutation({
-    mutationFn: ({ unitId, data }: { unitId: string; data: UnitInput }) =>
-      updateUnit(serviceId, unitId, data),
+    mutationFn: ({ unitId, data }: { unitId: string; data: UnitTypeInput }) =>
+      updateUnitType(serviceId, unitId, data),
     onSuccess: invalidate,
   })
   const deactivate = useMutation({
-    mutationFn: (unitId: string) => deactivateUnit(serviceId, unitId),
+    mutationFn: (unitId: string) => deactivateUnitType(serviceId, unitId),
     onSuccess: invalidate,
   })
   const reactivate = useMutation({
-    mutationFn: (unitId: string) => reactivateUnit(serviceId, unitId),
+    mutationFn: (unitId: string) => reactivateUnitType(serviceId, unitId),
     onSuccess: invalidate,
   })
 

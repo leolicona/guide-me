@@ -24,10 +24,12 @@ const timeStr = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Expected HH:MM (2
 
 const money = z.number().int().min(0) // minor units (centavos)
 
-export const createUnitSchema = z
+export const createUnitTypeSchema = z
   .object({
     name: z.string().min(1, 'Name is required'),
     unit_type: z.string().min(1).nullable().optional(),
+    // v2 (RFC) — how many interchangeable rooms of this type exist. Defaults to 1 (boutique).
+    inventory_count: z.number().int().min(1).optional(),
     beds: z.number().int().min(1),
     base_occupancy: z.number().int().min(1),
     max_capacity: z.number().int().min(1),
@@ -59,7 +61,7 @@ export const createUnitSchema = z
   })
 
 // PUT is a full replace — same shape as create.
-export const updateUnitSchema = createUnitSchema
+export const updateUnitTypeSchema = createUnitTypeSchema
 
 export const createSeasonSchema = z
   .object({
@@ -79,6 +81,9 @@ export const createBlockoutSchema = z
   .object({
     start_date: dateStr,
     end_date: dateStr,
+    // v2 (D11) — rooms of the type taken out of inventory for the range. Defaults to 1.
+    // The upper bound (≤ the type's inventory_count) is enforced in the handler (needs the row).
+    quantity: z.number().int().min(1).optional(),
     reason: z.string().min(1).nullable().optional(),
   })
   .refine((v) => v.start_date < v.end_date, {
@@ -86,8 +91,8 @@ export const createBlockoutSchema = z
     path: ['end_date'],
   })
 
-export type CreateUnitInput = z.infer<typeof createUnitSchema>
-export type UpdateUnitInput = z.infer<typeof updateUnitSchema>
+export type CreateUnitTypeInput = z.infer<typeof createUnitTypeSchema>
+export type UpdateUnitTypeInput = z.infer<typeof updateUnitTypeSchema>
 export type CreateSeasonInput = z.infer<typeof createSeasonSchema>
 export type UpdateSeasonInput = z.infer<typeof updateSeasonSchema>
 export type CreateBlockoutInput = z.infer<typeof createBlockoutSchema>

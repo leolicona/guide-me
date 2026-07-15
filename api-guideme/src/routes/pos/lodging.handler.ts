@@ -4,26 +4,29 @@ import {
   accommodationBlockouts,
   accommodationReservations,
   accommodationSeasons,
-  accommodationUnits,
+  accommodationUnitTypes,
   affiliateCommissions,
   organizations,
   services,
 } from '../../db/schema'
 import { ApiError } from '../../types/errors'
 import {
-  checkUnitAvailable,
+  checkTypeAvailable,
   eachNight,
+  minRemaining,
   nightlyRate,
   parseCsvInts,
   quoteStay,
-  rangesOverlap,
+  remainingOnNight,
+  type QuantityRange,
   type SeasonRate,
 } from '../../utils/lodging'
 import type { PosContext } from './handler'
 
-// docs/lodging/accommodation-stays.spec.md §4.2 — POS availability reads (agent/affiliate/admin).
-// A stay occupies nights [check_in, check_out); availability uses the shared engine so the quote
-// shown here can never drift from the quote enforced at confirmSale.
+// docs/lodging/accommodation-stays.spec.md §4.2 (v2 — unit-type inventory) — POS availability
+// reads (agent/affiliate/admin). A stay occupies nights [check_in, check_out); availability is
+// per-night COUNT math (remaining = inventory_count − reserved − blocked) via the shared engine,
+// so what's shown here can never drift from what confirmSale enforces.
 
 const dateRe = /^\d{4}-\d{2}-\d{2}$/
 
@@ -70,25 +73,27 @@ const requireLodgingService = async (db: Db, c: PosContext, serviceId: string) =
   }
 }
 
-const unitCols = {
-  id: accommodationUnits.id,
-  name: accommodationUnits.name,
-  unitType: accommodationUnits.unitType,
-  beds: accommodationUnits.beds,
-  baseOccupancy: accommodationUnits.baseOccupancy,
-  maxCapacity: accommodationUnits.maxCapacity,
-  baseRate: accommodationUnits.baseRate,
-  weekendRate: accommodationUnits.weekendRate,
-  extraPersonFee: accommodationUnits.extraPersonFee,
-  minNights: accommodationUnits.minNights,
-  checkinTime: accommodationUnits.checkinTime,
-  checkoutTime: accommodationUnits.checkoutTime,
-  amenities: accommodationUnits.amenities,
-  status: accommodationUnits.status,
+const typeCols = {
+  id: accommodationUnitTypes.id,
+  serviceId: accommodationUnitTypes.serviceId,
+  name: accommodationUnitTypes.name,
+  unitType: accommodationUnitTypes.unitType,
+  inventoryCount: accommodationUnitTypes.inventoryCount,
+  beds: accommodationUnitTypes.beds,
+  baseOccupancy: accommodationUnitTypes.baseOccupancy,
+  maxCapacity: accommodationUnitTypes.maxCapacity,
+  baseRate: accommodationUnitTypes.baseRate,
+  weekendRate: accommodationUnitTypes.weekendRate,
+  extraPersonFee: accommodationUnitTypes.extraPersonFee,
+  minNights: accommodationUnitTypes.minNights,
+  checkinTime: accommodationUnitTypes.checkinTime,
+  checkoutTime: accommodationUnitTypes.checkoutTime,
+  amenities: accommodationUnitTypes.amenities,
+  status: accommodationUnitTypes.status,
 } as const
 
-// Active seasons for a set of units that overlap [from, to] (inclusive), grouped by unit.
-const seasonsByUnit = async (
+// Active seasons for a set of types that overlap [from, to] (inclusive), grouped by type.
+const seasonsByType = async (
   db: Db,
   org: string,
   from: string,
@@ -96,7 +101,7 @@ const seasonsByUnit = async (
 ): Promise<Map<string, SeasonRate[]>> => {
   const rows = await db
     .select({
-      unitId: accommodationSeasons.unitId,
+      unitTypeId: accommodationSeasons.unitTypeId,
       startDate: accommodationSeasons.startDate,
       endDate: accommodationSeasons.endDate,
       nightlyRate: accommodationSeasons.nightlyRate,
@@ -112,21 +117,72 @@ const seasonsByUnit = async (
     )
   const map = new Map<string, SeasonRate[]>()
   for (const r of rows) {
-    const list = map.get(r.unitId) ?? []
+    const list = map.get(r.unitTypeId) ?? []
     list.push({ startDate: r.startDate, endDate: r.endDate, nightlyRate: r.nightlyRate })
-    map.set(r.unitId, list)
+    map.set(r.unitTypeId, list)
   }
   return map
 }
 
-// US-AG36 — range-first availability: the units of a lodging service free for the WHOLE range,
-// each with a quoteStay breakdown. Units that fail any availability rule are omitted.
+// The OCCUPANCY map (D10): every active reservation and every block-out that touches the
+// half-open night window [from, endExclusive), as quantity ranges grouped by unit type.
+// One pair of org-wide queries; callers narrow by type id.
+const occupanciesByType = async (
+  db: Db,
+  org: string,
+  from: string,
+  endExclusive: string,
+): Promise<Map<string, QuantityRange[]>> => {
+  const blockouts = await db
+    .select({
+      unitTypeId: accommodationBlockouts.unitTypeId,
+      start: accommodationBlockouts.startDate,
+      end: accommodationBlockouts.endDate,
+      quantity: accommodationBlockouts.quantity,
+    })
+    .from(accommodationBlockouts)
+    .where(
+      and(
+        eq(accommodationBlockouts.organizationId, org),
+        lte(accommodationBlockouts.startDate, endExclusive),
+        gte(accommodationBlockouts.endDate, from),
+      ),
+    )
+  const reservations = await db
+    .select({
+      unitTypeId: accommodationReservations.unitTypeId,
+      start: accommodationReservations.checkIn,
+      end: accommodationReservations.checkOut,
+      quantity: accommodationReservations.quantity,
+    })
+    .from(accommodationReservations)
+    .where(
+      and(
+        eq(accommodationReservations.organizationId, org),
+        eq(accommodationReservations.status, 'active'),
+        lte(accommodationReservations.checkIn, endExclusive),
+        gte(accommodationReservations.checkOut, from),
+      ),
+    )
+  const map = new Map<string, QuantityRange[]>()
+  for (const row of [...blockouts, ...reservations]) {
+    const list = map.get(row.unitTypeId) ?? []
+    list.push({ start: row.start, end: row.end, quantity: row.quantity })
+    map.set(row.unitTypeId, list)
+  }
+  return map
+}
+
+// US-AG36 — range-first availability: the unit types of a lodging service with enough per-night
+// inventory for the WHOLE range × quantity, each with a quoteStay breakdown + min_remaining.
+// Types that fail any §3.3 rule are omitted.
 export const getLodgingAvailability = async (c: PosContext) => {
   const agent = c.get('user')
   const serviceId = c.req.param('serviceId')
   const checkIn = c.req.query('check_in') ?? ''
   const checkOut = c.req.query('check_out') ?? ''
   const guests = Number(c.req.query('guests') ?? '1')
+  const quantity = Number(c.req.query('quantity') ?? '1')
   const db = getDb(c.env)
   const org = agent.organizationId
 
@@ -136,114 +192,88 @@ export const getLodgingAvailability = async (c: PosContext) => {
   if (!Number.isInteger(guests) || guests < 1) {
     throw new ApiError('VALIDATION_ERROR', 400, 'guests must be a positive integer')
   }
+  if (!Number.isInteger(quantity) || quantity < 1) {
+    throw new ApiError('VALIDATION_ERROR', 400, 'quantity must be a positive integer')
+  }
 
   await requireLodgingService(db, c, serviceId)
 
-  const units = await db
-    .select(unitCols)
-    .from(accommodationUnits)
+  const types = await db
+    .select(typeCols)
+    .from(accommodationUnitTypes)
     .where(
       and(
-        eq(accommodationUnits.organizationId, org),
-        eq(accommodationUnits.serviceId, serviceId),
-        eq(accommodationUnits.status, 'active'),
+        eq(accommodationUnitTypes.organizationId, org),
+        eq(accommodationUnitTypes.serviceId, serviceId),
+        eq(accommodationUnitTypes.status, 'active'),
       ),
     )
-    .orderBy(asc(accommodationUnits.name))
+    .orderBy(asc(accommodationUnitTypes.name))
 
   const weekendDays = await orgWeekendDays(db, org)
-  const seasons = await seasonsByUnit(db, org, checkIn, checkOut)
+  const seasons = await seasonsByType(db, org, checkIn, checkOut)
+  const occupancies = await occupanciesByType(db, org, checkIn, checkOut)
 
-  // Block-outs and active reservations that touch the range, grouped by unit.
-  const blockoutRows = await db
-    .select({
-      unitId: accommodationBlockouts.unitId,
-      startDate: accommodationBlockouts.startDate,
-      endDate: accommodationBlockouts.endDate,
-    })
-    .from(accommodationBlockouts)
-    .where(
-      and(
-        eq(accommodationBlockouts.organizationId, org),
-        eq(accommodationBlockouts.serviceId, serviceId),
-        lte(accommodationBlockouts.startDate, checkOut),
-        gte(accommodationBlockouts.endDate, checkIn),
-      ),
-    )
-  const reservationRows = await db
-    .select({
-      unitId: accommodationReservations.unitId,
-      checkIn: accommodationReservations.checkIn,
-      checkOut: accommodationReservations.checkOut,
-    })
-    .from(accommodationReservations)
-    .where(
-      and(
-        eq(accommodationReservations.organizationId, org),
-        eq(accommodationReservations.serviceId, serviceId),
-        eq(accommodationReservations.status, 'active'),
-        lte(accommodationReservations.checkIn, checkOut),
-        gte(accommodationReservations.checkOut, checkIn),
-      ),
-    )
-
-  const blockoutsByUnit = new Map<string, { startDate: string; endDate: string }[]>()
-  for (const b of blockoutRows) {
-    const list = blockoutsByUnit.get(b.unitId) ?? []
-    list.push({ startDate: b.startDate, endDate: b.endDate })
-    blockoutsByUnit.set(b.unitId, list)
-  }
-  const reservationsByUnit = new Map<string, { checkIn: string; checkOut: string }[]>()
-  for (const r of reservationRows) {
-    const list = reservationsByUnit.get(r.unitId) ?? []
-    list.push({ checkIn: r.checkIn, checkOut: r.checkOut })
-    reservationsByUnit.set(r.unitId, list)
-  }
-
-  const result = units
+  const result = types
     .filter(
-      (u) =>
-        checkUnitAvailable(
-          u,
+      (t) =>
+        checkTypeAvailable(
+          t,
           checkIn,
           checkOut,
           guests,
-          blockoutsByUnit.get(u.id) ?? [],
-          reservationsByUnit.get(u.id) ?? [],
+          quantity,
+          occupancies.get(t.id) ?? [],
         ) === null,
     )
-    .map((u) => {
+    .map((t) => {
       const quote = quoteStay(
-        u,
+        t,
         checkIn,
         checkOut,
         guests,
-        seasons.get(u.id) ?? [],
+        quantity,
+        seasons.get(t.id) ?? [],
         weekendDays,
       )
       return {
-        unit_id: u.id,
-        name: u.name,
-        unit_type: u.unitType,
-        beds: u.beds,
-        base_occupancy: u.baseOccupancy,
-        max_capacity: u.maxCapacity,
-        amenities: u.amenities ? u.amenities.split(',') : [],
-        checkin_time: u.checkinTime,
-        checkout_time: u.checkoutTime,
+        unit_type_id: t.id,
+        name: t.name,
+        unit_type: t.unitType,
+        inventory_count: t.inventoryCount,
+        min_remaining: minRemaining(
+          t.inventoryCount,
+          checkIn,
+          checkOut,
+          occupancies.get(t.id) ?? [],
+        ),
+        beds: t.beds,
+        base_occupancy: t.baseOccupancy,
+        max_capacity: t.maxCapacity,
+        amenities: t.amenities ? t.amenities.split(',') : [],
+        checkin_time: t.checkinTime,
+        checkout_time: t.checkoutTime,
         nights: quote.nights,
+        quantity,
         total: quote.total,
         per_night: quote.perNight.map((n) => ({ date: n.date, rate: n.rate })),
       }
     })
 
-  return c.json({ check_in: checkIn, check_out: checkOut, guests, units: result })
+  return c.json({
+    check_in: checkIn,
+    check_out: checkOut,
+    guests,
+    quantity,
+    unit_types: result,
+  })
 }
 
-// US-AG37 — unit-first: a unit's day-by-day status + rate over [from, to].
-export const getUnitCalendar = async (c: PosContext) => {
+// US-AG37 — type-first: a unit type's day-by-day REMAINING count + rate over [from, to]
+// (replaces the v1 binary free/blocked/booked calendar).
+export const getUnitTypeCalendar = async (c: PosContext) => {
   const agent = c.get('user')
-  const unitId = c.req.param('unitId')
+  const typeId = c.req.param('typeId')
   const db = getDb(c.env)
   const org = agent.organizationId
 
@@ -253,173 +283,154 @@ export const getUnitCalendar = async (c: PosContext) => {
     throw new ApiError('VALIDATION_ERROR', 400, 'A valid from <= to range is required')
   }
 
-  const unitRows = await db
+  const typeRows = await db
     .select({
-      id: accommodationUnits.id,
-      serviceId: accommodationUnits.serviceId,
-      baseRate: accommodationUnits.baseRate,
-      weekendRate: accommodationUnits.weekendRate,
-      status: accommodationUnits.status,
+      id: accommodationUnitTypes.id,
+      serviceId: accommodationUnitTypes.serviceId,
+      inventoryCount: accommodationUnitTypes.inventoryCount,
+      baseRate: accommodationUnitTypes.baseRate,
+      weekendRate: accommodationUnitTypes.weekendRate,
+      status: accommodationUnitTypes.status,
     })
-    .from(accommodationUnits)
+    .from(accommodationUnitTypes)
     .where(
-      and(eq(accommodationUnits.id, unitId), eq(accommodationUnits.organizationId, org)),
+      and(
+        eq(accommodationUnitTypes.id, typeId),
+        eq(accommodationUnitTypes.organizationId, org),
+      ),
     )
     .limit(1)
-  const unit = unitRows[0]
-  if (!unit || unit.status !== 'active') {
-    throw new ApiError('NOT_FOUND', 404, 'Unit not found')
+  const unitType = typeRows[0]
+  if (!unitType || unitType.status !== 'active') {
+    throw new ApiError('NOT_FOUND', 404, 'Unit type not found')
   }
-  // Affiliate allow-list (the unit's parent service must be curated for them).
-  await requireLodgingService(db, c, unit.serviceId)
+  // Affiliate allow-list (the type's parent service must be curated for them).
+  await requireLodgingService(db, c, unitType.serviceId)
 
   const weekendDays = await orgWeekendDays(db, org)
-  const seasons = (await seasonsByUnit(db, org, from, to)).get(unitId) ?? []
+  const seasons = (await seasonsByType(db, org, from, to)).get(typeId) ?? []
 
   // `to` is the last day shown; include its night, so the night-range is [from, to+1).
   const toExclusive = addDays(to, 1)
-  const blockouts = (
-    await db
-      .select({
-        startDate: accommodationBlockouts.startDate,
-        endDate: accommodationBlockouts.endDate,
-      })
-      .from(accommodationBlockouts)
-      .where(
-        and(
-          eq(accommodationBlockouts.organizationId, org),
-          eq(accommodationBlockouts.unitId, unitId),
-          lte(accommodationBlockouts.startDate, toExclusive),
-          gte(accommodationBlockouts.endDate, from),
-        ),
-      )
-  ).map((b) => ({ start: b.startDate, end: b.endDate }))
-  const reservations = (
-    await db
-      .select({
-        checkIn: accommodationReservations.checkIn,
-        checkOut: accommodationReservations.checkOut,
-      })
-      .from(accommodationReservations)
-      .where(
-        and(
-          eq(accommodationReservations.organizationId, org),
-          eq(accommodationReservations.unitId, unitId),
-          eq(accommodationReservations.status, 'active'),
-          lte(accommodationReservations.checkIn, toExclusive),
-          gte(accommodationReservations.checkOut, from),
-        ),
-      )
-  ).map((r) => ({ start: r.checkIn, end: r.checkOut }))
+  const occupancies = (await occupanciesByType(db, org, from, toExclusive)).get(typeId) ?? []
 
-  const days = eachNight(from, toExclusive).map((date) => {
-    const dayEnd = addDays(date, 1)
-    let status: 'available' | 'blocked' | 'booked' = 'available'
-    if (blockouts.some((b) => rangesOverlap(date, dayEnd, b.start, b.end))) {
-      status = 'blocked'
-    } else if (reservations.some((r) => rangesOverlap(date, dayEnd, r.start, r.end))) {
-      status = 'booked'
-    }
-    return { date, status, rate: nightlyRate(date, unit, seasons, weekendDays) }
-  })
+  const days = eachNight(from, toExclusive).map((date) => ({
+    date,
+    remaining: remainingOnNight(unitType.inventoryCount, date, occupancies),
+    rate: nightlyRate(date, unitType, seasons, weekendDays),
+  }))
 
-  return c.json({ unit_id: unitId, days })
+  return c.json({ unit_type_id: typeId, inventory_count: unitType.inventoryCount, days })
 }
 
-// listPosServices lodging branch (spec §4.3): per lodging service, `from_nightly_rate` (min unit
-// base_rate) and a windowed `has_availability` (≥ 1 active unit with ≥ 1 free night in the window).
-// Reservations/blockouts are checked per night via the shared overlap rule. Returns a map keyed by
-// serviceId for the catalog serializer to merge in.
-export const lodgingCatalogInfo = async (
+// listPosServices lodging branch (spec §4.3, D14 — flattened catalog): one CARD PER ACTIVE UNIT
+// TYPE of the wanted lodging services, each with its exact nightly base rate, a windowed
+// has_availability (per-night min remaining ≥ 1 over [windowFrom, windowTo]) and the `remaining`
+// count that drives the "Quedan N" badge. The parent service is never a card.
+export interface LodgingTypeCard {
+  id: string
+  serviceId: string
+  name: string
+  unitType: string | null
+  nightlyRate: number
+  /** Hard guest cap PER ROOM — lets the stay sheet cap its guests stepper before any quote. */
+  maxCapacity: number
+  hasAvailability: boolean
+  remaining: number
+}
+
+export const lodgingTypeCards = async (
   db: Db,
   org: string,
   lodgingServiceIds: string[],
   windowFrom: string,
   windowTo: string,
-): Promise<Map<string, { hasAvailability: boolean; fromNightlyRate: number | null }>> => {
-  const out = new Map<string, { hasAvailability: boolean; fromNightlyRate: number | null }>()
-  if (lodgingServiceIds.length === 0) return out
+): Promise<LodgingTypeCard[]> => {
+  if (lodgingServiceIds.length === 0) return []
 
-  const units = await db
+  const types = await db
     .select({
-      id: accommodationUnits.id,
-      serviceId: accommodationUnits.serviceId,
-      baseRate: accommodationUnits.baseRate,
+      id: accommodationUnitTypes.id,
+      serviceId: accommodationUnitTypes.serviceId,
+      name: accommodationUnitTypes.name,
+      unitType: accommodationUnitTypes.unitType,
+      inventoryCount: accommodationUnitTypes.inventoryCount,
+      baseRate: accommodationUnitTypes.baseRate,
+      maxCapacity: accommodationUnitTypes.maxCapacity,
     })
-    .from(accommodationUnits)
+    .from(accommodationUnitTypes)
     .where(
       and(
-        eq(accommodationUnits.organizationId, org),
-        eq(accommodationUnits.status, 'active'),
+        eq(accommodationUnitTypes.organizationId, org),
+        eq(accommodationUnitTypes.status, 'active'),
       ),
     )
+    .orderBy(asc(accommodationUnitTypes.name))
 
   // The window covers nights [windowFrom, windowTo] inclusive → night-range end is windowTo+1.
   const windowEnd = addDays(windowTo, 1)
-  const nights = eachNight(windowFrom, windowEnd)
-
-  const blockouts = await db
-    .select({
-      unitId: accommodationBlockouts.unitId,
-      startDate: accommodationBlockouts.startDate,
-      endDate: accommodationBlockouts.endDate,
-    })
-    .from(accommodationBlockouts)
-    .where(
-      and(
-        eq(accommodationBlockouts.organizationId, org),
-        lte(accommodationBlockouts.startDate, windowEnd),
-        gte(accommodationBlockouts.endDate, windowFrom),
-      ),
-    )
-  const reservations = await db
-    .select({
-      unitId: accommodationReservations.unitId,
-      checkIn: accommodationReservations.checkIn,
-      checkOut: accommodationReservations.checkOut,
-    })
-    .from(accommodationReservations)
-    .where(
-      and(
-        eq(accommodationReservations.organizationId, org),
-        eq(accommodationReservations.status, 'active'),
-        lte(accommodationReservations.checkIn, windowEnd),
-        gte(accommodationReservations.checkOut, windowFrom),
-      ),
-    )
-  const boByUnit = new Map<string, { startDate: string; endDate: string }[]>()
-  for (const b of blockouts) {
-    const l = boByUnit.get(b.unitId) ?? []
-    l.push(b)
-    boByUnit.set(b.unitId, l)
-  }
-  const resByUnit = new Map<string, { checkIn: string; checkOut: string }[]>()
-  for (const r of reservations) {
-    const l = resByUnit.get(r.unitId) ?? []
-    l.push(r)
-    resByUnit.set(r.unitId, l)
-  }
+  const occupancies = await occupanciesByType(db, org, windowFrom, windowEnd)
 
   const wanted = new Set(lodgingServiceIds)
-  for (const u of units) {
-    if (!wanted.has(u.serviceId)) continue
-    const entry = out.get(u.serviceId) ?? { hasAvailability: false, fromNightlyRate: null }
-    entry.fromNightlyRate =
-      entry.fromNightlyRate === null ? u.baseRate : Math.min(entry.fromNightlyRate, u.baseRate)
+  return types
+    .filter((t) => wanted.has(t.serviceId))
+    .map((t) => {
+      const remaining = minRemaining(
+        t.inventoryCount,
+        windowFrom,
+        windowEnd,
+        occupancies.get(t.id) ?? [],
+      )
+      return {
+        id: t.id,
+        serviceId: t.serviceId,
+        name: t.name,
+        unitType: t.unitType,
+        nightlyRate: t.baseRate,
+        maxCapacity: t.maxCapacity,
+        hasAvailability: remaining >= 1,
+        remaining,
+      }
+    })
+}
 
-    if (!entry.hasAvailability) {
-      const bo = boByUnit.get(u.id) ?? []
-      const res = resByUnit.get(u.id) ?? []
-      const hasFreeNight = nights.some((d) => {
-        const dEnd = addDays(d, 1)
-        const blocked = bo.some((b) => rangesOverlap(d, dEnd, b.startDate, b.endDate))
-        const booked = res.some((r) => rangesOverlap(d, dEnd, r.checkIn, r.checkOut))
-        return !blocked && !booked
-      })
-      if (hasFreeNight) entry.hasAvailability = true
+// availability/days lodging contribution (spec §4.3): the dates in [windowFrom, windowEnd]
+// (inclusive) on which ANY active unit type of an active lodging service has remaining ≥ 1 —
+// real dots for lodging days (retires the frontend's `lodgingInScope` exception).
+export const lodgingAvailableDays = async (
+  db: Db,
+  org: string,
+  windowFrom: string,
+  windowEnd: string,
+): Promise<Set<string>> => {
+  const types = await db
+    .select({
+      id: accommodationUnitTypes.id,
+      inventoryCount: accommodationUnitTypes.inventoryCount,
+    })
+    .from(accommodationUnitTypes)
+    .innerJoin(services, eq(accommodationUnitTypes.serviceId, services.id))
+    .where(
+      and(
+        eq(accommodationUnitTypes.organizationId, org),
+        eq(accommodationUnitTypes.status, 'active'),
+        eq(services.status, 'active'),
+      ),
+    )
+  const out = new Set<string>()
+  if (types.length === 0) return out
+
+  const endExclusive = addDays(windowEnd, 1)
+  const occupancies = await occupanciesByType(db, org, windowFrom, endExclusive)
+
+  for (const night of eachNight(windowFrom, endExclusive)) {
+    if (
+      types.some(
+        (t) => remainingOnNight(t.inventoryCount, night, occupancies.get(t.id) ?? []) >= 1,
+      )
+    ) {
+      out.add(night)
     }
-    out.set(u.serviceId, entry)
   }
-  // A lodging service with no units stays absent → catalog serializer treats it as no availability.
   return out
 }

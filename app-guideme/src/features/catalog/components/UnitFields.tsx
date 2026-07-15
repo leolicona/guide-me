@@ -109,7 +109,22 @@ export function UnitFields({ disabled, inheritedCommissionLabel }: UnitFieldsPro
         {...register('unit_type')}
       />
 
-      <GroupLabel>Capacidad</GroupLabel>
+      <GroupLabel>Inventario y capacidad</GroupLabel>
+      {/* v2 — how many interchangeable rooms of this type exist. 1 = a unique cabin/suite
+          (boutique); a hotel enters its room count. Occupancy/capacity are PER ROOM. */}
+      <TextField
+        label="Habitaciones de este tipo"
+        type="number"
+        fullWidth
+        disabled={disabled}
+        error={!!errors.inventory_count}
+        helperText={
+          errors.inventory_count?.message ??
+          '¿Cuántas habitaciones idénticas de este tipo tienes? (1 = única)'
+        }
+        slotProps={{ htmlInput: { step: 1, min: 1, inputMode: 'numeric' } }}
+        {...register('inventory_count', { valueAsNumber: true })}
+      />
       <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
         {count('beds', 'Camas')}
         {count('base_occupancy', 'Ocupación base')}

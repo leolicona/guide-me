@@ -7,10 +7,12 @@ This document tracks known technical debt, deferred tasks, and architectural imp
 **Status:** The accommodation/lodging feature (`docs/lodging/accommodation-stays.spec.md`) added three
 error codes to the `ErrorCode` union in `src/types/errors.ts`, each thrown by a handler and asserted
 by a test (`test/lodging/accommodation-stays.test.ts`) — introduced **and** consumed, no open debt:
-- `UNIT_UNAVAILABLE` (409) — the atomic reservation guard at sale/reactivate found the dates taken
-  (`confirmSale`, `reactivateBooking`).
-- `SEASON_OVERLAP` (409) — a new season overlaps an existing active season for the unit (admin API).
-- `MIN_STAY_NOT_MET` (400) — a stay shorter than the unit's `min_nights` (availability + sale).
+- ~~`UNIT_UNAVAILABLE`~~ → **`INSUFFICIENT_INVENTORY`** (409) — v2 (Unit-Type Inventory, migration
+  `0042`, `docs/RFCs/rfc-airbnb-inventory-model.md`): the per-unit overlap guard became a per-night
+  COUNT guard (`reserved + blocked + requested ≤ inventory_count` ∀ night); the old code was removed
+  from the union in the same change (no route emitted it any more) — no open debt.
+- `SEASON_OVERLAP` (409) — a new season overlaps an existing active season for the type (admin API).
+- `MIN_STAY_NOT_MET` (400) — a stay shorter than the type's `min_nights` (availability + sale).
 
 **`folio_lines` rebuild (Option A):** migration `0040_alter_folio_lines_for_stays.sql` rebuilt
 `folio_lines` to make `slot_id`/`slot_date`/`slot_start_time` nullable and add the stay columns
