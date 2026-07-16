@@ -20,6 +20,7 @@ const InviteAgentPage = lazy(() => import('./pages/InviteAgentPage'))
 const AffiliatesListPage = lazy(() => import('./pages/AffiliatesListPage'))
 const AffiliateDetailPage = lazy(() => import('./pages/AffiliateDetailPage'))
 const CatalogListPage = lazy(() => import('./pages/CatalogListPage'))
+const CatalogNewServicePage = lazy(() => import('./pages/CatalogNewServicePage'))
 const CatalogDetailPage = lazy(() => import('./pages/CatalogDetailPage'))
 const PosCatalogPage = lazy(() => import('./pages/PosCatalogPage'))
 const PosServicePage = lazy(() => import('./pages/PosServicePage'))
@@ -237,6 +238,18 @@ function App() {
               <AuthGuard>
                 <RoleGuard role="admin">
                   <InviteAgentPage />
+                </RoleGuard>
+              </AuthGuard>
+            }
+          />
+          {/* Full-page service creation wizard — immersive, outside the nav shell (US-A38–A44).
+              The static /catalog/new outranks /catalog/:id in v6 route ranking. */}
+          <Route
+            path={ROUTES.CATALOG_NEW}
+            element={
+              <AuthGuard>
+                <RoleGuard role="admin">
+                  <CatalogNewServicePage />
                 </RoleGuard>
               </AuthGuard>
             }

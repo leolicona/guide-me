@@ -11,6 +11,7 @@ export const ROUTES = {
   AFFILIATES: '/affiliates', // admin — affiliate companies list (US-A48)
   AFFILIATE_DETAIL: '/affiliates/:id', // admin — affiliate detail/edit (US-A48/A50/A52)
   CATALOG: '/catalog',
+  CATALOG_NEW: '/catalog/new', // admin — full-page service creation wizard (US-A38–A44)
   CATALOG_DETAIL: '/catalog/:id',
   SETTINGS: '/settings', // admin — org booking policy (US-A46)
   POS: '/pos',

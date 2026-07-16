@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useEffect, useState } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
 import {
   Box,
   Typography,
@@ -12,28 +12,25 @@ import {
 import AddRounded from '@mui/icons-material/AddRounded'
 import { useServices } from '../features/catalog/hooks/useServices'
 import { ServiceList } from '../features/catalog/components/ServiceList'
-import { ServiceWizard } from '../features/catalog/components/wizard/ServiceWizard'
 import { ROUTES } from '../config/routes'
 
 export default function CatalogListPage() {
   const { data: services, isLoading, isError } = useServices()
   const navigate = useNavigate()
-  const [creating, setCreating] = useState(false)
-  const [created, setCreated] = useState(false)
 
-  // US-A44 — on a fully-successful create show a success toast; on a partial create (service
-  // saved but a schedule/extra failed) route to the detail page so the operator finishes the
-  // few that didn't land, flagged by router state the detail page reads.
-  const handleCreated = (serviceId: string, failures: number) => {
-    setCreating(false)
-    if (failures === 0) {
-      setCreated(true)
-    } else {
-      navigate(ROUTES.CATALOG_DETAIL.replace(':id', serviceId), {
-        state: { wizardPartial: true },
-      })
+  // US-A44 — the full-page wizard (/catalog/new) returns here with `serviceCreated` router
+  // state on a fully-successful create; show the success toast once and clear the state so a
+  // refresh or Back doesn't re-toast. (The partial-create path routes to the detail page
+  // flagged `wizardPartial` instead — no list-page involvement.)
+  const location = useLocation()
+  const [created, setCreated] = useState(
+    () => Boolean((location.state as { serviceCreated?: boolean } | null)?.serviceCreated),
+  )
+  useEffect(() => {
+    if ((location.state as { serviceCreated?: boolean } | null)?.serviceCreated) {
+      window.history.replaceState({}, '')
     }
-  }
+  }, [location.state])
 
   return (
     <Fade in timeout={400}>
@@ -59,7 +56,7 @@ export default function CatalogListPage() {
             variant="contained"
             disableElevation
             startIcon={<AddRounded />}
-            onClick={() => setCreating(true)}
+            onClick={() => navigate(ROUTES.CATALOG_NEW)}
             sx={{ flexShrink: 0, alignSelf: { xs: 'stretch', md: 'auto' } }}
           >
             Nuevo servicio
@@ -84,12 +81,6 @@ export default function CatalogListPage() {
           ) : (
             <ServiceList services={services} />
           ))}
-
-        <ServiceWizard
-          open={creating}
-          onClose={() => setCreating(false)}
-          onCreated={handleCreated}
-        />
 
         <Snackbar
           open={created}

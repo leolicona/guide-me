@@ -1,19 +1,12 @@
 import { useState } from 'react'
-import {
-  Stack,
-  TextField,
-  InputAdornment,
-  Button,
-  Box,
-  Typography,
-  Paper,
-  IconButton,
-} from '@mui/material'
+import { Stack, Button, Box, Typography, Paper, IconButton } from '@mui/material'
 import AddRounded from '@mui/icons-material/AddRounded'
+import EditOutlined from '@mui/icons-material/EditOutlined'
 import DeleteOutlineRounded from '@mui/icons-material/DeleteOutlineRounded'
 import LocalOfferRounded from '@mui/icons-material/LocalOfferRounded'
 import { formatMoney, amountToCents } from '../../types'
 import { StepIntro } from './StepIntro'
+import { ExtraDraftSheet } from './ExtraDraftSheet'
 import type { ExtraDraft } from './wizardTypes'
 
 interface StepExtrasProps {
@@ -21,24 +14,28 @@ interface StepExtrasProps {
   onChange: (extras: ExtraDraft[]) => void
 }
 
-/** Step 4 — Extras (US-A43). Inline add form (Add disabled until both filled), newest-first
- * list with the price in green, inputs clear after add, trash to remove. Optional step. */
+// Step 4 — Extras (US-A43, v2). Mirrors the StepUnits repeater: an "Agregar extra" button opens
+// the ExtraDraftSheet (add/edit), rows show the price in green with edit/delete actions.
+// Optional step — no minimum.
 export function StepExtras({ extras, onChange }: StepExtrasProps) {
-  const [name, setName] = useState('')
-  const [price, setPrice] = useState('')
+  const [editing, setEditing] = useState<ExtraDraft | null>(null)
+  const [open, setOpen] = useState(false)
 
-  const priceNum = Number(price)
-  const canAdd = name.trim().length > 0 && price.trim().length > 0 && priceNum >= 0
-
-  const add = () => {
-    if (!canAdd) return
-    onChange([{ name: name.trim(), price: priceNum }, ...extras])
-    setName('')
-    setPrice('')
+  const openAdd = () => {
+    setEditing(null)
+    setOpen(true)
+  }
+  const openEdit = (draft: ExtraDraft) => {
+    setEditing(draft)
+    setOpen(true)
   }
 
-  const remove = (index: number) =>
-    onChange(extras.filter((_, i) => i !== index))
+  const save = (draft: ExtraDraft) => {
+    const exists = extras.some((e) => e.tempId === draft.tempId)
+    onChange(
+      exists ? extras.map((e) => (e.tempId === draft.tempId ? draft : e)) : [...extras, draft],
+    )
+  }
 
   return (
     <Stack spacing={2.5}>
@@ -47,48 +44,15 @@ export function StepExtras({ extras, onChange }: StepExtrasProps) {
         subtitle="Agrega opciones con costo adicional para aumentar el ticket promedio: renta de equipo, comida, fotos…"
       />
 
-      <Stack
-        direction={{ xs: 'column', sm: 'row' }}
-        spacing={1.5}
-        sx={{ alignItems: 'flex-start' }}
+      <Button
+        variant="contained"
+        disableElevation
+        startIcon={<AddRounded />}
+        onClick={openAdd}
+        sx={{ alignSelf: 'flex-start' }}
       >
-        <TextField
-          label="Nombre del extra"
-          placeholder="p. ej. Renta de equipo"
-          fullWidth
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-        />
-        <TextField
-          label="Precio"
-          type="number"
-          value={price}
-          onChange={(e) => setPrice(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') {
-              e.preventDefault()
-              add()
-            }
-          }}
-          slotProps={{
-            input: {
-              startAdornment: <InputAdornment position="start">$</InputAdornment>,
-            },
-            htmlInput: { step: 0.01, min: 0, inputMode: 'decimal' },
-          }}
-          sx={{ width: { xs: '100%', sm: 160 }, flexShrink: 0 }}
-        />
-        <Button
-          onClick={add}
-          disabled={!canAdd}
-          startIcon={<AddRounded />}
-          variant="outlined"
-          color="secondary"
-          sx={{ flexShrink: 0, mt: { sm: 1 }, height: 40 }}
-        >
-          Agregar
-        </Button>
-      </Stack>
+        Agregar extra
+      </Button>
 
       {extras.length === 0 ? (
         <Box
@@ -108,9 +72,9 @@ export function StepExtras({ extras, onChange }: StepExtrasProps) {
         </Box>
       ) : (
         <Stack spacing={1}>
-          {extras.map((extra, i) => (
+          {extras.map((extra) => (
             <Paper
-              key={`${extra.name}-${i}`}
+              key={extra.tempId}
               variant="outlined"
               sx={{
                 display: 'flex',
@@ -130,8 +94,15 @@ export function StepExtras({ extras, onChange }: StepExtrasProps) {
                 </Typography>
                 <IconButton
                   size="small"
+                  aria-label={`Editar ${extra.name}`}
+                  onClick={() => openEdit(extra)}
+                >
+                  <EditOutlined fontSize="small" />
+                </IconButton>
+                <IconButton
+                  size="small"
                   aria-label={`Eliminar ${extra.name}`}
-                  onClick={() => remove(i)}
+                  onClick={() => onChange(extras.filter((x) => x.tempId !== extra.tempId))}
                 >
                   <DeleteOutlineRounded fontSize="small" />
                 </IconButton>
@@ -140,6 +111,14 @@ export function StepExtras({ extras, onChange }: StepExtrasProps) {
           ))}
         </Stack>
       )}
+
+      <ExtraDraftSheet
+        open={open}
+        onClose={() => setOpen(false)}
+        initial={editing}
+        onSave={save}
+        existingNames={extras.filter((e) => e.tempId !== editing?.tempId).map((e) => e.name)}
+      />
     </Stack>
   )
 }

@@ -106,7 +106,7 @@ Prefer these over ad-hoc `Card`/`Paper`/`Chip` usage:
 - **`StatusChip`** — functional-color pill, icon-paired (presets: paid/booking/cancelled/active/suspended/…).
 - **`AlertCard`** — top-of-screen attention card (warning/error semantics).
 - **`BottomSheet`** — the canonical overlay (solid white, real upward shadow).
-- **`WizardShell`** — full-screen multi-step modal chrome (used by the service + affiliate wizards).
+- **`WizardShell`** / **`WizardPage`** — multi-step wizard chrome (shared `WizardChrome`): the Dialog host (affiliate wizard) and the full-page host (service wizard at `/catalog/new`).
 
 Feature-specific shared pieces follow the same idea (e.g. `FolioStatusChip` in `features/folios`).
 

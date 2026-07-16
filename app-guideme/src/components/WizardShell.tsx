@@ -47,15 +47,18 @@ export interface WizardShellProps {
   children: ReactNode
 }
 
+/** The host-agnostic wizard chrome props — everything in `WizardShellProps` except `open`,
+ * which only makes sense for the Dialog host. */
+export type WizardChromeProps = Omit<WizardShellProps, 'open'>
+
 /**
- * The shared multi-step modal chrome (Elegant Field Minimalism): full-screen on mobile (90vh,
- * rounded top edges), centered on desktop; a fixed header (title · close X · "PASO n DE N" +
- * step title · teal progress bar), a single scrollable body, and a fixed footer (Anterior /
- * Siguiente → Finalizar). Anterior is disabled on step 1. Used by the Service Creation wizard
- * (US-A38–A44) and the Affiliate Setup wizard (US-A54–A57). The step body fades on change.
+ * The shared multi-step chrome (Elegant Field Minimalism): a fixed header (title · close X ·
+ * "PASO n DE N" + step title · teal progress bar), a single scrollable body that fades on step
+ * change, and a fixed footer (Anterior / Siguiente → Finalizar; Anterior disabled on step 1).
+ * Host-agnostic: `WizardShell` mounts it inside a Dialog, `WizardPage` inside a full page.
+ * Expects a flex-column host with a fixed height — the body takes `flex: 1` and scrolls.
  */
-export function WizardShell({
-  open,
+export function WizardChrome({
   onClose,
   title,
   step,
@@ -72,32 +75,9 @@ export function WizardShell({
   busy = false,
   error,
   children,
-}: WizardShellProps) {
+}: WizardChromeProps) {
   return (
-    <Dialog
-      open={open}
-      onClose={onClose}
-      fullWidth
-      slotProps={{
-        paper: {
-          sx: {
-            m: { xs: 0, sm: 2 },
-            position: { xs: 'fixed', sm: 'relative' },
-            bottom: { xs: 0, sm: 'auto' },
-            left: { xs: 0, sm: 'auto' },
-            right: { xs: 0, sm: 'auto' },
-            width: { xs: '100%', sm: '100%' },
-            maxWidth: { sm: 600 },
-            height: { xs: '90vh', sm: 'auto' },
-            maxHeight: { xs: '90vh', sm: '88vh' },
-            borderRadius: { xs: 'var(--radius-xl, 20px) var(--radius-xl, 20px) 0 0', sm: 'var(--radius-lg, 16px)' },
-            display: 'flex',
-            flexDirection: 'column',
-            overflow: 'hidden',
-          },
-        },
-      }}
-    >
+    <>
       {/* Fixed header — title, close, step indicator, progress (US-A38/A54) */}
       <Box sx={{ px: 3, pt: 2.5, pb: 2, flexShrink: 0 }}>
         <Stack direction="row" sx={{ alignItems: 'center', justifyContent: 'space-between' }}>
@@ -172,6 +152,42 @@ export function WizardShell({
           )}
         </Stack>
       </Box>
+    </>
+  )
+}
+
+/**
+ * The multi-step modal host (Elegant Field Minimalism): `WizardChrome` inside a Dialog —
+ * full-screen on mobile (90vh, rounded top edges), centered on desktop. Used by the Affiliate
+ * Setup wizard (US-A54–A57); the Service Creation wizard now lives on a page (`WizardPage`).
+ */
+export function WizardShell({ open, onClose, ...chrome }: WizardShellProps) {
+  return (
+    <Dialog
+      open={open}
+      onClose={onClose}
+      fullWidth
+      slotProps={{
+        paper: {
+          sx: {
+            m: { xs: 0, sm: 2 },
+            position: { xs: 'fixed', sm: 'relative' },
+            bottom: { xs: 0, sm: 'auto' },
+            left: { xs: 0, sm: 'auto' },
+            right: { xs: 0, sm: 'auto' },
+            width: { xs: '100%', sm: '100%' },
+            maxWidth: { sm: 600 },
+            height: { xs: '90vh', sm: 'auto' },
+            maxHeight: { xs: '90vh', sm: '88vh' },
+            borderRadius: { xs: 'var(--radius-xl, 20px) var(--radius-xl, 20px) 0 0', sm: 'var(--radius-lg, 16px)' },
+            display: 'flex',
+            flexDirection: 'column',
+            overflow: 'hidden',
+          },
+        },
+      }}
+    >
+      <WizardChrome onClose={onClose} {...chrome} />
     </Dialog>
   )
 }

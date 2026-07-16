@@ -1,8 +1,8 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useForm, FormProvider } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { Dialog, Box, Typography, Button, Stack, Alert } from '@mui/material'
-import { WizardShell } from '../../../../components'
+import { WizardPage } from '../../../../components'
 import { wizardSchema, STEP_FIELDS, stepFields, type WizardFormData } from './wizardSchema'
 import {
   totalSteps,
@@ -45,20 +45,22 @@ const EMPTY: WizardFormData = {
 }
 
 interface ServiceWizardProps {
-  open: boolean
+  /** Exit confirmed (X on a clean form, or discard confirmed) — the parent navigates away. */
   onClose: () => void
   /** Fired after a successful create. `failures` > 0 means the service exists but some
    * schedules/extras didn't persist (US-A44 partial path). */
   onCreated: (serviceId: string, failures: number) => void
 }
 
-export function ServiceWizard({ open, onClose, onCreated }: ServiceWizardProps) {
+// The full-page service creation wizard (US-A38–A44) — always mounted as a route's content
+// (/catalog/new); navigation away unmounts it, so there's no reset-on-close bookkeeping.
+export function ServiceWizard({ onClose, onCreated }: ServiceWizardProps) {
   const methods = useForm<WizardFormData>({
     resolver: zodResolver(wizardSchema),
     defaultValues: EMPTY,
     mode: 'onTouched',
   })
-  const { trigger, getValues, reset, formState, watch } = methods
+  const { trigger, getValues, formState, watch } = methods
 
   const [step, setStep] = useState<WizardStep>(1)
   const [times, setTimes] = useState<DepartureTime[]>([])
@@ -77,29 +79,23 @@ export function ServiceWizard({ open, onClose, onCreated }: ServiceWizardProps) 
   const isDirty =
     formState.isDirty || times.length > 0 || extras.length > 0 || units.length > 0
 
-  const resetAll = () => {
-    reset(EMPTY)
-    setStep(1)
-    setTimes([])
-    setExtras([])
-    setUnits([])
-    setShowTimesError(false)
-    setShowUnitsError(false)
-    setConfirmDiscard(false)
-    saveMutation.reset()
-    lodgingSave.reset()
-  }
-
-  const doClose = () => {
-    resetAll()
-    onClose()
-  }
-
   const handleClose = () => {
     if (saveMutation.isPending) return
     if (isDirty) setConfirmDiscard(true)
-    else doClose()
+    else onClose()
   }
+
+  // Tab close / refresh with unsaved input → native "leave site?" prompt. SPA back-navigation
+  // is not intercepted (BrowserRouter has no useBlocker) — an accepted silent discard.
+  useEffect(() => {
+    if (!isDirty) return
+    const warn = (e: BeforeUnloadEvent) => {
+      e.preventDefault()
+      e.returnValue = ''
+    }
+    window.addEventListener('beforeunload', warn)
+    return () => window.removeEventListener('beforeunload', warn)
+  }, [isDirty])
 
   const goNext = async () => {
     const ok = await trigger([...stepFields(category, step)])
@@ -153,10 +149,7 @@ export function ServiceWizard({ open, onClose, onCreated }: ServiceWizardProps) 
     lodgingSave.mutate(
       { core, units },
       {
-        onSuccess: ({ serviceId, failures }) => {
-          onCreated(serviceId, failures)
-          resetAll()
-        },
+        onSuccess: ({ serviceId, failures }) => onCreated(serviceId, failures),
       },
     )
   }
@@ -215,10 +208,7 @@ export function ServiceWizard({ open, onClose, onCreated }: ServiceWizardProps) 
         extras: extrasPayload,
       },
       {
-        onSuccess: ({ serviceId, failures }) => {
-          onCreated(serviceId, failures)
-          resetAll()
-        },
+        onSuccess: ({ serviceId, failures }) => onCreated(serviceId, failures),
       },
     )
   }
@@ -229,8 +219,7 @@ export function ServiceWizard({ open, onClose, onCreated }: ServiceWizardProps) 
 
   return (
     <>
-      <WizardShell
-        open={open}
+      <WizardPage
         onClose={handleClose}
         title="Nuevo servicio"
         step={step}
@@ -270,7 +259,7 @@ export function ServiceWizard({ open, onClose, onCreated }: ServiceWizardProps) 
             ))}
           {step === 4 && !isLodging && <StepExtras extras={extras} onChange={setExtras} />}
         </FormProvider>
-      </WizardShell>
+      </WizardPage>
 
       {/* Discard confirmation */}
       <Dialog
@@ -289,7 +278,7 @@ export function ServiceWizard({ open, onClose, onCreated }: ServiceWizardProps) 
             <Button color="inherit" onClick={() => setConfirmDiscard(false)}>
               Seguir editando
             </Button>
-            <Button color="error" variant="contained" onClick={doClose}>
+            <Button color="error" variant="contained" onClick={onClose}>
               Descartar
             </Button>
           </Stack>

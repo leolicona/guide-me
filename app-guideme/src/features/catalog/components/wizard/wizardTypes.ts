@@ -7,8 +7,10 @@ export type Frequency = 'single' | 'recurring'
 export type DepartureTime = string
 
 /** A draft extra held in wizard-local state until Save flushes it (US-A43). `price` is a
- * major-unit decimal as typed; converted to centavos at save. */
+ * major-unit decimal as typed; converted to centavos at save. `tempId` is a client-only
+ * stable key for list rows and upsert-by-id — never sent to the API. */
 export interface ExtraDraft {
+  tempId: string
   name: string
   price: number
 }
