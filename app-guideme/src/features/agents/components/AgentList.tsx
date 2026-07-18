@@ -2,9 +2,9 @@ import { useState } from 'react'
 import { Stack } from '@mui/material'
 import type { Agent } from '../types'
 import { AgentRow } from './AgentRow'
-import { EditAgentDialog } from './EditAgentDialog'
-import { ConfirmStatusDialog } from './ConfirmStatusDialog'
-import type { StatusAction } from './ConfirmStatusDialog'
+import { EditAgentSheet } from './EditAgentSheet'
+import { ConfirmStatusSheet } from './ConfirmStatusSheet'
+import type { StatusAction } from './ConfirmStatusSheet'
 
 interface AgentListProps {
   agents: Agent[]
@@ -31,13 +31,13 @@ export function AgentList({ agents }: AgentListProps) {
         ))}
       </Stack>
 
-      <EditAgentDialog
+      <EditAgentSheet
         agent={editing}
         open={!!editing}
         onClose={() => setEditing(null)}
       />
 
-      <ConfirmStatusDialog
+      <ConfirmStatusSheet
         agent={confirm?.agent ?? null}
         action={confirm?.action ?? 'deactivate'}
         open={!!confirm}

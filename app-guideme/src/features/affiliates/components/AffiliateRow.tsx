@@ -1,53 +1,65 @@
-import { Card, CardActionArea, CardContent, Box, Typography, Stack } from '@mui/material'
+import { Typography, Stack, IconButton, Switch, FormControlLabel } from '@mui/material'
 import StorefrontRounded from '@mui/icons-material/StorefrontRounded'
 import GroupsRounded from '@mui/icons-material/GroupsRounded'
-import { useNavigate } from 'react-router-dom'
+import EditRounded from '@mui/icons-material/EditRounded'
+import { Link as RouterLink } from 'react-router-dom'
 import type { AffiliateListItem } from '../types'
-import { StatusChip } from '../../../components'
+import { ListRow } from '../../../components'
 
-// US-A48 — one affiliate company in the list. The whole card navigates to the detail/edit page.
-export function AffiliateRow({ affiliate }: { affiliate: AffiliateListItem }) {
-  const navigate = useNavigate()
+interface AffiliateRowProps {
+  affiliate: AffiliateListItem
+  onDeactivate: (affiliate: AffiliateListItem) => void
+  onReactivate: (affiliate: AffiliateListItem) => void
+}
+
+// US-A48 — one affiliate company in the list (unified ListRow v2 anatomy): title and the
+// corner ✎ both navigate to the detail/edit page; the estado switch requests suspend/
+// reactivate through the list-level confirm sheet (parity with services/agents), flipping
+// only after the mutation lands.
+export function AffiliateRow({ affiliate, onDeactivate, onReactivate }: AffiliateRowProps) {
   const suspended = affiliate.status === 'suspended'
+  const detailTo = `/affiliates/${affiliate.id}`
 
   return (
-    <Card sx={{ opacity: suspended ? 0.6 : 1, transition: 'opacity 160ms ease' }}>
-      <CardActionArea onClick={() => navigate(`/affiliates/${affiliate.id}`)}>
-        <CardContent>
-          <Box
-            sx={{
-              display: 'flex',
-              gap: 2,
-              justifyContent: 'space-between',
-              alignItems: 'center',
-            }}
-          >
-            <Box sx={{ minWidth: 0 }}>
-              <Typography sx={{ fontWeight: 600 }} noWrap>
-                {affiliate.name}
-              </Typography>
-              <Stack direction="row" spacing={2} sx={{ mt: 0.5, color: 'text.secondary' }}>
-                <Stack direction="row" spacing={0.5} sx={{ alignItems: 'center' }}>
-                  <StorefrontRounded fontSize="inherit" />
-                  <Typography variant="body2">
-                    {affiliate.service_count} servicio{affiliate.service_count === 1 ? '' : 's'}
-                  </Typography>
-                </Stack>
-                <Stack direction="row" spacing={0.5} sx={{ alignItems: 'center' }}>
-                  <GroupsRounded fontSize="inherit" />
-                  <Typography variant="body2">
-                    {affiliate.user_count} usuario{affiliate.user_count === 1 ? '' : 's'}
-                  </Typography>
-                </Stack>
-              </Stack>
-            </Box>
-            <StatusChip
-              status={suspended ? 'suspended' : 'active'}
-              sx={{ flexShrink: 0 }}
+    <ListRow
+      title={affiliate.name}
+      titleTo={detailTo}
+      inactive={suspended}
+      meta={
+        <Stack direction="row" spacing={2} sx={{ mt: 0.5, color: 'text.secondary' }}>
+          <Stack direction="row" spacing={0.5} sx={{ alignItems: 'center' }}>
+            <StorefrontRounded fontSize="inherit" />
+            <Typography variant="body2">
+              {affiliate.service_count} servicio{affiliate.service_count === 1 ? '' : 's'}
+            </Typography>
+          </Stack>
+          <Stack direction="row" spacing={0.5} sx={{ alignItems: 'center' }}>
+            <GroupsRounded fontSize="inherit" />
+            <Typography variant="body2">
+              {affiliate.user_count} usuario{affiliate.user_count === 1 ? '' : 's'}
+            </Typography>
+          </Stack>
+        </Stack>
+      }
+      cornerAction={
+        <IconButton aria-label="Editar" component={RouterLink} to={detailTo}>
+          <EditRounded fontSize="small" />
+        </IconButton>
+      }
+      footerStatus={
+        <FormControlLabel
+          control={
+            <Switch
+              color="secondary"
+              checked={!suspended}
+              onChange={() => (suspended ? onReactivate(affiliate) : onDeactivate(affiliate))}
             />
-          </Box>
-        </CardContent>
-      </CardActionArea>
-    </Card>
+          }
+          label={suspended ? 'Suspendido' : 'Activo'}
+          slotProps={{ typography: { variant: 'body2' } }}
+          sx={{ mr: 0 }}
+        />
+      }
+    />
   )
 }

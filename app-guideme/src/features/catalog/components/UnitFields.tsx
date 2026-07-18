@@ -31,7 +31,7 @@ interface UnitFieldsProps {
 }
 
 // The shared unit field group (bound to unitFormSchema). Uses the surrounding RHF context, so it
-// drops into BOTH the detail-page UnitFormDialog and the wizard's UnitDraftSheet — one definition,
+// drops into BOTH the detail-page UnitFormSheet and the wizard's UnitDraftSheet — one definition,
 // no drift. Money fields are entered as major-unit decimals; the parent converts on submit.
 export function UnitFields({ disabled, inheritedCommissionLabel }: UnitFieldsProps) {
   const {

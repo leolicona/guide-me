@@ -18,6 +18,7 @@ const DashboardPage = lazy(() => import('./pages/DashboardPage'))
 const AgentsListPage = lazy(() => import('./pages/AgentsListPage'))
 const InviteAgentPage = lazy(() => import('./pages/InviteAgentPage'))
 const AffiliatesListPage = lazy(() => import('./pages/AffiliatesListPage'))
+const AffiliateNewPage = lazy(() => import('./pages/AffiliateNewPage'))
 const AffiliateDetailPage = lazy(() => import('./pages/AffiliateDetailPage'))
 const CatalogListPage = lazy(() => import('./pages/CatalogListPage'))
 const CatalogNewServicePage = lazy(() => import('./pages/CatalogNewServicePage'))
@@ -250,6 +251,18 @@ function App() {
               <AuthGuard>
                 <RoleGuard role="admin">
                   <CatalogNewServicePage />
+                </RoleGuard>
+              </AuthGuard>
+            }
+          />
+          {/* Full-page affiliate setup wizard — immersive, outside the nav shell (US-A54–A57).
+              The static /affiliates/new outranks /affiliates/:id in v6 route ranking. */}
+          <Route
+            path={ROUTES.AFFILIATE_NEW}
+            element={
+              <AuthGuard>
+                <RoleGuard role="admin">
+                  <AffiliateNewPage />
                 </RoleGuard>
               </AuthGuard>
             }

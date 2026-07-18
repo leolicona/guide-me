@@ -2,25 +2,20 @@ import { useEffect } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import {
-  Dialog,
-  DialogTitle,
-  DialogContent,
-  DialogActions,
   TextField,
   MenuItem,
-  Button,
   Stack,
   Box,
   Typography,
   Collapse,
   InputAdornment,
-  CircularProgress,
   ToggleButton,
   ToggleButtonGroup,
 } from '@mui/material'
+import { FormSheet } from '../../../components'
 import { serviceFormSchema } from '../schemas'
 import type { ServiceFormData } from '../schemas'
-import { CATEGORY_OPTIONS, type ServiceCategory } from '../categories'
+import { CATEGORY_OPTIONS, pricesAtServiceLevel, type ServiceCategory } from '../categories'
 import { useCreateService } from '../hooks/useCreateService'
 import { useUpdateService } from '../hooks/useUpdateService'
 import {
@@ -33,7 +28,7 @@ import {
 import type { Service } from '../types'
 import { ServiceError } from '../../../services/authService'
 
-interface ServiceFormDialogProps {
+interface ServiceFormSheetProps {
   /** null → create mode; a service → edit mode (prefilled). */
   service: Service | null
   open: boolean
@@ -56,11 +51,11 @@ const EMPTY: ServiceFormData = {
   flex_capacity_pct: 0,
 }
 
-export function ServiceFormDialog({
+export function ServiceFormSheet({
   service,
   open,
   onClose,
-}: ServiceFormDialogProps) {
+}: ServiceFormSheetProps) {
   const isEdit = !!service
   const createMutation = useCreateService()
   const updateMutation = useUpdateService()
@@ -79,6 +74,10 @@ export function ServiceFormDialog({
   })
   const commissionType = watch('commission_type')
   const category = watch('category')
+  // Unit-based categories price and allocate per unit type, not at the service level — so the
+  // service-level price / capacity / allocation fields don't apply and are hidden (parity with
+  // the create Wizard's unit track). Reactive on `category` so switching it re-reveals them.
+  const showServicePricing = pricesAtServiceLevel(category)
   const isFlexible = watch('is_flexible')
   const flexPct = watch('flex_capacity_pct')
   const baseCapacity = watch('default_capacity')
@@ -90,6 +89,7 @@ export function ServiceFormDialog({
 
   // Prefill on open: edit → service values (cents → major); create → blank. The commission
   // value is unit-converted by its type: percent ↔ basis points, fixed ↔ centavos.
+  // (The sheet stays mounted while closed, so keying the effect on `open` is reliable.)
   useEffect(() => {
     if (!open) return
     if (service) {
@@ -115,12 +115,10 @@ export function ServiceFormDialog({
   }, [open, service, reset])
 
   const onSubmit = (data: ServiceFormData) => {
+    const unitBasedSubmit = !pricesAtServiceLevel(data.category)
     const payload = {
       name: data.name.trim(),
       description: data.description?.trim() ? data.description.trim() : null,
-      base_price: amountToCents(data.base_price),
-      minimum_price: amountToCents(data.minimum_price),
-      default_capacity: data.default_capacity,
       // US-A37 — required; the schema guarantees a valid enum value here.
       category: data.category,
       commission_type: data.commission_type,
@@ -128,9 +126,26 @@ export function ServiceFormDialog({
         data.commission_type === 'fixed'
           ? amountToCents(data.commission_value)
           : percentToBasisPoints(data.commission_value),
-      // US-A36 — Hard Cap always persists a 0 tolerance (the server coerces it too).
-      is_flexible: data.is_flexible,
-      flex_capacity_pct: data.is_flexible ? data.flex_capacity_pct : 0,
+      // Unit-based categories carry canonical zeros at the service level (rates/capacity live
+      // on the units) — forced here so hidden fields can never persist a stale value, keeping
+      // the record consistent with the unit-based model (mirrors the Wizard's unit-track create
+      // path). Service-priced categories persist the fields the form actually shows.
+      ...(unitBasedSubmit
+        ? {
+            base_price: 0,
+            minimum_price: 0,
+            default_capacity: 1,
+            is_flexible: false,
+            flex_capacity_pct: 0,
+          }
+        : {
+            base_price: amountToCents(data.base_price),
+            minimum_price: amountToCents(data.minimum_price),
+            default_capacity: data.default_capacity,
+            // US-A36 — Hard Cap always persists a 0 tolerance (the server coerces it too).
+            is_flexible: data.is_flexible,
+            flex_capacity_pct: data.is_flexible ? data.flex_capacity_pct : 0,
+          }),
     }
 
     const onError = (error: unknown) => {
@@ -162,17 +177,25 @@ export function ServiceFormDialog({
   const isLoading = createMutation.isPending || updateMutation.isPending
 
   return (
-    <Dialog open={open} onClose={onClose} fullWidth maxWidth="sm">
-      <DialogTitle>{isEdit ? 'Editar servicio' : 'Nuevo servicio'}</DialogTitle>
-      <form onSubmit={handleSubmit(onSubmit)} noValidate>
-        <DialogContent>
-          <Stack spacing={2} sx={{ mt: 0.5 }}>
+    <FormSheet
+      open={open}
+      onClose={onClose}
+      title={isEdit ? 'Editar servicio' : 'Nuevo servicio'}
+      submitLabel="Guardar"
+      busy={isLoading}
+      onSubmit={handleSubmit(onSubmit)}
+    >
+      <Stack spacing={2}>
             <TextField
               label="Nombre"
               fullWidth
               disabled={isLoading}
               error={!!errors.name}
               helperText={errors.name?.message}
+              // RHF sets the value via reset() without firing an input event, so MUI can't
+              // auto-detect the pre-filled state — pin the label up so it never overlaps the
+              // prefilled text on edit (empty state shows the placeholder cleanly).
+              slotProps={{ inputLabel: { shrink: true } }}
               {...register('name')}
             />
             {/* US-A37 — required primary category; classifies the whole service for the POS. */}
@@ -207,8 +230,22 @@ export function ServiceFormDialog({
               disabled={isLoading}
               error={!!errors.description}
               helperText={errors.description?.message}
+              // Same as Nombre — keep the label floated so a prefilled description doesn't
+              // collide with it on edit.
+              slotProps={{ inputLabel: { shrink: true } }}
               {...register('description')}
             />
+
+            {!showServicePricing && (
+              // A unit-based service prices and allocates per unit type, so the service-level
+              // fields below don't apply — surfaced so the shorter form doesn't read as broken.
+              <Typography variant="body2" color="text.secondary">
+                Las tarifas y el cupo de un hospedaje se definen en cada tipo de unidad.
+              </Typography>
+            )}
+
+            {showServicePricing && (
+              <>
             <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
               <TextField
                 label="Precio base"
@@ -314,11 +351,15 @@ export function ServiceFormDialog({
                 />
               </Collapse>
             </Box>
+              </>
+            )}
 
-            {/* US-A12 (rev.) — the commission ANY seller earns for this service. */}
-            <Stack direction="row" spacing={2}>
+            {/* US-A12 (rev.) — the commission ANY seller earns for this service. The toggle group
+                is pinned to the input's 48px control height (buttons fill it) and the row aligns
+                at the top, so the toggle and the field's input box share the same top and bottom
+                edges — one clean row. */}
+            <Stack direction="row" spacing={2} sx={{ alignItems: 'flex-start' }}>
               <ToggleButtonGroup
-                size="small"
                 exclusive
                 value={commissionType}
                 onChange={(_, v) => {
@@ -326,7 +367,7 @@ export function ServiceFormDialog({
                 }}
                 disabled={isLoading}
                 aria-label="Tipo de comisión"
-                sx={{ alignSelf: 'flex-start', mt: 1 }}
+                sx={{ flexShrink: 0, height: 48, '& .MuiToggleButton-root': { height: '100%' } }}
               >
                 <ToggleButton value="percent">%</ToggleButton>
                 <ToggleButton value="fixed">$ por lugar</ToggleButton>
@@ -364,22 +405,7 @@ export function ServiceFormDialog({
                 {...register('commission_value', { valueAsNumber: true })}
               />
             </Stack>
-          </Stack>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={onClose} disabled={isLoading}>
-            Cancelar
-          </Button>
-          <Button
-            type="submit"
-            variant="contained"
-            disableElevation
-            disabled={isLoading}
-          >
-            {isLoading ? <CircularProgress size={22} color="inherit" /> : 'Guardar'}
-          </Button>
-        </DialogActions>
-      </form>
-    </Dialog>
+      </Stack>
+    </FormSheet>
   )
 }

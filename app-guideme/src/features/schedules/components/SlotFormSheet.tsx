@@ -1,16 +1,8 @@
 import { useEffect } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
-import {
-  Dialog,
-  DialogTitle,
-  DialogContent,
-  DialogActions,
-  TextField,
-  Button,
-  Stack,
-  CircularProgress,
-} from '@mui/material'
+import { TextField, Stack } from '@mui/material'
+import { FormSheet } from '../../../components'
 import { slotFormSchema } from '../schemas'
 import type { SlotFormData } from '../schemas'
 import { useCreateSlot } from '../hooks/useCreateSlot'
@@ -18,7 +10,7 @@ import { useUpdateSlot } from '../hooks/useUpdateSlot'
 import type { Slot } from '../types'
 import { ServiceError } from '../../../services/authService'
 
-interface SlotFormDialogProps {
+interface SlotFormSheetProps {
   serviceId: string
   /** Capacity to pre-fill when creating a new slot. */
   defaultCapacity: number
@@ -28,13 +20,13 @@ interface SlotFormDialogProps {
   onClose: () => void
 }
 
-export function SlotFormDialog({
+export function SlotFormSheet({
   serviceId,
   defaultCapacity,
   slot,
   open,
   onClose,
-}: SlotFormDialogProps) {
+}: SlotFormSheetProps) {
   const isEdit = !!slot
   const createMutation = useCreateSlot(serviceId)
   const updateMutation = useUpdateSlot(serviceId)
@@ -98,52 +90,46 @@ export function SlotFormDialog({
   const isLoading = createMutation.isPending || updateMutation.isPending
 
   return (
-    <Dialog open={open} onClose={onClose} fullWidth maxWidth="xs">
-      <DialogTitle>{isEdit ? 'Editar fecha' : 'Agregar fecha'}</DialogTitle>
-      <form onSubmit={handleSubmit(onSubmit)} noValidate>
-        <DialogContent>
-          <Stack spacing={2} sx={{ mt: 0.5 }}>
-            <TextField
-              label="Fecha"
-              type="date"
-              fullWidth
-              disabled={isLoading}
-              error={!!errors.date}
-              helperText={errors.date?.message}
-              slotProps={{ inputLabel: { shrink: true } }}
-              {...register('date')}
-            />
-            <TextField
-              label="Hora de inicio"
-              type="time"
-              fullWidth
-              disabled={isLoading}
-              error={!!errors.start_time}
-              helperText={errors.start_time?.message}
-              slotProps={{ inputLabel: { shrink: true } }}
-              {...register('start_time')}
-            />
-            <TextField
-              label="Capacidad"
-              type="number"
-              fullWidth
-              disabled={isLoading}
-              error={!!errors.capacity}
-              helperText={errors.capacity?.message}
-              slotProps={{ htmlInput: { step: 1, min: 1 } }}
-              {...register('capacity', { valueAsNumber: true })}
-            />
-          </Stack>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={onClose} disabled={isLoading}>
-            Cancelar
-          </Button>
-          <Button type="submit" variant="contained" disableElevation disabled={isLoading}>
-            {isLoading ? <CircularProgress size={22} color="inherit" /> : 'Guardar'}
-          </Button>
-        </DialogActions>
-      </form>
-    </Dialog>
+    <FormSheet
+      open={open}
+      onClose={onClose}
+      title={isEdit ? 'Editar fecha' : 'Agregar fecha'}
+      submitLabel="Guardar"
+      busy={isLoading}
+      onSubmit={handleSubmit(onSubmit)}
+    >
+      <Stack spacing={2}>
+        <TextField
+          label="Fecha"
+          type="date"
+          fullWidth
+          disabled={isLoading}
+          error={!!errors.date}
+          helperText={errors.date?.message}
+          slotProps={{ inputLabel: { shrink: true } }}
+          {...register('date')}
+        />
+        <TextField
+          label="Hora de inicio"
+          type="time"
+          fullWidth
+          disabled={isLoading}
+          error={!!errors.start_time}
+          helperText={errors.start_time?.message}
+          slotProps={{ inputLabel: { shrink: true } }}
+          {...register('start_time')}
+        />
+        <TextField
+          label="Capacidad"
+          type="number"
+          fullWidth
+          disabled={isLoading}
+          error={!!errors.capacity}
+          helperText={errors.capacity?.message}
+          slotProps={{ htmlInput: { step: 1, min: 1 } }}
+          {...register('capacity', { valueAsNumber: true })}
+        />
+      </Stack>
+    </FormSheet>
   )
 }

@@ -41,7 +41,7 @@ const toUnitInput = (u: UnitDraft) => ({
   name: u.name,
   // The form defaults unit_type to '' (the "Tipo" field is optional). The API rejects '' with 400
   // (unit_type is `z.string().min(1).nullable().optional()`), so an empty/blank value must become
-  // null — matching UnitFormDialog's mapping. (Found via live smoke test: POST /units → 400.)
+  // null — matching UnitFormSheet's mapping. (Found via live smoke test: POST /units → 400.)
   unit_type: u.unit_type?.trim() ? u.unit_type.trim() : null,
   inventory_count: u.inventory_count,
   beds: u.beds,

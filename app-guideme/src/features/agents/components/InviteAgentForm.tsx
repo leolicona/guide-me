@@ -1,24 +1,22 @@
 import { useState } from 'react';
 import { useForm, Controller } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { TextField, Button, Box, CircularProgress, Alert, Link } from '@mui/material';
-import { Link as RouterLink } from 'react-router-dom';
-import { Email } from '@mui/icons-material';
+import { TextField, Button, Box, CircularProgress, Alert } from '@mui/material';
+import { useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { inviteAgentSchema } from '../schemas';
 import type { InviteAgentFormData } from '../schemas';
 import { useInviteAgent } from '../hooks/useInviteAgent';
 import { ServiceError } from '../../../services/authService';
 import { ROUTES } from '../../../config/routes';
-import { SuccessScreen } from '../../auth/components/SuccessScreen';
 
 export function InviteAgentForm() {
-  const [isSuccess, setIsSuccess] = useState(false);
   const [forbidden, setForbidden] = useState(false);
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const inviteMutation = useInviteAgent();
 
-  const { control, handleSubmit, reset, setError, formState: { errors } } = useForm<InviteAgentFormData>({
+  const { control, handleSubmit, setError, formState: { errors } } = useForm<InviteAgentFormData>({
     resolver: zodResolver(inviteAgentSchema),
     defaultValues: { identity: '' },
   });
@@ -26,8 +24,9 @@ export function InviteAgentForm() {
   const onSubmit = (data: InviteAgentFormData) => {
     setForbidden(false);
     inviteMutation.mutate(data, {
+      // Return to the agents list with a success toast (unified with the service/affiliate flows).
       onSuccess: () => {
-        setIsSuccess(true);
+        navigate(ROUTES.AGENTS, { replace: true, state: { agentInvited: true } });
       },
       onError: (error) => {
         if (error instanceof ServiceError) {
@@ -43,23 +42,6 @@ export function InviteAgentForm() {
       },
     });
   };
-
-  if (isSuccess) {
-    return (
-      <SuccessScreen
-        icon={<Email sx={{ fontSize: 64 }} />}
-        title="Invitación enviada"
-        description="El agente recibirá un correo electrónico con instrucciones."
-        action={{
-          label: 'Enviar otra',
-          onClick: () => {
-            reset();
-            setIsSuccess(false);
-          },
-        }}
-      />
-    );
-  }
 
   const isLoading = inviteMutation.isPending;
 
@@ -78,9 +60,9 @@ export function InviteAgentForm() {
           <TextField
             {...field}
             fullWidth
+            autoFocus
             label="Correo electrónico del agente"
             type="email"
-            margin="normal"
             disabled={isLoading}
             error={!!errors.identity}
             helperText={errors.identity?.message}
@@ -92,18 +74,13 @@ export function InviteAgentForm() {
         type="submit"
         fullWidth
         variant="contained"
+        disableElevation
         size="large"
         disabled={isLoading}
-        sx={{ mt: 3, mb: 3 }}
+        sx={{ mt: 3 }}
       >
         {isLoading ? <CircularProgress size={24} color="inherit" /> : 'Enviar invitación'}
       </Button>
-
-      <Box sx={{ textAlign: 'center' }}>
-        <Link component={RouterLink} to={ROUTES.DASHBOARD} variant="body2" underline="hover">
-          Volver al dashboard
-        </Link>
-      </Box>
     </Box>
   );
 }

@@ -12,6 +12,7 @@ import {
 import AddRounded from '@mui/icons-material/AddRounded'
 import { useServices } from '../features/catalog/hooks/useServices'
 import { ServiceList } from '../features/catalog/components/ServiceList'
+import { ListPageHeader } from '../components'
 import { ROUTES } from '../config/routes'
 
 export default function CatalogListPage() {
@@ -35,33 +36,19 @@ export default function CatalogListPage() {
   return (
     <Fade in timeout={400}>
       <Box sx={{ maxWidth: 760, mx: 'auto' }}>
-        {/* On mobile the shell's account avatar floats fixed at the top-right, so the header
-            action can't sit beside the title there (US-UX03). Stack on xs (title, then a
-            full-width action below the avatar zone); keep the side-by-side row from md up,
-            where the avatar lives in the rail. */}
-        <Box
-          sx={{
-            display: 'flex',
-            flexDirection: { xs: 'column', md: 'row' },
-            justifyContent: 'space-between',
-            alignItems: { xs: 'stretch', md: 'center' },
-            gap: 2,
-            mb: 3,
-          }}
-        >
-          <Typography variant="h4" component="h1">
-            Catálogo
-          </Typography>
-          <Button
-            variant="contained"
-            disableElevation
-            startIcon={<AddRounded />}
-            onClick={() => navigate(ROUTES.CATALOG_NEW)}
-            sx={{ flexShrink: 0, alignSelf: { xs: 'stretch', md: 'auto' } }}
-          >
-            Nuevo servicio
-          </Button>
-        </Box>
+        <ListPageHeader
+          title="Catálogo"
+          action={
+            <Button
+              variant="contained"
+              disableElevation
+              startIcon={<AddRounded />}
+              onClick={() => navigate(ROUTES.CATALOG_NEW)}
+            >
+              Nuevo servicio
+            </Button>
+          }
+        />
 
         {isLoading && (
           <Box sx={{ display: 'flex', justifyContent: 'center', py: 6 }}>

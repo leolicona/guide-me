@@ -19,24 +19,19 @@ import ArrowBackRounded from '@mui/icons-material/ArrowBackRounded'
 import AddRounded from '@mui/icons-material/AddRounded'
 import BlockRounded from '@mui/icons-material/BlockRounded'
 import CheckCircleRounded from '@mui/icons-material/CheckCircleRounded'
+import EditRounded from '@mui/icons-material/EditRounded'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { listServices } from '../services/catalogService'
+import { useAffiliate, useInviteAffiliate } from '../features/affiliates/hooks/useAffiliates'
+import { CompanyInfoSheet } from '../features/affiliates/components/CompanyInfoSheet'
+import { CommissionsSheet } from '../features/affiliates/components/CommissionsSheet'
 import {
-  useAffiliate,
-  useAffiliateStatus,
-  useInviteAffiliate,
-  useSetCommissions,
-  useUpdateAffiliate,
-} from '../features/affiliates/hooks/useAffiliates'
-import { CommissionCatalogEditor } from '../features/affiliates/components/CommissionCatalogEditor'
-import {
-  draftFromCommissions,
-  draftToEntries,
-  draftsValid,
-  type CommissionDraftMap,
-} from '../features/affiliates/commission'
+  ConfirmAffiliateStatusSheet,
+  type AffiliateStatusAction,
+} from '../features/affiliates/components/ConfirmAffiliateStatusSheet'
 import type { AffiliateDetail } from '../features/affiliates/types'
+import { basisPointsToPercent, formatMoney } from '../features/catalog/types'
 import { StatusChip } from '../components'
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
@@ -45,6 +40,28 @@ const SectionTitle = ({ children }: { children: React.ReactNode }) => (
   <Typography variant="overline" color="text.secondary" sx={{ letterSpacing: 0.6 }}>
     {children}
   </Typography>
+)
+
+// A read-only label/value line on the summary cards (— for empty values).
+const InfoLine = ({ label, value }: { label: string; value: string | null }) => (
+  <Box>
+    <Typography variant="body2" color="text.secondary">
+      {label}
+    </Typography>
+    <Typography sx={{ fontWeight: 500 }} noWrap>
+      {value?.trim() ? value : '—'}
+    </Typography>
+  </Box>
+)
+
+// Card-header row: section title left, an Editar affordance right (opens the section's sheet).
+const SectionHeader = ({ title, onEdit }: { title: string; onEdit: () => void }) => (
+  <Stack direction="row" sx={{ alignItems: 'center', justifyContent: 'space-between' }}>
+    <SectionTitle>{title}</SectionTitle>
+    <Button size="small" startIcon={<EditRounded />} onClick={onEdit}>
+      Editar
+    </Button>
+  </Stack>
 )
 
 export default function AffiliateDetailPage() {
@@ -66,12 +83,14 @@ export default function AffiliateDetailPage() {
     )
   }
 
-  // Remount (key) on id change so the editor re-initializes its form state from fresh props,
-  // avoiding a props→state useEffect (react-hooks/set-state-in-effect).
-  return <AffiliateEditor key={affiliate.id} affiliate={affiliate} />
+  // Remount (key) on id change so local UI state (open sheets, invite draft) never leaks
+  // across affiliates.
+  return <AffiliateView key={affiliate.id} affiliate={affiliate} />
 }
 
-function AffiliateEditor({ affiliate }: { affiliate: AffiliateDetail }) {
+// Read-only projection of the affiliate + per-section edit sheets (the app-wide sheet pattern).
+// The page holds no form state — each sheet seeds itself from the fresh `affiliate` prop on open.
+function AffiliateView({ affiliate }: { affiliate: AffiliateDetail }) {
   const id = affiliate.id
   const navigate = useNavigate()
   const servicesQuery = useQuery({
@@ -79,40 +98,16 @@ function AffiliateEditor({ affiliate }: { affiliate: AffiliateDetail }) {
     queryFn: () => listServices('active'),
   })
 
-  const updateMutation = useUpdateAffiliate(id)
-  const commissionsMutation = useSetCommissions(id)
   const inviteMutation = useInviteAffiliate(id)
-  const { deactivate, reactivate } = useAffiliateStatus(id)
 
-  // Initialized directly from props (no effect). Seeding the FULL draft map (incl. commissions
-  // for now-inactive services) means a Save preserves them even though the editor only renders
-  // active services (D12 — deactivation preserves rows).
-  const [name, setName] = useState(affiliate.name)
-  const [contactEmail, setContactEmail] = useState(affiliate.contact_email ?? '')
-  const [contactPhone, setContactPhone] = useState(affiliate.contact_phone ?? '')
-  const [commissions, setCommissions] = useState<CommissionDraftMap>(() =>
-    draftFromCommissions(affiliate.commissions),
-  )
+  const [editCompany, setEditCompany] = useState(false)
+  const [editCommissions, setEditCommissions] = useState(false)
+  const [statusConfirm, setStatusConfirm] = useState<AffiliateStatusAction | null>(null)
   const [emailInput, setEmailInput] = useState('')
   const [emailError, setEmailError] = useState('')
   const [toast, setToast] = useState('')
 
   const suspended = affiliate.status === 'suspended'
-
-  const saveCompany = () =>
-    updateMutation.mutate(
-      {
-        name: name.trim(),
-        contact_email: contactEmail.trim() || null,
-        contact_phone: contactPhone.trim() || null,
-      },
-      { onSuccess: () => setToast('Datos guardados') },
-    )
-
-  const saveCommissions = () =>
-    commissionsMutation.mutate(draftToEntries(commissions), {
-      onSuccess: () => setToast('Comisiones actualizadas'),
-    })
 
   const addInvite = () => {
     const e = emailInput.trim().toLowerCase()
@@ -159,8 +154,7 @@ function AffiliateEditor({ affiliate }: { affiliate: AffiliateDetail }) {
             <Button
               color="primary"
               startIcon={<CheckCircleRounded />}
-              onClick={() => reactivate.mutate()}
-              disabled={reactivate.isPending}
+              onClick={() => setStatusConfirm('reactivate')}
             >
               Reactivar
             </Button>
@@ -168,8 +162,7 @@ function AffiliateEditor({ affiliate }: { affiliate: AffiliateDetail }) {
             <Button
               color="error"
               startIcon={<BlockRounded />}
-              onClick={() => deactivate.mutate()}
-              disabled={deactivate.isPending}
+              onClick={() => setStatusConfirm('deactivate')}
             >
               Suspender
             </Button>
@@ -177,78 +170,70 @@ function AffiliateEditor({ affiliate }: { affiliate: AffiliateDetail }) {
         </Stack>
 
         <Stack spacing={2.5}>
-          {/* Company info */}
+          {/* Company info — read-only summary; edited in its sheet. */}
           <Card>
             <CardContent>
-              <SectionTitle>Información de la empresa</SectionTitle>
-              <Stack spacing={2} sx={{ mt: 2 }}>
-                <TextField
-                  label="Nombre de la empresa"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  required
-                  fullWidth
-                />
-                <TextField
-                  label="Correo de contacto"
-                  value={contactEmail}
-                  onChange={(e) => setContactEmail(e.target.value)}
-                  fullWidth
-                />
-                <TextField
-                  label="Teléfono de contacto"
-                  value={contactPhone}
-                  onChange={(e) => setContactPhone(e.target.value)}
-                  fullWidth
-                />
-                <Box sx={{ display: 'flex', justifyContent: 'flex-end' }}>
-                  <Button
-                    variant="contained"
-                    color="secondary"
-                    disableElevation
-                    onClick={saveCompany}
-                    disabled={!name.trim() || updateMutation.isPending}
-                  >
-                    Guardar cambios
-                  </Button>
-                </Box>
+              <SectionHeader
+                title="Información de la empresa"
+                onEdit={() => setEditCompany(true)}
+              />
+              <Stack spacing={1.5} sx={{ mt: 1.5 }}>
+                <InfoLine label="Nombre" value={affiliate.name} />
+                <InfoLine label="Correo de contacto" value={affiliate.contact_email} />
+                <InfoLine label="Teléfono de contacto" value={affiliate.contact_phone} />
               </Stack>
             </CardContent>
           </Card>
 
-          {/* Catalog & commissions */}
+          {/* Catalog & commissions — read-only summary of the allow-list; edited in its sheet. */}
           <Card>
             <CardContent>
-              <SectionTitle>Catálogo y comisiones</SectionTitle>
-              <Typography variant="body2" color="text.secondary" sx={{ mt: 1, mb: 2 }}>
-                Activa los servicios que este afiliado puede vender y define su comisión.
-              </Typography>
-              {servicesQuery.isLoading ? (
-                <Box sx={{ display: 'flex', justifyContent: 'center', py: 3 }}>
-                  <CircularProgress />
-                </Box>
-              ) : (
-                <CommissionCatalogEditor
-                  services={servicesQuery.data ?? []}
-                  value={commissions}
-                  onChange={setCommissions}
-                />
-              )}
-              <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: 2 }}>
-                <Button
-                  variant="contained"
-                  color="secondary"
-                  disableElevation
-                  onClick={saveCommissions}
-                  disabled={!draftsValid(commissions) || commissionsMutation.isPending}
-                >
-                  Guardar comisiones
-                </Button>
+              <SectionHeader
+                title="Catálogo y comisiones"
+                onEdit={() => setEditCommissions(true)}
+              />
+              <Box sx={{ mt: 1.5 }}>
+                {affiliate.commissions.length === 0 ? (
+                  <Typography variant="body2" color="text.secondary">
+                    Sin servicios habilitados — usa Editar para activar los que este afiliado
+                    puede vender.
+                  </Typography>
+                ) : (
+                  <Stack spacing={1}>
+                    {affiliate.commissions.map((c) => (
+                      <Stack
+                        key={c.service_id}
+                        direction="row"
+                        sx={{ alignItems: 'center', justifyContent: 'space-between', gap: 2 }}
+                      >
+                        <Typography noWrap sx={{ minWidth: 0 }}>
+                          {c.service_name}
+                          {c.service_status === 'inactive' && (
+                            <Typography component="span" variant="body2" color="text.secondary">
+                              {' '}
+                              · inactivo
+                            </Typography>
+                          )}
+                        </Typography>
+                        <Typography
+                          className="numeric"
+                          color="text.secondary"
+                          sx={{ flexShrink: 0 }}
+                        >
+                          {c.commission_type === 'fixed'
+                            ? `${formatMoney(c.commission_value)} por lugar`
+                            : `${basisPointsToPercent(c.commission_value)}%`}
+                        </Typography>
+                      </Stack>
+                    ))}
+                  </Stack>
+                )}
               </Box>
             </CardContent>
           </Card>
 
-          {/* Users & invitations */}
+          {/* Users & invitations — the invite input stays inline: it's an additive one-field
+              action with inline error feedback, not an edit modal (matches the wizard). */}
           <Card>
             <CardContent>
               <SectionTitle>Usuarios e invitaciones</SectionTitle>
@@ -326,6 +311,27 @@ function AffiliateEditor({ affiliate }: { affiliate: AffiliateDetail }) {
             </CardContent>
           </Card>
         </Stack>
+
+        <CompanyInfoSheet
+          affiliate={affiliate}
+          open={editCompany}
+          onClose={() => setEditCompany(false)}
+          onSaved={() => setToast('Datos guardados')}
+        />
+        <CommissionsSheet
+          affiliate={affiliate}
+          services={servicesQuery.data ?? []}
+          open={editCommissions}
+          onClose={() => setEditCommissions(false)}
+          onSaved={() => setToast('Comisiones actualizadas')}
+        />
+        <ConfirmAffiliateStatusSheet
+          affiliateId={id}
+          affiliateName={affiliate.name}
+          action={statusConfirm ?? 'deactivate'}
+          open={!!statusConfirm}
+          onClose={() => setStatusConfirm(null)}
+        />
 
         <Snackbar
           open={!!toast}

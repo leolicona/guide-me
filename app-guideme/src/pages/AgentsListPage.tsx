@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react'
 import {
   Box,
   Typography,
@@ -5,41 +6,47 @@ import {
   CircularProgress,
   Alert,
   Fade,
+  Snackbar,
 } from '@mui/material'
 import PersonAddRounded from '@mui/icons-material/PersonAddRounded'
-import { Link as RouterLink } from 'react-router-dom'
+import { Link as RouterLink, useLocation } from 'react-router-dom'
 import { useAgents } from '../features/agents/hooks/useAgents'
 import { AgentList } from '../features/agents/components/AgentList'
+import { ListPageHeader } from '../components'
 import { ROUTES } from '../config/routes'
 
 export default function AgentsListPage() {
   const { data: agents, isLoading, isError } = useAgents()
 
+  // The invite page (/agents/invite) returns here with `agentInvited` router state on success;
+  // toast once, then clear the state so a refresh or Back doesn't re-toast.
+  const location = useLocation()
+  const [invited, setInvited] = useState(
+    () => Boolean((location.state as { agentInvited?: boolean } | null)?.agentInvited),
+  )
+  useEffect(() => {
+    if ((location.state as { agentInvited?: boolean } | null)?.agentInvited) {
+      window.history.replaceState({}, '')
+    }
+  }, [location.state])
+
   return (
     <Fade in timeout={400}>
       <Box sx={{ maxWidth: 720, mx: 'auto' }}>
-        <Box
-          sx={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            gap: 2,
-            mb: 3,
-          }}
-        >
-          <Typography variant="h4" component="h1">
-            Agentes
-          </Typography>
-          <Button
-            component={RouterLink}
-            to={ROUTES.INVITE_AGENT}
-            variant="contained"
-            disableElevation
-            startIcon={<PersonAddRounded />}
-          >
-            Invitar agente
-          </Button>
-        </Box>
+        <ListPageHeader
+          title="Agentes"
+          action={
+            <Button
+              component={RouterLink}
+              to={ROUTES.INVITE_AGENT}
+              variant="contained"
+              disableElevation
+              startIcon={<PersonAddRounded />}
+            >
+              Invitar agente
+            </Button>
+          }
+        />
 
         {isLoading && (
           <Box sx={{ display: 'flex', justifyContent: 'center', py: 6 }}>
@@ -61,6 +68,17 @@ export default function AgentsListPage() {
           ) : (
             <AgentList agents={agents} />
           ))}
+
+        <Snackbar
+          open={invited}
+          autoHideDuration={3000}
+          onClose={() => setInvited(false)}
+          anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+        >
+          <Alert severity="success" variant="filled" onClose={() => setInvited(false)}>
+            Invitación enviada
+          </Alert>
+        </Snackbar>
       </Box>
     </Fade>
   )

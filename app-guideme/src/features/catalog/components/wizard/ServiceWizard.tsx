@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
 import { useForm, FormProvider } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
-import { Dialog, Box, Typography, Button, Stack, Alert } from '@mui/material'
-import { WizardPage } from '../../../../components'
+import { Alert } from '@mui/material'
+import { ConfirmSheet, WizardPage } from '../../../../components'
 import { wizardSchema, STEP_FIELDS, stepFields, type WizardFormData } from './wizardSchema'
 import {
   totalSteps,
@@ -23,7 +23,7 @@ import {
   type UnitDraft,
 } from '../../hooks/useCreateLodgingFull'
 import { amountToCents, percentToBasisPoints } from '../../types'
-import type { ServiceCategory } from '../../categories'
+import { inventoryModel, type ServiceCategory } from '../../categories'
 import type { ServiceInput, ExtraInput } from '../../../../services/catalogService'
 
 const EMPTY: WizardFormData = {
@@ -71,7 +71,9 @@ export function ServiceWizard({ onClose, onCreated }: ServiceWizardProps) {
   const [confirmDiscard, setConfirmDiscard] = useState(false)
 
   const category = watch('category')
-  const isLodging = category === 'lodging'
+  // Structural branch on the category's operational model (categories.ts): the unit track
+  // (lodging) swaps steps 2–4 and the save path; the slot track is everything else.
+  const isLodging = inventoryModel(category) === 'units'
 
   const saveMutation = useCreateServiceFull()
   const lodgingSave = useCreateLodgingFull()
@@ -261,29 +263,16 @@ export function ServiceWizard({ onClose, onCreated }: ServiceWizardProps) {
         </FormProvider>
       </WizardPage>
 
-      {/* Discard confirmation */}
-      <Dialog
+      {/* Discard confirmation — the sheet outranks the WizardPage host (zIndex modal+1). */}
+      <ConfirmSheet
         open={confirmDiscard}
         onClose={() => setConfirmDiscard(false)}
-        slotProps={{ paper: { sx: { borderRadius: 'var(--radius-lg, 16px)', p: 1 } } }}
-      >
-        <Box sx={{ p: 2, maxWidth: 360 }}>
-          <Typography variant="h6" sx={{ mb: 1 }}>
-            ¿Descartar este servicio?
-          </Typography>
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 2.5 }}>
-            Perderás la información que has capturado en el asistente.
-          </Typography>
-          <Stack direction="row" spacing={1} sx={{ justifyContent: 'flex-end' }}>
-            <Button color="inherit" onClick={() => setConfirmDiscard(false)}>
-              Seguir editando
-            </Button>
-            <Button color="error" variant="contained" onClick={onClose}>
-              Descartar
-            </Button>
-          </Stack>
-        </Box>
-      </Dialog>
+        title="¿Descartar este servicio?"
+        description="Perderás la información que has capturado en el asistente."
+        confirmLabel="Descartar"
+        cancelLabel="Seguir editando"
+        onConfirm={onClose}
+      />
     </>
   )
 }

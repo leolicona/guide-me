@@ -93,7 +93,22 @@ export function UnitRow({ unit, actions }: UnitRowProps) {
       )}
 
       {actions && (
-        <Stack direction="row" spacing={1} sx={{ mt: 1.5, flexWrap: 'wrap', gap: 1 }}>
+        <Stack
+          direction="row"
+          spacing={1}
+          sx={{
+            mt: 1.5,
+            flexWrap: 'wrap',
+            gap: 1,
+            // Hierarchy (one-confident-accent law): repeated per-row utilities are neutral —
+            // teal is reserved for the section's single primary CTA. Buttons with an explicit
+            // semantic color (e.g. color="error") are untouched.
+            '& .MuiButton-text.MuiButton-colorPrimary, & .MuiButton-text.MuiButton-colorSecondary, & .MuiButton-text.MuiButton-colorInherit':
+              {
+                color: 'text.secondary',
+              },
+          }}
+        >
           {actions}
         </Stack>
       )}

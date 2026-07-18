@@ -105,7 +105,8 @@ Prefer these over ad-hoc `Card`/`Paper`/`Chip` usage:
 - **`SectionCard`** — white surface, hairline border, 16px radius, 24px padding, no resting shadow.
 - **`StatusChip`** — functional-color pill, icon-paired (presets: paid/booking/cancelled/active/suspended/…).
 - **`AlertCard`** — top-of-screen attention card (warning/error semantics).
-- **`BottomSheet`** — the canonical overlay (solid white, real upward shadow).
+- **`BottomSheet`** — the canonical overlay (solid white, real upward shadow; centered ≤640px on desktop).
+- **`FormSheet`** / **`ConfirmSheet`** — the BottomSheet hosts for ALL entity editing and confirmations (no MUI Dialogs for these): FormSheet = title + form scroll region + fixed submit footer; ConfirmSheet = question + stacked confirm/cancel.
 - **`WizardShell`** / **`WizardPage`** — multi-step wizard chrome (shared `WizardChrome`): the Dialog host (affiliate wizard) and the full-page host (service wizard at `/catalog/new`).
 
 Feature-specific shared pieces follow the same idea (e.g. `FolioStatusChip` in `features/folios`).

@@ -1,5 +1,8 @@
 // US-A38..A44 — shared types for the Service Creation Wizard.
 
+import { inventoryModel } from '../../categories'
+import type { ServiceCategory } from '../../categories'
+
 /** Step 3 inventory frequency: a single calendar date vs. a recurring weekly rule. */
 export type Frequency = 'single' | 'recurring'
 
@@ -36,12 +39,12 @@ const LODGING_STEP_TITLES: Record<number, string> = {
   3: 'Comisión',
 }
 
-/** Category-aware step count: tour 4 · lodging 3. */
-export const totalSteps = (category: string): number =>
-  category === 'lodging' ? 3 : TOTAL_STEPS
+/** Category-aware step count: slot track 4 · unit track 3. */
+export const totalSteps = (category: ServiceCategory | ''): number =>
+  inventoryModel(category) === 'units' ? 3 : TOTAL_STEPS
 
 /** Category-aware step title. */
-export const stepTitle = (category: string, step: number): string =>
-  category === 'lodging'
+export const stepTitle = (category: ServiceCategory | '', step: number): string =>
+  inventoryModel(category) === 'units'
     ? (LODGING_STEP_TITLES[step] ?? '')
     : (STEP_TITLES[step as WizardStep] ?? '')

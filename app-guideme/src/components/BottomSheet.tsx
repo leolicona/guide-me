@@ -12,6 +12,9 @@ interface BottomSheetProps {
   /** The scrollable body — the only overflow region. */
   children: ReactNode
   maxHeight?: string
+  /** Max paper width from `sm` up (mobile is always full-width). The sheet stays docked to the
+   *  bottom edge, centered — a full-viewport-wide sheet reads wrong on desktop. */
+  paperMaxWidth?: number
 }
 
 /**
@@ -27,6 +30,7 @@ export function BottomSheet({
   footer,
   children,
   maxHeight = '90vh',
+  paperMaxWidth = 640,
 }: BottomSheetProps) {
   return (
     <SwipeableDrawer
@@ -45,7 +49,13 @@ export function BottomSheet({
           sx: {
             borderTopLeftRadius: 'var(--radius-xl, 20px)',
             borderTopRightRadius: 'var(--radius-xl, 20px)',
+            width: '100%',
+            maxWidth: { xs: '100%', sm: paperMaxWidth },
+            mx: 'auto',
             maxHeight,
+            // Keep the footer action above the home-indicator / gesture bar on notched phones
+            // (resolves to 0 elsewhere) — the sheet is docked to the physical bottom edge.
+            pb: 'env(safe-area-inset-bottom)',
             display: 'flex',
             flexDirection: 'column',
             overflow: 'hidden',
@@ -60,10 +70,12 @@ export function BottomSheet({
       <Box sx={{ position: 'relative', pt: 1.5, pb: 0.5, flexShrink: 0 }}>
         <Box sx={{ width: 36, height: 4, borderRadius: 2, bgcolor: 'divider', mx: 'auto' }} />
         <IconButton
-          size="small"
           aria-label="Cerrar"
           onClick={onClose}
-          sx={{ position: 'absolute', top: 4, right: 8 }}
+          // A quiet control (text.secondary): a 44px touch target (p:1.5 + 20px glyph) that
+          // meets the field-use minimum, with its glyph aligned to the 16px content gutter the
+          // header/body/footer share (top:4/right:4 on the 4px scale).
+          sx={{ position: 'absolute', top: 4, right: 4, p: 1.5, color: 'text.secondary' }}
         >
           <CloseRounded fontSize="small" />
         </IconButton>

@@ -1,17 +1,8 @@
 import { useState } from 'react'
 import { FormProvider, useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
-import {
-  Dialog,
-  DialogTitle,
-  DialogContent,
-  DialogActions,
-  Button,
-  CircularProgress,
-  Alert,
-  useMediaQuery,
-  useTheme,
-} from '@mui/material'
+import { Alert } from '@mui/material'
+import { FormSheet } from '../../../components'
 import { unitFormSchema, type UnitFormData } from '../schemas'
 import { centsToAmount, unitCommissionToApi, unitCommissionFromApi } from '../types'
 import type { AccommodationUnitType } from '../types'
@@ -19,7 +10,7 @@ import { useUnitMutations } from '../hooks/useUnitMutations'
 import { ServiceError } from '../../../services/authService'
 import { UnitFields } from './UnitFields'
 
-interface UnitFormDialogProps {
+interface UnitFormSheetProps {
   serviceId: string
   /** null → create; a unit type → edit (prefilled). */
   unit: AccommodationUnitType | null
@@ -62,9 +53,7 @@ const toInput = (data: UnitFormData) => ({
   ...unitCommissionToApi(data.commission_type, data.commission_value),
 })
 
-export function UnitFormDialog({ serviceId, unit, open, onClose }: UnitFormDialogProps) {
-  const theme = useTheme()
-  const fullScreen = useMediaQuery(theme.breakpoints.down('sm'))
+export function UnitFormSheet({ serviceId, unit, open, onClose }: UnitFormSheetProps) {
   const { create, update } = useUnitMutations(serviceId)
   const [apiError, setApiError] = useState<string | null>(null)
 
@@ -123,28 +112,20 @@ export function UnitFormDialog({ serviceId, unit, open, onClose }: UnitFormDialo
   const isLoading = create.isPending || update.isPending
 
   return (
-    <Dialog open={open} onClose={onClose} fullWidth maxWidth="sm" fullScreen={fullScreen}>
-      <DialogTitle>{unit ? 'Editar unidad' : 'Nueva unidad'}</DialogTitle>
+    <FormSheet
+      open={open}
+      onClose={onClose}
+      title={unit ? 'Editar unidad' : 'Nueva unidad'}
+      submitLabel="Guardar"
+      busy={isLoading}
+      onSubmit={methods.handleSubmit(onSubmit)}
+      // API error lives in the fixed footer region so it's visible beside the button
+      // even when the 15-field form is scrolled.
+      error={apiError ? <Alert severity="error">{apiError}</Alert> : undefined}
+    >
       <FormProvider {...methods}>
-        <form onSubmit={methods.handleSubmit(onSubmit)} noValidate>
-          <DialogContent>
-            {apiError && (
-              <Alert severity="error" sx={{ mb: 2 }}>
-                {apiError}
-              </Alert>
-            )}
-            <UnitFields disabled={isLoading} />
-          </DialogContent>
-          <DialogActions>
-            <Button onClick={onClose} disabled={isLoading}>
-              Cancelar
-            </Button>
-            <Button type="submit" variant="contained" disableElevation disabled={isLoading}>
-              {isLoading ? <CircularProgress size={22} color="inherit" /> : 'Guardar'}
-            </Button>
-          </DialogActions>
-        </form>
+        <UnitFields disabled={isLoading} />
       </FormProvider>
-    </Dialog>
+    </FormSheet>
   )
 }

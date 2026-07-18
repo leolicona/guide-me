@@ -73,7 +73,7 @@ export const basisPointsToPercent = (basisPoints: number): number =>
   basisPoints / 100
 
 // Unit commission override (waterfall) ↔ API mapping — the single source of truth used by BOTH the
-// wizard (useCreateLodgingFull) and the detail editor (UnitFormDialog), so the two can't drift.
+// wizard (useCreateLodgingFull) and the detail editor (UnitFormSheet), so the two can't drift.
 // Form: 'inherit' | 'percent' | 'fixed' + a major-unit value (percent entered 0–100). API: nullable
 // commission_type + commission_value (basis points for percent, minor units for fixed).
 export const unitCommissionToApi = (

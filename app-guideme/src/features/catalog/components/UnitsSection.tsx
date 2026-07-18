@@ -7,7 +7,7 @@ import { useUnitMutations } from '../hooks/useUnitMutations'
 import type { AccommodationUnitType } from '../types'
 import { UnitRow } from './UnitRow'
 import { fromNightlyRate } from '../lodging'
-import { UnitFormDialog } from './UnitFormDialog'
+import { UnitFormSheet } from './UnitFormSheet'
 import { SeasonsEditor } from './SeasonsEditor'
 import { BlockoutsEditor } from './BlockoutsEditor'
 
@@ -101,13 +101,13 @@ export function UnitsSection({ serviceId }: UnitsSectionProps) {
         </Typography>
       )}
 
-      <UnitFormDialog
+      <UnitFormSheet
         serviceId={serviceId}
         unit={null}
         open={creating}
         onClose={() => setCreating(false)}
       />
-      <UnitFormDialog
+      <UnitFormSheet
         serviceId={serviceId}
         unit={editing}
         open={!!editing}

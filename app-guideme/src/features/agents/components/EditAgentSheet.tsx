@@ -1,29 +1,21 @@
 import { useEffect } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
-import {
-  Dialog,
-  DialogTitle,
-  DialogContent,
-  DialogActions,
-  TextField,
-  Button,
-  Stack,
-  CircularProgress,
-} from '@mui/material'
+import { TextField, Stack } from '@mui/material'
+import { FormSheet } from '../../../components'
 import { editAgentSchema } from '../schemas'
 import type { EditAgentFormData } from '../schemas'
 import { useUpdateAgent } from '../hooks/useUpdateAgent'
 import type { Agent } from '../types'
 import { ServiceError } from '../../../services/authService'
 
-interface EditAgentDialogProps {
+interface EditAgentSheetProps {
   agent: Agent | null
   open: boolean
   onClose: () => void
 }
 
-export function EditAgentDialog({ agent, open, onClose }: EditAgentDialogProps) {
+export function EditAgentSheet({ agent, open, onClose }: EditAgentSheetProps) {
   const updateMutation = useUpdateAgent()
 
   const {
@@ -83,43 +75,32 @@ export function EditAgentDialog({ agent, open, onClose }: EditAgentDialogProps) 
   const isLoading = updateMutation.isPending
 
   return (
-    <Dialog open={open} onClose={onClose} fullWidth maxWidth="xs">
-      <DialogTitle>Editar agente</DialogTitle>
-      <form onSubmit={handleSubmit(onSubmit)} noValidate>
-        <DialogContent>
-          <Stack spacing={2} sx={{ mt: 0.5 }}>
-            <TextField
-              label="Nombre"
-              fullWidth
-              disabled={isLoading}
-              error={!!errors.name}
-              helperText={errors.name?.message}
-              {...register('name')}
-            />
-            <TextField
-              label="Teléfono"
-              fullWidth
-              disabled={isLoading}
-              error={!!errors.phone}
-              helperText={errors.phone?.message}
-              {...register('phone')}
-            />
-          </Stack>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={onClose} disabled={isLoading}>
-            Cancelar
-          </Button>
-          <Button
-            type="submit"
-            variant="contained"
-            disableElevation
-            disabled={isLoading}
-          >
-            {isLoading ? <CircularProgress size={22} color="inherit" /> : 'Guardar'}
-          </Button>
-        </DialogActions>
-      </form>
-    </Dialog>
+    <FormSheet
+      open={open}
+      onClose={onClose}
+      title="Editar agente"
+      submitLabel="Guardar"
+      busy={isLoading}
+      onSubmit={handleSubmit(onSubmit)}
+    >
+      <Stack spacing={2}>
+        <TextField
+          label="Nombre"
+          fullWidth
+          disabled={isLoading}
+          error={!!errors.name}
+          helperText={errors.name?.message}
+          {...register('name')}
+        />
+        <TextField
+          label="Teléfono"
+          fullWidth
+          disabled={isLoading}
+          error={!!errors.phone}
+          helperText={errors.phone?.message}
+          {...register('phone')}
+        />
+      </Stack>
+    </FormSheet>
   )
 }

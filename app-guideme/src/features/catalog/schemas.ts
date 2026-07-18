@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import { FLEX_CAP_MAX_PCT } from './types'
-import { SERVICE_CATEGORIES } from './categories'
+import { SERVICE_CATEGORIES, pricesAtServiceLevel, hasFlexibleCapacity } from './categories'
 import { AMENITY_KEYS } from './lodging'
 
 // Money fields are entered as major-unit decimals (e.g. 1500.00) the admin
@@ -42,14 +42,20 @@ export const serviceCoreObject = z.object({
       .max(FLEX_CAP_MAX_PCT, `El máximo permitido es ${FLEX_CAP_MAX_PCT}%`),
 })
 
+// Price-floor and capacity-mode rules only apply where the category prices at the service
+// level (unit-based categories price per night on their units — see inventoryModel in
+// categories.ts). Without the carve-out, a unit-based service with a fixed commission would be
+// un-editable (its commission checked against a minimum_price that is always 0). The percent
+// cap is operational-model-agnostic, so it applies to every category. Kept in lockstep with
+// the create Wizard's `wizardSchema` via the same predicates.
 export const serviceFormSchema = serviceCoreObject
-  .refine((v) => v.minimum_price <= v.base_price, {
+  .refine((v) => !pricesAtServiceLevel(v.category) || v.minimum_price <= v.base_price, {
     message: 'El precio mínimo debe ser ≤ al precio base',
     path: ['minimum_price'],
   })
   // US-A36 — Flexible (Soft Cap) requires a tolerance of at least 1%; the form blocks saving
   // when Flexible is selected but the field is empty or 0.
-  .refine((v) => !v.is_flexible || v.flex_capacity_pct >= 1, {
+  .refine((v) => !hasFlexibleCapacity(v.category) || !v.is_flexible || v.flex_capacity_pct >= 1, {
     message: `Ingresa un porcentaje entre 1% y ${FLEX_CAP_MAX_PCT}%`,
     path: ['flex_capacity_pct'],
   })
@@ -58,11 +64,19 @@ export const serviceFormSchema = serviceCoreObject
     path: ['commission_value'],
   })
   // Mirrors the backend D3 cap: a fixed commission may never exceed the price floor (both
-  // values are entered in major units here, so they compare directly).
-  .refine((v) => v.commission_type !== 'fixed' || v.commission_value <= v.minimum_price, {
-    message: 'La comisión fija no puede exceder el precio mínimo',
-    path: ['commission_value'],
-  })
+  // values are entered in major units here, so they compare directly). Service-priced
+  // categories only — a unit-based service has no service price floor (its floor is the
+  // per-night unit rate).
+  .refine(
+    (v) =>
+      !pricesAtServiceLevel(v.category) ||
+      v.commission_type !== 'fixed' ||
+      v.commission_value <= v.minimum_price,
+    {
+      message: 'La comisión fija no puede exceder el precio mínimo',
+      path: ['commission_value'],
+    },
+  )
 
 export type ServiceFormData = z.infer<typeof serviceFormSchema>
 

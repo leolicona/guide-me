@@ -10,11 +10,6 @@ import {
   Alert,
   Snackbar,
   Divider,
-  Dialog,
-  DialogTitle,
-  DialogContent,
-  DialogContentText,
-  DialogActions,
 } from '@mui/material'
 import AddRounded from '@mui/icons-material/AddRounded'
 import EventRepeatRounded from '@mui/icons-material/EventRepeatRounded'
@@ -25,8 +20,9 @@ import { useDeactivateSlot } from '../hooks/useDeactivateSlot'
 import { useReactivateSlot } from '../hooks/useReactivateSlot'
 import { useDeactivateSchedule } from '../hooks/useDeactivateSchedule'
 import { SlotList } from './SlotList'
-import { SlotFormDialog } from './SlotFormDialog'
-import { ScheduleFormDialog } from './ScheduleFormDialog'
+import { SlotFormSheet } from './SlotFormSheet'
+import { ScheduleFormSheet } from './ScheduleFormSheet'
+import { ConfirmSheet } from '../../../components'
 import { WEEKDAY_LABELS } from '../types'
 import type { Schedule, Slot } from '../types'
 import { ServiceError } from '../../../services/authService'
@@ -128,18 +124,23 @@ export function SchedulesSection({
         }}
       >
         <Typography variant="h6">Horarios y fechas</Typography>
-        <Stack direction="row" spacing={1} sx={{ flexShrink: 0 }}>
+        {/* One contained primary per section (parity with "Agregar tipo" / "Agregar extra");
+            the alternate add-path is a neutral text button beside it. */}
+        <Stack direction="row" spacing={1} sx={{ flexShrink: 0, alignItems: 'center' }}>
           <Button
+            startIcon={<EventRepeatRounded />}
+            onClick={() => setScheduleDialogOpen(true)}
+            sx={{ color: 'text.secondary' }}
+          >
+            Recurrente
+          </Button>
+          <Button
+            variant="contained"
+            disableElevation
             startIcon={<AddRounded />}
             onClick={() => setSlotDialog({ open: true, slot: null })}
           >
             Agregar fecha
-          </Button>
-          <Button
-            startIcon={<EventRepeatRounded />}
-            onClick={() => setScheduleDialogOpen(true)}
-          >
-            Recurrente
           </Button>
         </Stack>
       </Box>
@@ -169,12 +170,13 @@ export function SchedulesSection({
                   {s.start_date} → {s.end_date}
                 </Typography>
               </Box>
+              {/* Neutral per-row utility — the destructive red moment lives on the
+                  ConfirmSheet, not on every row (de-emphasize to emphasize). */}
               <Button
                 size="small"
-                color="error"
                 startIcon={<BlockRounded />}
                 onClick={() => setScheduleToClose(s)}
-                sx={{ flexShrink: 0 }}
+                sx={{ flexShrink: 0, color: 'text.secondary' }}
               >
                 Desactivar
               </Button>
@@ -224,14 +226,14 @@ export function SchedulesSection({
         />
       )}
 
-      <SlotFormDialog
+      <SlotFormSheet
         serviceId={serviceId}
         defaultCapacity={defaultCapacity}
         slot={slotDialog.slot}
         open={slotDialog.open}
         onClose={() => setSlotDialog({ open: false, slot: null })}
       />
-      <ScheduleFormDialog
+      <ScheduleFormSheet
         serviceId={serviceId}
         defaultCapacity={defaultCapacity}
         open={scheduleDialogOpen}
@@ -242,41 +244,15 @@ export function SchedulesSection({
       />
 
       {/* Confirm schedule deactivation (cascades to unbooked slots) */}
-      <Dialog
+      <ConfirmSheet
         open={!!scheduleToClose}
         onClose={() => setScheduleToClose(null)}
-        maxWidth="xs"
-        fullWidth
-      >
-        <DialogTitle>¿Desactivar este horario?</DialogTitle>
-        <DialogContent>
-          <DialogContentText>
-            Las fechas sin reservas se cerrarán. Las fechas con reservas permanecerán
-            activas para que sus boletos sigan siendo válidos.
-          </DialogContentText>
-        </DialogContent>
-        <DialogActions>
-          <Button
-            onClick={() => setScheduleToClose(null)}
-            disabled={deactivateSchedule.isPending}
-          >
-            Cancelar
-          </Button>
-          <Button
-            variant="contained"
-            disableElevation
-            color="error"
-            onClick={confirmCloseSchedule}
-            disabled={deactivateSchedule.isPending}
-          >
-            {deactivateSchedule.isPending ? (
-              <CircularProgress size={22} color="inherit" />
-            ) : (
-              'Desactivar'
-            )}
-          </Button>
-        </DialogActions>
-      </Dialog>
+        title="¿Desactivar este horario?"
+        description="Las fechas sin reservas se cerrarán. Las fechas con reservas permanecerán activas para que sus boletos sigan siendo válidos."
+        confirmLabel="Desactivar"
+        busy={deactivateSchedule.isPending}
+        onConfirm={confirmCloseSchedule}
+      />
 
       <Snackbar
         open={!!snack}

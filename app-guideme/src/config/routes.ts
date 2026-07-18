@@ -9,6 +9,7 @@ export const ROUTES = {
   AGENTS: '/agents',
   INVITE_AGENT: '/agents/invite',
   AFFILIATES: '/affiliates', // admin — affiliate companies list (US-A48)
+  AFFILIATE_NEW: '/affiliates/new', // admin — full-page affiliate setup wizard (US-A54–A57)
   AFFILIATE_DETAIL: '/affiliates/:id', // admin — affiliate detail/edit (US-A48/A50/A52)
   CATALOG: '/catalog',
   CATALOG_NEW: '/catalog/new', // admin — full-page service creation wizard (US-A38–A44)

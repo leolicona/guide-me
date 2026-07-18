@@ -1,6 +1,5 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
-  Dialog,
   Box,
   Typography,
   Button,
@@ -12,7 +11,7 @@ import {
 } from '@mui/material'
 import AddRounded from '@mui/icons-material/AddRounded'
 import { useQuery } from '@tanstack/react-query'
-import { WizardShell } from '../../../components'
+import { ConfirmSheet, WizardPage } from '../../../components'
 import { listServices } from '../../../services/catalogService'
 import { useCreateAffiliate } from '../hooks/useAffiliates'
 import { CommissionCatalogEditor } from './CommissionCatalogEditor'
@@ -32,15 +31,15 @@ const STEP_TITLES: Record<number, string> = {
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
 interface Props {
-  open: boolean
+  /** Exit confirmed (X on a clean form, or discard confirmed) — the parent navigates away. */
   onClose: () => void
   onCreated: (affiliateId: string) => void
 }
 
-// US-A54–A57 — affiliate setup wizard. Mirrors the service-creation wizard shell (full-screen
-// bottom sheet on mobile, fixed header + footer, progress). Create-only; one atomic save on
-// Finalizar (D9): nothing persists until then.
-export function AffiliateWizard({ open, onClose, onCreated }: Props) {
+// US-A54–A57 — affiliate setup wizard, hosted full-page (/affiliates/new) via WizardPage, matching
+// the service-creation flow. Create-only; one atomic save on Finalizar (D9): nothing persists
+// until then. Navigation away unmounts it, so there's no reset-on-close bookkeeping.
+export function AffiliateWizard({ onClose, onCreated }: Props) {
   const [step, setStep] = useState(1)
   const [name, setName] = useState('')
   const [contactEmail, setContactEmail] = useState('')
@@ -64,29 +63,23 @@ export function AffiliateWizard({ open, onClose, onCreated }: Props) {
     enabledCount(commissions) > 0 ||
     invites.length > 0
 
-  const resetAll = () => {
-    setStep(1)
-    setName('')
-    setContactEmail('')
-    setContactPhone('')
-    setCommissions({})
-    setInvites([])
-    setEmailInput('')
-    setEmailError('')
-    setConfirmDiscard(false)
-    createMutation.reset()
-  }
-
-  const doClose = () => {
-    resetAll()
-    onClose()
-  }
-
   const handleClose = () => {
     if (createMutation.isPending) return
     if (isDirty) setConfirmDiscard(true)
-    else doClose()
+    else onClose()
   }
+
+  // Tab close / refresh with unsaved input → native "leave site?" prompt. SPA back-navigation
+  // is not intercepted (BrowserRouter has no useBlocker) — an accepted silent discard.
+  useEffect(() => {
+    if (!isDirty) return
+    const warn = (e: BeforeUnloadEvent) => {
+      e.preventDefault()
+      e.returnValue = ''
+    }
+    window.addEventListener('beforeunload', warn)
+    return () => window.removeEventListener('beforeunload', warn)
+  }, [isDirty])
 
   const nameValid = name.trim().length > 0
   const step2Valid = draftsValid(commissions)
@@ -118,7 +111,7 @@ export function AffiliateWizard({ open, onClose, onCreated }: Props) {
         commissions: draftToEntries(commissions),
         invites,
       },
-      { onSuccess: (res) => { onCreated(res.affiliate.id); resetAll() } },
+      { onSuccess: (res) => onCreated(res.affiliate.id) },
     )
   }
 
@@ -126,8 +119,7 @@ export function AffiliateWizard({ open, onClose, onCreated }: Props) {
 
   return (
     <>
-      <WizardShell
-        open={open}
+      <WizardPage
         onClose={handleClose}
         title="Nuevo afiliado"
         step={step}
@@ -243,31 +235,18 @@ export function AffiliateWizard({ open, onClose, onCreated }: Props) {
                 </Stack>
               </Stack>
             )}
-      </WizardShell>
+      </WizardPage>
 
-      {/* Discard confirmation */}
-      <Dialog
+      {/* Discard confirmation — the sheet outranks the WizardPage host (zIndex modal+1). */}
+      <ConfirmSheet
         open={confirmDiscard}
         onClose={() => setConfirmDiscard(false)}
-        slotProps={{ paper: { sx: { borderRadius: 'var(--radius-lg, 16px)', p: 1 } } }}
-      >
-        <Box sx={{ p: 2, maxWidth: 360 }}>
-          <Typography variant="h6" sx={{ mb: 1 }}>
-            ¿Descartar este afiliado?
-          </Typography>
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 2.5 }}>
-            Perderás la información que has capturado en el asistente.
-          </Typography>
-          <Stack direction="row" spacing={1} sx={{ justifyContent: 'flex-end' }}>
-            <Button color="inherit" onClick={() => setConfirmDiscard(false)}>
-              Seguir editando
-            </Button>
-            <Button color="error" variant="contained" onClick={doClose}>
-              Descartar
-            </Button>
-          </Stack>
-        </Box>
-      </Dialog>
+        title="¿Descartar este afiliado?"
+        description="Perderás la información que has capturado en el asistente."
+        confirmLabel="Descartar"
+        cancelLabel="Seguir editando"
+        onConfirm={onClose}
+      />
     </>
   )
 }
