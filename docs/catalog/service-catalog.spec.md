@@ -453,6 +453,6 @@ not reveal they exist in another org.
 - [ ] `docs/TECH_DEBT.md §1` marked resolved (NOT_FOUND now consumed by `GET /api/services/:id`)
 - [ ] Frontend: catalog service, hooks, schemas, `CatalogListPage`, service form, extras
       manager; **Catalog** nav destination (admin-only) added to `AppLayout`
-- [ ] `pnpm --filter api-guideme test` green; `pnpm build:app` clean
+- [ ] `pnpm --filter api-turistear test` green; `pnpm build:app` clean
 </content>
 </invoke>

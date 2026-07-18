@@ -245,7 +245,7 @@ Adds to `balance`: each `drops[]` entry now carries `source`/`acknowledgment`/`a
 
 ---
 
-## Frontend (app-guideme)
+## Frontend (app-turistear)
 
 Layered per the frontend rules: types/`features/cash/types.ts`, clients/`services/cashService.ts`,
 hooks/`features/cash/hooks/useCash.ts`, components/`features/cash/components/`, assembly/`pages/`.

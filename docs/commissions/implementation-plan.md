@@ -79,7 +79,7 @@ Extend the existing suite (the `seedService` raw insert already lists explicit c
 > `test/pos/pos-controlled-discount.test.ts` (the `base % + per-service bonus` test) — no
 > duplication needed.
 
-**Deliverable:** `pnpm --filter api-guideme test` green.
+**Deliverable:** `pnpm --filter api-turistear test` green.
 
 ---
 

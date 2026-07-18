@@ -1,4 +1,4 @@
-# Implementation Plan — Auth UI (`app-guideme`)
+# Implementation Plan — Auth UI (`app-turistear`)
 
 > **Stack:** React 19 · MUI v6 · TanStack Query · Zustand · React Hook Form + Zod · React Router v7  
 > **Specs:** `docs/auth/frontend.spec.md`  
@@ -25,7 +25,7 @@ Phase 7 → Admin: Send Agent Invitation
 ### Task 1.1 — Install packages
 
 ```bash
-pnpm --filter app-guideme add \
+pnpm --filter app-turistear add \
   @mui/material @mui/icons-material @emotion/react @emotion/styled \
   @tanstack/react-query \
   zustand \
@@ -35,7 +35,7 @@ pnpm --filter app-guideme add \
 
 ### Task 1.2 — Google Fonts
 
-In `app-guideme/index.html`: add link to **Inter** from Google Fonts.
+In `app-turistear/index.html`: add link to **Inter** from Google Fonts.
 
 ### Task 1.3 — Clean up template
 

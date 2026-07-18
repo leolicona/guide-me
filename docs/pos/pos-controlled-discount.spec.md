@@ -585,7 +585,7 @@ MUST ship cross-org isolation tests built on `seedTwoOrgs`.
       POS catalog page, service/slot/extra selection, discount input clamped to
       `minimum_price`, checkout/confirm, folio receipt view; agent-only **Sell** nav
       destination
-- [ ] `pnpm --filter api-guideme test` green; `pnpm build:app` clean
+- [ ] `pnpm --filter api-turistear test` green; `pnpm build:app` clean
 - [ ] `docs/SPEC.md` MUST-HAVE item **Mobile point of sale with controlled discount
       (US-AG03, US-AG04, US-AG05, US-AG06, US-AG08)** ticked
 </content>

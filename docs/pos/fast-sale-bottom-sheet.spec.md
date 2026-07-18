@@ -76,7 +76,7 @@ needs — slot `capacity` / `booked` / `remaining`, service `is_flexible` /
 ## The `max_extra_seats` mapping
 
 The story phrases the fit test as `slot.remaining + slot.max_extra_seats >= partySize`.
-The GuideMe payload has **no per-slot `max_extra_seats` field**; the overbooking margin
+The Turistear Ya! payload has **no per-slot `max_extra_seats` field**; the overbooking margin
 lives on the **service** as `is_flexible` + `flex_capacity_pct` (US-A36), and the client
 already derives the per-slot margin in `features/pos/capacity.ts`:
 

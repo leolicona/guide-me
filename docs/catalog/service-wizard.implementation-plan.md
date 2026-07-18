@@ -118,7 +118,7 @@ on the detail page with a warning; service creation failure keeps the wizard ope
 ## Phase 6 — Polish & verification
 - Fade between steps; back preserves all entered data (verify times/extras survive step changes).
 - Close-discard confirmation when dirty.
-- `pnpm --filter app-guideme exec tsc -b` clean; `pnpm lint:app` clean.
+- `pnpm --filter app-turistear exec tsc -b` clean; `pnpm lint:app` clean.
 - Manual mobile pass (DevTools device): 90vh sheet, rounded top, keypad types, sticky header/footer
   over a scrolling body.
 
@@ -135,7 +135,7 @@ on the detail page with a warning; service creation failure keeps the wizard ope
 
 ## Phase 0b — (only if Open Question 1 → composite endpoint)
 Insert before Phase 3's save wiring; replaces Phase 5's orchestration with a single call.
-1. `api-guideme/src/routes/services/schema.ts` — `createServiceFullSchema = { service:
+1. `api-turistear/src/routes/services/schema.ts` — `createServiceFullSchema = { service:
    createServiceSchema, availability: { frequency, single_date? | {weekdays,start,end}, times[] },
    extras: createExtraSchema[] }` with the same refines.
 2. `handler.ts` — `createServiceFull`: build the service row + materialized slots (extract the

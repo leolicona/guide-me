@@ -63,9 +63,9 @@ US-AG29 fixes the *presentation*: electronic sales are first-class, shown as sal
 
 **No new tables, no SQL migration.** One app-level enum extension (D1):
 
-- `api-guideme/src/db/schema.ts` — `folios.payment_method` enum becomes
+- `api-turistear/src/db/schema.ts` — `folios.payment_method` enum becomes
   `['cash', 'card', 'transfer', 'link']` (column stays `text NOT NULL DEFAULT 'cash'`).
-- `api-guideme/src/routes/pos/schema.ts` — `payment_method: z.enum(['cash','card','transfer','link'])`.
+- `api-turistear/src/routes/pos/schema.ts` — `payment_method: z.enum(['cash','card','transfer','link'])`.
 - Frontend `PaymentMethod` type (`features/pos/types.ts`, `features/cash/types.ts`) extended
   to match.
 
@@ -186,7 +186,7 @@ snapshotted and deducted, `amount_paid` never enters the cash balance.
 
 ---
 
-## Frontend (app-guideme)
+## Frontend (app-turistear)
 
 Layered per the frontend rules; this is a **redesign of `pages/BalancePage.tsx`** with new
 presentational components under `features/cash/components/`. Elegant-minimalist: outlined

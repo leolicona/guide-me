@@ -51,7 +51,7 @@ restating it.
 ## 1. Module layout & shared building blocks
 
 ```
-app-guideme/src/
+app-turistear/src/
   features/catalog/
     lodging.ts                      # AMENITY_OPTIONS (key→label, order); shared by value with API enum
     types.ts (extend)               # AccommodationUnit, Season, Blockout, + lodging fields
@@ -143,7 +143,7 @@ Hooks: `useUnits(serviceId)`, `useCreate/Update/Deactivate/ReactivateUnit`, `use
 on the range+guests, `enabled` once the range is valid), `useUnitCalendar`. Extend
 `organizationsService` with the three lodging settings fields.
 
-**Deliverable:** importable, type-checks (`pnpm --filter app-guideme exec tsc --noEmit`).
+**Deliverable:** importable, type-checks (`pnpm --filter app-turistear exec tsc --noEmit`).
 
 ---
 
@@ -423,6 +423,6 @@ FE-1 gates everything. FE-2/FE-3/FE-4 are parallelizable once infra + the releva
 
 ### Finish (FE-5)
 - [ ] Loading/error/empty states; reduced-motion; focus trap/restore; SR meaning labels; i18n no-truncation; Back-dismiss
-- [ ] `pnpm --filter app-guideme exec tsc --noEmit` clean · `pnpm lint:app` clean
+- [ ] `pnpm --filter app-turistear exec tsc --noEmit` clean · `pnpm lint:app` clean
 ```
 

@@ -342,6 +342,6 @@ distinct payloads and signatures); each verifies and decodes to its own line.
       (no per-org stored secret; rotation/`kid` deferred); (b) `expires_at` single-timezone
       naive-date simplification; (c) `verifyTicket` shipped here, consumed in production by
       the *Online QR Scanner* feature
-- [ ] `pnpm --filter api-guideme test` green; `pnpm build:app` clean
+- [ ] `pnpm --filter api-turistear test` green; `pnpm build:app` clean
 - [ ] `docs/SPEC.md` MUST-HAVE item **Folio generation with signed QR code (HMAC)**
       *(US-AG08, US-C02)* ticked

@@ -100,7 +100,7 @@ Mobile bottom bar caps at 5 items — the daily admin set fills it exactly.
 
 ### App chrome (D3/D4)
 
-- **Desktop:** the rail becomes full-height. **Top:** a small GuideMe monogram (→ role
+- **Desktop:** the rail becomes full-height. **Top:** a small Turistear Ya! monogram (→ role
   landing). **Middle:** the daily destination pills. **Bottom-pinned:** an avatar button
   (initials) opening a popover — identity header (name · role · email), the admin **Gestión**
   group (Agentes, Catálogo), Configuración, **Cerrar sesión**.
@@ -114,7 +114,7 @@ corner.
 
 ---
 
-## Frontend (app-guideme)
+## Frontend (app-turistear)
 
 This is a **frontend-only** feature (no API changes). Layered per the frontend rules;
 elegant-minimalist (outlined surfaces `elevation={0}` + `1px solid divider`, one accent for

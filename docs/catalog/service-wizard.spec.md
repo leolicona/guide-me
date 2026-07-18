@@ -1,6 +1,6 @@
 # Guided Service Creation Wizard — Feature Spec
 
-**Stories:** US-A38 … US-A44 · **Phase:** 2 (Core Enhancements) · **Surface:** `app-guideme` (admin)
+**Stories:** US-A38 … US-A44 · **Phase:** 2 (Core Enhancements) · **Surface:** `app-turistear` (admin)
 **Refines:** US-A09 (service), US-A10 (schedules/slots), US-A11 (extras), US-A12 (commission),
 US-A36 (Hard/Soft Cap), US-A37 (category). **Pattern sibling:** US-AG31 (POS Bottom Sheet — a
 re-homing of existing logic into a new shell).
@@ -176,7 +176,7 @@ footer):
 
 ## 6. Affected files (default / frontend-only path)
 
-**New** (`app-guideme/src/features/catalog/`)
+**New** (`app-turistear/src/features/catalog/`)
 - `components/wizard/ServiceWizard.tsx` — shell (header, progress, body switch, footer, save).
 - `components/wizard/StepBasicInfo.tsx`, `StepPricing.tsx`, `StepAvailability.tsx`,
   `StepExtras.tsx`.

@@ -360,4 +360,4 @@ fails `400`; services already at `20 %` are unchanged (no retroactive clamp).
       tests where the confirmation path lives).
 - [ ] Scenarios 15–16 (B1/B3) covered using `seedTwoOrgs`.
 - [ ] SPEC.md updated (US-A36, Inventory rule, Phase-2 entry, glossary) — done.
-- [ ] `pnpm --filter api-guideme test` green; `pnpm build:app` clean.
+- [ ] `pnpm --filter api-turistear test` green; `pnpm build:app` clean.

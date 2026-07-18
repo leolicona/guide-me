@@ -171,6 +171,6 @@ Every service row now carries `commission_bonus`.
       type + `serviceFormSchema` carry it; the detail page shows it as `%`
 - [ ] Scenarios 1–5, 7–8 covered in `test/catalog/service-catalog.test.ts`; Scenario 6 already
       covered by the POS suite
-- [ ] `pnpm --filter api-guideme test` green; `pnpm build:app` clean
+- [ ] `pnpm --filter api-turistear test` green; `pnpm build:app` clean
 - [ ] `docs/SPEC.md` MUST-HAVE **Commissions: base % per agent + bonus per service (US-A12)**
       ticked; `docs/TECH_DEBT.md` §13 marked **resolved**

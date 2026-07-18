@@ -1,8 +1,8 @@
-# Design Tokens: GuideMe — "Elegant Field Minimalism"
+# Design Tokens: Turistear Ya! — "Elegant Field Minimalism"
 
 > Canonical token reference for the whole-product design system. Derived from
 > `.design/design-system/DESIGN_BRIEF.md`. **Fresh synthesis** — this *replaces* the indigo
-> "Luminous SaaS" system in `docs/DESING.md` + `app-guideme/src/config/theme.ts`. Phase 6 ports
+> "Luminous SaaS" system in `docs/DESING.md` + `app-turistear/src/config/theme.ts`. Phase 6 ports
 > these values into `theme.ts` (MUI `createTheme`) and a CSS-variable layer; this file is the
 > source of truth. Stack is **MUI v6 CSS-in-JS** (`cssVariables: true`).
 >

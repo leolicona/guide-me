@@ -183,7 +183,7 @@ Each phase is independently shippable and independently tested.
 - [ ] `deriveBalance`/`deriveShiftBreakdown` unified and watermark-anchored; `balance_after` set at confirm; **regression test proves anchored balance == full recompute** across mixed histories.
 - [ ] Settled expenses refuse deletion (409); post-watermark cancellation of a pre-watermark folio surfaces as a current-shift reversal with the settled snapshot frozen.
 - [ ] Scenarios 1–17 updated where noted (4, 12) and still green; multitenancy (16–17) intact via `seedTwoOrgs`.
-- [ ] `pnpm --filter api-guideme test` green; `pnpm build:app` clean.
+- [ ] `pnpm --filter api-turistear test` green; `pnpm build:app` clean.
 - [ ] TECH_DEBT §12 updated: mark (a)–(e) resolved (or note any deliberately deferred sub-case, e.g. partial-payment event streams, which stay out of scope while `amount_paid` is immutable).
 
 ## 9. Explicitly out of scope

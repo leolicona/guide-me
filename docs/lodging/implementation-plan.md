@@ -302,13 +302,13 @@ new tables in `beforeEach`.
 | **B3** cross-org get/edit/availability → 404 | 18 |
 | **B1** injected `organizationId`/`status` stripped | 19 |
 
-**Deliverable:** `pnpm --filter api-guideme test` green.
+**Deliverable:** `pnpm --filter api-turistear test` green.
 
 ---
 
 ## Phase 7 — Frontend infrastructure
 
-New feature dir `app-guideme/src/features/catalog/` additions + POS hooks. Reuse the `request()`
+New feature dir `app-turistear/src/features/catalog/` additions + POS hooks. Reuse the `request()`
 wrapper.
 
 - **`features/catalog/lodging.ts`** — `AMENITY_OPTIONS` (key → Spanish label, §2.6), shared

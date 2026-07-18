@@ -491,7 +491,7 @@ snapshot.
       (running balance + expense add/delete + register-drop), and an admin surface
       (**Balances** list + **Drops** review queue with confirm/reject); agent-only **Balance**
       + admin-only **Cash** nav destinations replacing the old Caja/Closures entries
-- [ ] `pnpm --filter api-guideme test` green; `pnpm build:app` clean
+- [ ] `pnpm --filter api-turistear test` green; `pnpm build:app` clean
 - [ ] `docs/SPEC.md` MUST-HAVE item **Agent continuous cash balance with cash drops** ticked
 - [ ] `docs/TECH_DEBT.md`: mark the daily cash-drawer feature **superseded**; note the
       deferred refinements (settled-history immutability, unbounded balance sum → snapshot

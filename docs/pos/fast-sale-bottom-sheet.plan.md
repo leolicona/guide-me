@@ -30,7 +30,7 @@ compiling at each phase boundary.
 
 ## Phase 1 — `ServiceSelectionPanel` (shared body, re-ordered + reactive)
 
-**File:** `app-guideme/src/features/pos/components/ServiceSelectionPanel.tsx` (new).
+**File:** `app-turistear/src/features/pos/components/ServiceSelectionPanel.tsx` (new).
 
 1. Move the selection JSX + handlers out of `PosServicePage`: `partySize` (was
    `quantity`, default 1), `slot`, `priceInput`, `extraQtys`, `handleAdd`,
@@ -60,7 +60,7 @@ Props: `{ service: PosServiceDetail; onAdded: () => void }`.
 
 ## Phase 2 — `ServiceSheet` (bottom sheet)
 
-**File:** `app-guideme/src/features/pos/components/ServiceSheet.tsx` (new).
+**File:** `app-turistear/src/features/pos/components/ServiceSheet.tsx` (new).
 
 1. Props `{ serviceId: string | null; onClose: () => void; onAdded: () => void }`.
 2. Derive the detail range from the global store (mirror `PosServicePage` today):
@@ -85,7 +85,7 @@ Props: `{ service: PosServiceDetail; onAdded: () => void }`.
 
 ## Phase 3 — Wire `PosCatalogPage`
 
-**File:** `app-guideme/src/pages/PosCatalogPage.tsx`.
+**File:** `app-turistear/src/pages/PosCatalogPage.tsx`.
 
 1. Add `const [openServiceId, setOpenServiceId] = useState<string | null>(null)` and
    `const [added, setAdded] = useState(false)`.
@@ -107,7 +107,7 @@ Props: `{ service: PosServiceDetail; onAdded: () => void }`.
 
 ## Phase 4 — Reconcile `PosServicePage` / route
 
-**File:** `app-guideme/src/pages/PosServicePage.tsx` *(open decision 2)*.
+**File:** `app-turistear/src/pages/PosServicePage.tsx` *(open decision 2)*.
 
 - **Default (keep route):** strip the inlined selection body and instead render
   `<ServiceSelectionPanel service={service} onAdded={() => setAdded(true)} />` inside the

@@ -11,7 +11,7 @@ Tracks confirmed bugs, root causes, and fixes. Each entry is immutable once clos
 **Discovered:** 2026-06-12
 **Fixed:** 2026-06-12
 **Reporter:** Leo Licona (symptom) / Claude Code (root-cause analysis)
-**Affected component:** `app-guideme/src/App.tsx`, `app-guideme/src/main.tsx`, `app-guideme/wrangler.jsonc`
+**Affected component:** `app-turistear/src/App.tsx`, `app-turistear/src/main.tsx`, `app-turistear/wrangler.jsonc`
 **Severity:** High — login intermittently appears broken; only a manual refresh recovers.
 
 ### Symptom
@@ -60,7 +60,7 @@ message next time) — but the boundary fixes the blank-page failure mode for AN
 **Discovered:** 2026-06-12
 **Fixed:** 2026-06-12
 **Reporter:** Claude Code (static analysis)
-**Affected component:** `api-guideme/src/middleware/auth.ts:78-111`
+**Affected component:** `api-turistear/src/middleware/auth.ts:78-111`
 **Severity:** High — intermittent forced logouts after ~15 min of idle.
 
 ### Symptom
@@ -95,7 +95,7 @@ service's rotation proves strict single-use under heavy parallelism.)
 **Discovered:** 2026-06-12
 **Fixed:** 2026-06-12
 **Reporter:** Claude Code (static analysis)
-**Affected component:** `api-guideme/src/routes/folios/handler.ts` (`buildCancellationBatch`, `cancelFolio`, `approveCancellationRequest`)
+**Affected component:** `api-turistear/src/routes/folios/handler.ts` (`buildCancellationBatch`, `cancelFolio`, `approveCancellationRequest`)
 **Severity:** Medium — inventory integrity: `booked` undercount → oversell.
 
 ### Symptom
@@ -128,7 +128,7 @@ cancelled folio — no oversell, same compensate-style trade-off as POS confirm.
 **Discovered:** 2026-06-12
 **Fixed:** 2026-06-12
 **Reporter:** Claude Code (static analysis)
-**Affected component:** `api-guideme/src/routes/services/slots.handler.ts:87,407-409`
+**Affected component:** `api-turistear/src/routes/services/slots.handler.ts:87,407-409`
 **Severity:** Medium — recurring schedules that materialize ≥ 12 slots fail.
 
 ### Symptom
@@ -165,7 +165,7 @@ Regression test added: a Mon–Fri schedule over 4 weeks (20 slots) materializes
 **Discovered:** 2026-06-12
 **Fixed:** 2026-06-12
 **Reporter:** Claude Code (static analysis)
-**Affected component:** `api-guideme/src/routes/agents/handler.ts:36-44`
+**Affected component:** `api-turistear/src/routes/agents/handler.ts:36-44`
 **Severity:** Medium — multitenancy isolation violation (Rule: every tenant-scoped write must be org-filtered).
 
 ### Symptom
@@ -195,7 +195,7 @@ identity leaves org A's pending invitation untouched while creating its own.
 **Discovered:** 2026-06-12
 **Fixed:** 2026-06-12
 **Reporter:** Claude Code (static analysis)
-**Affected component:** `api-guideme/src/routes/auth/index.ts:33` (+ `handler.ts:95-129`), `app-guideme/src/features/auth/hooks/useVerify.ts`
+**Affected component:** `api-turistear/src/routes/auth/index.ts:33` (+ `handler.ts:95-129`), `app-turistear/src/features/auth/hooks/useVerify.ts`
 **Severity:** Medium — users see "Verificación fallida" for accounts that verified fine.
 
 ### Symptom
@@ -229,7 +229,7 @@ page renders as failure.
 **Discovered:** 2026-06-12
 **Fixed:** 2026-06-12 (portal; see residual note for the email)
 **Reporter:** Claude Code (static analysis)
-**Affected component:** `api-guideme/src/routes/portal/handler.tsx:26-27` (and the confirmation email per its comment)
+**Affected component:** `api-turistear/src/routes/portal/handler.tsx:26-27` (and the confirmation email per its comment)
 **Severity:** Medium (security/privacy) — the entry credential leaves the trust boundary.
 
 ### Symptom / Risk
@@ -256,7 +256,7 @@ follow-up, not done here.
 **Discovered:** 2026-06-12
 **Fixed:** 2026-06-12
 **Reporter:** Claude Code (static analysis)
-**Affected component:** `app-guideme/vite.config.ts` (proxy target `http://localhost:5173`), `app-guideme/worker/index.ts`
+**Affected component:** `app-turistear/vite.config.ts` (proxy target `http://localhost:5173`), `app-turistear/worker/index.ts`
 **Severity:** Medium (dev only) — intermittent, very confusing auth behavior in local dev.
 
 ### Symptom
@@ -286,7 +286,7 @@ error body instead of the fake `{ name: "Cloudflare" }` 200.
 **Discovered:** 2026-06-12
 **Fixed:** 2026-06-12
 **Reporter:** Claude Code (static analysis)
-**Affected component:** `app-guideme/src/features/pos/dates.ts:6`, `src/pages/PosCatalogPage.tsx:40`, `api-guideme/src/routes/pos/handler.ts:38`
+**Affected component:** `app-turistear/src/features/pos/dates.ts:6`, `src/pages/PosCatalogPage.tsx:40`, `api-turistear/src/routes/pos/handler.ts:38`
 **Severity:** Medium — every evening, "Hoy" silently becomes tomorrow.
 
 ### Symptom
@@ -321,7 +321,7 @@ deferred with the single-timezone MVP model.
 **Discovered:** 2026-06-12
 **Fixed:** 2026-06-12
 **Reporter:** Claude Code (static analysis)
-**Affected component:** `app-guideme/src/features/auth/hooks/useLogout.ts:17-18`
+**Affected component:** `app-turistear/src/features/auth/hooks/useLogout.ts:17-18`
 **Severity:** Low/Medium (security) — same shared-machine class as BUG-003's residual note.
 
 ### Symptom
@@ -351,7 +351,7 @@ before the cookies cleared server-side), which had been deferred.
 **Discovered:** 2026-06-12
 **Fixed:** 2026-06-12
 **Reporter:** Claude Code (static analysis)
-**Affected component:** `app-guideme/src/features/auth/components/LoginForm.tsx:48-52`
+**Affected component:** `app-turistear/src/features/auth/components/LoginForm.tsx:48-52`
 **Severity:** Low — ~7 s frozen login button when `/api/me` genuinely fails after login.
 
 ### Root Cause
@@ -372,7 +372,7 @@ still described the old invalidate-based flow this `fetchQuery` replaced.
 **Discovered:** 2026-06-12
 **Fixed:** 2026-06-12
 **Reporter:** Claude Code (static analysis)
-**Affected component:** `app-guideme/src/App.tsx:183`, `app-guideme/src/pages/LoginPage.tsx`
+**Affected component:** `app-turistear/src/App.tsx:183`, `app-turistear/src/pages/LoginPage.tsx`
 **Severity:** Low (UX) — reads as "my session was lost".
 
 ### Symptom
@@ -399,7 +399,7 @@ login/logout flows simple.
 **Discovered:** 2026-06-09
 **Fixed:** 2026-06-09
 **Reporter:** Leo Licona (manual QA)
-**Affected component:** `app-guideme/src/features/auth/hooks/useLogout.ts`
+**Affected component:** `app-turistear/src/features/auth/hooks/useLogout.ts`
 **Severity:** Security — a borrowed/shared machine remains fully accessible after a "logout".
 
 ### Symptom
@@ -471,7 +471,7 @@ cost of logout snappiness — deferred as not worth the UX trade for the MVP.
 
 ### Related changes
 
-- `app-guideme/src/features/auth/hooks/useLogout.ts` — `removeQueries(['me'])` before navigate
+- `app-turistear/src/features/auth/hooks/useLogout.ts` — `removeQueries(['me'])` before navigate
 
 ---
 
@@ -480,7 +480,7 @@ cost of logout snappiness — deferred as not worth the UX trade for the MVP.
 **Discovered:** 2026-06-08
 **Fixed:** 2026-06-08 (deployed `2619f2d2`)
 **Reporter:** Leo Licona (manual verification)
-**Affected component:** `api-guideme/src/routes/pos/handler.ts`
+**Affected component:** `api-turistear/src/routes/pos/handler.ts`
 
 ### Symptom
 
@@ -520,13 +520,13 @@ Agent's balance adjusted: $875 → **$780** (the $95 difference credited).
 
 ### Related changes
 
-- `api-guideme/src/routes/pos/handler.ts` — formula fix
-- `api-guideme/src/routes/services/schema.ts` — `commission_bonus` validation: int 0–10000 (bp), replaces money validator
-- `api-guideme/src/db/schema.ts` — column comment updated to clarify basis points
-- `app-guideme/src/features/catalog/types.ts` — `percentToBasisPoints` / `basisPointsToPercent` helpers; field changed from `$` to `%`
-- `app-guideme/src/features/catalog/schemas.ts` — validation 0–100 (percent in UI)
-- `app-guideme/src/features/catalog/components/ServiceFormDialog.tsx` — conversion on prefill + submit
-- `app-guideme/src/pages/CatalogDetailPage.tsx` — display as `X%` not money
+- `api-turistear/src/routes/pos/handler.ts` — formula fix
+- `api-turistear/src/routes/services/schema.ts` — `commission_bonus` validation: int 0–10000 (bp), replaces money validator
+- `api-turistear/src/db/schema.ts` — column comment updated to clarify basis points
+- `app-turistear/src/features/catalog/types.ts` — `percentToBasisPoints` / `basisPointsToPercent` helpers; field changed from `$` to `%`
+- `app-turistear/src/features/catalog/schemas.ts` — validation 0–100 (percent in UI)
+- `app-turistear/src/features/catalog/components/ServiceFormDialog.tsx` — conversion on prefill + submit
+- `app-turistear/src/pages/CatalogDetailPage.tsx` — display as `X%` not money
 - `docs/commissions/commissions.spec.md` — formula, data model, scenarios updated
 - Tests: `pos-controlled-discount.test.ts` + `service-catalog.test.ts` corrected
 
@@ -537,7 +537,7 @@ Agent's balance adjusted: $875 → **$780** (the $95 difference credited).
 **Discovered:** 2026-06-07
 **Fixed:** 2026-06-07
 **Reporter:** Leo Licona (CURL validation)
-**Affected component:** `api-guideme/src/routes/pos/handler.ts`
+**Affected component:** `api-turistear/src/routes/pos/handler.ts`
 
 ### Symptom
 
@@ -578,7 +578,7 @@ A `820,000` centavo cash drop that had been confirmed against the inflated balan
 
 ### Related changes
 
-- `api-guideme/src/routes/pos/handler.ts` — divisor `/100` → `/10000`
+- `api-turistear/src/routes/pos/handler.ts` — divisor `/100` → `/10000`
 - Production D1 rows patched via `wrangler d1 execute`
 
 ---

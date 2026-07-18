@@ -1,14 +1,14 @@
-# Design Brief: GuideMe Design System (Whole-Product)
+# Design Brief: Turistear Ya! Design System (Whole-Product)
 
 > Scope: a **product-wide** design system, not a single feature. It establishes the unifying
-> philosophy, visual language, and token foundation that every one of GuideMe's 16 feature
+> philosophy, visual language, and token foundation that every one of Turistear Ya!'s 16 feature
 > modules inherits. Direction is a **fresh synthesis** (replacing the shipped "Luminous SaaS"
 > indigo theme), with a **deep refactor** mandate across the app. Dark mode is **documented but
 > not built** in this pass.
 
 ## Problem
 
-GuideMe is used by tourism sales agents *in the field* — on a phone, one-handed, often outdoors
+Turistear Ya! is used by tourism sales agents *in the field* — on a phone, one-handed, often outdoors
 in bright sun, while handling physical cash and a queue of customers. Today the app's look was
 assembled feature-by-feature: an indigo theme that drifts from its own documentation, soft
 shadows that disappear in sunlight, primitives re-invented inside individual features, and money
@@ -22,7 +22,7 @@ in.** An agent holding someone else's cash needs to glance, trust the number, an
 
 ## Solution
 
-A single, coherent visual system — *an elegant field instrument* — that makes every GuideMe
+A single, coherent visual system — *an elegant field instrument* — that makes every Turistear Ya!
 screen legible at arm's length in daylight, reachable with one thumb, and fast for the handful of
 loops agents repeat all day (sell, scan, settle). It does this through restraint, not addition:
 neutral ink on light surfaces, structure drawn with hairline borders instead of shadows that wash
@@ -72,7 +72,7 @@ the structural conventions (MUI theming, feature-folder layout, BottomSheet patt
 Symbols). It must refactor *toward* the new tokens, not bolt on beside them.
 
 - **Framework**: React 18 + TypeScript + Vite (CRXJS), **MUI v6** with `createTheme`
-  (`cssVariables: true`). Theme lives at `app-guideme/src/config/theme.ts`.
+  (`cssVariables: true`). Theme lives at `app-turistear/src/config/theme.ts`.
 - **Typography (current → keep face)**: Manrope (`"Manrope", "Inter", sans-serif`). Hierarchy via
   weight (400 body / 600 emphasis / 700 headings), `-0.02em` heading tracking. **Kept**; the fresh
   system re-tunes the scale and adds an explicit numeric/tabular treatment.

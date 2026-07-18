@@ -288,7 +288,7 @@ never set `has_availability` or seed a chip for `org_a`.
 - [x] Scenarios 1–6, 11 covered in `test/pos/pos-catalog-availability.test.ts`
       (B4 via `seedTwoOrgs`). Scenarios 7–10 are frontend behaviours.
 - [x] SPEC.md updated (US-AG30, Phase-2 entry, business rule, glossary) — done.
-- [x] `pnpm --filter api-guideme test` green (317); `pnpm build:app` clean (`tsc -b` + vite).
+- [x] `pnpm --filter api-turistear test` green (317); `pnpm build:app` clean (`tsc -b` + vite).
 
 ---
 

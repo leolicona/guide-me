@@ -128,7 +128,7 @@ Request unchanged. `commission_amount` in the response is now computed by Rule 2
 
 ---
 
-## Frontend (app-guideme)
+## Frontend (app-turistear)
 
 - **`ServiceFormDialog`** — the "Bono de comisión" field becomes a **Comisión** control: a
   type toggle (**%** / **$ por lugar**) + a value input (percent entered 0–100 →

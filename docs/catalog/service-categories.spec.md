@@ -284,7 +284,7 @@ category is rejected `400` (the required rule applies to every write).
 - [x] Scenarios 1–6, 10–11 covered in `test/catalog/service-categories.test.ts`
       (B1/B4 via `seedTwoOrgs`). Scenarios 7–9 are frontend behaviours.
 - [x] SPEC.md updated (US-A37, Phase-2 entry, glossary) — done.
-- [x] `pnpm --filter api-guideme test` green (310); `pnpm build:app` clean (`tsc -b` + vite).
+- [x] `pnpm --filter api-turistear test` green (310); `pnpm build:app` clean (`tsc -b` + vite).
 
 ---
 

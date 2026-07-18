@@ -30,7 +30,7 @@ swaps in Phase 3). Phases 3→4 depend on Phase 1's payload.
 
 ## Phase 1 — API: windowed `has_availability`
 
-**File:** `api-guideme/src/routes/pos/handler.ts` (`listPosServices`).
+**File:** `api-turistear/src/routes/pos/handler.ts` (`listPosServices`).
 
 1. Read the new optional `date` query param alongside the existing `today`.
 2. Compute the window bounds:
@@ -54,7 +54,7 @@ swaps in Phase 3). Phases 3→4 depend on Phase 1's payload.
 
 ## Phase 2 — API tests
 
-**File:** `api-guideme/test/pos/pos-catalog-availability.test.ts` (new).
+**File:** `api-turistear/test/pos/pos-catalog-availability.test.ts` (new).
 
 - Seed an org + agent (reuse existing POS test helpers / `seedTwoOrgs`).
 - **Scenario 1** — slot on `today+2`, no `date` → `has_availability: true`; assert the
@@ -66,19 +66,19 @@ swaps in Phase 3). Phases 3→4 depend on Phase 1's payload.
 - **Scenario 6** — no in-window slot → `false` and `next_slot_date: null`.
 - **Scenario 11 (B4)** — `seedTwoOrgs`: `org_a` agent sees only `org_a`'s service; the
   `org_b` service never sets availability for `org_a`.
-- Gate: `pnpm --filter api-guideme test` green (the api gate is vitest, no tsc step).
+- Gate: `pnpm --filter api-turistear test` green (the api gate is vitest, no tsc step).
 
 ## Phase 3 — Frontend infra
 
-1. **`app-guideme/src/store/posFilters.ts`** (new Zustand store):
+1. **`app-turistear/src/store/posFilters.ts`** (new Zustand store):
    `selectedDate: string | null` + `setSelectedDate`. Default `null` (= "Hoy").
-2. **`app-guideme/src/features/pos/types.ts`**: in `PosServiceSummary`, replace
+2. **`app-turistear/src/features/pos/types.ts`**: in `PosServiceSummary`, replace
    `available_spots: number` with `has_availability: boolean`. (`PosServiceDetail`
    `Omit`s `available_spots`/`next_slot_date` already — update the Omit to drop
    `has_availability` instead, keeping the detail shape unchanged.)
-3. **`app-guideme/src/services/posService.ts`**: `listPosServices(today?, date?)` — append
+3. **`app-turistear/src/services/posService.ts`**: `listPosServices(today?, date?)` — append
    `&date=` when provided; response type already flows from the updated summary type.
-4. **`app-guideme/src/features/pos/hooks/usePosServices.ts`**: accept `date`, key on
+4. **`app-turistear/src/features/pos/hooks/usePosServices.ts`**: accept `date`, key on
    `[...POS_SERVICES_QUERY_KEY, today ?? null, date ?? null]`, pass through.
 
 ## Phase 4 — Frontend UI

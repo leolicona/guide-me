@@ -2,7 +2,7 @@
 
 ## Context
 
-Both administrators and sales agents use passwords in GuideMe. When they forget it, they can request a reset via email. The flow consists of two steps: requesting the link and confirming the new password. Upon completing the reset, **no session is established** — the user must log in using the new password.
+Both administrators and sales agents use passwords in Turistear Ya! When they forget it, they can request a reset via email. The flow consists of two steps: requesting the link and confirming the new password. Upon completing the reset, **no session is established** — the user must log in using the new password.
 
 **User Stories:** US-A04, US-AG18  
 **Endpoints:** `POST /api/auth/forgot-password`, `POST /api/auth/reset-password`  

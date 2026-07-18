@@ -1,10 +1,10 @@
-# GuideMe — Product Specification
+# Turistear Ya! — Product Specification
 
 ## Product Vision
 
-GuideMe is a multi-tenant, mobile-optimized SaaS platform that centralizes the sale of tourist services, real-time inventory control, commission calculation, and access validation via QR codes. It is designed so that tourism companies (organizations) can operate agilely in the field, ensuring financial control and a modern digital experience for the tourist.
+Turistear Ya! is a multi-tenant, mobile-optimized SaaS platform that centralizes the sale of tourist services, real-time inventory control, commission calculation, and access validation via QR codes. It is designed so that tourism companies (organizations) can operate agilely in the field, ensuring financial control and a modern digital experience for the tourist.
 
-**Problem solved:** Tourism sales teams operate with spreadsheets, informal WhatsApp, and untraceable cash. GuideMe replaces this chaos with a mobile-first tool that prevents overbooking, controls commissions, and automatically delivers digital receipts.
+**Problem solved:** Tourism sales teams operate with spreadsheets, informal WhatsApp, and untraceable cash. Turistear Ya! replaces this chaos with a mobile-first tool that prevents overbooking, controls commissions, and automatically delivers digital receipts.
 
 ---
 
@@ -36,7 +36,7 @@ GuideMe is a multi-tenant, mobile-optimized SaaS platform that centralizes the s
 
 ### Authentication and Account
 
-- **US-A01** — As an admin, I want to register with my name, email, password, and company name to create my organization in GuideMe.
+- **US-A01** — As an admin, I want to register with my name, email, password, and company name to create my organization in Turistear Ya!
 - **US-A02** — As an admin, I want to verify my email by clicking on a magic link sent via Resend to activate my account.
 - **US-A03** — As an admin, I want to log in with email and password to access my dashboard.
 - **US-A04** — As an admin, I want to recover my password via email in case I forget it.
@@ -95,7 +95,7 @@ GuideMe is a multi-tenant, mobile-optimized SaaS platform that centralizes the s
 > `docs/RFCs/rfc-airbnb-inventory-model.md`); each type carries an **inventory count**, its own
 > nightly pricing, occupancy, availability controls, and amenities, and is sold as a **quantity of
 > rooms for a date range** (multi-night stay) rather than a per-day slot. Nobody picks a physical
-> room — GuideMe is a sales POS, not a PMS. This is a new inventory primitive **beside** slots —
+> room — Turistear Ya! is a sales POS, not a PMS. This is a new inventory primitive **beside** slots —
 > tours are untouched. Full spec: `docs/lodging/accommodation-stays.spec.md`.
 
 - **US-A59** — As an admin, I want to define a **lodging service** and add **unit types** under it (e.g. "Habitación Estándar", "Cabaña Río"), each with an **`inventory_count`** (how many interchangeable rooms of that type exist), **number of beds**, **base occupancy**, and **maximum capacity** per room, so my inventory is modeled as sellable room types — a unique boutique cabin is simply a type with count 1 and gets its **own card in the POS catalog**. Types are children of the `lodging` service (`accommodation_unit_types`), soft-deactivated never hard-deleted (folio history). *(D1/D2/D14 — unit-type inventory, per-type config, flattened catalog.)* — `docs/lodging/accommodation-stays.spec.md`
@@ -354,7 +354,7 @@ GuideMe is a multi-tenant, mobile-optimized SaaS platform that centralizes the s
 - [x] **Affiliate Reseller Portal (external partners sell on a curated POS)** *(US-AF01–US-AF09)* - *The affiliate-facing runtime. Admin-invited `affiliate` users accept a magic-link invite (US-AF01), then sell on a **tailored POS limited to their curated services** (US-A56): full payment at sale mints the QR, with **manual discounts down to the minimum price** and **bookings/apartados**, just like agents — but **no access scanner and no expense recording**. They collect cash, carry a **running balance**, and settle by **deposit/transfer (cash drop)**, reusing the agent balance model minus expenses; tickets/QRs are emailed (US-AF07) and they review their own folio history (US-AF09). **Builds on Affiliate Setup & Commissions.*** — `docs/affiliates/affiliate-portal.spec.md`
 - [x] **POS Date Filter — Quick-Day Strip + Calendar Bottom Sheet** *(US-AG35, US-A45)* - *Replaces US-AG30's interim Date control with a quick-day strip (`HOY` + the next two days + a calendar button) and a calendar Bottom Sheet of square day chips that marks the available days of the month (with month navigation), shared identically by agent and admin-seller. The catalog still defaults to today; picking a day sets the shared `selectedDate`. Adds one lightweight org-scoped read `GET /api/pos/availability/days` (the dates with a sellable slot); no migration.* — `docs/pos/date-filter-calendar-sheet.spec.md`
 - [x] **Accommodation / Lodging v1 (named units, date-range stays, per-night pricing)** *(US-A59–US-A63, US-AG36, US-AG37, US-AG38)* - *The first category-specific service type, as originally shipped: a `lodging` service owned named, individually-bookable units, each with per-night rate rules (base + weekend + seasonal overrides + extra-person surcharge), availability controls (block-out calendar, min-stay, check-in/out times, standard hotel turnover), amenities, and a structured cancellation policy, sold range-first or unit-first under an atomic overlap guard (`409 UNIT_UNAVAILABLE`). Additive migrations 0035–0041. **Superseded by the Unit-Type Inventory transition below** — the stories now read per the v2 model.* — `docs/lodging/accommodation-stays.spec.md`
-- [ ] **Unit-Type Inventory transition (Airbnb/OTA model)** *(US-A59–US-A63, US-AG36–AG38 — v2)* - *Approved RFC (`docs/RFCs/rfc-airbnb-inventory-model.md`, 2026-07-07): physical units become **unit types with an `inventory_count`**; agents sell a **quantity of a type** for a range, never a physical room (GuideMe is a POS, not a PMS). Flattened POS catalog (one card per type, `item_type` discriminator, "Quedan N" badge), **per-night atomic count guard** (`409 INSUFFICIENT_INVENTORY`; replaces `UNIT_UNAVAILABLE`), type-level **quantity block-outs**, total-guests even-split pricing, fixed commission × quantity, real lodging availability dots (retires the `lodgingInScope` hack). Migration `0042` (rename + additive; test data wiped).* — `docs/lodging/accommodation-stays.spec.md`
+- [ ] **Unit-Type Inventory transition (Airbnb/OTA model)** *(US-A59–US-A63, US-AG36–AG38 — v2)* - *Approved RFC (`docs/RFCs/rfc-airbnb-inventory-model.md`, 2026-07-07): physical units become **unit types with an `inventory_count`**; agents sell a **quantity of a type** for a range, never a physical room (Turistear Ya! is a POS, not a PMS). Flattened POS catalog (one card per type, `item_type` discriminator, "Quedan N" badge), **per-night atomic count guard** (`409 INSUFFICIENT_INVENTORY`; replaces `UNIT_UNAVAILABLE`), type-level **quantity block-outs**, total-guests even-split pricing, fixed commission × quantity, real lodging availability dots (retires the `lodgingInScope` hack). Migration `0042` (rename + additive; test data wiped).* — `docs/lodging/accommodation-stays.spec.md`
 - [ ] **Offline-capable QR validation with post-sync** *(US-AG16)* - *Deferred from MVP to focus on real-time validation.*
 - [ ] **Partial cancellations (per service within the folio)** *(US-A22)* - *Deferred to simplify inventory logic in MVP.*
 - [x] **Cash refund tracking** *(US-A23)* - *To ensure the admin can reconcile physical cash returns. Pairs with the Tourist Portal's Refund PIN (US-T05) to confirm the customer received the cash.* — **delivered with** `docs/tourist-portal/tourist-self-service-portal.spec.md` (the request→approve→PIN→confirm loop ships as one feature).

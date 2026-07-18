@@ -2,7 +2,7 @@
 
 ## Context
 
-This spec defines the UI screens, navigation flows, component structure, and testable scenarios for all authentication features in `app-guideme`. It covers admin registration, email verification, login, password recovery, agent invitation/onboarding (both sides — admin sends, agent accepts), session management, and logout.
+This spec defines the UI screens, navigation flows, component structure, and testable scenarios for all authentication features in `app-turistear`. It covers admin registration, email verification, login, password recovery, agent invitation/onboarding (both sides — admin sends, agent accepts), session management, and logout.
 
 The UI never handles tokens directly — session cookies (`gm_access`, `gm_refresh`) are `HttpOnly` and managed entirely by the API via `Set-Cookie` headers.
 
@@ -22,7 +22,7 @@ The UI never handles tokens directly — session cookies (`gm_access`, `gm_refre
 Following the layered architecture defined in `CLAUDE.md`:
 
 ```
-app-guideme/src/
+app-turistear/src/
 ├── pages/
 │   ├── LoginPage.tsx
 │   ├── RegisterPage.tsx

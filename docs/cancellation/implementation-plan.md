@@ -229,13 +229,13 @@ then the tenancy clear.
 > Scenario 20, which also drives the real `cancelFolio` API). Scenario 7 mints a real token
 > via POS confirm, cancels the folio, then scans.
 
-**Deliverable:** `pnpm --filter api-guideme test` green.
+**Deliverable:** `pnpm --filter api-turistear test` green.
 
 ---
 
 ## Phase 4 — Frontend Infrastructure
 
-New feature dir `app-guideme/src/features/folios/`. Reuse `request()` + `ServiceError`
+New feature dir `app-turistear/src/features/folios/`. Reuse `request()` + `ServiceError`
 from `authService.ts` and the money helpers from `features/catalog/types`.
 
 ### Task 4.1 — Types (`src/features/folios/types.ts`)

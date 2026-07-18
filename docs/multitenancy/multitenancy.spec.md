@@ -2,7 +2,7 @@
 
 ## Context
 
-GuideMe is a multi-tenant platform where multiple tourism companies (organizations) share the same Cloudflare D1 database and API. Multitenancy ensures that every organization's data — agents, services, schedules, folios, cash drawers — is completely isolated. An admin or agent from Organization A can never read, write, or affect any data belonging to Organization B.
+Turistear Ya! is a multi-tenant platform where multiple tourism companies (organizations) share the same Cloudflare D1 database and API. Multitenancy ensures that every organization's data — agents, services, schedules, folios, cash drawers — is completely isolated. An admin or agent from Organization A can never read, write, or affect any data belonging to Organization B.
 
 This is a foundational, cross-cutting feature. It does not map to a single user story but is a prerequisite for every subsequent feature in the platform. Its deliverables are threefold:
 
@@ -20,7 +20,7 @@ This is a foundational, cross-cutting feature. It does not map to a single user 
 
 ### Single shared database, row-level isolation
 
-GuideMe uses a **shared-database, shared-schema** model: one D1 instance, one set of tables, and every tenant-scoped row carries an `organization_id`. Isolation is enforced at the **query layer** — every read and write is filtered by the authenticated user's `organization_id`. There is no per-tenant database or schema.
+Turistear Ya! uses a **shared-database, shared-schema** model: one D1 instance, one set of tables, and every tenant-scoped row carries an `organization_id`. Isolation is enforced at the **query layer** — every read and write is filtered by the authenticated user's `organization_id`. There is no per-tenant database or schema.
 
 ### Identity uniqueness across tenants
 

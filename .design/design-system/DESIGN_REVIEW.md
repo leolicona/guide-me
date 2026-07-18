@@ -1,4 +1,4 @@
-# Design Review: GuideMe Design System (Whole-Product)
+# Design Review: Turistear Ya! Design System (Whole-Product)
 
 Reviewed against: `.design/design-system/DESIGN_BRIEF.md`
 Philosophy: **Elegant Field Minimalism** (teal-accented, structure-first, money-reads-first)

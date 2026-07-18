@@ -4,9 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-`guide-me` is a monorepo containing:
-- A Cloudflare Worker API (`api-guideme/`) built with Hono and served via Vite SSR.
-- A React application as a Chrome Extension (`app-guideme/`) built with React 18, TypeScript, Vite with CRXJS, and TailwindCSS.
+`turistear` is a monorepo containing:
+- A Cloudflare Worker API (`api-turistear/`) built with Hono and served via Vite SSR.
+- A React application as a Chrome Extension (`app-turistear/`) built with React 18, TypeScript, Vite with CRXJS, and TailwindCSS.
 
 The project uses `pnpm` workspaces. Commands can be run from the root.
 
@@ -78,7 +78,7 @@ clarity. Three laws, in priority order: **legible in sunlight · one confident a
 repetition.**
 
 > **Canonical source of truth:** `.design/design-system/DESIGN_TOKENS.md` (every value AA-verified
-> there) → implemented in `app-guideme/src/config/theme.ts` + `src/styles/tokens.css`. The full
+> there) → implemented in `app-turistear/src/config/theme.ts` + `src/styles/tokens.css`. The full
 > rationale lives in `.design/design-system/DESIGN_BRIEF.md`. *(This supersedes the old indigo
 > "Luminous SaaS" system; `docs/DESING.md` is retired.)*
 
@@ -120,7 +120,7 @@ Define in `src/config/theme.ts` using `createTheme({ cssVariables: true })`:
 
 ### Frontend Layered Folder Structure
 
-Organize the `app-guideme/` codebase using the following layered architecture:
+Organize the `app-turistear/` codebase using the following layered architecture:
 
 - `pages/` — Route assembly only, no business logic.
 - `layout/` — App shell components (AppLayout, AuthLayout, BottomNav/rail, account surface).

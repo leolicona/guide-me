@@ -37,7 +37,7 @@ Phase 5 is the client render.
 - `worker-configuration.d.ts`: regenerate via `pnpm cf-typegen:api` (or add the field).
 - `.dev.vars`: add `QR_SECRET=dev_qr_secret_change_me` (long random string locally).
 - `vitest.config.ts` → `miniflare.bindings`: add `QR_SECRET: 'test_qr_secret'`.
-- **Prod (manual, document only):** `cd api-guideme && npx wrangler secret put QR_SECRET`.
+- **Prod (manual, document only):** `cd api-turistear && npx wrangler secret put QR_SECRET`.
   It is a **secret**, so it is *not* added to `wrangler.jsonc` `vars`.
 
 ### Task 1.2 — Migration `migrations/0013_add_qr_token_to_folio_lines.sql`
@@ -229,7 +229,7 @@ Reuse the POS suite's seeders (`seedService`/`seedSlot`/`seedExtra`, `seedUser`,
 
 (Scenario 9 lives in `qr.unit.test.ts`, Phase 2.)
 
-**Deliverable:** `pnpm --filter api-guideme test` green.
+**Deliverable:** `pnpm --filter api-turistear test` green.
 
 ---
 
@@ -237,7 +237,7 @@ Reuse the POS suite's seeders (`seedService`/`seedSlot`/`seedExtra`, `seedUser`,
 
 ### Task 5.1 — Dependency
 
-`pnpm --filter app-guideme add qrcode.react` (exports `QRCodeSVG`; SVG = crisp, no canvas).
+`pnpm --filter app-turistear add qrcode.react` (exports `QRCodeSVG`; SVG = crisp, no canvas).
 
 ### Task 5.2 — Types (`src/features/pos/types.ts`)
 

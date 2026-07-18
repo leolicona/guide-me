@@ -316,7 +316,7 @@ ignored — the cancelled folio's `organization_id` stays `org_a` and `cancelled
       optional reason + a **clawback** switch, US-A26, that threads `clawback` through
       `foliosService.cancelFolio` / `useCancelFolio`; the cancelled-folio alert states
       whether the commission was clawed back or absorbed); admin-only **Folios** nav + routes
-- [x] `pnpm --filter api-guideme test` green; `pnpm build:app` clean
+- [x] `pnpm --filter api-turistear test` green; `pnpm build:app` clean
 - [x] `docs/SPEC.md` MUST-HAVE item **Total folio cancellation (US-A21)** ticked
 
 ### Remaining (future features, not this one)

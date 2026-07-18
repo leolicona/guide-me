@@ -28,8 +28,8 @@ Phase 2 is the load-bearing rework; Phases 1 & 3 feed it the window + props.
 
 ## Phase 1 — 3-day window scoping
 
-**Files:** `app-guideme/src/features/pos/components/ServiceSheet.tsx`,
-`app-guideme/src/pages/PosServicePage.tsx`, + a small date helper.
+**Files:** `app-turistear/src/features/pos/components/ServiceSheet.tsx`,
+`app-turistear/src/pages/PosServicePage.tsx`, + a small date helper.
 
 1. Add a shared frontend date helper (e.g. `features/pos/dates.ts` or extend an existing
    util): `todayStr()` (already inline in `PosCatalogPage` — lift it) and
@@ -47,7 +47,7 @@ Phase 2 is the load-bearing rework; Phases 1 & 3 feed it the window + props.
 
 ## Phase 2 — `SlotPicker` → 3-day matrix + party-aware orange
 
-**File:** `app-guideme/src/features/pos/components/SlotPicker.tsx`.
+**File:** `app-turistear/src/features/pos/components/SlotPicker.tsx`.
 
 1. **Props:** add `days: string[]`, `today: string`, `partySize: number`. Keep `slots`,
    `selectedId`, `onSelect`, `isFlexible`, `flexCapacityPct`.
@@ -71,7 +71,7 @@ Phase 2 is the load-bearing rework; Phases 1 & 3 feed it the window + props.
 
 ## Phase 3 — `ServiceSelectionPanel` wiring
 
-**File:** `app-guideme/src/features/pos/components/ServiceSelectionPanel.tsx`.
+**File:** `app-turistear/src/features/pos/components/ServiceSelectionPanel.tsx`.
 
 The day axis can't be derived from the loaded slots (a sold-out day has none), so the
 owner computes it (Phase 1) and threads it down:

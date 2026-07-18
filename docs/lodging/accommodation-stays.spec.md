@@ -6,8 +6,8 @@
 `docs/RFCs/rfc-airbnb-inventory-model.md`, 2026-07-07). Supersedes the v1 named-physical-units
 model, which shipped in migrations `0035`–`0041`; the v2 delta is migration `0042` + the API/POS
 refactor below.
-**Owner modules:** `api-guideme/src/routes/services/` (admin config), `api-guideme/src/routes/pos/`
-(availability + sale), `app-guideme/src/features/catalog/` + `app-guideme/src/features/pos/`.
+**Owner modules:** `api-turistear/src/routes/services/` (admin config), `api-turistear/src/routes/pos/`
+(availability + sale), `app-turistear/src/features/catalog/` + `app-turistear/src/features/pos/`.
 
 ---
 
@@ -67,9 +67,9 @@ service still never uses slots/schedules.
 
 ### Out of scope (own features / later)
 
-- **Physical room assignment.** GuideMe is a **sales POS, not a PMS**: the system tracks *how
+- **Physical room assignment.** Turistear Ya! is a **sales POS, not a PMS**: the system tracks *how
   many* rooms of a type are sold per night, never *which* physical room a guest occupies. Key
-  assignment at check-in happens outside GuideMe (the property's PMS, front-desk board, or paper).
+  assignment at check-in happens outside Turistear Ya! (the property's PMS, front-desk board, or paper).
   "Which room was sold?" is by-design out of scope, not a bug.
 - **Per-night manual discount** on a stay (the US-AG06 minimum-price floor is per-ticket, not
   per-night). Stays sell at the computed total; discounting stays is deferred.
@@ -280,7 +280,7 @@ frontend (`features/catalog/lodging.ts`):
 
 ## 3. The pricing & availability engine (one shared helper)
 
-Defined once in `api-guideme/src/utils/lodging.ts` and imported by **both** the POS availability
+Defined once in `api-turistear/src/utils/lodging.ts` and imported by **both** the POS availability
 serializers (display) and `confirmSale` (enforcement), so the quote shown can never drift from the
 quote charged — the same single-source discipline as `effectiveCapacity()`.
 
@@ -618,7 +618,7 @@ Existing `VALIDATION_ERROR` / `NOT_FOUND` / `FORBIDDEN` cover the rest.
       **including the false-409 shape, the last-room oversell, blockout quantity sums, D12
       multi-room pricing, D13 fixed × quantity, and B1/B3/B4 via `seedTwoOrgs`**. The rest of the
       POS suite needed no changes (tour paths untouched).
-- [x] `pnpm --filter api-guideme test` green (461 tests / 37 files); API `vite build` clean;
+- [x] `pnpm --filter api-turistear test` green (461 tests / 37 files); API `vite build` clean;
       frontend `tsc -b` + eslint (0 errors) + `vite build` clean after the UI refactor.
 - [x] `docs/SPEC.md` updated (US-A59–A63, US-AG36–AG38, Inventory/Pricing invariants, roadmap).
 

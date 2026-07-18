@@ -23,7 +23,7 @@ print-friendly layout — the standard pragmatic path. The spec DoD is updated t
 
 ## Phase 1 — Backend route scaffold
 
-**Files:** `api-guideme/src/routes/reports/{index.ts,handler.ts,schema.ts}` + mount in `index.tsx`.
+**Files:** `api-turistear/src/routes/reports/{index.ts,handler.ts,schema.ts}` + mount in `index.tsx`.
 
 ### 1.1 `schema.ts`
 ```ts
@@ -208,7 +208,7 @@ Add to `MANAGEMENT_LINKS`: `{ label: 'Reportes', to: ROUTES.REPORTS, icon: Asses
 
 ---
 
-## Phase 6 — Tests (`api-guideme/test/reports/commission-report.test.ts`)
+## Phase 6 — Tests (`api-turistear/test/reports/commission-report.test.ts`)
 
 Reuse `seedTwoOrgs`, `seedUser`, `seedAffiliateCompany`, `clearAffiliateDb`, and a local raw-D1
 `seedFolio` / `seedDrop` / `seedPayout` (mirror the cash + affiliate suites; `buildFakeJwt` auth).
@@ -229,7 +229,7 @@ Reuse `seedTwoOrgs`, `seedUser`, `seedAffiliateCompany`, `clearAffiliateDb`, and
 9. **CSV export** — `200`, `text/csv`, `Content-Disposition: attachment`, a TOTALS row, and the
    injection-guard prefix on a crafted name.
 
-**Gate:** `pnpm --filter api-guideme test` green (the API has no tsc gate — vitest is the gate).
+**Gate:** `pnpm --filter api-turistear test` green (the API has no tsc gate — vitest is the gate).
 Frontend: `pnpm lint:app` + `tsc` + `vite build` clean.
 
 ---

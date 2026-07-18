@@ -1,0 +1,43 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  // Deployed Cloudflare worker name — kept from the GuideMe era on purpose:
+  // renaming it would create a brand-new worker and orphan the custom domain.
+  "name": "api-guideme",
+  "compatibility_date": "2025-08-03",
+  "main": "./src/index.tsx",
+  "routes": [
+    {
+      "pattern": "api.turistearya.com",
+      "custom_domain": true
+    }
+  ],
+  // US-AG07 (P3) — every 15 min, auto-cancel expired bookings and release their spots.
+  "triggers": {
+    "crons": ["*/15 * * * *"]
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "guideme-db",
+      "database_id": "15cd8f75-c94e-41e8-9ec0-d43b1cf73a04",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "services": [
+    {
+      "binding": "AGNOSTIC_AUTH_API",
+      "service": "agnostic-auth"
+    }
+  ],
+  "vars": {
+    "AGNOSTIC_AUTH_APP_ID": "guide-me",
+    "COOKIE_DOMAIN": ".turistearya.com",
+    "CORS_ORIGIN": "http://localhost:5173,https://app.turistearya.com",
+    "API_BASE_URL": "https://api.turistearya.com",
+    "APP_BASE_URL": "https://app.turistearya.com",
+    "RESEND_FROM": "no-reply@turistearya.com",
+    // Idle-session window (seconds). Keep in sync with `refreshTokenTtlSeconds`
+    // in the agnostic-auth APP_REGISTRY KV entry for app "guide-me".
+    "SESSION_REFRESH_TTL_SECONDS": "2592000"
+  }
+}

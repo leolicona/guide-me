@@ -172,7 +172,7 @@ Document in the file header that every new tenant-scoped resource route MUST add
 
 > B3/B4 cannot be exercised end-to-end yet — no resource-detail/collection route exists beyond `/agents/invite`. The helper + documented requirement is the deliverable; the assertions land with the first resource feature (Service Catalog).
 
-**Deliverable:** `pnpm --filter api-guideme test` passes with A1–A3, B1, B2 green; `seedTwoOrgs` helper available for future suites.
+**Deliverable:** `pnpm --filter api-turistear test` passes with A1–A3, B1, B2 green; `seedTwoOrgs` helper available for future suites.
 
 ---
 

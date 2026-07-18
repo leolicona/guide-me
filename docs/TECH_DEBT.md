@@ -41,7 +41,7 @@ open decision O3) ship with a **non-refundable retained deposit**: when a bookin
 `amount_paid` **stays in the agent's cash drawer** and the folio goes to `status='cancelled'`,
 `refund_status='none'`.
 
-**The discrepancy:** the cash-drawer derivation (`api-guideme/src/routes/cash/handler.ts`) sums
+**The discrepancy:** the cash-drawer derivation (`api-turistear/src/routes/cash/handler.ts`) sums
 `cash_collected` over **non-cancelled** folios only (`ne(folios.status, 'cancelled')`). So a
 retained cash deposit on a cancelled booking is **excluded** from collected cash even though the
 agent physically holds that money — the drawer would under-count by the deposit.
@@ -93,7 +93,7 @@ the perpetual *Agent continuous cash balance with cash drops* feature
 (`docs/cash-drops/agent-balance-cash-drops.spec.md`). Migration `0018_drop_cash_drawers.sql`
 drops both tables (expenses → drawers, FK order); the Drizzle defs, routes, services, hooks,
 pages, nav entries and route constants are all gone (verified: no dangling references in
-`api-guideme/src` or `app-guideme/src`).
+`api-turistear/src` or `app-turistear/src`).
 
 **Why accepted:** the operationally meaningful number is "how much company cash is this agent
 holding **right now**", not a paper reconciliation pinned to a calendar day. The continuous

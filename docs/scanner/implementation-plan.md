@@ -191,7 +191,7 @@ cross-org) — import from `src/utils/qr.ts`. Assert stored `redeemed_count` via
 > past against the real folio line — avoids depending on slot-date arithmetic. For Scenario
 > 8, sign a payload with a random `folio_line_id`.
 
-**Deliverable:** `pnpm --filter api-guideme test` green.
+**Deliverable:** `pnpm --filter api-turistear test` green.
 
 ---
 
@@ -199,7 +199,7 @@ cross-org) — import from `src/utils/qr.ts`. Assert stored `redeemed_count` via
 
 ### Task 4.1 — Scanner dependency
 
-`pnpm --filter app-guideme add @yudiel/react-qr-scanner` — a maintained React component
+`pnpm --filter app-turistear add @yudiel/react-qr-scanner` — a maintained React component
 using the native `BarcodeDetector` with a zxing/wasm fallback; exposes `<Scanner onScan />`.
 Requires a **secure context** (HTTPS — prod custom domain ✓ — or `localhost`) and camera
 permission.
@@ -287,7 +287,7 @@ SCAN: '/scan',
 - **Invalid:** large ✗ (`CancelRounded`/`BlockRounded`, error color) and a human reason:
   - `ALREADY_CONSUMED` → "All passes already used ({passes_total} of {passes_total})."
   - `EXPIRED` → "This ticket has expired."
-  - `INVALID_SIGNATURE` → "Not a valid GuideMe ticket."
+  - `INVALID_SIGNATURE` → "Not a valid Turistear Ya! ticket."
   - `CANCELLED` → "This folio was cancelled."
   - `NOT_PAID` → "This folio isn't fully paid."
   - `NOT_FOUND` → "Ticket not found."

@@ -113,7 +113,7 @@ All required data is already on the existing schema:
 
 5. **Org name in email.** The org name (`organizations.name`) is fetched from the DB once
    per send and included in the subject line and body so the client sees the tour
-   company's name, not "GuideMe". This is one extra DB read per email; acceptable at MVP scale.
+   company's name, not "Turistear Ya!". This is one extra DB read per email; acceptable at MVP scale.
 
 6. **No delivery status tracking.** This is MVP — email send state is monitored via the
    Resend dashboard, not stored in D1. A `sent_at` column or delivery log is not added.
@@ -148,7 +148,7 @@ All required data is already on the existing schema:
 ## Email Templates
 
 Both templates are written in Spanish (consistent with the rest of the transactional
-emails in `resend.ts`) and follow GuideMe's minimal HTML style.
+emails in `resend.ts`) and follow Turistear Ya!'s minimal HTML style.
 
 ### Confirmation email (US-AG09 / US-C01)
 
@@ -156,7 +156,7 @@ emails in `resend.ts`) and follow GuideMe's minimal HTML style.
 |---|---|
 | **To** | `folio.customer_email` |
 | **Subject** | `Tu reserva está confirmada — {org_name}` |
-| **From** | `env.RESEND_FROM` (same sender identity as all GuideMe emails) |
+| **From** | `env.RESEND_FROM` (same sender identity as all Turistear Ya! emails) |
 
 **Body structure:**
 ```
@@ -182,7 +182,7 @@ Método de pago: {Efectivo | Tarjeta}
 TOTAL PAGADO: {total}
 
 {org_name}
-Servicio gestionado por GuideMe
+Servicio gestionado por Turistear Ya!
 ```
 
 **QR image tag per line:**
@@ -218,7 +218,7 @@ Servicios cancelados:
 Si tienes alguna pregunta, comunícate directamente con {org_name}.
 
 {org_name}
-Servicio gestionado por GuideMe
+Servicio gestionado por Turistear Ya!
 ```
 
 ---
@@ -316,8 +316,8 @@ folio has a `customer_email`
       (sale rejected without/with malformed email) and Scenario 11 (HTML escaping)
 - [ ] Existing suites that create folios via POS (`pos-controlled-discount`,
       `folio-qr-signing`, `online-qr-scanner`, `folio-cancellation`) updated to send a
-      valid `customer_email`; full `pnpm --filter api-guideme test` green
-- [ ] `pnpm --filter api-guideme test` green; `pnpm build:app` clean
+      valid `customer_email`; full `pnpm --filter api-turistear test` green
+- [ ] `pnpm --filter api-turistear test` green; `pnpm build:app` clean
 
 ### Frontend
 - [ ] `PosCheckoutPage`: `customer_email` is a **required**, format-validated field; the

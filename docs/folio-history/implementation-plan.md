@@ -152,7 +152,7 @@ then the tenancy clear.
 > US-AG21 contract that the history relies on. Scenario 11 seeds ≥2 agents in `org_a` and a
 > folio in `org_b`, then asserts the caller sees only their own `org_a` folios.
 
-**Deliverable:** `pnpm --filter api-guideme test` green.
+**Deliverable:** `pnpm --filter api-turistear test` green.
 
 ---
 

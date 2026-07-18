@@ -3,13 +3,13 @@
 **Feature:** Register a sale as an *apartado* (booking) with a partial amount received — reserve the spots now, collect the rest later, then settle into a fully-paid folio.
 **Stories:** US-AG07.1 (cascade rules), US-AG07.2 (adaptive checkout), US-AG07.3 (CRM recovery), US-AG07.4 (manual cancel), US-AG07.5 (late arrival contingency), US-A46 (org policy).
 **Status:** Updated Specification. SHOULD HAVE.
-**Owner module:** `api-guideme/src/routes/pos/`, `organizations/`, `app-guideme/src/features/pos/`.
+**Owner module:** `api-turistear/src/routes/pos/`, `organizations/`, `app-turistear/src/features/pos/`.
 
 ---
 
 ## 1. Context & Architecture
 
-GuideMe allows agents to take a **deposit** for a service, **hold the spots immediately** (decrementing inventory at booking time to prevent overbooking), and **collect the balance later** to flip the folio to `paid` and deliver the scannable ticket QRs.
+Turistear Ya! allows agents to take a **deposit** for a service, **hold the spots immediately** (decrementing inventory at booking time to prevent overbooking), and **collect the balance later** to flip the folio to `paid` and deliver the scannable ticket QRs.
 
 This specification unifies two workflows:
 1. **B2C Individual Tourists:** Must pay a minimum deposit, cannot enter the tour while unpaid (scanner blocks access), and are subject to auto-expiry if they do not settle before the event.

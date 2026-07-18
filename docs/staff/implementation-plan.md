@@ -169,13 +169,13 @@ if needed (default 0). Cover:
 > `Set-Cookie` header clears `gm_access`/`gm_refresh`. Mirror the cookie assertions
 > already used in `test/auth/agent-invitation.test.ts`.
 
-**Deliverable:** `pnpm --filter api-guideme test` green.
+**Deliverable:** `pnpm --filter api-turistear test` green.
 
 ---
 
 ## Phase 5 — Frontend Infrastructure
 
-> Lives under `app-guideme/src/features/agents/` alongside the existing invite code.
+> Lives under `app-turistear/src/features/agents/` alongside the existing invite code.
 > Reuse the exported `request()` wrapper + `ServiceError` from `authService.ts`.
 
 ### Task 5.1 — Service (`src/services/agentsService.ts`)
@@ -278,7 +278,7 @@ A new shared layout for **authenticated** pages (the dashboard, the agents list,
 future POS/catalog screens all render inside it — fits the `layout/` layer in the
 folder architecture). Responsibilities:
 
-- Top `AppBar` (transparent, `elevation={0}`, `1px solid divider`) with the GuideMe
+- Top `AppBar` (transparent, `elevation={0}`, `1px solid divider`) with the Turistear Ya!
   wordmark, the `name (role)` chip, and the logout button — lifted out of
   `DashboardPage` so every page shares it.
 - **Responsive navigation**, driven by `useMediaQuery(theme.breakpoints.up('md'))`:
@@ -404,7 +404,7 @@ across the API project).
   `password_hash` / `password_salt`. ✅
 - Rule 6 — `users_org_role_status_idx` (org-leading) added in `0005`. ✅
 
-**Verification performed:** `pnpm --filter api-guideme test` → 60/60; `pnpm build`
+**Verification performed:** `pnpm --filter api-turistear test` → 60/60; `pnpm build`
 (app) → `tsc -b && vite build` clean; `eslint` clean.
 
 **Not yet performed — interactive/visual:** the UI has no test harness, so the rail

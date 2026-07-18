@@ -1,8 +1,8 @@
-# GuideMe — System Architecture
+# Turistear Ya! — System Architecture
 
 ## Overview
 
-GuideMe consists of four independent services that communicate with each other. The UI never interacts directly with internal services or manipulates tokens — all session and authentication logic occurs on the server.
+Turistear Ya! consists of four independent services that communicate with each other. The UI never interacts directly with internal services or manipulates tokens — all session and authentication logic occurs on the server.
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -10,7 +10,7 @@ GuideMe consists of four independent services that communicate with each other. 
 │                                                             │
 │   ┌──────────────────┐         ┌──────────────────────┐    │
 │   │   UI (SPA)       │         │  Meta WhatsApp API   │    │
-│   │ app.guideme.com  │         │ (outbound templates) │    │
+│   │ app.turistear.com  │         │ (outbound templates) │    │
 │   └────────┬─────────┘         └──────────▲───────────┘    │
 │            │ HTTPS + cookies              │ HTTPS POST     │
 │            │                              │                │
@@ -20,8 +20,8 @@ GuideMe consists of four independent services that communicate with each other. 
     │              CLOUDFLARE NETWORK       │         │
     │                                       │         │
     │  ┌──────────────────────┐  Service  ┌─┴───────┐ │
-    │  │     api-guideme      │  Binding  │whatsapp │ │
-    │  │   api.guideme.com    │──────────►│ -worker │ │
+    │  │     api-turistear      │  Binding  │whatsapp │ │
+    │  │   api.turistear.com    │──────────►│ -worker │ │
     │  │   (Hono Worker/BFF)  │           └─────────┘ │
     │  └──────┬──────────┬────┘                        │
     │         │          │  Service Binding             │
@@ -43,15 +43,15 @@ GuideMe consists of four independent services that communicate with each other. 
 
 ### 1. UI — Frontend Application (SPA)
 
-- **Domain:** `app.guideme.com`
+- **Domain:** `app.turistear.com`
 - **Technology:** SPA (React / Next / Vite) — to be defined
 - **Responsibility:** User interface for admins and agents. Mobile-first.
-- **Communication:** Only talks to `api-guideme`. Never calls other services directly.
-- **Session Management:** Does not store tokens. The session lives in HttpOnly cookies managed by `api-guideme`. The frontend uses `credentials: 'include'` on all fetches.
+- **Communication:** Only talks to `api-turistear`. Never calls other services directly.
+- **Session Management:** Does not store tokens. The session lives in HttpOnly cookies managed by `api-turistear`. The frontend uses `credentials: 'include'` on all fetches.
 
-### 2. api-guideme — Backend for Frontend (BFF)
+### 2. api-turistear — Backend for Frontend (BFF)
 
-- **Domain:** `api.guideme.com`
+- **Domain:** `api.turistear.com`
 - **Runtime:** Cloudflare Worker (Hono)
 - **Responsibility:** Single entry point for the UI. Manages sessions, authorization, business logic, D1 access, and orchestration of calls to internal and external services.
 - **Bindings:**
@@ -66,14 +66,14 @@ GuideMe consists of four independent services that communicate with each other. 
 | `WHATSAPP_PHONE_NUMBER_ID` | Secret | Registered WhatsApp number ID with Meta |
 | `AGNOSTIC_AUTH_APP_ID` | Var | `"guide-me"` — appId registered in Agnostic Auth |
 | `QR_SECRET` | Secret | HMAC key to sign/verify QR codes |
-| `COOKIE_DOMAIN` | Var | `.guideme.com` |
+| `COOKIE_DOMAIN` | Var | `.turistear.com` |
 
 ### 3. agnostic-auth — Identity Provider (IdP)
 
 - **Service:** `agnostic-auth` (existing Cloudflare Worker)
-- **Access from api-guideme:** Service Binding `AGNOSTIC_AUTH_API`
+- **Access from api-turistear:** Service Binding `AGNOSTIC_AUTH_API`
 - **Responsibility:** Issue JWTs (access token) and refresh tokens. Manage magic links in KV. Rotate tokens (RTR).
-- **api-guideme never exposes these tokens to the frontend** — it reads them from the Agnostic Auth response and writes them as cookies.
+- **api-turistear never exposes these tokens to the frontend** — it reads them from the Agnostic Auth response and writes them as cookies.
 
 ### 4. whatsapp-worker — WhatsApp Integration Proxy
 
@@ -82,7 +82,7 @@ GuideMe consists of four independent services that communicate with each other. 
   - Standardize and format requests before dispatching them to the Meta WhatsApp Cloud API.
   - Send outbound purchase receipts and QR tickets to clients.
   - Webhooks and incoming message processing are disabled/not supported (the only WhatsApp integration is outbound to send tickets).
-- **Binding in api-guideme:** `WHATSAPP_WORKER: Fetcher` — api-guideme calls this binding to proxy outbound messages to the Meta Cloud API.
+- **Binding in api-turistear:** `WHATSAPP_WORKER: Fetcher` — api-turistear calls this binding to proxy outbound messages to the Meta Cloud API.
 
 ---
 
@@ -96,17 +96,17 @@ The UI never stores the JWT in `localStorage` or in exposed JavaScript memory. A
 
 | Cookie | Content | Duration | Configuration |
 |---|---|---|---|
-| `gm_access` | JWT issued by Agnostic Auth | 15 min | `HttpOnly; Secure; SameSite=Lax; Domain=.guideme.com` |
-| `gm_refresh` | Refresh token from Agnostic Auth | 7 days | `HttpOnly; Secure; SameSite=Lax; Domain=.guideme.com; Path=/api/auth/refresh` |
+| `gm_access` | JWT issued by Agnostic Auth | 15 min | `HttpOnly; Secure; SameSite=Lax; Domain=.turistear.com` |
+| `gm_refresh` | Refresh token from Agnostic Auth | 7 days | `HttpOnly; Secure; SameSite=Lax; Domain=.turistear.com; Path=/api/auth/refresh` |
 
 > `gm_refresh` is restricted to the `/api/auth/refresh` path so that the browser only sends it when the app explicitly requests a refresh, never during normal data requests.
 
 ### Domain and CORS Configuration
 
-- UI on `app.guideme.com`, API on `api.guideme.com` — same root domain `.guideme.com`.
-- Cookie with `Domain=.guideme.com` → valid for both subdomains.
+- UI on `app.turistear.com`, API on `api.turistear.com` — same root domain `.turistear.com`.
+- Cookie with `Domain=.turistear.com` → valid for both subdomains.
 - `SameSite=Lax` → the browser automatically sends the cookie in same-site requests. Does not require `SameSite=None`.
-- CORS in `api-guideme`: `Access-Control-Allow-Origin: https://app.guideme.com` + `Access-Control-Allow-Credentials: true`.
+- CORS in `api-turistear`: `Access-Control-Allow-Origin: https://app.turistear.com` + `Access-Control-Allow-Credentials: true`.
 
 ---
 
@@ -115,7 +115,7 @@ The UI never stores the JWT in `localStorage` or in exposed JavaScript memory. A
 ### Login / Token Acquisition
 
 ```
-UI                       api-guideme              agnostic-auth
+UI                       api-turistear              agnostic-auth
 │                             │                        │
 │  POST /api/auth/login       │                        │
 │  { email, password }        │                        │
@@ -138,10 +138,10 @@ UI                       api-guideme              agnostic-auth
 │  Set-Cookie: gm_refresh=... │                        │
 ```
 
-### Authenticated Request (api-guideme middleware)
+### Authenticated Request (api-turistear middleware)
 
 ```
-UI                        api-guideme
+UI                        api-turistear
 │                              │
 │  GET /api/services           │
 │  Cookie: gm_access=jwt       │
@@ -159,7 +159,7 @@ UI                        api-guideme
 ### Transparent Session Renewal (Token Refresh)
 
 ```
-UI                        api-guideme              agnostic-auth
+UI                        api-turistear              agnostic-auth
 │                              │                        │
 │  GET /api/dashboard          │                        │
 │  Cookie: gm_access=EXPIRED   │                        │
@@ -180,10 +180,10 @@ UI                        api-guideme              agnostic-auth
 
 > The frontend **does not know** a refresh occurred. The response arrives with the data and the new cookies, completely transparently.
 
-### Send WhatsApp Message (from api-guideme)
+### Send WhatsApp Message (from api-turistear)
 
 ```
-api-guideme                  whatsapp-worker          Meta Cloud API
+api-turistear                  whatsapp-worker          Meta Cloud API
 │                                  │                       │
 │  Confirm sale → generate QR      │                       │
 │  → notify client                 │                       │
@@ -202,7 +202,7 @@ api-guideme                  whatsapp-worker          Meta Cloud API
 
 
 
-## Authorization Middleware in api-guideme
+## Authorization Middleware in api-turistear
 
 Every protected endpoint passes through the auth middleware before reaching the handler:
 
@@ -237,7 +237,7 @@ Request
 
 ### Tenancy model
 
-GuideMe uses **shared-database, shared-schema with row-level scoping**: one D1 instance, one set of tables, every tenant-scoped row carries an `organization_id`. Isolation is enforced at the query layer — foreign keys give referential integrity but do not prevent cross-org reads.
+Turistear Ya! uses **shared-database, shared-schema with row-level scoping**: one D1 instance, one set of tables, every tenant-scoped row carries an `organization_id`. Isolation is enforced at the query layer — foreign keys give referential integrity but do not prevent cross-org reads.
 
 ### Identity model
 
@@ -270,7 +270,7 @@ Every handler that reads or writes tenant-scoped data MUST follow these rules. V
 ```
 Cloudflare Account leolicona-dev
 │
-├── api-guideme              ← This repository (api-guideme/)
+├── api-turistear              ← This repository (api-turistear/)
 │   ├── D1 Binding: guideme-db
 │   ├── Service Binding: AGNOSTIC_AUTH_API → agnostic-auth
 │   └── (optional) Service Binding: WHATSAPP_WORKER → whatsapp-worker
@@ -284,11 +284,11 @@ Cloudflare Account leolicona-dev
 
 ---
 
-## `wrangler.jsonc` Config for api-guideme
+## `wrangler.jsonc` Config for api-turistear
 
 ```jsonc
 {
-  "name": "api-guideme",
+  "name": "api-turistear",
   "compatibility_date": "2025-08-03",
   "main": "./src/index.tsx",
   "d1_databases": [
@@ -308,8 +308,8 @@ Cloudflare Account leolicona-dev
   ],
   "vars": {
     "AGNOSTIC_AUTH_APP_ID": "guide-me",
-    "COOKIE_DOMAIN": ".guideme.com",
-    "CORS_ORIGIN": "https://app.guideme.com"
+    "COOKIE_DOMAIN": ".turistear.com",
+    "CORS_ORIGIN": "https://app.turistear.com"
   }
   // Secrets (wrangler secret put <NAME>):
   // RESEND_API_KEY
@@ -339,7 +339,7 @@ Cloudflare Account leolicona-dev
 | Item | Required Action |
 |---|---|
 | `database_id` in `wrangler.jsonc` | Run `wrangler d1 create guideme-db` and paste the ID |
-| `appId: "guide-me"` in Agnostic Auth | Confirm `guide-me` is registered in the App Registry of agnostic-auth |
+| `appId: "turistear"` in Agnostic Auth | Confirm `turistear` is registered in the App Registry of agnostic-auth |
 | `whatsapp-worker` | Create the Worker, add Service Binding for outbound message proxying |
-| Domain `guideme.com` | Configure DNS in Cloudflare, set up Workers routes for `api.guideme.com` and `app.guideme.com` |
+| Domain `turistear.com` | Configure DNS in Cloudflare, set up Workers routes for `api.turistear.com` and `app.turistear.com` |
 | WhatsApp Templates | Create and obtain approval from Meta for: sales receipt, cancellation notification |

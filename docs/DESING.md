@@ -10,8 +10,8 @@
 | What | Where |
 |---|---|
 | **Design tokens** (colors, type, spacing, radius, elevation, motion — AA-verified, + deferred dark mode) | `.design/design-system/DESIGN_TOKENS.md` |
-| **Implementation** | `app-guideme/src/config/theme.ts` + `app-guideme/src/styles/tokens.css` |
-| **Shared primitives** | `app-guideme/src/components/` (`MoneyText`, `SectionCard`, `StatusChip`, `AlertCard`, `BottomSheet`, `WizardShell`) |
+| **Implementation** | `app-turistear/src/config/theme.ts` + `app-turistear/src/styles/tokens.css` |
+| **Shared primitives** | `app-turistear/src/components/` (`MoneyText`, `SectionCard`, `StatusChip`, `AlertCard`, `BottomSheet`, `WizardShell`) |
 | **Philosophy / rationale** | `.design/design-system/DESIGN_BRIEF.md` |
 | **Quick reference** | `CLAUDE.md` → "Design System — Elegant Field Minimalism" |
 

@@ -2,7 +2,7 @@
 
 ## Context
 
-A system administrator registers in GuideMe to create their organization. Upon completing registration, they receive a magic link by email. Their account is activated and the session is established only after they verify it.
+A system administrator registers in Turistear Ya! to create their organization. Upon completing registration, they receive a magic link by email. Their account is activated and the session is established only after they verify it.
 
 **User Stories:** US-A01, US-A02  
 **Endpoints:** `POST /api/auth/register`, `GET /api/auth/verify?token=xxx`  

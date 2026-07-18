@@ -175,7 +175,7 @@ export const sendTicketConfirmationEmail = async (
       </p>
 
       <p style="font-size:12px;color:#777;margin-top:24px;">
-        ${data.orgName} — Gestión de reservas con GuideMe.
+        ${data.orgName} — Gestión de reservas con Turistear Ya!
       </p>
     </div>`
 
@@ -251,7 +251,7 @@ export const sendCancellationEmail = async (
          <strong>${data.orgName}</strong>.</p>
 
       <p style="font-size:12px;color:#777;margin-top:24px;">
-        ${data.orgName} — Gestión de reservas con GuideMe.
+        ${data.orgName} — Gestión de reservas con Turistear Ya!
       </p>
     </div>`
 
@@ -311,7 +311,7 @@ if (input.customer_email && env.RESEND_API_KEY) {
     .from(organizations)
     .where(eq(organizations.id, org))
     .limit(1)
-  const orgName = orgRows[0]?.name ?? 'GuideMe'
+  const orgName = orgRows[0]?.name ?? 'Turistear Ya!'
 
   const emailData: TicketConfirmationEmailInput = {
     to: input.customer_email,
@@ -389,7 +389,7 @@ if (folio.customer_email && env.RESEND_API_KEY) {
     .from(organizations)
     .where(eq(organizations.id, org))
     .limit(1)
-  const orgName = orgRows[0]?.name ?? 'GuideMe'
+  const orgName = orgRows[0]?.name ?? 'Turistear Ya!'
 
   const emailData: CancellationEmailInput = {
     to: folio.customer_email,
@@ -493,7 +493,7 @@ Verify that `test/pos/pos-controlled-discount.test.ts` and
 `RESEND_API_KEY` empty-string guard (Business Rule 8 in the spec) should handle this —
 confirm the test env does not set a non-empty key, or explicitly set it to `""`.
 
-**Deliverable:** `pnpm --filter api-guideme test` green across all test files.
+**Deliverable:** `pnpm --filter api-turistear test` green across all test files.
 
 ---
 
@@ -588,7 +588,7 @@ graph LR
 - [ ] Both hooks: org name fetched from `organizations` table (scoped to `org` from context)
 - [ ] `test/email/client-ticket-delivery.test.ts` — Scenarios 1–10 (fetch spy, RESEND_API_KEY set to "test-key")
 - [ ] Existing POS + cancellation tests still green (API-KEY guard with empty string)
-- [ ] `pnpm --filter api-guideme test` green
+- [ ] `pnpm --filter api-turistear test` green
 
 ### Frontend
 - [ ] *(Optional)* POS confirm success: "Recibo enviado a {email}" helper text when

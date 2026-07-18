@@ -246,13 +246,13 @@ clear `service_extras` + `services` in the suite's `beforeEach`.
 | **B3** cross-org service + extra ops → 404, targets untouched | 17 |
 | **B1** injected `organizationId` in create/edit body ignored | 18 |
 
-**Deliverable:** `pnpm --filter api-guideme test` green.
+**Deliverable:** `pnpm --filter api-turistear test` green.
 
 ---
 
 ## Phase 4 — Frontend Infrastructure
 
-New feature dir `app-guideme/src/features/catalog/`. Reuse the `request()` wrapper +
+New feature dir `app-turistear/src/features/catalog/`. Reuse the `request()` wrapper +
 `ServiceError` from `authService.ts` (same as `agentsService.ts`).
 
 ### Task 4.1 — Types + money helper (`src/features/catalog/types.ts`)

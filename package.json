@@ -1,22 +1,22 @@
 {
-  "name": "guide-me-monorepo",
+  "name": "turistear-monorepo",
   "version": "1.0.0",
   "private": true,
-  "description": "Monorepo for the guide-me application and API services",
+  "description": "Monorepo for the Turistear Ya! application and API services",
   "scripts": {
-    "dev:api": "pnpm --filter api-guideme dev",
-    "dev:app": "pnpm --filter app-guideme dev",
-    "build:api": "pnpm --filter api-guideme build",
-    "build:app": "pnpm --filter app-guideme build",
-    "deploy:api": "pnpm --filter api-guideme run deploy",
-    "deploy:app": "pnpm --filter app-guideme run deploy",
-    "cf-typegen:api": "pnpm --filter api-guideme cf-typegen",
-    "cf-typegen:app": "pnpm --filter app-guideme cf-typegen",
-    "lint:app": "pnpm --filter app-guideme lint",
+    "dev:api": "pnpm --filter api-turistear dev",
+    "dev:app": "pnpm --filter app-turistear dev",
+    "build:api": "pnpm --filter api-turistear build",
+    "build:app": "pnpm --filter app-turistear build",
+    "deploy:api": "pnpm --filter api-turistear run deploy",
+    "deploy:app": "pnpm --filter app-turistear run deploy",
+    "cf-typegen:api": "pnpm --filter api-turistear cf-typegen",
+    "cf-typegen:app": "pnpm --filter app-turistear cf-typegen",
+    "lint:app": "pnpm --filter app-turistear lint",
     "dev": "pnpm --parallel dev",
-    "test:api": "pnpm --filter api-guideme test",
-    "db:migrate:local": "pnpm --filter api-guideme db:migrate:local",
-    "db:migrate": "pnpm --filter api-guideme db:migrate",
-    "db:generate": "pnpm --filter api-guideme db:generate"
+    "test:api": "pnpm --filter api-turistear test",
+    "db:migrate:local": "pnpm --filter api-turistear db:migrate:local",
+    "db:migrate": "pnpm --filter api-turistear db:migrate",
+    "db:generate": "pnpm --filter api-turistear db:generate"
   }
 }

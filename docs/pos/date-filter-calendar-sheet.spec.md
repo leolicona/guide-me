@@ -230,7 +230,7 @@ light up a day for `org_a`.
 - [x] Scenarios 5, 10 covered in `test/pos/pos-availability-days.test.ts` (B4 via
       `seedTwoOrgs`). Scenarios 1–9 are frontend behaviours. *(Range window also covered in `pos-catalog-availability.test.ts`.)*
 - [x] SPEC.md updated (US-AG35, US-A45, Phase-2 entry, glossary, US-AG30 cross-ref).
-- [x] `pnpm --filter api-guideme test` green; `pnpm build:app` clean (`tsc -b` + vite).
+- [x] `pnpm --filter api-turistear test` green; `pnpm build:app` clean (`tsc -b` + vite).
 
 ---
 

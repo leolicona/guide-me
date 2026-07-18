@@ -17,7 +17,7 @@ balance — total sold, commission owed, cash to hand in.
 
 | # | Gap | Evidence |
 |---|---|---|
-| G1 | **Admins cannot sell.** POS is agent-only in the UI (`RoleGuard role="agent"` on `/pos/*` in `App.tsx`) *and* the API (`requireRole('agent')` in `routes/pos/index.ts`). Selling is the admin's primary daily activity. | `app-guideme/src/App.tsx:89-120`, `api-guideme/src/routes/pos/index.ts:29` |
+| G1 | **Admins cannot sell.** POS is agent-only in the UI (`RoleGuard role="agent"` on `/pos/*` in `App.tsx`) *and* the API (`requireRole('agent')` in `routes/pos/index.ts`). Selling is the admin's primary daily activity. | `app-turistear/src/App.tsx:89-120`, `api-turistear/src/routes/pos/index.ts:29` |
 | G2 | **Admins cannot scan.** Same double gate on the scanner (`/scan` route + `routes/tickets/index.ts:23`). | `App.tsx:141-148`, `tickets/index.ts:23` |
 | G3 | **Both roles land on a stub.** `/dashboard` is the default destination and the logo link, but `DashboardPage` is a placeholder ("se ampliará en futuras versiones"). The agent's first daily action (sell) and the admin's (sell / review) are each one extra tap away, every time. | `pages/DashboardPage.tsx` |
 | G4 | **Admin nav has no frequency hierarchy.** Daily tools (Folios, Cash) and occasional tools (Agentes, Catálogo) share the bar with equal weight; there is no home for org configuration or future reports at all. | `layout/AppLayout.tsx:42-52` |
@@ -80,7 +80,7 @@ The top app bar (logo, user name, logout) is **removed**; content gets the full
 viewport. Everything it held moves into a single **account surface**, which also
 absorbs the admin overflow menu:
 
-- **Desktop:** the rail becomes full-height. Top: a small GuideMe monogram (links to
+- **Desktop:** the rail becomes full-height. Top: a small Turistear Ya! monogram (links to
   the role's landing). Middle: the destination pills; for admins, a thin divider and
   a second **Gestión** group (Agentes, Catálogo — shown inline, since the rail has
   room). Pinned at the **bottom of the rail**: an avatar button (initials) opening a
@@ -112,7 +112,7 @@ against this glossary.
 
 ## 4. Changes required
 
-### API (`api-guideme`)
+### API (`api-turistear`)
 
 1. **`requireRole` accepts multiple roles** — extend `middleware/role.ts` to
    `requireRole(...roles)`; apply `requireRole('agent', 'admin')` to `routes/pos` and
@@ -155,7 +155,7 @@ against this glossary.
    negative balance; an agent's drop still requires explicit admin confirmation
    (self-authorization must not leak to agents).
 
-### Frontend (`app-guideme`)
+### Frontend (`app-turistear`)
 
 1. **`AppLayout`** — remove the top `AppBar`; full-height rail with monogram,
    destination pills, admin Gestión group, and a bottom-pinned avatar popover

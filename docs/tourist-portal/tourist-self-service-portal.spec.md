@@ -313,7 +313,7 @@ the MUI admin chrome). No client JS required.
 - **Error pages** — `404` (invalid link) and `410` (expired link) with calm copy and a "contact
   the agency" hint; never reveal whether a folio exists.
 
-### B. Admin — `app-guideme` (React + MUI)
+### B. Admin — `app-turistear` (React + MUI)
 
 - **Cancellation-requests queue** — a new tab in the existing Cash/Folios area (mirrors the
   drops/disputes queue): each row shows folio ref, customer, the tourist's reason, and

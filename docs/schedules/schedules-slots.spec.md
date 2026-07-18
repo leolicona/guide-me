@@ -521,6 +521,6 @@ they exist in another org.
 - [ ] Frontend: `schedulesService`, feature dir (`features/schedules/`) types/schemas/hooks,
       a **Schedules & Slots** section on the service detail page (`CatalogDetailPage`),
       specific-date slot form, recurring-schedule form, slot list grouped by date
-- [ ] `pnpm --filter api-guideme test` green; `pnpm build:app` clean
+- [ ] `pnpm --filter api-turistear test` green; `pnpm build:app` clean
 - [ ] `docs/SPEC.md` MUST-HAVE item **Schedules/slots with capacity by date and time
       (US-A10)** ticked

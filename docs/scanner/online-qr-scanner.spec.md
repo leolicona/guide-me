@@ -324,5 +324,5 @@ plus the org-filtered query are independent backstops.
 - [ ] `docs/TECH_DEBT.md`: notes for (a) redemption **audit table deferred** (no MVP
       consumer); (b) scan **not idempotent** (client re-arm; revisit with an idempotency
       key); (c) the strictly-online MVP / Phase-2 offline-sync boundary
-- [ ] `pnpm --filter api-guideme test` green; `pnpm build:app` clean
+- [ ] `pnpm --filter api-turistear test` green; `pnpm build:app` clean
 - [ ] `docs/SPEC.md` MUST-HAVE item **Online QR Scanner** *(US-AG15, US-AG17, US-AG19)* ticked

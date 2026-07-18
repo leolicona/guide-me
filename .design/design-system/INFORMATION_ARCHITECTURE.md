@@ -1,8 +1,8 @@
-# Information Architecture: GuideMe (Whole-Product)
+# Information Architecture: Turistear Ya! (Whole-Product)
 
 > This is the **product-wide** structural skeleton the design system dresses — not a single
 > feature. It consolidates the confirmed App-Shell redesign (`docs/navigation/app-shell-redesign.spec.md`,
-> decisions D1–D9), the live route table (`app-guideme/src/config/routes.ts`), and all four roles
+> decisions D1–D9), the live route table (`app-turistear/src/config/routes.ts`), and all four roles
 > from `docs/SPEC.md`. The design system inherits this structure; it does not change it. Where the
 > shell and the routes disagree (shared *labels* over original *paths*), that's the intentional
 > Phase-1 decision **D6** (rename labels, keep routes) — documented here, not "fixed."

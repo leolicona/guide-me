@@ -319,13 +319,13 @@ folio_lines → folios → slots → schedules → service_extras → services`,
 > Scenario 11 is the key end-to-end: derive balance, create+confirm a drop, re-read balance
 > and assert it dropped by exactly the confirmed amount.
 
-**Deliverable:** `pnpm --filter api-guideme test` green (old `test/cash-drawer/` removed).
+**Deliverable:** `pnpm --filter api-turistear test` green (old `test/cash-drawer/` removed).
 
 ---
 
 ## Phase 4 — Frontend Infrastructure
 
-New feature dir `app-guideme/src/features/cash/`. Reuse `request()` + `ServiceError` from
+New feature dir `app-turistear/src/features/cash/`. Reuse `request()` + `ServiceError` from
 `authService.ts` and the money helpers from `features/catalog/types`.
 
 ### Task 4.1 — Types (`src/features/cash/types.ts`)

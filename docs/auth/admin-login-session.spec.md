@@ -2,7 +2,7 @@
 
 ## Context
 
-Both administrators and sales agents access the platform using their email and password. `api-guideme` acts as a BFF: it retrieves tokens from Agnostic Auth and stores them in HttpOnly cookies. The UI never sees the tokens. Session renewal occurs transparently in the middleware when `gm_access` expires.
+Both administrators and sales agents access the platform using their email and password. `api-turistear` acts as a BFF: it retrieves tokens from Agnostic Auth and stores them in HttpOnly cookies. The UI never sees the tokens. Session renewal occurs transparently in the middleware when `gm_access` expires.
 
 **User Stories:** US-A03, US-AG02  
 **Endpoints:** `POST /api/auth/login`, `POST /api/auth/refresh`, `POST /api/auth/logout`  

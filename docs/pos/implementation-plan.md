@@ -387,13 +387,13 @@ Seed the caller as an **`agent`** (POS is agent-role).
 > the cart so `slot_2` decrements first, assert the 409 **and** that `slot_2.booked`
 > returned to its pre-call value (compensation), and that **no** `folios` row exists.
 
-**Deliverable:** `pnpm --filter api-guideme test` green.
+**Deliverable:** `pnpm --filter api-turistear test` green.
 
 ---
 
 ## Phase 4 — Frontend Infrastructure
 
-New feature dir `app-guideme/src/features/pos/`. Reuse the `request()` wrapper +
+New feature dir `app-turistear/src/features/pos/`. Reuse the `request()` wrapper +
 `ServiceError` from `authService.ts` (same as `catalogService.ts` / `schedulesService.ts`)
 and the `amountToCents` / cents helpers from `features/catalog/types`.
 

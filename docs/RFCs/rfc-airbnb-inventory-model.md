@@ -5,7 +5,7 @@
 
 ## 1. Context and Current Problem
 
-Currently (under the `US-A59` specification), the Lodging architecture in GuideMe operates under a **strictly physical model**:
+Currently (under the `US-A59` specification), the Lodging architecture in Turistear Ya! operates under a **strictly physical model**:
 - **Structure:** A Service (e.g., "Center Hotel") contains Multiple Physical Units (e.g., "Room 101", "Room 102").
 - **POS UX:** The main catalog lists the "Parent Service" (Center Hotel). When tapped, the sales sheet displays all available individual physical units. The agent must select and sell a specific physical unit.
 
@@ -172,9 +172,9 @@ POS — one guest figure, no per-room allocation UI):
 
 ## 4. Out of Scope — Physical Room Assignment
 
-GuideMe is a **sales POS, not a Property Management System**. After this change the system tracks
+Turistear Ya! is a **sales POS, not a Property Management System**. After this change the system tracks
 *how many* rooms of a type are sold per night — never *which* physical room a guest occupies.
-Physical key assignment at check-in happens outside GuideMe (the property's own PMS, front-desk
+Physical key assignment at check-in happens outside Turistear Ya! (the property's own PMS, front-desk
 board, or paper). Requests to "see which room was sold" are by-design out of scope, not bugs.
 
 ## 5. Testing Requirements
@@ -194,7 +194,7 @@ board, or paper). Requests to "see which room was sold" are by-design out of sco
 
 ## 6. Conclusion and Verdict
 
-Adopting this model transforms GuideMe from a rigid administration tool into a **High-Performance Sales Engine**.
+Adopting this model transforms Turistear Ya! from a rigid administration tool into a **High-Performance Sales Engine**.
 
 - Agents sell much faster by not worrying about physical logistics.
 - Unique properties get the premium visibility they demand (Airbnb style).

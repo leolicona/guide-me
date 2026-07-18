@@ -34,7 +34,7 @@ Phase 9 → Frontend: folio-detail expiry banner + Liquidar/Cancelar/Reactivar  
 Phase 10 → Cash-drawer carve-out coordination + review against spec + gates
 ```
 
-Phases 0–5 are backend (each ends green on `pnpm --filter api-guideme test`). 6 is full-stack.
+Phases 0–5 are backend (each ends green on `pnpm --filter api-turistear test`). 6 is full-stack.
 7–9 are frontend (`tsc -b` + `lint:app` + `build:app` per boundary). The backend ships first so
 the UI builds against real endpoints.
 
@@ -42,7 +42,7 @@ the UI builds against real endpoints.
 
 ## Phase 0 — Migration + schema
 
-**Files:** `api-guideme/src/db/schema.ts`, a new migration under `api-guideme/migrations/`.
+**Files:** `api-turistear/src/db/schema.ts`, a new migration under `api-turistear/migrations/`.
 
 1. `organizations` += `bookingMinDownPaymentPct` (default 0), `bookingHoldDays` (default 7),
    `sameDayBufferMinutes` (default 15).
@@ -60,7 +60,7 @@ the UI builds against real endpoints.
 
 ## Phase 1 — Policy resolver + booking creation
 
-**Files:** `api-guideme/src/routes/pos/handler.ts`, `…/pos/schema.ts`, `api-guideme/src/services/resend.ts`.
+**Files:** `api-turistear/src/routes/pos/handler.ts`, `…/pos/schema.ts`, `api-turistear/src/services/resend.ts`.
 
 1. **Schema:** `confirmSaleSchema` += `down_payment: z.number().int().min(1).optional()`. Bounds stay
    in the handler (depend on server-computed `total` + org policy), mirroring the discount floor.
@@ -129,7 +129,7 @@ the UI builds against real endpoints.
 
 ## Phase 4 — Auto-expiry sweep (repo's first scheduled Worker)
 
-**Files:** `api-guideme/wrangler.jsonc`, `api-guideme/src/index.tsx`, a new `…/pos/sweep.ts`.
+**Files:** `api-turistear/wrangler.jsonc`, `api-turistear/src/index.tsx`, a new `…/pos/sweep.ts`.
 
 1. `wrangler.jsonc` += `"triggers": { "crons": ["*/15 * * * *"] }`.
 2. `src/index.tsx`: keep the Hono app as `fetch`; add `export default { fetch: app.fetch, scheduled }`.
@@ -160,7 +160,7 @@ the UI builds against real endpoints.
 
 ## Phase 6 — Org policy (US-A46)
 
-**Files:** `api-guideme/src/routes/organizations/` (schema + handler), `app-guideme` admin settings.
+**Files:** `api-turistear/src/routes/organizations/` (schema + handler), `app-turistear` admin settings.
 
 1. Extend the org-update Zod schema with `booking_min_down_payment_pct` (int 0–100),
    `booking_hold_days` (int ≥ 1), `same_day_buffer_minutes` (int ≥ 0). Range → `400`.
@@ -173,7 +173,7 @@ the UI builds against real endpoints.
 
 ## Phase 7 — Adaptive checkout (US-AG07.2, frontend)
 
-**Files:** `app-guideme/src/features/pos/components/ServiceSelectionPanel.tsx` (or the checkout
+**Files:** `app-turistear/src/features/pos/components/ServiceSelectionPanel.tsx` (or the checkout
 sub-component), `…/services/posService.ts`, `…/features/pos/hooks/`.
 
 1. Replace the confirm CTA with the **amount-driven** model. Local `amount` state seeded to
@@ -195,7 +195,7 @@ sub-component), `…/services/posService.ts`, `…/features/pos/hooks/`.
 > **Revised (D9):** no `BookingsDashboard`, no route/tab. The recovery affordances are added to
 > the **existing `FolioHistoryPage`** (the agent's Ventas list, already filterable by *Reservas*).
 
-**Files:** `app-guideme/src/pages/FolioHistoryPage.tsx`, new shared module
+**Files:** `app-turistear/src/pages/FolioHistoryPage.tsx`, new shared module
 `…/features/bookings/` — `components/BookingWhatsAppButton.tsx` + `bookingUrgency.ts`
 (`hoursUntilExpiry`/`isUrgentBooking`/`venceLabel`). The `features/bookings` module is consumed by
 both the agent (`pos`) and admin (`folios`) surfaces but imports neither — one-way deps (see §
@@ -278,7 +278,7 @@ mutations imported `features/folios`' `FOLIOS_KEY` — a pos↔folios coupling n
    carve-out where the drawer aggregates, or — if owned by the cash-drawer spec — file the follow-up
    note there and link it. Confirm with the owner before shipping the sweep to production.
 2. Re-read the spec §7 — every scenario has a test; **Sc.16 uses `seedTwoOrgs`**.
-3. Gates: `pnpm --filter api-guideme test` green; `npx tsc -b` 0; `pnpm lint:app` 0 errors;
+3. Gates: `pnpm --filter api-turistear test` green; `npx tsc -b` 0; `pnpm lint:app` 0 errors;
    `pnpm build:app` clean. Tick the spec §8 DoD.
 
 ---

@@ -160,7 +160,7 @@ row in the per-seller commission report like any agent.
 
 ---
 
-## Frontend (app-guideme)
+## Frontend (app-turistear)
 
 Layered per the frontend rules. Routing and chrome changes belong to the App Shell Redesign;
 **this feature owns only the seller unlock at the route guards and the Tu caja block.**
