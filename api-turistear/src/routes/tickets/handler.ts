@@ -27,6 +27,10 @@ interface TicketContext {
   service_name: string | null
   slot_date: string | null
   slot_start_time: string | null
+  // US-A64 — the physical zone this pass is for (Turibus deck), shown on the scan result so the
+  // staffer directs the tourist. Read from the line, NOT the signed payload — so every ticket
+  // issued before this feature stays valid and simply shows no zone.
+  zone_name: string | null
   passes_total: number | null
   redeemed_count: number | null
 }
@@ -64,6 +68,7 @@ export const scanTicket = async (c: TicketsContext) => {
       serviceName: folioLines.serviceName,
       slotDate: folioLines.slotDate,
       slotStartTime: folioLines.slotStartTime,
+      zoneName: folioLines.zoneName,
       folioStatus: folios.status,
     })
     .from(folioLines)
@@ -87,6 +92,7 @@ export const scanTicket = async (c: TicketsContext) => {
     service_name: row.serviceName,
     slot_date: row.slotDate,
     slot_start_time: row.slotStartTime,
+    zone_name: row.zoneName,
     passes_total: row.quantity,
     redeemed_count: row.redeemedCount,
   }

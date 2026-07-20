@@ -13,9 +13,10 @@ import ShoppingCartRounded from '@mui/icons-material/ShoppingCartRounded'
 import { SlotPicker } from './SlotPicker'
 import { effectiveRemaining } from '../capacity'
 import { useRepeatPress } from '../hooks'
-import type { PosServiceDetail, PosSlot } from '../types'
+import type { PosServiceDetail, PosSlot, PosSlotZone } from '../types'
 import { usePosCart, type CartExtra } from '../../../store/posCart'
 import { formatMoney } from '../../catalog/types'
+import { chipPillSx } from '../../filters'
 
 interface ServiceSelectionPanelProps {
   service: PosServiceDetail
@@ -42,26 +43,41 @@ export function ServiceSelectionPanel({
 }: ServiceSelectionPanelProps) {
   const addLine = usePosCart((s) => s.addLine)
 
+  const zonesEnabled = !!service.zones_enabled
+
   // US-AG32 — party size is chosen FIRST (before any slot), default 1.
   const [partySize, setPartySize] = useState(1)
   const [slot, setSlot] = useState<PosSlot | null>(null)
+  // US-A64 — on a zoned service the agent picks a zone after the departure.
+  const [zone, setZone] = useState<PosSlotZone | null>(null)
   const [extraQtys, setExtraQtys] = useState<Record<string, number>>({})
 
-  // US-AG32 — the largest group any in-window slot can seat (Effective Capacity, US-A36).
-  // Caps the People counter so the agent can never request a group no slot fits.
+  // US-AG32 — the largest group any in-window slot can seat (Effective Capacity, US-A36). On a
+  // zoned service a party can't span zones, so the ceiling is the biggest single-zone remaining.
+  // Caps the People counter so the agent can never request a group no slot/zone fits.
   const maxParty = useMemo(
     () =>
-      Math.max(
-        1,
-        ...service.slots.map((s) =>
-          effectiveRemaining(s, service.is_flexible, service.flex_capacity_pct),
-        ),
-      ),
-    [service],
+      zonesEnabled
+        ? Math.max(
+            1,
+            ...service.slots.flatMap((s) =>
+              (s.zones ?? [])
+                .filter((z) => z.status === 'active')
+                .map((z) => z.remaining),
+            ),
+          )
+        : Math.max(
+            1,
+            ...service.slots.map((s) =>
+              effectiveRemaining(s, service.is_flexible, service.flex_capacity_pct),
+            ),
+          ),
+    [service, zonesEnabled],
   )
 
   const clearSelection = () => {
     setSlot(null)
+    setZone(null)
     setExtraQtys({})
   }
 
@@ -91,10 +107,13 @@ export function ServiceSelectionPanel({
   const incHandlers = useRepeatPress(incrementParty)
   const decHandlers = useRepeatPress(decrementParty)
 
-  const handleSelectSlot = (s: PosSlot) => setSlot(s)
+  const handleSelectSlot = (s: PosSlot) => {
+    setSlot(s)
+    setZone(null) // a new departure clears the zone pick
+  }
 
   const handleAdd = () => {
-    if (!slot) return
+    if (!slot || (zonesEnabled && !zone)) return
     const extras: CartExtra[] = service.extras
       .filter((e) => (extraQtys[e.id] ?? 0) > 0)
       .map((e) => ({ extra: e, quantity: extraQtys[e.id] }))
@@ -106,9 +125,10 @@ export function ServiceSelectionPanel({
         base_price: service.base_price,
         minimum_price: service.minimum_price,
       },
-      // US-A36 — the cart caps quantity at `remaining`; for a Soft Cap service that ceiling
-      // is the Effective Capacity (raw + flexible margin), so pass the effective figure.
-      slot: { ...slot, remaining: flexRemaining },
+      // The cart caps quantity at the line's `remaining`: a zoned line is bounded by its zone's
+      // seats; a Soft Cap slot by Effective Capacity (raw + flexible margin).
+      slot: { ...slot, remaining: cap },
+      zone: zone ? { id: zone.zone_id, name: zone.name } : undefined,
       quantity: partySize,
       // Price is locked to base here — the discount is applied later in the cart.
       unit_price: service.base_price,
@@ -117,13 +137,17 @@ export function ServiceSelectionPanel({
     onAdded()
   }
 
-  // US-A36 — the sellable ceiling for the selected slot: raw remaining for a Hard Cap
-  // service, raw + flexible margin for a Soft Cap one. `inFlexZone` is true once the party
-  // size crosses the strict capacity into the overbooking margin, so the UI can flag it.
+  // Active zones on the selected departure (empty for an unzoned service).
+  const slotZones = (slot?.zones ?? []).filter((z) => z.status === 'active')
+
+  // The sellable ceiling for the current selection: the chosen zone's remaining (zoned), else the
+  // slot's Effective Capacity (raw + flexible margin for Soft Cap). `inFlexZone` flags a Soft Cap
+  // party crossing into the overbooking margin.
   const flexRemaining = slot
     ? effectiveRemaining(slot, service.is_flexible, service.flex_capacity_pct)
     : 0
-  const inFlexZone = !!slot && partySize > slot.remaining
+  const cap = zonesEnabled ? (zone?.remaining ?? 0) : flexRemaining
+  const inFlexZone = !zonesEnabled && !!slot && partySize > slot.remaining
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
@@ -219,7 +243,48 @@ export function ServiceSelectionPanel({
           />
         )}
 
-        {slot && service.extras.length > 0 && (
+        {/* US-A64 — zone chips: pick a physical zone on the chosen departure. Bound by the zone's
+            own remaining; a zone that can't seat the party (or is closed) is disabled. */}
+        {slot && zonesEnabled && (
+          <Box sx={{ mt: 3 }}>
+            <Typography variant="subtitle2" color="text.secondary" sx={{ mb: 1 }}>
+              Elige una zona
+            </Typography>
+            <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: 'wrap' }}>
+              {slotZones.map((z) => {
+                const fits = z.remaining >= partySize
+                const selected = zone?.zone_id === z.zone_id
+                return (
+                  <Box
+                    key={z.zone_id}
+                    component="button"
+                    type="button"
+                    disabled={!fits}
+                    onClick={() => setZone(z)}
+                    sx={{
+                      ...chipPillSx(selected),
+                      border: 'none',
+                      cursor: fits ? 'pointer' : 'default',
+                      opacity: fits ? 1 : 0.5,
+                      flexDirection: 'column',
+                      height: 'auto',
+                      py: 1,
+                    }}
+                  >
+                    <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                      {z.name}
+                    </Typography>
+                    <Typography variant="caption" color={selected ? 'primary.main' : 'text.secondary'}>
+                      {z.remaining} disponibles
+                    </Typography>
+                  </Box>
+                )
+              })}
+            </Stack>
+          </Box>
+        )}
+
+        {slot && (!zonesEnabled || zone) && service.extras.length > 0 && (
           <Box sx={{ mt: 3 }}>
             <Typography variant="subtitle2" color="text.secondary" sx={{ mb: 1 }}>
               Extras
@@ -290,10 +355,14 @@ export function ServiceSelectionPanel({
           disableElevation
           startIcon={<ShoppingCartRounded />}
           onClick={handleAdd}
-          disabled={!slot}
+          disabled={!slot || (zonesEnabled && !zone)}
           sx={{ py: 1.25 }}
         >
-          {slot ? 'Agregar al carrito' : 'Elige un horario'}
+          {!slot
+            ? 'Elige un horario'
+            : zonesEnabled && !zone
+              ? 'Elige una zona'
+              : 'Agregar al carrito'}
         </Button>
       </Box>
     </Box>

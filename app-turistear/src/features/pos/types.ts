@@ -104,6 +104,19 @@ export interface PosSlot {
   capacity: number
   booked: number
   remaining: number
+  /** US-A64 — per-zone availability, present only for a zoned service's slots. The agent picks a
+   * zone; the quantity is bounded by that zone's `remaining`. A closed zone has status 'inactive'. */
+  zones?: PosSlotZone[]
+}
+
+/** US-A64 — a slot's availability within one physical zone (Turibus deck). */
+export interface PosSlotZone {
+  zone_id: string
+  name: string
+  capacity: number
+  booked: number
+  remaining: number
+  status: 'active' | 'inactive'
 }
 
 export interface PosExtra {
@@ -114,6 +127,8 @@ export interface PosExtra {
 
 export interface PosServiceDetail
   extends Omit<PosTourCard, 'item_type' | 'has_availability' | 'next_slot_date'> {
+  /** US-A64 — when true, each slot carries a `zones` array and the agent must pick a zone. */
+  zones_enabled?: boolean
   extras: PosExtra[]
   slots: PosSlot[]
 }
@@ -156,6 +171,8 @@ export interface FolioLine {
   /** Null for a lodging stay line. */
   slot_date: string | null
   slot_start_time: string | null
+  /** US-A64 — the physical zone (null for an unzoned or lodging line). */
+  zone_name?: string | null
   /** Lodging stay fields (null for a tour line). For a stay, `quantity` = rooms reserved. */
   unit_type_id?: string | null
   check_in?: string | null

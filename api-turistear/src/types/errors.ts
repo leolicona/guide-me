@@ -23,6 +23,10 @@ export type ErrorCode =
   | 'INSUFFICIENT_INVENTORY'
   | 'SEASON_OVERLAP'
   | 'MIN_STAY_NOT_MET'
+  // Zoned Capacity (US-A64 — docs/catalog/zoned-capacity.spec.md). A sale into a physical zone
+  // (Turibus deck) whose snapshotted per-departure seats are exhausted. Introduced & consumed by
+  // this feature: thrown by confirmSale's atomic zone guard, asserted by the zoned-capacity tests.
+  | 'ZONE_UNAVAILABLE'
   | 'ALREADY_INVITED'
   | 'DROP_EXCEEDS_BALANCE'
   | 'INTERNAL_ERROR'

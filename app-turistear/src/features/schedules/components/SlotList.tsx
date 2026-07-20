@@ -9,6 +9,10 @@ interface SlotListProps {
   onClose: (slot: Slot) => void
   onReopen: (slot: Slot) => void
   busy: boolean
+  /** US-A64 — per-zone close/reopen on a departure (zoned services). */
+  onCloseZone?: (slotId: string, zoneId: string) => void
+  onReopenZone?: (slotId: string, zoneId: string) => void
+  zoneBusy?: boolean
 }
 
 // Format a 'YYYY-MM-DD' string as a readable local date header.
@@ -22,7 +26,16 @@ const formatDateHeading = (date: string): string => {
   })
 }
 
-export function SlotList({ slots, onEdit, onClose, onReopen, busy }: SlotListProps) {
+export function SlotList({
+  slots,
+  onEdit,
+  onClose,
+  onReopen,
+  busy,
+  onCloseZone,
+  onReopenZone,
+  zoneBusy,
+}: SlotListProps) {
   // Group by date (slots arrive ordered by date then time).
   const groups = slots.reduce<Record<string, Slot[]>>((acc, slot) => {
     ;(acc[slot.date] ??= []).push(slot)
@@ -52,6 +65,9 @@ export function SlotList({ slots, onEdit, onClose, onReopen, busy }: SlotListPro
                   onClose={onClose}
                   onReopen={onReopen}
                   busy={busy}
+                  onCloseZone={onCloseZone}
+                  onReopenZone={onReopenZone}
+                  zoneBusy={zoneBusy}
                 />
               ))}
             </Stack>

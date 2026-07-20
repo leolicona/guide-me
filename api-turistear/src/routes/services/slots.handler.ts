@@ -1,10 +1,15 @@
-import { and, asc, eq, gte, lte, ne } from 'drizzle-orm'
+import { and, asc, eq, gte, inArray, lte, ne } from 'drizzle-orm'
 import type { BatchItem } from 'drizzle-orm/batch'
 import { getDb } from '../../db/client'
-import { schedules, slots } from '../../db/schema'
+import { schedules, serviceZones, slots, slotZones } from '../../db/schema'
 import { ApiError } from '../../types/errors'
 import { datesInRangeMatchingWeekdays } from './slots.dates'
 import { requireService, type ServicesContext } from './handler'
+import {
+  activeZonesForService,
+  buildSlotZoneInserts,
+  type ZoneSpec,
+} from './zones.materialize'
 import type {
   CreateScheduleInput,
   CreateSlotInput,
@@ -133,7 +138,15 @@ export const createSlot = async (c: ServicesContext) => {
   const db = getDb(c.env)
 
   const service = await requireService(db, admin.organizationId, serviceId)
-  const capacity = input.capacity ?? service.defaultCapacity
+
+  // US-A64 — on a zoned service the slot's capacity is the sum of its zones, and the new departure
+  // gets its snapshotted `slot_zones` rows in the SAME batch (a slot never exists without them).
+  const zones = service.zonesEnabled
+    ? await activeZonesForService(db, admin.organizationId, serviceId)
+    : []
+  const capacity = service.zonesEnabled
+    ? zones.reduce((sum, z) => sum + z.capacity, 0)
+    : (input.capacity ?? service.defaultCapacity)
 
   if (
     await activeSlotExists(
@@ -151,21 +164,29 @@ export const createSlot = async (c: ServicesContext) => {
     )
   }
 
-  const result = await db
-    .insert(slots)
-    .values({
-      id: crypto.randomUUID(),
-      organizationId: admin.organizationId,
-      serviceId,
-      scheduleId: null,
-      date: input.date,
-      startTime: input.start_time,
-      capacity,
-      booked: 0,
-      status: 'active',
-    })
-    .returning(slotColumns)
+  const slotId = crypto.randomUUID()
+  const slotValues = {
+    id: slotId,
+    organizationId: admin.organizationId,
+    serviceId,
+    scheduleId: null,
+    date: input.date,
+    startTime: input.start_time,
+    capacity,
+    booked: 0,
+    status: 'active' as const,
+  }
 
+  if (service.zonesEnabled && zones.length > 0) {
+    await db.batch([
+      db.insert(slots).values(slotValues),
+      ...buildSlotZoneInserts(db, admin.organizationId, [slotId], zones),
+    ] as [BatchItem<'sqlite'>, ...BatchItem<'sqlite'>[]])
+    const [row] = await db.select(slotColumns).from(slots).where(eq(slots.id, slotId))
+    return c.json({ slot: serializeSlot(row) }, 201)
+  }
+
+  const result = await db.insert(slots).values(slotValues).returning(slotColumns)
   return c.json({ slot: serializeSlot(result[0]) }, 201)
 }
 
@@ -176,7 +197,7 @@ export const listSlots = async (c: ServicesContext) => {
   const serviceId = c.req.param('id')
   const db = getDb(c.env)
 
-  await requireService(db, admin.organizationId, serviceId)
+  const service = await requireService(db, admin.organizationId, serviceId)
 
   const filters = [
     eq(slots.organizationId, admin.organizationId),
@@ -203,8 +224,61 @@ export const listSlots = async (c: ServicesContext) => {
     .where(and(...filters))
     .orderBy(asc(slots.date), asc(slots.startTime))
 
-  return c.json({ slots: rows.map(serializeSlot) })
+  // US-A64 — on a zoned service attach each slot's per-zone rows (with the zone name), so the
+  // admin schedules view can close/reopen a zone on a single departure. Absent for unzoned.
+  const zonesBySlot = new Map<string, ReturnType<typeof serializeSlotZone>[]>()
+  if (service.zonesEnabled && rows.length > 0) {
+    const zoneRows = await db
+      .select({
+        slotId: slotZones.slotId,
+        zoneId: slotZones.zoneId,
+        name: serviceZones.name,
+        sortOrder: serviceZones.sortOrder,
+        capacity: slotZones.capacity,
+        booked: slotZones.booked,
+        status: slotZones.status,
+      })
+      .from(slotZones)
+      .innerJoin(serviceZones, eq(serviceZones.id, slotZones.zoneId))
+      .where(
+        and(
+          eq(slotZones.organizationId, admin.organizationId),
+          inArray(
+            slotZones.slotId,
+            rows.map((r) => r.id),
+          ),
+        ),
+      )
+      .orderBy(asc(serviceZones.sortOrder))
+    for (const z of zoneRows) {
+      const list = zonesBySlot.get(z.slotId) ?? []
+      list.push(serializeSlotZone(z))
+      zonesBySlot.set(z.slotId, list)
+    }
+  }
+
+  return c.json({
+    slots: rows.map((r) => ({
+      ...serializeSlot(r),
+      ...(service.zonesEnabled ? { zones: zonesBySlot.get(r.id) ?? [] } : {}),
+    })),
+  })
 }
+
+const serializeSlotZone = (row: {
+  zoneId: string
+  name: string
+  capacity: number
+  booked: number
+  status: string
+}) => ({
+  zone_id: row.zoneId,
+  name: row.name,
+  capacity: row.capacity,
+  booked: row.booked,
+  remaining: row.capacity - row.booked,
+  status: row.status,
+})
 
 // US-A10 — edit a slot (full replace of date/time/capacity). Triple filter
 // (slotId + serviceId + org) → 404. Guards capacity ≥ booked and time collisions.
@@ -230,6 +304,17 @@ export const updateSlot = async (c: ServicesContext) => {
   const slot = existing[0]
   if (!slot) {
     throw new ApiError('NOT_FOUND', 404, 'Slot not found')
+  }
+
+  // US-A64 — on a zoned service the per-slot capacity is DERIVED from its zones (`slot_zones`),
+  // never authored here. Date/time edits are still fine; a capacity change is rejected.
+  const service = await requireService(db, admin.organizationId, serviceId)
+  if (service.zonesEnabled && input.capacity !== slot.capacity) {
+    throw new ApiError(
+      'VALIDATION_ERROR',
+      400,
+      'Capacity is set per zone on a zoned service — edit the zones instead',
+    )
   }
 
   if (input.capacity < slot.booked) {
@@ -354,7 +439,15 @@ export const createSchedule = async (c: ServicesContext) => {
   const db = getDb(c.env)
 
   const service = await requireService(db, admin.organizationId, serviceId)
-  const capacity = input.capacity ?? service.defaultCapacity
+
+  // US-A64 — on a zoned service every generated slot's capacity is the sum of its zones, and each
+  // gets its snapshotted `slot_zones` rows in the SAME batch as the slot (BUG-012 atomicity).
+  const zones: ZoneSpec[] = service.zonesEnabled
+    ? await activeZonesForService(db, admin.organizationId, serviceId)
+    : []
+  const capacity = service.zonesEnabled
+    ? zones.reduce((sum, z) => sum + z.capacity, 0)
+    : (input.capacity ?? service.defaultCapacity)
 
   const scheduleId = crypto.randomUUID()
 
@@ -432,6 +525,17 @@ export const createSchedule = async (c: ServicesContext) => {
   ]
   for (let i = 0; i < rows.length; i += INSERT_CHUNK) {
     statements.push(db.insert(slots).values(rows.slice(i, i + INSERT_CHUNK)))
+  }
+  // US-A64 — one snapshotted slot_zones row per (generated slot × zone), in the same batch.
+  if (zones.length > 0 && rows.length > 0) {
+    statements.push(
+      ...buildSlotZoneInserts(
+        db,
+        admin.organizationId,
+        rows.map((r) => r.id),
+        zones,
+      ),
+    )
   }
 
   const [scheduleResult] = await db.batch(

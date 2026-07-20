@@ -133,6 +133,12 @@ export const services = sqliteTable('services', {
   category: text('category', {
     enum: ['lodging', 'tours', 'dining', 'adventure', 'culture'],
   }),
+  // Zoned Capacity (US-A64 — docs/catalog/zoned-capacity.spec.md). Opt-in: when true, the
+  // service's slot seats are partitioned across `service_zones`; sales guard per-zone and
+  // `slots.capacity`/`booked` are reconciled from the zones. false = today's single pool.
+  // Mutually exclusive with is_flexible (strict per-zone ceilings make the flex margin
+  // unreachable — enabling zones clears Soft Cap).
+  zonesEnabled: integer('zones_enabled', { mode: 'boolean' }).notNull().default(false),
   status: text('status', { enum: ['active', 'inactive'] })
     .notNull()
     .default('active'),
@@ -204,6 +210,63 @@ export const slots = sqliteTable('slots', {
   date: text('date').notNull(), // 'YYYY-MM-DD'
   startTime: text('start_time').notNull(), // 'HH:MM'
   capacity: integer('capacity').notNull(),
+  booked: integer('booked').notNull().default(0),
+  status: text('status', { enum: ['active', 'inactive'] })
+    .notNull()
+    .default('active'),
+  createdAt: integer('created_at', { mode: 'timestamp' })
+    .notNull()
+    .default(sql`(unixepoch())`),
+  updatedAt: integer('updated_at', { mode: 'timestamp' })
+    .notNull()
+    .default(sql`(unixepoch())`),
+})
+
+// Zoned Capacity (US-A64 — docs/catalog/zoned-capacity.spec.md). The authored zone definitions
+// for a service with `zones_enabled = true`: a name and a seat count, 2–6 active per service.
+// A pure inventory partition — no price/commission of its own. Soft-deactivated (folio history);
+// hard-deletable only while it has no sales.
+export const serviceZones = sqliteTable('service_zones', {
+  id: text('id').primaryKey(),
+  organizationId: text('organization_id')
+    .notNull()
+    .references(() => organizations.id),
+  serviceId: text('service_id')
+    .notNull()
+    .references(() => services.id),
+  name: text('name').notNull(),
+  capacity: integer('capacity').notNull(), // seats in this zone; >= 1
+  sortOrder: integer('sort_order').notNull().default(0),
+  status: text('status', { enum: ['active', 'inactive'] })
+    .notNull()
+    .default('active'),
+  createdAt: integer('created_at', { mode: 'timestamp' })
+    .notNull()
+    .default(sql`(unixepoch())`),
+  updatedAt: integer('updated_at', { mode: 'timestamp' })
+    .notNull()
+    .default(sql`(unixepoch())`),
+})
+
+// One row per (departure, zone). `capacity` is SNAPSHOTTED from service_zones at creation and
+// frozen thereafter (past departures never re-snapshot — that is what makes editing a zone
+// non-destructive to history). Created eagerly for every future slot of a zoned service (at
+// enable, and in the same atomic batch whenever a new slot is materialized). The sale guard is a
+// single conditional UPDATE against this row's own `capacity`; `slots.capacity`/`booked` are
+// reconciled as the sum over active (open) rows. `status = 'inactive'` = zone closed for THIS
+// departure (e.g. rain), dropping out of both sums while its sold seats stay valid.
+export const slotZones = sqliteTable('slot_zones', {
+  id: text('id').primaryKey(),
+  organizationId: text('organization_id')
+    .notNull()
+    .references(() => organizations.id),
+  slotId: text('slot_id')
+    .notNull()
+    .references(() => slots.id),
+  zoneId: text('zone_id')
+    .notNull()
+    .references(() => serviceZones.id),
+  capacity: integer('capacity').notNull(), // snapshot of the zone's capacity for this departure
   booked: integer('booked').notNull().default(0),
   status: text('status', { enum: ['active', 'inactive'] })
     .notNull()
@@ -329,6 +392,11 @@ export const folioLines = sqliteTable('folio_lines', {
   checkOut: text('check_out'), // 'YYYY-MM-DD' (stay only)
   guests: integer('guests'), // stay only
   nights: integer('nights'), // stay only
+  // Zoned Capacity (US-A64). The zone a slot line's seats occupy + a snapshot of its name at
+  // sale time (so renaming a zone never rewrites a sold ticket/receipt). NULL for an unzoned
+  // sale or a lodging stay line.
+  zoneId: text('zone_id').references(() => serviceZones.id),
+  zoneName: text('zone_name'),
   createdAt: integer('created_at', { mode: 'timestamp' })
     .notNull()
     .default(sql`(unixepoch())`),

@@ -14,6 +14,8 @@ interface LabelableLine {
   line_type?: 'slot' | 'stay' | null
   slot_date?: string | null
   slot_start_time?: string | null
+  /** US-A64 — the physical zone (Turibus deck), when the tour is zoned. */
+  zone_name?: string | null
   check_in?: string | null
   check_out?: string | null
   guests?: number | null
@@ -32,5 +34,6 @@ export function folioLineMeta(line: LabelableLine): string {
       nights === 1 ? 'noche' : 'noches'
     } · ${guests} ${guests === 1 ? 'huésped' : 'huéspedes'}${rooms}`
   }
-  return `${line.slot_date ?? ''} · ${line.slot_start_time ?? ''} · ${line.quantity}×`
+  const zone = line.zone_name ? ` · ${line.zone_name}` : ''
+  return `${line.slot_date ?? ''} · ${line.slot_start_time ?? ''}${zone} · ${line.quantity}×`
 }

@@ -18,6 +18,14 @@ export interface ExtraDraft {
   price: number
 }
 
+/** US-A64 — a draft physical zone held in wizard-local state until Save enables zones on the new
+ * service. `tempId` is a client-only stable key; `capacity` is seats (whole number). */
+export interface ZoneDraft {
+  tempId: string
+  name: string
+  capacity: number
+}
+
 export type WizardStep = 1 | 2 | 3 | 4
 
 export const TOTAL_STEPS = 4 as const

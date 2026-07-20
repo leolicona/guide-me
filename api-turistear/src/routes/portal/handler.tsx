@@ -120,6 +120,8 @@ interface PortalLine {
   slotStartTime: string
   quantity: number
   qrToken: string | null
+  // US-A64 — the physical zone (Turibus deck) this line's seats are in, snapshotted at sale.
+  zoneName: string | null
   // The service's CURRENT description (meeting point / instructions) — live, not a sale
   // snapshot, so an updated meeting point reaches the tourist (Rule 3 / open question 1).
   description: string | null
@@ -237,6 +239,7 @@ const PortalPage = ({ data }: { data: PortalData }) => {
             <p>
               📅 {formatSlotDate(line.slotDate)} — {line.slotStartTime} h
             </p>
+            {line.zoneName && <p>📍 {line.zoneName}</p>}
             <p>👥 {line.quantity} {line.quantity === 1 ? 'persona' : 'personas'}</p>
             {line.description && <p class="portal-muted">{line.description}</p>}
             {/* US-T03 — the same signed QR the email carries. Omitted entirely on a
@@ -300,6 +303,7 @@ const loadPortalData = async (
       slotStartTime: folioLines.slotStartTime,
       quantity: folioLines.quantity,
       qrToken: folioLines.qrToken,
+      zoneName: folioLines.zoneName,
       description: services.description,
     })
     .from(folioLines)

@@ -10,6 +10,7 @@ import {
   type WizardStep,
   type DepartureTime,
   type ExtraDraft,
+  type ZoneDraft,
 } from './wizardTypes'
 import { StepBasicInfo } from './StepBasicInfo'
 import { StepPricing } from './StepPricing'
@@ -66,8 +67,10 @@ export function ServiceWizard({ onClose, onCreated }: ServiceWizardProps) {
   const [times, setTimes] = useState<DepartureTime[]>([])
   const [extras, setExtras] = useState<ExtraDraft[]>([])
   const [units, setUnits] = useState<UnitDraft[]>([])
+  const [zones, setZones] = useState<ZoneDraft[]>([])
   const [showTimesError, setShowTimesError] = useState(false)
   const [showUnitsError, setShowUnitsError] = useState(false)
+  const [showZonesError, setShowZonesError] = useState(false)
   const [confirmDiscard, setConfirmDiscard] = useState(false)
 
   const category = watch('category')
@@ -79,7 +82,23 @@ export function ServiceWizard({ onClose, onCreated }: ServiceWizardProps) {
   const lodgingSave = useCreateLodgingFull()
 
   const isDirty =
-    formState.isDirty || times.length > 0 || extras.length > 0 || units.length > 0
+    formState.isDirty ||
+    times.length > 0 ||
+    extras.length > 0 ||
+    units.length > 0 ||
+    zones.length > 0
+
+  // US-A64 — zones are optional; when present they must be a complete 2–6 set with unique names
+  // and ≥ 1 seat each. Empty = unzoned (valid).
+  const zonesValid = (): boolean => {
+    if (zones.length === 0) return true
+    if (zones.length < 2 || zones.length > 6) return false
+    const names = zones.map((z) => z.name.trim().toLowerCase())
+    return (
+      zones.every((z) => z.name.trim().length > 0 && Number.isInteger(z.capacity) && z.capacity >= 1) &&
+      new Set(names).size === names.length
+    )
+  }
 
   const handleClose = () => {
     if (saveMutation.isPending) return
@@ -109,9 +128,15 @@ export function ServiceWizard({ onClose, onCreated }: ServiceWizardProps) {
         setShowUnitsError(true)
         return
       }
-    } else if (step === 3 && times.length === 0) {
-      setShowTimesError(true)
-      return
+    } else if (step === 3) {
+      if (times.length === 0) {
+        setShowTimesError(true)
+        return
+      }
+      if (!zonesValid()) {
+        setShowZonesError(true)
+        return
+      }
     }
     setStep((s) => (s + 1) as WizardStep)
   }
@@ -174,6 +199,11 @@ export function ServiceWizard({ onClose, onCreated }: ServiceWizardProps) {
       setStep(3)
       return
     }
+    if (!zonesValid()) {
+      setShowZonesError(true)
+      setStep(3)
+      return
+    }
 
     const data = getValues()
     const core: ServiceInput = {
@@ -208,6 +238,11 @@ export function ServiceWizard({ onClose, onCreated }: ServiceWizardProps) {
           times,
         },
         extras: extrasPayload,
+        // US-A64 — enabled on the new service after its departures exist (see useCreateServiceFull).
+        zones:
+          zones.length >= 2
+            ? zones.map((z) => ({ name: z.name.trim(), capacity: z.capacity }))
+            : undefined,
       },
       {
         onSuccess: ({ serviceId, failures }) => onCreated(serviceId, failures),
@@ -257,6 +292,9 @@ export function ServiceWizard({ onClose, onCreated }: ServiceWizardProps) {
                 times={times}
                 onTimesChange={setTimes}
                 showTimesError={showTimesError}
+                zones={zones}
+                onZonesChange={setZones}
+                showZonesError={showZonesError}
               />
             ))}
           {step === 4 && !isLodging && <StepExtras extras={extras} onChange={setExtras} />}

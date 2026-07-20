@@ -1,14 +1,16 @@
 import type { Context } from 'hono'
 import type { BatchItem } from 'drizzle-orm/batch'
-import { and, asc, eq } from 'drizzle-orm'
+import { and, asc, eq, inArray } from 'drizzle-orm'
 import { getDb } from '../../db/client'
 import {
   affiliateCommissions,
   folioLines,
   schedules,
   serviceExtras,
+  serviceZones,
   services,
   slots,
+  slotZones,
 } from '../../db/schema'
 import { ApiError } from '../../types/errors'
 import type { AppVariables } from '../../types/context'
@@ -39,6 +41,7 @@ interface ServiceRow {
   commissionValue: number
   isFlexible: boolean
   flexCapacityPct: number
+  zonesEnabled: boolean
   category: 'lodging' | 'tours' | 'dining' | 'adventure' | 'culture' | null
   status: string
 }
@@ -50,6 +53,15 @@ interface ExtraRow {
   status: string
 }
 
+// A zone as embedded on the service detail (US-A64). Kept minimal — the authored definition.
+interface ZoneRow {
+  id: string
+  name: string
+  capacity: number
+  sortOrder: number
+  status: string
+}
+
 const serializeExtra = (row: ExtraRow) => ({
   id: row.id,
   name: row.name,
@@ -57,9 +69,18 @@ const serializeExtra = (row: ExtraRow) => ({
   status: row.status,
 })
 
+const serializeZone = (row: ZoneRow) => ({
+  id: row.id,
+  name: row.name,
+  capacity: row.capacity,
+  sort_order: row.sortOrder,
+  status: row.status,
+})
+
 const serializeService = (
   row: ServiceRow,
   extras?: ExtraRow[],
+  zones?: ZoneRow[],
 ) => ({
   id: row.id,
   name: row.name,
@@ -71,9 +92,11 @@ const serializeService = (
   commission_value: row.commissionValue,
   is_flexible: row.isFlexible,
   flex_capacity_pct: row.flexCapacityPct,
+  zones_enabled: row.zonesEnabled,
   category: row.category,
   status: row.status,
   ...(extras !== undefined ? { extras: extras.map(serializeExtra) } : {}),
+  ...(zones !== undefined ? { zones: zones.map(serializeZone) } : {}),
 })
 
 const serviceColumns = {
@@ -87,6 +110,7 @@ const serviceColumns = {
   commissionValue: services.commissionValue,
   isFlexible: services.isFlexible,
   flexCapacityPct: services.flexCapacityPct,
+  zonesEnabled: services.zonesEnabled,
   category: services.category,
   status: services.status,
 } as const
@@ -184,8 +208,32 @@ export const getService = async (c: ServicesContext) => {
   }
 
   const extras = await readExtras(db, admin.organizationId, id)
-  return c.json({ service: serializeService(service, extras) })
+  // US-A64 — a zoned service embeds its active zone definitions so the wizard re-hydrates.
+  const zones = service.zonesEnabled
+    ? await readActiveZones(db, admin.organizationId, id)
+    : undefined
+  return c.json({ service: serializeService(service, extras, zones) })
 }
+
+// US-A64 — a service's active zones, ordered for display.
+const readActiveZones = (db: ReturnType<typeof getDb>, organizationId: string, serviceId: string) =>
+  db
+    .select({
+      id: serviceZones.id,
+      name: serviceZones.name,
+      capacity: serviceZones.capacity,
+      sortOrder: serviceZones.sortOrder,
+      status: serviceZones.status,
+    })
+    .from(serviceZones)
+    .where(
+      and(
+        eq(serviceZones.serviceId, serviceId),
+        eq(serviceZones.organizationId, organizationId),
+        eq(serviceZones.status, 'active'),
+      ),
+    )
+    .orderBy(asc(serviceZones.sortOrder))
 
 // US-A13 — full replace of the editable fields. status / organizationId are
 // preserved (not in the SET). 0 rows matched → 404.
@@ -194,6 +242,17 @@ export const updateService = async (c: ServicesContext) => {
   const id = c.req.param('id')
   const input = (await c.req.json()) as UpdateServiceInput
   const db = getDb(c.env)
+
+  // US-A64 — zones and Soft Cap are mutually exclusive; a zoned service cannot be flipped back to
+  // flexible via this edit (the flex control is disabled in the UI; this is the API backstop).
+  const existing = await requireService(db, admin.organizationId, id)
+  if (existing.zonesEnabled && input.is_flexible) {
+    throw new ApiError(
+      'VALIDATION_ERROR',
+      400,
+      'A zoned service cannot use flexible capacity — disable zones first',
+    )
+  }
 
   const result = await db
     .update(services)
@@ -218,12 +277,11 @@ export const updateService = async (c: ServicesContext) => {
     .returning(serviceColumns)
 
   const service = result[0]
-  if (!service) {
-    throw new ApiError('NOT_FOUND', 404, 'Service not found')
-  }
-
   const extras = await readExtras(db, admin.organizationId, id)
-  return c.json({ service: serializeService(service, extras) })
+  const zones = service.zonesEnabled
+    ? await readActiveZones(db, admin.organizationId, id)
+    : undefined
+  return c.json({ service: serializeService(service, extras, zones) })
 }
 
 // Soft (de)activation. The org filter makes unknown / foreign ids → 404;
@@ -288,13 +346,29 @@ export const deleteService = async (c: ServicesContext) => {
     )
   }
 
-  // FK-safe cascade: children before the service. Slots reference schedules, so slots go first.
+  // FK-safe cascade: children before the service. US-A64 — `slot_zones` reference both `slots`
+  // and `service_zones`, so they go FIRST; then slots/schedules, then the zone definitions, then
+  // the service. Without this a zoned service could never be hard-deleted (FK on the slots delete).
   await db.batch([
     db
       .delete(affiliateCommissions)
       .where(and(eq(affiliateCommissions.serviceId, id), eq(affiliateCommissions.organizationId, org))),
+    db
+      .delete(slotZones)
+      .where(
+        and(
+          eq(slotZones.organizationId, org),
+          inArray(
+            slotZones.slotId,
+            db.select({ id: slots.id }).from(slots).where(eq(slots.serviceId, id)),
+          ),
+        ),
+      ),
     db.delete(slots).where(and(eq(slots.serviceId, id), eq(slots.organizationId, org))),
     db.delete(schedules).where(and(eq(schedules.serviceId, id), eq(schedules.organizationId, org))),
+    db
+      .delete(serviceZones)
+      .where(and(eq(serviceZones.serviceId, id), eq(serviceZones.organizationId, org))),
     db
       .delete(serviceExtras)
       .where(and(eq(serviceExtras.serviceId, id), eq(serviceExtras.organizationId, org))),
@@ -317,6 +391,8 @@ export const requireService = async (
       id: services.id,
       defaultCapacity: services.defaultCapacity,
       category: services.category,
+      zonesEnabled: services.zonesEnabled,
+      isFlexible: services.isFlexible,
     })
     .from(services)
     .where(

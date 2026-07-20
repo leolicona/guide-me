@@ -15,8 +15,12 @@ const extraSchema = z.object({
 })
 
 // A tour/activity line — a slot + quantity + (discountable) unit price.
+// US-A64 — `zone_id` targets a physical zone on a zoned service (required there, refused otherwise;
+// enforced in the handler since it depends on the slot's service). A split party is one line per
+// zone on the same slot.
 const slotLineSchema = z.object({
   slot_id: z.string().min(1),
+  zone_id: z.string().min(1).optional(),
   quantity: z.number().int().min(1),
   unit_price: z.number().int().min(0),
   extras: z.array(extraSchema).optional().default([]),
@@ -58,17 +62,18 @@ export const confirmSaleSchema = z
     down_payment: z.number().int().min(1).optional(),
     lines: z.array(lineSchema).nonempty('Cart must have at least one line'),
   })
-  // Business rule 6 — a slot may appear at most once (the UI merges quantities). This keeps the
-  // inventory decrement one-update-per-slot. Only applies to slot lines; stay lines are exempt
-  // (the same unit can be booked for non-overlapping ranges in one cart).
+  // Business rule 6 — a slot may appear at most once (the UI merges quantities), keeping the
+  // inventory decrement one-update-per-slot. US-A64: on a zoned service a split party puts the same
+  // slot in different zones, so uniqueness is per (slot_id, zone_id) — the same zone twice is still
+  // rejected. Stay lines are exempt (a unit can be booked for non-overlapping ranges in one cart).
   .refine(
     (v) => {
-      const slotIds = v.lines
-        .filter((l): l is { slot_id: string } => 'slot_id' in l)
-        .map((l) => l.slot_id)
-      return new Set(slotIds).size === slotIds.length
+      const keys = v.lines
+        .filter((l): l is { slot_id: string; zone_id?: string } => 'slot_id' in l)
+        .map((l) => `${l.slot_id}:${l.zone_id ?? ''}`)
+      return new Set(keys).size === keys.length
     },
-    { message: 'Each slot may appear at most once', path: ['lines'] },
+    { message: 'Each slot (zone) may appear at most once', path: ['lines'] },
   )
 
 export type ConfirmSaleInput = z.infer<typeof confirmSaleSchema>

@@ -74,9 +74,11 @@ const clearPosDb = async () => {
   await env.DB.exec('DELETE FROM cancellation_requests')
   await env.DB.exec('DELETE FROM folio_access_tokens')
   await env.DB.exec('DELETE FROM folios')
+  await env.DB.exec('DELETE FROM slot_zones')
   await env.DB.exec('DELETE FROM slots')
   await env.DB.exec('DELETE FROM schedules')
   await env.DB.exec('DELETE FROM service_extras')
+  await env.DB.exec('DELETE FROM service_zones')
   await env.DB.exec('DELETE FROM services')
 }
 
@@ -307,5 +309,79 @@ describe('Online QR Scanner', () => {
     const own = await scan(agentB, token)
     expect(own.json.result).toBe('valid')
     expect(await getRedeemedCount(lineId)).toBe(1)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// US-A64 — the scan result carries the zone (display-only; payload unchanged)
+// ---------------------------------------------------------------------------
+describe('US-A64 — zone on the scan result', () => {
+  // Sell one zoned line and return its minted token.
+  const mintZonedTicket = async (email: string, organizationId: string) => {
+    const ts = Math.floor(Date.now() / 1000)
+    const serviceId = crypto.randomUUID()
+    await env.DB.prepare(
+      `INSERT INTO services
+         (id, organization_id, name, description, base_price, minimum_price, default_capacity,
+          zones_enabled, status, created_at, updated_at)
+       VALUES (?, ?, 'Turibus', NULL, 150000, 100000, 50, 1, 'active', ?, ?)`,
+    )
+      .bind(serviceId, organizationId, ts, ts)
+      .run()
+    const slotId = crypto.randomUUID()
+    await env.DB.prepare(
+      `INSERT INTO slots (id, organization_id, service_id, schedule_id, date, start_time, capacity, booked, status, created_at, updated_at)
+       VALUES (?, ?, ?, NULL, '2026-06-15', '06:00', 50, 0, 'active', ?, ?)`,
+    )
+      .bind(slotId, organizationId, serviceId, ts, ts)
+      .run()
+    const zoneId = crypto.randomUUID()
+    await env.DB.prepare(
+      `INSERT INTO service_zones (id, organization_id, service_id, name, capacity, sort_order, status, created_at, updated_at)
+       VALUES (?, ?, ?, 'Piso alto', 20, 0, 'active', ?, ?)`,
+    )
+      .bind(zoneId, organizationId, serviceId, ts, ts)
+      .run()
+    await env.DB.prepare(
+      `INSERT INTO slot_zones (id, organization_id, slot_id, zone_id, capacity, booked, status, created_at, updated_at)
+       VALUES (?, ?, ?, ?, 20, 0, 'active', ?, ?)`,
+    )
+      .bind(crypto.randomUUID(), organizationId, slotId, zoneId, ts, ts)
+      .run()
+
+    const res = await SELF.fetch(`${POS}/folios`, {
+      method: 'POST',
+      headers: jsonAuth(email),
+      body: JSON.stringify({
+        customer_email: 'cliente@example.com',
+        lines: [{ slot_id: slotId, zone_id: zoneId, quantity: 1, unit_price: 150000 }],
+      }),
+    })
+    const body = (await res.json()) as any
+    expect(res.status, JSON.stringify(body)).toBe(201)
+    return body.folio.lines[0].qr_token as string
+  }
+
+  it('Scenario 25 — a zoned ticket scans valid and shows its zone', async () => {
+    const { organizationId } = await seedUser({ email: AGENT_EMAIL, role: 'agent' })
+    const token = await mintZonedTicket(AGENT_EMAIL, organizationId)
+
+    const { status, json } = await scan(AGENT_EMAIL, token)
+    expect(status).toBe(200)
+    expect(json.result).toBe('valid')
+    expect(json.ticket).toMatchObject({
+      service_name: 'Turibus',
+      zone_name: 'Piso alto',
+      pass_number: 1,
+    })
+  })
+
+  it('Scenario 26 — a pre-feature (unzoned) ticket still verifies, with no zone', async () => {
+    const { organizationId } = await seedUser({ email: AGENT_EMAIL, role: 'agent' })
+    const { token } = await mintTicket(AGENT_EMAIL, organizationId)
+
+    const { json } = await scan(AGENT_EMAIL, token)
+    expect(json.result).toBe('valid')
+    expect(json.ticket.zone_name).toBeNull()
   })
 })

@@ -24,7 +24,10 @@ export interface SlotCartLine {
   kind: 'slot'
   service: CartService
   slot: PosSlot
-  /** Number of people; >= 1, soft-capped at the slot's remaining. */
+  /** US-A64 — the physical zone this line sells into (undefined on an unzoned service). A split
+   * party is one line per zone on the same slot, so the line's identity is slot + zone. */
+  zone?: { id: string; name: string }
+  /** Number of people; >= 1, soft-capped at the zone's (or slot's) remaining. */
   quantity: number
   /** Discounted unit price (minor units), clamped to [minimum_price, base_price]. */
   unit_price: number
@@ -55,9 +58,10 @@ export interface StayCartLine {
 
 export type CartLine = SlotCartLine | StayCartLine
 
-/** A line's stable key — the slot id for a tour line, the client id for a stay line. */
+/** A line's stable key — slot id (+ zone id on a zoned service) for a tour line, the client id for
+ * a stay line. The zone is part of the identity so a split party keeps two distinct lines. */
 export const lineKey = (line: CartLine): string =>
-  line.kind === 'slot' ? line.slot.id : line.id
+  line.kind === 'slot' ? `${line.slot.id}${line.zone ? `:${line.zone.id}` : ''}` : line.id
 
 /** Input for adding a stay line (US-AG38, v2). */
 export interface AddStayInput {
@@ -82,22 +86,25 @@ interface PosCartState {
   /** How the agent collected payment (US-AG25). Defaults to 'cash'. */
   paymentMethod: PaymentMethod
 
-  /** Add a service/slot. If the slot is already in the cart, quantities merge. */
+  /** Add a service/slot. If the same slot (and zone, US-A64) is already in the cart, quantities
+   * merge; a different zone on the same slot is a distinct line. */
   addLine: (input: {
     service: CartService
     slot: PosSlot
+    zone?: { id: string; name: string }
     quantity?: number
     unit_price?: number
     extras?: CartExtra[]
   }) => void
   /** US-AG38 — add a lodging stay line. */
   addStayLine: (input: AddStayInput) => void
-  updateQuantity: (slotId: string, quantity: number) => void
-  setUnitPrice: (slotId: string, unitPrice: number) => void
-  addExtra: (slotId: string, extra: PosExtra) => void
-  updateExtraQuantity: (slotId: string, extraId: string, quantity: number) => void
-  removeExtra: (slotId: string, extraId: string) => void
-  removeLine: (slotId: string) => void
+  // All slot-line mutations key on `lineKey(line)` (slot id, + zone id on a zoned service).
+  updateQuantity: (key: string, quantity: number) => void
+  setUnitPrice: (key: string, unitPrice: number) => void
+  addExtra: (key: string, extra: PosExtra) => void
+  updateExtraQuantity: (key: string, extraId: string, quantity: number) => void
+  removeExtra: (key: string, extraId: string) => void
+  removeLine: (key: string) => void
   setCustomer: (fields: Partial<{ name: string; email: string; phone: string }>) => void
   setPaymentMethod: (method: PaymentMethod) => void
   clear: () => void
@@ -113,24 +120,23 @@ export const usePosCart = create<PosCartState>((set) => ({
   customerPhone: '',
   paymentMethod: 'cash',
 
-  addLine: ({ service, slot, quantity = 1, unit_price, extras = [] }) =>
+  addLine: ({ service, slot, zone, quantity = 1, unit_price, extras = [] }) =>
     set((state) => {
       const price = clamp(
         unit_price ?? service.base_price,
         service.minimum_price,
         service.base_price,
       )
-      const existing = state.lines.find(
-        (l): l is SlotCartLine => l.kind === 'slot' && l.slot.id === slot.id,
-      )
+      // Identity is slot + zone (US-A64): the same slot in a different zone is a distinct line.
+      const sameLine = (l: CartLine): l is SlotCartLine =>
+        l.kind === 'slot' && l.slot.id === slot.id && l.zone?.id === zone?.id
+      const existing = state.lines.find(sameLine)
       if (existing) {
-        // Merge quantities (distinct-slot rule), soft-capped at remaining.
+        // Merge quantities (distinct slot+zone rule), soft-capped at remaining.
         const merged = Math.min(existing.quantity + quantity, slot.remaining || quantity)
         return {
           lines: state.lines.map((l) =>
-            l.kind === 'slot' && l.slot.id === slot.id
-              ? { ...l, quantity: Math.max(merged, 1) }
-              : l,
+            sameLine(l) ? { ...l, quantity: Math.max(merged, 1) } : l,
           ),
         }
       }
@@ -138,7 +144,7 @@ export const usePosCart = create<PosCartState>((set) => ({
       return {
         lines: [
           ...state.lines,
-          { kind: 'slot', service, slot, quantity: Math.max(capped, 1), unit_price: price, extras },
+          { kind: 'slot', service, slot, zone, quantity: Math.max(capped, 1), unit_price: price, extras },
         ],
       }
     }),
@@ -148,10 +154,10 @@ export const usePosCart = create<PosCartState>((set) => ({
       lines: [...state.lines, { kind: 'stay', id: crypto.randomUUID(), ...input }],
     })),
 
-  updateQuantity: (slotId, quantity) =>
+  updateQuantity: (key, quantity) =>
     set((state) => ({
       lines: state.lines.map((l) =>
-        l.kind === 'slot' && l.slot.id === slotId
+        l.kind === 'slot' && lineKey(l) === key
           ? {
               ...l,
               quantity: clamp(
@@ -164,10 +170,10 @@ export const usePosCart = create<PosCartState>((set) => ({
       ),
     })),
 
-  setUnitPrice: (slotId, unitPrice) =>
+  setUnitPrice: (key, unitPrice) =>
     set((state) => ({
       lines: state.lines.map((l) =>
-        l.kind === 'slot' && l.slot.id === slotId
+        l.kind === 'slot' && lineKey(l) === key
           ? {
               ...l,
               unit_price: clamp(
@@ -180,10 +186,10 @@ export const usePosCart = create<PosCartState>((set) => ({
       ),
     })),
 
-  addExtra: (slotId, extra) =>
+  addExtra: (key, extra) =>
     set((state) => ({
       lines: state.lines.map((l) => {
-        if (l.kind !== 'slot' || l.slot.id !== slotId) return l
+        if (l.kind !== 'slot' || lineKey(l) !== key) return l
         const found = l.extras.find((e) => e.extra.id === extra.id)
         return {
           ...l,
@@ -196,10 +202,10 @@ export const usePosCart = create<PosCartState>((set) => ({
       }),
     })),
 
-  updateExtraQuantity: (slotId, extraId, quantity) =>
+  updateExtraQuantity: (key, extraId, quantity) =>
     set((state) => ({
       lines: state.lines.map((l) =>
-        l.kind === 'slot' && l.slot.id === slotId
+        l.kind === 'slot' && lineKey(l) === key
           ? {
               ...l,
               extras: l.extras
@@ -214,10 +220,10 @@ export const usePosCart = create<PosCartState>((set) => ({
       ),
     })),
 
-  removeExtra: (slotId, extraId) =>
+  removeExtra: (key, extraId) =>
     set((state) => ({
       lines: state.lines.map((l) =>
-        l.kind === 'slot' && l.slot.id === slotId
+        l.kind === 'slot' && lineKey(l) === key
           ? { ...l, extras: l.extras.filter((e) => e.extra.id !== extraId) }
           : l,
       ),
@@ -282,6 +288,7 @@ export const toConfirmPayload = (state: PosCartState): ConfirmSaleInput => ({
     l.kind === 'slot'
       ? {
           slot_id: l.slot.id,
+          ...(l.zone ? { zone_id: l.zone.id } : {}),
           quantity: l.quantity,
           unit_price: l.unit_price,
           extras: l.extras.map((e) => ({ extra_id: e.extra.id, quantity: e.quantity })),

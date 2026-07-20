@@ -24,6 +24,7 @@ import { useSchedules } from '../hooks/useSchedules'
 import { useDeactivateSlot } from '../hooks/useDeactivateSlot'
 import { useReactivateSlot } from '../hooks/useReactivateSlot'
 import { useDeactivateSchedule } from '../hooks/useDeactivateSchedule'
+import { useZoneMutations } from '../../catalog/hooks/useZones'
 import { SlotList } from './SlotList'
 import { SlotFormSheet } from './SlotFormSheet'
 import { ScheduleFormSheet } from './ScheduleFormSheet'
@@ -78,6 +79,9 @@ interface ChunkedSlotListProps {
   onClose: (slot: Slot) => void
   onReopen: (slot: Slot) => void
   busy: boolean
+  onCloseZone?: (slotId: string, zoneId: string) => void
+  onReopenZone?: (slotId: string, zoneId: string) => void
+  zoneBusy?: boolean
   /** Date-groups revealed per page. */
   pageSize?: number
 }
@@ -164,6 +168,9 @@ export function SchedulesSection({
   const deactivateSlot = useDeactivateSlot(serviceId)
   const reactivateSlot = useReactivateSlot(serviceId)
   const deactivateSchedule = useDeactivateSchedule(serviceId)
+  // US-A64 — per-departure zone close/reopen (only fires on a zoned service, where slots carry
+  // `zones`). Invalidating on success also refreshes the slot list here (shared cache).
+  const { close: closeZone, reopen: reopenZone } = useZoneMutations(serviceId)
 
   const [slotDialog, setSlotDialog] = useState<{ open: boolean; slot: Slot | null }>(
     { open: false, slot: null },
@@ -175,6 +182,18 @@ export function SchedulesSection({
   )
 
   const slotBusy = deactivateSlot.isPending || reactivateSlot.isPending
+  const zoneBusy = closeZone.isPending || reopenZone.isPending
+
+  const handleCloseZone = (slotId: string, zoneId: string) =>
+    closeZone.mutate(
+      { slotId, zoneId },
+      { onError: () => setSnack({ msg: 'No se pudo cerrar la zona.', severity: 'error' }) },
+    )
+  const handleReopenZone = (slotId: string, zoneId: string) =>
+    reopenZone.mutate(
+      { slotId, zoneId },
+      { onError: () => setSnack({ msg: 'No se pudo reabrir la zona.', severity: 'error' }) },
+    )
 
   const handleClose = (slot: Slot) =>
     deactivateSlot.mutate(slot.id, {
@@ -343,6 +362,9 @@ export function SchedulesSection({
             onClose={handleClose}
             onReopen={handleReopen}
             busy={slotBusy}
+            onCloseZone={handleCloseZone}
+            onReopenZone={handleReopenZone}
+            zoneBusy={zoneBusy}
           />
         </Box>
       )}
@@ -414,6 +436,9 @@ export function SchedulesSection({
               onClose={handleClose}
               onReopen={handleReopen}
               busy={slotBusy}
+              onCloseZone={handleCloseZone}
+              onReopenZone={handleReopenZone}
+              zoneBusy={zoneBusy}
             />
           )}
         </Box>

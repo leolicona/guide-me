@@ -34,8 +34,24 @@ export interface Service {
   /** US-A37 — primary category. null only for pre-migration (legacy) services. */
   category: ServiceCategory | null
   status: ServiceStatus
+  /** US-A64 — when true, the slot seats are partitioned across `zones` (mutually exclusive with
+   * is_flexible). false = a single undifferentiated pool (today's behaviour). */
+  zones_enabled: boolean
   /** Present on detail (GET /:id), absent on the list. */
   extras?: ServiceExtra[]
+  /** US-A64 — active zone definitions, embedded on detail when zones_enabled. */
+  zones?: ServiceZone[]
+}
+
+/** US-A64 — a physical zone inside a slot-based service (e.g. a Turibus deck). A pure inventory
+ * partition: a name + seat count, no price/commission of its own. */
+export interface ServiceZone {
+  id: string
+  service_id: string
+  name: string
+  capacity: number
+  sort_order: number
+  status: ServiceStatus
 }
 
 /** US-A36 — largest overbooking tolerance (%) a Soft Cap service may set. Mirrors the

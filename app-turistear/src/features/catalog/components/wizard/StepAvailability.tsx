@@ -10,14 +10,19 @@ import {
   Collapse,
   Divider,
   FormHelperText,
+  IconButton,
+  Button,
+  Alert,
 } from '@mui/material'
+import AddRounded from '@mui/icons-material/AddRounded'
+import CloseRounded from '@mui/icons-material/CloseRounded'
 import { FLEX_CAP_MAX_PCT } from '../../types'
 import { todayStr } from '../../dates'
 import type { WizardFormData } from './wizardSchema'
 import { StepIntro } from './StepIntro'
 import { QuickSelectChips } from './QuickSelectChips'
 import { DepartureTimes } from './DepartureTimes'
-import type { DepartureTime } from './wizardTypes'
+import type { DepartureTime, ZoneDraft } from './wizardTypes'
 
 // Mon-first visual order with single-letter initials, while preserving the API's
 // Sunday-indexed (0=Dom … 6=Sáb) values.
@@ -38,13 +43,23 @@ interface StepAvailabilityProps {
   onTimesChange: (times: DepartureTime[]) => void
   /** True once the operator has tried to advance, so we can show the "≥1 time" guard. */
   showTimesError: boolean
+  /** US-A64 — wizard-local zone drafts (empty = unzoned). */
+  zones: ZoneDraft[]
+  onZonesChange: (zones: ZoneDraft[]) => void
+  /** True once the operator tried to advance, so we can flag an incomplete zone set. */
+  showZonesError: boolean
 }
 
-/** Step 3 — Availability & Departure Times (US-A41, US-A42). */
+const blankZone = (): ZoneDraft => ({ tempId: crypto.randomUUID(), name: '', capacity: 0 })
+
+/** Step 3 — Availability & Departure Times (US-A41, US-A42) + optional zones (US-A64). */
 export function StepAvailability({
   times,
   onTimesChange,
   showTimesError,
+  zones,
+  onZonesChange,
+  showZonesError,
 }: StepAvailabilityProps) {
   const {
     register,
@@ -65,6 +80,29 @@ export function StepAvailability({
       ? Math.floor((baseCapacity * flexPct) / 100)
       : 0
 
+  // US-A64 — capacity model is a single 3-way choice: a strict single pool, a flexible single pool
+  // (Soft Cap, US-A36), or physical zones. The three are mutually exclusive by construction (zones
+  // are always strict), so one segmented control replaces the old cap-mode toggle + zones checkbox.
+  const zonesEnabled = zones.length > 0
+  const zonesTotal = zones.reduce((sum, z) => sum + (z.capacity || 0), 0)
+  const capMode: 'hard' | 'flex' | 'zones' = zonesEnabled ? 'zones' : isFlexible ? 'flex' : 'hard'
+  const setCapMode = (mode: 'hard' | 'flex' | 'zones') => {
+    if (mode === 'zones') {
+      setValue('is_flexible', false, { shouldValidate: true })
+      setValue('flex_capacity_pct', 0, { shouldValidate: true })
+      if (zones.length === 0) onZonesChange([blankZone(), blankZone()])
+    } else {
+      onZonesChange([]) // leaving zone mode clears the drafts
+      const flex = mode === 'flex'
+      setValue('is_flexible', flex, { shouldValidate: true })
+      if (!flex) setValue('flex_capacity_pct', 0, { shouldValidate: true })
+    }
+  }
+  const setZone = (tempId: string, patch: Partial<ZoneDraft>) =>
+    onZonesChange(zones.map((z) => (z.tempId === tempId ? { ...z, ...patch } : z)))
+  const addZone = () => zones.length < 6 && onZonesChange([...zones, blankZone()])
+  const removeZone = (tempId: string) =>
+    zones.length > 2 && onZonesChange(zones.filter((z) => z.tempId !== tempId))
   const toggleWeekday = (next: number[]) =>
     setValue('weekdays', next, { shouldValidate: true })
 
@@ -86,17 +124,8 @@ export function StepAvailability({
         subtitle="Define el cupo, el tipo de fecha y los horarios de salida. Así controlas el inventario y evitas sobreventa."
       />
 
-      {/* Capacity + quota mode (US-A36) */}
-      <TextField
-        label="Capacidad por horario"
-        type="number"
-        fullWidth
-        error={!!errors.default_capacity}
-        helperText={errors.default_capacity?.message ?? 'Lugares disponibles en cada salida'}
-        slotProps={{ htmlInput: { step: 1, min: 1, inputMode: 'numeric' } }}
-        {...register('default_capacity', { valueAsNumber: true })}
-      />
-
+      {/* Capacity model (US-A36 + US-A64): the single decision of how seats are counted —
+          a strict pool, a flexible pool, or physical zones. */}
       <Box>
         <Typography variant="subtitle2" color="text.secondary" sx={{ mb: 1 }}>
           Tipo de cupo
@@ -105,40 +134,108 @@ export function StepAvailability({
           exclusive
           fullWidth
           size="small"
-          value={isFlexible ? 'flex' : 'hard'}
-          onChange={(_, v) => {
-            if (!v) return
-            const flex = v === 'flex'
-            setValue('is_flexible', flex, { shouldValidate: true })
-            if (!flex) setValue('flex_capacity_pct', 0, { shouldValidate: true })
-          }}
+          value={capMode}
+          onChange={(_, v: 'hard' | 'flex' | 'zones' | null) => v && setCapMode(v)}
           aria-label="Tipo de cupo"
         >
           <ToggleButton value="hard">Estricto</ToggleButton>
           <ToggleButton value="flex">Flexible</ToggleButton>
+          <ToggleButton value="zones">Por zonas</ToggleButton>
         </ToggleButtonGroup>
-        <Collapse in={isFlexible} unmountOnExit>
-          <TextField
-            label="Lugares extra permitidos"
-            type="number"
-            fullWidth
-            error={!!errors.flex_capacity_pct}
-            helperText={
-              errors.flex_capacity_pct?.message ??
-              (extraPlaces > 0
-                ? `Permite sobrevender ~${extraPlaces} lugar${extraPlaces > 1 ? 'es' : ''} por horario con cupo ${baseCapacity}. Asegura ventas de último minuto sin sobrepasar la operación.`
-                : `Tolerancia de sobreventa, entre 1% y ${FLEX_CAP_MAX_PCT}% del cupo.`)
-            }
-            slotProps={{
-              input: {
-                endAdornment: <InputAdornment position="end">%</InputAdornment>,
-              },
-              htmlInput: { step: 1, min: 1, max: FLEX_CAP_MAX_PCT, inputMode: 'numeric' },
-            }}
-            sx={{ mt: 2 }}
-            {...register('flex_capacity_pct', { valueAsNumber: true })}
-          />
-        </Collapse>
+
+        {/* Single-pool modes: a capacity number (+ overbooking margin when flexible). */}
+        {capMode !== 'zones' && (
+          <>
+            <TextField
+              label="Capacidad por horario"
+              type="number"
+              fullWidth
+              error={!!errors.default_capacity}
+              helperText={errors.default_capacity?.message ?? 'Lugares disponibles en cada salida'}
+              slotProps={{ htmlInput: { step: 1, min: 1, inputMode: 'numeric' } }}
+              sx={{ mt: 2 }}
+              {...register('default_capacity', { valueAsNumber: true })}
+            />
+            <Collapse in={capMode === 'flex'} unmountOnExit>
+              <TextField
+                label="Lugares extra permitidos"
+                type="number"
+                fullWidth
+                error={!!errors.flex_capacity_pct}
+                helperText={
+                  errors.flex_capacity_pct?.message ??
+                  (extraPlaces > 0
+                    ? `Permite sobrevender ~${extraPlaces} lugar${extraPlaces > 1 ? 'es' : ''} por horario con cupo ${baseCapacity}. Asegura ventas de último minuto sin sobrepasar la operación.`
+                    : `Tolerancia de sobreventa, entre 1% y ${FLEX_CAP_MAX_PCT}% del cupo.`)
+                }
+                slotProps={{
+                  input: {
+                    endAdornment: <InputAdornment position="end">%</InputAdornment>,
+                  },
+                  htmlInput: { step: 1, min: 1, max: FLEX_CAP_MAX_PCT, inputMode: 'numeric' },
+                }}
+                sx={{ mt: 2 }}
+                {...register('flex_capacity_pct', { valueAsNumber: true })}
+              />
+            </Collapse>
+          </>
+        )}
+
+        {/* Zones: the capacity number is replaced by the per-zone seat editor (2–6 zones). */}
+        {capMode === 'zones' && (
+          <Stack spacing={2} sx={{ mt: 2 }}>
+            <Typography variant="caption" color="text.secondary">
+              Divide los asientos de cada salida en zonas físicas (p. ej. Piso alto / Piso bajo)
+              para venderlas por separado. El cupo total es la suma de las zonas.
+            </Typography>
+            {zones.map((zone) => (
+              <Stack key={zone.tempId} direction="row" spacing={1} sx={{ alignItems: 'flex-start' }}>
+                <TextField
+                  label="Nombre"
+                  value={zone.name}
+                  onChange={(e) => setZone(zone.tempId, { name: e.target.value })}
+                  fullWidth
+                  slotProps={{ htmlInput: { maxLength: 40 } }}
+                />
+                <TextField
+                  label="Asientos"
+                  type="number"
+                  value={zone.capacity || ''}
+                  onChange={(e) => setZone(zone.tempId, { capacity: Number(e.target.value) })}
+                  sx={{ width: 120 }}
+                  slotProps={{ htmlInput: { min: 1, step: 1, inputMode: 'numeric' } }}
+                />
+                <IconButton
+                  aria-label="Quitar zona"
+                  onClick={() => removeZone(zone.tempId)}
+                  disabled={zones.length <= 2}
+                  sx={{ mt: 0.5, color: 'text.secondary' }}
+                >
+                  <CloseRounded fontSize="small" />
+                </IconButton>
+              </Stack>
+            ))}
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <Button
+                size="small"
+                startIcon={<AddRounded />}
+                onClick={addZone}
+                disabled={zones.length >= 6}
+                sx={{ color: 'text.secondary' }}
+              >
+                Agregar zona
+              </Button>
+              <Typography variant="body2" color="text.secondary" className="numeric">
+                Total: {zonesTotal} asientos
+              </Typography>
+            </Box>
+            {showZonesError && (
+              <Alert severity="error">
+                Cada zona necesita un nombre único y al menos 1 asiento (2–6 zonas).
+              </Alert>
+            )}
+          </Stack>
+        )}
       </Box>
 
       <Divider />

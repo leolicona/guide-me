@@ -13,9 +13,12 @@ import {
   folios,
   organizations,
   serviceExtras,
+  serviceZones,
   services,
   slots,
+  slotZones,
 } from '../../db/schema'
+import { reconcileSlotTotals } from '../services/zones.reconcile'
 import {
   sendBookingConfirmationEmail,
   sendTicketConfirmationEmail,
@@ -112,6 +115,23 @@ const serializeExtra = (row: { id: string; name: string; price: number }) => ({
   id: row.id,
   name: row.name,
   price: row.price,
+})
+
+// US-A64 — a slot's per-zone availability (from `slot_zones` + the zone's name). `remaining` is the
+// zone's own sellable count; `status` surfaces a closed-for-this-departure zone to the POS.
+const serializeSlotZone = (row: {
+  zoneId: string
+  name: string
+  capacity: number
+  booked: number
+  status: string
+}) => ({
+  zone_id: row.zoneId,
+  name: row.name,
+  capacity: row.capacity,
+  booked: row.booked,
+  remaining: row.capacity - row.booked,
+  status: row.status,
 })
 
 const slotReadColumns = {
@@ -395,6 +415,7 @@ export const getPosService = async (c: PosContext) => {
       minimumPrice: services.minimumPrice,
       isFlexible: services.isFlexible,
       flexCapacityPct: services.flexCapacityPct,
+      zonesEnabled: services.zonesEnabled,
       category: services.category,
     })
     .from(services)
@@ -473,6 +494,40 @@ export const getPosService = async (c: PosContext) => {
     .where(and(...slotFilters))
     .orderBy(asc(slots.date), asc(slots.startTime))
 
+  // US-A64 — for a zoned service, attach each slot's per-zone availability (from `slot_zones`,
+  // so `capacity` is the frozen per-departure snapshot and a closed zone appears as inactive).
+  // The agent picks a zone; the POS bounds the quantity by that zone's remaining.
+  const zonesBySlot = new Map<string, ReturnType<typeof serializeSlotZone>[]>()
+  if (service.zonesEnabled && slotRows.length > 0) {
+    const zoneRows = await db
+      .select({
+        slotId: slotZones.slotId,
+        zoneId: slotZones.zoneId,
+        name: serviceZones.name,
+        sortOrder: serviceZones.sortOrder,
+        capacity: slotZones.capacity,
+        booked: slotZones.booked,
+        status: slotZones.status,
+      })
+      .from(slotZones)
+      .innerJoin(serviceZones, eq(serviceZones.id, slotZones.zoneId))
+      .where(
+        and(
+          eq(slotZones.organizationId, agent.organizationId),
+          inArray(
+            slotZones.slotId,
+            slotRows.map((s) => s.id),
+          ),
+        ),
+      )
+      .orderBy(asc(serviceZones.sortOrder))
+    for (const z of zoneRows) {
+      const list = zonesBySlot.get(z.slotId) ?? []
+      list.push(serializeSlotZone(z))
+      zonesBySlot.set(z.slotId, list)
+    }
+  }
+
   return c.json({
     service: {
       id: service.id,
@@ -486,10 +541,15 @@ export const getPosService = async (c: PosContext) => {
       // enforces this ceiling atomically at confirmSale; these fields are display-only.
       is_flexible: service.isFlexible,
       flex_capacity_pct: service.flexCapacityPct,
+      // US-A64 — false ⇒ no `zones` on any slot (today's clients unaffected).
+      zones_enabled: service.zonesEnabled,
       // US-A37 — echoed for a consistent service shape (the detail screen doesn't filter).
       category: service.category,
       extras: extras.map(serializeExtra),
-      slots: slotRows.map(serializeSlot),
+      slots: slotRows.map((s) => ({
+        ...serializeSlot(s),
+        ...(service.zonesEnabled ? { zones: zonesBySlot.get(s.id) ?? [] } : {}),
+      })),
     },
   })
 }
@@ -525,6 +585,10 @@ interface PreparedLine {
   // US-A36 — capacity mode, used to build the effective-capacity guard at decrement time (slot only).
   isFlexible: boolean
   flexCapacityPct: number
+  // US-A64 — the physical zone this slot line sells into (null on an unzoned service). When set,
+  // inventory is guarded/released against `slot_zones`, not the raw slot.
+  zoneId?: string | null
+  zoneName?: string | null
   extras: PreparedExtra[]
   // Lodging stay fields (lineType === 'stay').
   unitTypeId?: string
@@ -949,6 +1013,7 @@ export const confirmSale = async (c: PosContext) => {
         commissionValue: services.commissionValue,
         isFlexible: services.isFlexible,
         flexCapacityPct: services.flexCapacityPct,
+        zonesEnabled: services.zonesEnabled,
       })
       .from(slots)
       .innerJoin(services, eq(slots.serviceId, services.id))
@@ -976,6 +1041,36 @@ export const confirmSale = async (c: PosContext) => {
         409,
         'This time slot is closed for sale (its departure has passed the cutoff)',
       )
+    }
+
+    // US-A64 — resolve the physical zone. Required on a zoned service, refused on an unzoned one;
+    // the id must belong to this slot's service + the caller's org (a foreign zone → 404, never
+    // revealed). The name is snapshotted onto the line so a later rename can't rewrite this ticket.
+    let zoneId: string | null = null
+    let zoneName: string | null = null
+    if (slot.zonesEnabled) {
+      if (!line.zone_id) {
+        throw new ApiError('VALIDATION_ERROR', 400, 'A zone is required for this service')
+      }
+      const zoneRows = await db
+        .select({ id: serviceZones.id, name: serviceZones.name })
+        .from(serviceZones)
+        .where(
+          and(
+            eq(serviceZones.id, line.zone_id),
+            eq(serviceZones.organizationId, org),
+            eq(serviceZones.serviceId, slot.serviceId),
+            eq(serviceZones.status, 'active'),
+          ),
+        )
+        .limit(1)
+      if (!zoneRows[0]) {
+        throw new ApiError('NOT_FOUND', 404, 'Zone not found for this service')
+      }
+      zoneId = zoneRows[0].id
+      zoneName = zoneRows[0].name
+    } else if (line.zone_id) {
+      throw new ApiError('VALIDATION_ERROR', 400, 'This service does not use zones')
     }
 
     // Controlled discount (US-AG06): floor at the admin's minimum_price.
@@ -1063,6 +1158,8 @@ export const confirmSale = async (c: PosContext) => {
       commissionValue,
       isFlexible: slot.isFlexible,
       flexCapacityPct: slot.flexCapacityPct,
+      zoneId,
+      zoneName,
       extras: preparedExtras,
     })
   }
@@ -1175,14 +1272,29 @@ export const confirmSale = async (c: PosContext) => {
   // 2. RESERVE INVENTORY — per line, conditionally & atomically, tracking successes so a later
   //    failure can be compensated. Slot lines decrement booked (effective-capacity guard); stay
   //    lines insert a reservation guarded by a half-open overlap probe (the lodging analogue).
-  const applied: { slotId: string; qty: number }[] = []
+  const applied: { slotId: string; qty: number; zoneId?: string | null }[] = []
   const appliedReservations: string[] = []
   const compensate = async () => {
     for (const a of applied) {
-      await db
-        .update(slots)
-        .set({ booked: sql`${slots.booked} - ${a.qty}`, updatedAt: new Date() })
-        .where(and(eq(slots.id, a.slotId), eq(slots.organizationId, org)))
+      if (a.zoneId) {
+        // US-A64 — hand the seats back to the zone counter, then re-derive the slot totals.
+        await db
+          .update(slotZones)
+          .set({ booked: sql`${slotZones.booked} - ${a.qty}`, updatedAt: new Date() })
+          .where(
+            and(
+              eq(slotZones.slotId, a.slotId),
+              eq(slotZones.zoneId, a.zoneId),
+              eq(slotZones.organizationId, org),
+            ),
+          )
+        await reconcileSlotTotals(db, a.slotId)
+      } else {
+        await db
+          .update(slots)
+          .set({ booked: sql`${slots.booked} - ${a.qty}`, updatedAt: new Date() })
+          .where(and(eq(slots.id, a.slotId), eq(slots.organizationId, org)))
+      }
     }
     for (const rid of appliedReservations) {
       await db
@@ -1248,6 +1360,37 @@ export const confirmSale = async (c: PosContext) => {
         )
       }
       appliedReservations.push(reservationId)
+      continue
+    }
+
+    // US-A64 — a zoned line is guarded against its OWN zone's snapshotted seats (single-statement
+    // atomic UPDATE, mirroring the slot guard). A zoned service is never Soft Cap, so no flex here.
+    if (line.zoneId) {
+      const decremented = await db
+        .update(slotZones)
+        .set({ booked: sql`${slotZones.booked} + ${line.quantity}`, updatedAt: new Date() })
+        .where(
+          and(
+            eq(slotZones.slotId, line.slotId!),
+            eq(slotZones.zoneId, line.zoneId),
+            eq(slotZones.organizationId, org),
+            eq(slotZones.status, 'active'),
+            gte(sql`${slotZones.capacity} - ${slotZones.booked}`, line.quantity),
+          ),
+        )
+        .returning({ id: slotZones.id })
+
+      if (decremented.length === 0) {
+        await compensate()
+        throw new ApiError(
+          'ZONE_UNAVAILABLE',
+          409,
+          'That zone just sold out — please review your cart',
+        )
+      }
+      // Re-derive the slot's headline totals from its zones (idempotent).
+      await reconcileSlotTotals(db, line.slotId!)
+      applied.push({ slotId: line.slotId!, qty: line.quantity, zoneId: line.zoneId })
       continue
     }
 
@@ -1344,6 +1487,8 @@ export const confirmSale = async (c: PosContext) => {
         checkOut: line.checkOut ?? null,
         guests: line.guests ?? null,
         nights: line.nights ?? null,
+        zoneId: line.zoneId ?? null,
+        zoneName: line.zoneName ?? null,
       }),
     )
     for (const ex of line.extras) {
@@ -1559,6 +1704,7 @@ const readFolio = async (
       serviceName: folioLines.serviceName,
       slotDate: folioLines.slotDate,
       slotStartTime: folioLines.slotStartTime,
+      zoneName: folioLines.zoneName,
       quantity: folioLines.quantity,
       basePrice: folioLines.basePrice,
       minimumPrice: folioLines.minimumPrice,
@@ -1616,6 +1762,8 @@ const readFolio = async (
         service_name: line.serviceName,
         slot_date: line.slotDate,
         slot_start_time: line.slotStartTime,
+        // US-A64 — the physical zone (null for an unzoned or lodging line).
+        zone_name: line.zoneName,
         // Lodging stay fields (null for a tour line).
         unit_type_id: line.unitTypeId,
         check_in: line.checkIn,
@@ -1877,7 +2025,11 @@ export const cancelBooking = async (c: PosContext) => {
   }
 
   const lineRows = await db
-    .select({ slotId: folioLines.slotId, quantity: folioLines.quantity })
+    .select({
+      slotId: folioLines.slotId,
+      quantity: folioLines.quantity,
+      zoneId: folioLines.zoneId,
+    })
     .from(folioLines)
     .where(and(eq(folioLines.folioId, id), eq(folioLines.organizationId, org)))
 
@@ -1895,7 +2047,23 @@ export const cancelBooking = async (c: PosContext) => {
       .where(and(eq(folios.id, id), eq(folios.organizationId, org))),
   ]
   for (const line of lineRows) {
-    if (line.slotId) {
+    if (!line.slotId) continue
+    if (line.zoneId) {
+      // US-A64 — release the seats to the zone counter, then reconcile the slot totals.
+      statements.push(
+        db
+          .update(slotZones)
+          .set({ booked: sql`${slotZones.booked} - ${line.quantity}`, updatedAt: new Date() })
+          .where(
+            and(
+              eq(slotZones.slotId, line.slotId),
+              eq(slotZones.zoneId, line.zoneId),
+              eq(slotZones.organizationId, org),
+            ),
+          ),
+        reconcileSlotTotals(db, line.slotId),
+      )
+    } else {
       statements.push(
         db
           .update(slots)
@@ -2014,6 +2182,7 @@ export const reactivateBooking = async (c: PosContext) => {
       quantity: folioLines.quantity,
       slotDate: folioLines.slotDate,
       slotStartTime: folioLines.slotStartTime,
+      zoneId: folioLines.zoneId,
       isFlexible: services.isFlexible,
       flexCapacityPct: services.flexCapacityPct,
     })
@@ -2054,8 +2223,59 @@ export const reactivateBooking = async (c: PosContext) => {
   }
 
   // Re-decrement each slot atomically with the effective-capacity guard; compensate on failure.
-  const applied: { slotId: string; qty: number }[] = []
+  // US-A64 — a zoned line re-blocks its OWN zone counter (a competing sale may have filled it while
+  // this booking was cancelled → 409, same as a filled tour); others re-block the raw slot.
+  const applied: { slotId: string; qty: number; zoneId?: string | null }[] = []
+  const revertApplied = async () => {
+    for (const a of applied) {
+      if (a.zoneId) {
+        await db
+          .update(slotZones)
+          .set({ booked: sql`${slotZones.booked} - ${a.qty}`, updatedAt: new Date() })
+          .where(
+            and(
+              eq(slotZones.slotId, a.slotId),
+              eq(slotZones.zoneId, a.zoneId),
+              eq(slotZones.organizationId, org),
+            ),
+          )
+        await reconcileSlotTotals(db, a.slotId)
+      } else {
+        await db
+          .update(slots)
+          .set({ booked: sql`${slots.booked} - ${a.qty}`, updatedAt: new Date() })
+          .where(and(eq(slots.id, a.slotId), eq(slots.organizationId, org)))
+      }
+    }
+  }
   for (const line of lineRows) {
+    if (line.zoneId) {
+      const decremented = await db
+        .update(slotZones)
+        .set({ booked: sql`${slotZones.booked} + ${line.quantity}`, updatedAt: new Date() })
+        .where(
+          and(
+            eq(slotZones.slotId, line.slotId),
+            eq(slotZones.zoneId, line.zoneId),
+            eq(slotZones.organizationId, org),
+            eq(slotZones.status, 'active'),
+            gte(sql`${slotZones.capacity} - ${slotZones.booked}`, line.quantity),
+          ),
+        )
+        .returning({ id: slotZones.id })
+      if (decremented.length === 0) {
+        await revertApplied()
+        throw new ApiError(
+          'NO_CAPACITY_AVAILABLE',
+          409,
+          'No hay cupo disponible para reactivar este apartado',
+        )
+      }
+      await reconcileSlotTotals(db, line.slotId)
+      applied.push({ slotId: line.slotId, qty: line.quantity, zoneId: line.zoneId })
+      continue
+    }
+
     const flexMargin =
       line.isFlexible && line.flexCapacityPct > 0
         ? sql`((${slots.capacity} * ${line.flexCapacityPct}) / 100)`
@@ -2074,12 +2294,7 @@ export const reactivateBooking = async (c: PosContext) => {
       .returning({ id: slots.id })
 
     if (decremented.length === 0) {
-      for (const a of applied) {
-        await db
-          .update(slots)
-          .set({ booked: sql`${slots.booked} - ${a.qty}`, updatedAt: new Date() })
-          .where(and(eq(slots.id, a.slotId), eq(slots.organizationId, org)))
-      }
+      await revertApplied()
       throw new ApiError(
         'NO_CAPACITY_AVAILABLE',
         409,
@@ -2146,12 +2361,7 @@ export const reactivateBooking = async (c: PosContext) => {
       )
       .run()
     if (!upd.meta.changes) {
-      for (const a of applied) {
-        await db
-          .update(slots)
-          .set({ booked: sql`${slots.booked} - ${a.qty}`, updatedAt: new Date() })
-          .where(and(eq(slots.id, a.slotId), eq(slots.organizationId, org)))
-      }
+      await revertApplied()
       for (const rid of reactivatedReservations) {
         await db
           .update(accommodationReservations)

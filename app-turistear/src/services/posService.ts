@@ -17,6 +17,9 @@ export interface ConfirmExtraInput {
 
 export interface ConfirmSlotLineInput {
   slot_id: string
+  /** US-A64 — the physical zone to sell into. Required on a zoned service, refused otherwise
+   * (the server enforces). A split party is one line per zone on the same slot. */
+  zone_id?: string
   quantity: number
   /** Discounted unit price (minor units); server re-validates against [minimum_price, base_price]. */
   unit_price: number

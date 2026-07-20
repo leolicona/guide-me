@@ -20,6 +20,7 @@ import { useService } from '../features/catalog/hooks/useService'
 import { ExtrasPanel } from '../features/catalog/components/ExtrasPanel'
 import { ServiceFormSheet } from '../features/catalog/components/ServiceFormSheet'
 import { UnitsSection } from '../features/catalog/components/UnitsSection'
+import { ZonesSection } from '../features/catalog/components/ZonesSection'
 import { SchedulesSection } from '../features/schedules/components/SchedulesSection'
 import { formatMoney } from '../features/catalog/types'
 import {
@@ -182,6 +183,9 @@ export default function CatalogDetailPage() {
               </Box>
             ) : (
               <>
+                {/* US-A64 — physical zones (opt-in) for a slot-based service. */}
+                <ZonesSection service={service} />
+
                 <Card
                   ref={(el: HTMLDivElement | null) => {
                     sectionRefs.current.extras = el

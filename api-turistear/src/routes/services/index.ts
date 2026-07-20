@@ -58,6 +58,23 @@ import {
   updateSeasonSchema,
   updateUnitTypeSchema,
 } from './lodging.schema'
+import {
+  closeSlotZone,
+  createZone,
+  deactivateZone,
+  deleteZone,
+  disableZones,
+  enableZones,
+  listZones,
+  reactivateZone,
+  reopenSlotZone,
+  updateZone,
+} from './zones.handler'
+import {
+  createZoneSchema,
+  enableZonesSchema,
+  updateZoneSchema,
+} from './zones.schema'
 
 const services = new Hono<{
   Bindings: CloudflareBindings
@@ -124,6 +141,20 @@ services.post(
 )
 services.get('/:id/schedules', listSchedules)
 services.post('/:id/schedules/:scheduleId/deactivate', deactivateSchedule)
+
+// Zoned Capacity (US-A64) — physical zones inside a slot-based service's departures. Admin-only
+// via the `*` middleware above. Spec: docs/catalog/zoned-capacity.spec.md.
+services.post('/:id/zones/enable', zValidator('json', enableZonesSchema, validationHook), enableZones)
+services.post('/:id/zones/disable', disableZones)
+services.get('/:id/zones', listZones)
+services.post('/:id/zones', zValidator('json', createZoneSchema, validationHook), createZone)
+services.put('/:id/zones/:zoneId', zValidator('json', updateZoneSchema, validationHook), updateZone)
+services.delete('/:id/zones/:zoneId', deleteZone)
+services.post('/:id/zones/:zoneId/deactivate', deactivateZone)
+services.post('/:id/zones/:zoneId/reactivate', reactivateZone)
+// Per-departure closure (the rain case) — close/reopen one zone on a single slot.
+services.post('/:id/slots/:slotId/zones/:zoneId/close', closeSlotZone)
+services.post('/:id/slots/:slotId/zones/:zoneId/reopen', reopenSlotZone)
 
 // Accommodation / lodging (US-A59–A63, v2 unit-type inventory) — unit types + per-type seasons &
 // quantity block-outs, nested under a lodging service. Admin-only via the `*` middleware above.

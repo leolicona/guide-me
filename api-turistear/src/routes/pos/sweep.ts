@@ -1,7 +1,8 @@
 import type { BatchItem } from 'drizzle-orm/batch'
 import { and, eq, lte, sql } from 'drizzle-orm'
 import { getDb } from '../../db/client'
-import { accommodationReservations, folioLines, folios, slots } from '../../db/schema'
+import { accommodationReservations, folioLines, folios, slots, slotZones } from '../../db/schema'
+import { reconcileSlotTotals } from '../services/zones.reconcile'
 
 // US-AG07 (P3) — auto-expiry sweep. Cancels every booking past its `booking_expires_at`, releasing
 // its held spots back into inventory (so the seats free up for last-minute walk-ins). The deposit
@@ -21,7 +22,11 @@ export async function sweepExpiredBookings(env: CloudflareBindings): Promise<num
   let swept = 0
   for (const folio of expired) {
     const lineRows = await db
-      .select({ slotId: folioLines.slotId, quantity: folioLines.quantity })
+      .select({
+        slotId: folioLines.slotId,
+        quantity: folioLines.quantity,
+        zoneId: folioLines.zoneId,
+      })
       .from(folioLines)
       .where(
         and(
@@ -49,20 +54,37 @@ export async function sweepExpiredBookings(env: CloudflareBindings): Promise<num
     ]
     for (const line of lineRows) {
       if (!line.slotId) continue // a lodging stay line has no slot (released via reservations below)
-      statements.push(
-        db
-          .update(slots)
-          .set({
-            booked: sql`${slots.booked} - ${line.quantity}`,
-            updatedAt: new Date(),
-          })
-          .where(
-            and(
-              eq(slots.id, line.slotId),
-              eq(slots.organizationId, folio.organizationId),
+      if (line.zoneId) {
+        // US-A64 — return the seats to the zone counter, then re-derive the slot totals.
+        statements.push(
+          db
+            .update(slotZones)
+            .set({ booked: sql`${slotZones.booked} - ${line.quantity}`, updatedAt: new Date() })
+            .where(
+              and(
+                eq(slotZones.slotId, line.slotId),
+                eq(slotZones.zoneId, line.zoneId),
+                eq(slotZones.organizationId, folio.organizationId),
+              ),
             ),
-          ),
-      )
+          reconcileSlotTotals(db, line.slotId),
+        )
+      } else {
+        statements.push(
+          db
+            .update(slots)
+            .set({
+              booked: sql`${slots.booked} - ${line.quantity}`,
+              updatedAt: new Date(),
+            })
+            .where(
+              and(
+                eq(slots.id, line.slotId),
+                eq(slots.organizationId, folio.organizationId),
+              ),
+            ),
+        )
+      }
     }
     // Lodging: free the stay's dates by cancelling its active reservations (deposit retained, D7).
     statements.push(

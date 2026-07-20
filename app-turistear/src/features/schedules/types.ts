@@ -15,6 +15,18 @@ export interface Slot {
   /** Derived server-side: capacity − booked. */
   remaining: number
   status: SlotStatus
+  /** US-A64 — per-zone rows on a zoned service's slot (closable per departure). Absent otherwise. */
+  zones?: SlotZone[]
+}
+
+/** US-A64 — one zone's state on a specific departure. */
+export interface SlotZone {
+  zone_id: string
+  name: string
+  capacity: number
+  booked: number
+  remaining: number
+  status: SlotStatus
 }
 
 export interface Schedule {

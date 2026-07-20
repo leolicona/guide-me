@@ -98,7 +98,7 @@ function LinePriceField({ line }: { line: SlotCartLine }) {
     const clamped = Number.isNaN(cents)
       ? line.unit_price
       : Math.min(Math.max(cents, min), base)
-    setUnitPrice(line.slot.id, clamped)
+    setUnitPrice(lineKey(line), clamped)
     setValue(String(centsToAmount(clamped)))
   }
 
@@ -264,6 +264,7 @@ export default function PosCheckoutPage() {
                             <Typography variant="subtitle2">{line.service.name}</Typography>
                             <Typography variant="caption" color="text.secondary">
                               {line.slot.date} · {line.slot.start_time}
+                              {line.zone ? ` · ${line.zone.name}` : ''}
                             </Typography>
                             {line.extras.map((e) => (
                               <Typography
@@ -285,7 +286,7 @@ export default function PosCheckoutPage() {
                               <IconButton
                                 size="small"
                                 aria-label="Menos personas"
-                                onClick={() => updateQuantity(line.slot.id, line.quantity - 1)}
+                                onClick={() => updateQuantity(lineKey(line), line.quantity - 1)}
                                 disabled={line.quantity <= 1}
                               >
                                 <RemoveRounded fontSize="small" />
@@ -296,7 +297,7 @@ export default function PosCheckoutPage() {
                               <IconButton
                                 size="small"
                                 aria-label="Más personas"
-                                onClick={() => updateQuantity(line.slot.id, line.quantity + 1)}
+                                onClick={() => updateQuantity(lineKey(line), line.quantity + 1)}
                                 disabled={line.quantity >= line.slot.remaining}
                               >
                                 <AddRounded fontSize="small" />

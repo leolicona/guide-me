@@ -10,6 +10,7 @@ import { formatMoney } from '../types'
 import { categoryLabel, pricesAtServiceLevel } from '../categories'
 import { fromNightlyRate } from '../lodging'
 import { useUnits } from '../hooks/useUnits'
+import { useZones } from '../hooks/useZones'
 import { ListRow } from '../../../components'
 
 interface ServiceRowProps {
@@ -51,6 +52,23 @@ function LodgingSummary({ serviceId }: { serviceId: string }) {
   )
 }
 
+// US-A64 — a zoned slot service's meta: its zone breakdown (shares the detail query key, so the
+// list fetch pre-warms the detail cache). The list payload carries only `zones_enabled`, so the
+// actual zone counts are fetched here.
+function ZonesSummary({ serviceId }: { serviceId: string }) {
+  const { data: zones, isLoading } = useZones(serviceId)
+  if (isLoading) {
+    return <Skeleton width={160} sx={{ fontSize: '0.875rem' }} />
+  }
+  const active = (zones ?? []).filter((z) => z.status === 'active')
+  const seats = active.reduce((sum, z) => sum + z.capacity, 0)
+  return (
+    <Typography variant="body2" color="text.secondary" className="numeric">
+      {active.length} zona{active.length === 1 ? '' : 's'} · {seats} asientos
+    </Typography>
+  )
+}
+
 // One service in the catalog list (unified ListRow v2 anatomy): title → detail page, corner
 // ✎ opens the general-info edit sheet, meta + quick-edit shortcuts branch on the category's
 // operational model (categories.ts) — slot services show price/capacity and jump to Horarios /
@@ -80,10 +98,14 @@ export function ServiceRow({
             <Typography variant="body2" color="text.secondary" className="numeric">
               {formatMoney(service.base_price)} · mín {formatMoney(service.minimum_price)}
             </Typography>
-            <Typography variant="body2" color="text.secondary">
-              Cap. {service.default_capacity}
-              {extrasCount > 0 ? ` · ${extrasCount} extra${extrasCount > 1 ? 's' : ''}` : ''}
-            </Typography>
+            {service.zones_enabled ? (
+              <ZonesSummary serviceId={service.id} />
+            ) : (
+              <Typography variant="body2" color="text.secondary">
+                Cap. {service.default_capacity}
+                {extrasCount > 0 ? ` · ${extrasCount} extra${extrasCount > 1 ? 's' : ''}` : ''}
+              </Typography>
+            )}
           </>
         ) : (
           <LodgingSummary serviceId={service.id} />
