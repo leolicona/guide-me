@@ -14,13 +14,13 @@ import {
   Divider,
   IconButton,
   Snackbar,
+  Switch,
+  FormControlLabel,
 } from '@mui/material'
 import ArrowBackRounded from '@mui/icons-material/ArrowBackRounded'
 import AddRounded from '@mui/icons-material/AddRounded'
-import BlockRounded from '@mui/icons-material/BlockRounded'
-import CheckCircleRounded from '@mui/icons-material/CheckCircleRounded'
 import EditRounded from '@mui/icons-material/EditRounded'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useParams, Link as RouterLink } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { listServices } from '../services/catalogService'
 import { useAffiliate, useInviteAffiliate } from '../features/affiliates/hooks/useAffiliates'
@@ -42,25 +42,27 @@ const SectionTitle = ({ children }: { children: React.ReactNode }) => (
   </Typography>
 )
 
-// A read-only label/value line on the summary cards (— for empty values).
-const InfoLine = ({ label, value }: { label: string; value: string | null }) => (
+// A read-only label/value line on the summary cards. Values wrap rather than truncate —
+// emails and names must stay fully readable.
+const InfoLine = ({ label, value }: { label: string; value: string }) => (
   <Box>
     <Typography variant="body2" color="text.secondary">
       {label}
     </Typography>
-    <Typography sx={{ fontWeight: 500 }} noWrap>
-      {value?.trim() ? value : '—'}
-    </Typography>
+    <Typography sx={{ fontWeight: 500, overflowWrap: 'anywhere' }}>{value}</Typography>
   </Box>
 )
 
-// Card-header row: section title left, an Editar affordance right (opens the section's sheet).
+// Card-header row: section title left, neutral corner ✎ right (opens the section's sheet) —
+// same anatomy as the catalog detail header and ListRow v2.
 const SectionHeader = ({ title, onEdit }: { title: string; onEdit: () => void }) => (
-  <Stack direction="row" sx={{ alignItems: 'center', justifyContent: 'space-between' }}>
+  <Stack direction="row" sx={{ alignItems: 'flex-start', justifyContent: 'space-between' }}>
     <SectionTitle>{title}</SectionTitle>
-    <Button size="small" startIcon={<EditRounded />} onClick={onEdit}>
-      Editar
-    </Button>
+    <Box sx={{ flexShrink: 0, mt: -1, mr: -1 }}>
+      <IconButton aria-label={`Editar ${title.toLowerCase()}`} onClick={onEdit} sx={{ color: 'text.secondary' }}>
+        <EditRounded fontSize="small" />
+      </IconButton>
+    </Box>
   </Stack>
 )
 
@@ -92,7 +94,6 @@ export default function AffiliateDetailPage() {
 // The page holds no form state — each sheet seeds itself from the fresh `affiliate` prop on open.
 function AffiliateView({ affiliate }: { affiliate: AffiliateDetail }) {
   const id = affiliate.id
-  const navigate = useNavigate()
   const servicesQuery = useQuery({
     queryKey: ['services', 'active'],
     queryFn: () => listServices('active'),
@@ -137,51 +138,74 @@ function AffiliateView({ affiliate }: { affiliate: AffiliateDetail }) {
   return (
     <Fade in timeout={400}>
       <Box sx={{ maxWidth: 720, mx: 'auto' }}>
-        <Stack
-          direction="row"
-          sx={{ alignItems: 'center', justifyContent: 'space-between', mb: 3, gap: 2 }}
+        <Button
+          component={RouterLink}
+          to="/affiliates"
+          startIcon={<ArrowBackRounded />}
+          sx={{ mb: 2 }}
         >
-          <Stack direction="row" spacing={1} sx={{ alignItems: 'center', minWidth: 0 }}>
-            <IconButton onClick={() => navigate('/affiliates')} aria-label="Volver">
-              <ArrowBackRounded />
-            </IconButton>
-            <Typography variant="h5" component="h1" noWrap>
-              {affiliate.name}
-            </Typography>
-            <StatusChip status={suspended ? 'suspended' : 'active'} />
-          </Stack>
-          {suspended ? (
-            <Button
-              color="primary"
-              startIcon={<CheckCircleRounded />}
-              onClick={() => setStatusConfirm('reactivate')}
-            >
-              Reactivar
-            </Button>
-          ) : (
-            <Button
-              color="error"
-              startIcon={<BlockRounded />}
-              onClick={() => setStatusConfirm('deactivate')}
-            >
-              Suspender
-            </Button>
-          )}
-        </Stack>
+          Afiliados
+        </Button>
 
         <Stack spacing={2.5}>
-          {/* Company info — read-only summary; edited in its sheet. */}
+          {/* Identity card — same anatomy as the catalog detail header (ListRow v2): name +
+              corner ✎, contact meta, and the estado switch in the footer. The switch is the
+              single status expression (display AND control), so no chip/button contradiction. */}
           <Card>
             <CardContent>
-              <SectionHeader
-                title="Información de la empresa"
-                onEdit={() => setEditCompany(true)}
-              />
-              <Stack spacing={1.5} sx={{ mt: 1.5 }}>
-                <InfoLine label="Nombre" value={affiliate.name} />
-                <InfoLine label="Correo de contacto" value={affiliate.contact_email} />
-                <InfoLine label="Teléfono de contacto" value={affiliate.contact_phone} />
-              </Stack>
+              <Box sx={{ display: 'flex', gap: 1.5, alignItems: 'flex-start' }}>
+                <Box sx={{ flex: 1, minWidth: 0 }}>
+                  <Typography variant="h5" component="h1" sx={{ overflowWrap: 'anywhere' }}>
+                    {affiliate.name}
+                  </Typography>
+                  <Stack spacing={1.5} sx={{ mt: 1.5 }}>
+                    <InfoLine
+                      label="Correo de contacto"
+                      value={affiliate.contact_email?.trim() ? affiliate.contact_email : '—'}
+                    />
+                    {affiliate.contact_phone?.trim() ? (
+                      <InfoLine label="Teléfono de contacto" value={affiliate.contact_phone} />
+                    ) : (
+                      <Box>
+                        <Button
+                          size="small"
+                          startIcon={<AddRounded />}
+                          onClick={() => setEditCompany(true)}
+                          sx={{ ml: -1 }}
+                        >
+                          Agregar teléfono
+                        </Button>
+                      </Box>
+                    )}
+                  </Stack>
+                </Box>
+                <Box sx={{ flexShrink: 0, mt: -1, mr: -1 }}>
+                  <IconButton
+                    aria-label="Editar información de la empresa"
+                    onClick={() => setEditCompany(true)}
+                    sx={{ color: 'text.secondary' }}
+                  >
+                    <EditRounded fontSize="small" />
+                  </IconButton>
+                </Box>
+              </Box>
+              <Divider sx={{ mt: 1.5, mb: 0.5 }} />
+              <Box sx={{ display: 'flex', justifyContent: 'flex-end' }}>
+                <FormControlLabel
+                  control={
+                    <Switch
+                      color="secondary"
+                      checked={!suspended}
+                      onChange={() =>
+                        setStatusConfirm(suspended ? 'reactivate' : 'deactivate')
+                      }
+                    />
+                  }
+                  label={suspended ? 'Suspendido' : 'Activo'}
+                  slotProps={{ typography: { variant: 'body2' } }}
+                  sx={{ mr: 0 }}
+                />
+              </Box>
             </CardContent>
           </Card>
 
@@ -194,19 +218,28 @@ function AffiliateView({ affiliate }: { affiliate: AffiliateDetail }) {
               />
               <Box sx={{ mt: 1.5 }}>
                 {affiliate.commissions.length === 0 ? (
-                  <Typography variant="body2" color="text.secondary">
-                    Sin servicios habilitados — usa Editar para activar los que este afiliado
-                    puede vender.
-                  </Typography>
+                  <Stack spacing={1} sx={{ alignItems: 'flex-start' }}>
+                    <Typography variant="body2" color="text.secondary">
+                      Sin servicios habilitados.
+                    </Typography>
+                    <Button
+                      size="small"
+                      startIcon={<AddRounded />}
+                      onClick={() => setEditCommissions(true)}
+                      sx={{ ml: -1 }}
+                    >
+                      Habilitar servicios
+                    </Button>
+                  </Stack>
                 ) : (
                   <Stack spacing={1}>
                     {affiliate.commissions.map((c) => (
                       <Stack
                         key={c.service_id}
                         direction="row"
-                        sx={{ alignItems: 'center', justifyContent: 'space-between', gap: 2 }}
+                        sx={{ alignItems: 'baseline', justifyContent: 'space-between', gap: 2 }}
                       >
-                        <Typography noWrap sx={{ minWidth: 0 }}>
+                        <Typography sx={{ minWidth: 0, overflowWrap: 'anywhere' }}>
                           {c.service_name}
                           {c.service_status === 'inactive' && (
                             <Typography component="span" variant="body2" color="text.secondary">
@@ -247,14 +280,18 @@ function AffiliateView({ affiliate }: { affiliate: AffiliateDetail }) {
                   <Stack
                     key={u.id}
                     direction="row"
-                    sx={{ alignItems: 'center', justifyContent: 'space-between' }}
+                    sx={{ alignItems: 'center', justifyContent: 'space-between', gap: 1.5 }}
                   >
                     <Box sx={{ minWidth: 0 }}>
-                      <Typography noWrap>
+                      <Typography sx={{ overflowWrap: 'anywhere' }}>
                         {u.name}
                         {u.position ? ` · ${u.position}` : ''}
                       </Typography>
-                      <Typography variant="body2" color="text.secondary" noWrap>
+                      <Typography
+                        variant="body2"
+                        color="text.secondary"
+                        sx={{ overflowWrap: 'anywhere' }}
+                      >
                         {u.email}
                       </Typography>
                     </Box>
@@ -265,9 +302,13 @@ function AffiliateView({ affiliate }: { affiliate: AffiliateDetail }) {
                   <Stack
                     key={inv.id}
                     direction="row"
-                    sx={{ alignItems: 'center', justifyContent: 'space-between' }}
+                    sx={{ alignItems: 'center', justifyContent: 'space-between', gap: 1.5 }}
                   >
-                    <Typography variant="body2" color="text.secondary" noWrap>
+                    <Typography
+                      variant="body2"
+                      color="text.secondary"
+                      sx={{ minWidth: 0, overflowWrap: 'anywhere' }}
+                    >
                       {inv.identity}
                     </Typography>
                     <Chip size="small" variant="outlined" label="Invitación pendiente" />

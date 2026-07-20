@@ -41,5 +41,16 @@ export const WEEKDAY_LABELS = [
   'Sáb',
 ] as const
 
+/** Full weekday names, same 0 = Sunday indexing (rule summaries read as prose). */
+export const WEEKDAY_FULL_LABELS = [
+  'Domingo',
+  'Lunes',
+  'Martes',
+  'Miércoles',
+  'Jueves',
+  'Viernes',
+  'Sábado',
+] as const
+
 /** Human label for a slot's recurring origin. */
 export const isRecurring = (slot: Slot): boolean => slot.schedule_id !== null

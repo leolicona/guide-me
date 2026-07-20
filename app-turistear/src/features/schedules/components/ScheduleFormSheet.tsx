@@ -72,9 +72,14 @@ export function ScheduleFormSheet({
       },
       onError: (error: unknown) => {
         if (error instanceof ServiceError && error.status === 400) {
-          setError('end_date', {
+          // Two distinct 400s share VALIDATION_ERROR — tell them apart by message
+          // so the operator sees which field is actually wrong.
+          const noMatchingWeekday = error.message.includes('weekdays')
+          setError(noMatchingWeekday ? 'weekdays' : 'end_date', {
             type: 'manual',
-            message: 'Revisa las fechas (el periodo no puede exceder un año).',
+            message: noMatchingWeekday
+              ? 'Ninguno de estos días cae dentro del periodo elegido.'
+              : 'Revisa las fechas (el periodo no puede exceder un año).',
           })
         }
       },

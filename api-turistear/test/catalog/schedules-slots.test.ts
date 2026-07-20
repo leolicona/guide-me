@@ -568,6 +568,54 @@ describe('US-A10 — recurring schedules', () => {
     expect(await countSlots()).toBe(20)
   })
 
+  it('Regression (BUG-012 orphans) — the schedule row and its slots commit together', async () => {
+    const { organizationId } = await seedUser({ email: ADMIN_EMAIL })
+    const { serviceId } = await seedService({ organizationId, defaultCapacity: 10 })
+
+    // The parent row used to be inserted in its own round trip BEFORE the slot
+    // batch, so a throw during materialization committed a rule owning no dates.
+    // Whatever the outcome, the two must now agree: schedule ⇒ its slots exist.
+    const res = await SELF.fetch(`${base}/${serviceId}/schedules`, {
+      method: 'POST',
+      headers: jsonAuth(ADMIN_EMAIL),
+      body: JSON.stringify({
+        weekdays: [5, 6],
+        start_time: '21:45',
+        start_date: '2026-06-12',
+        end_date: '2026-12-31',
+      }),
+    })
+
+    expect(res.status).toBe(201)
+    const body = (await res.json()) as { schedule: { id: string }; slots_generated: number }
+    expect(body.slots_generated).toBe(58) // the exact shape of the production orphan
+    expect(await countSchedules()).toBe(1)
+    expect(await countSlots()).toBe(58)
+  })
+
+  it('A window matching none of the selected weekdays → 400, no orphan rule written', async () => {
+    const { organizationId } = await seedUser({ email: ADMIN_EMAIL })
+    const { serviceId } = await seedService({ organizationId })
+
+    // 2026-06-09 is a Tuesday; the rule asks for Mon/Wed/Thu. Previously this
+    // committed an "active" schedule that could never generate a single date.
+    const res = await SELF.fetch(`${base}/${serviceId}/schedules`, {
+      method: 'POST',
+      headers: jsonAuth(ADMIN_EMAIL),
+      body: JSON.stringify({
+        weekdays: [1, 3, 4],
+        start_time: '06:00',
+        start_date: '2026-06-09',
+        end_date: '2026-06-09',
+      }),
+    })
+
+    expect(res.status).toBe(400)
+    expect(((await res.json()) as any).error.code).toBe('VALIDATION_ERROR')
+    expect(await countSchedules()).toBe(0)
+    expect(await countSlots()).toBe(0)
+  })
+
   it('Scenario 12 — end_date < start_date or horizon > 366 → 400, nothing written', async () => {
     const { organizationId } = await seedUser({ email: ADMIN_EMAIL })
     const { serviceId } = await seedService({ organizationId })

@@ -357,21 +357,6 @@ export const createSchedule = async (c: ServicesContext) => {
   const capacity = input.capacity ?? service.defaultCapacity
 
   const scheduleId = crypto.randomUUID()
-  const scheduleResult = await db
-    .insert(schedules)
-    .values({
-      id: scheduleId,
-      organizationId: admin.organizationId,
-      serviceId,
-      recurrence: 'weekly',
-      weekdays: input.weekdays.join(','),
-      startTime: input.start_time,
-      capacity,
-      startDate: input.start_date,
-      endDate: input.end_date,
-      status: 'active',
-    })
-    .returning(scheduleColumns)
 
   // Candidate dates, minus those already occupied by an active slot at this time.
   const candidates = datesInRangeMatchingWeekdays(
@@ -379,6 +364,19 @@ export const createSchedule = async (c: ServicesContext) => {
     input.end_date,
     input.weekdays,
   )
+
+  // A window holding none of the chosen weekdays (e.g. Mon/Wed/Thu on a single
+  // Tuesday) can only ever be a mistake: it would commit a rule that generates
+  // nothing and then reads as "active" forever. Reject it instead of writing it.
+  // (rows.length can still legitimately be 0 when every candidate is already
+  // occupied — those dates DO exist, so that schedule is allowed through.)
+  if (candidates.length === 0) {
+    throw new ApiError(
+      'VALIDATION_ERROR',
+      400,
+      'The date range contains none of the selected weekdays',
+    )
+  }
 
   const occupied = new Set(
     (
@@ -410,19 +408,39 @@ export const createSchedule = async (c: ServicesContext) => {
       status: 'active' as const,
     }))
 
-  // One atomic batch for all chunks: a mid-way failure can no longer strand a
-  // half-materialized schedule (each chunk stays under the bound-parameter cap).
-  if (rows.length > 0) {
-    const inserts: BatchItem<'sqlite'>[] = []
-    for (let i = 0; i < rows.length; i += INSERT_CHUNK) {
-      inserts.push(db.insert(slots).values(rows.slice(i, i + INSERT_CHUNK)))
-    }
-    await db.batch(inserts as [BatchItem<'sqlite'>, ...BatchItem<'sqlite'>[]])
+  // The schedule row and ALL of its slot chunks go out as ONE D1 batch — a single
+  // transaction. Inserting the parent first in its own round trip is what stranded
+  // rules that own no dates when materialization threw (BUG-012 left six such
+  // orphans in production: the rule committed, its 58 slots did not). Each chunk
+  // still stays under the bound-parameter cap.
+  const statements: BatchItem<'sqlite'>[] = [
+    db
+      .insert(schedules)
+      .values({
+        id: scheduleId,
+        organizationId: admin.organizationId,
+        serviceId,
+        recurrence: 'weekly',
+        weekdays: input.weekdays.join(','),
+        startTime: input.start_time,
+        capacity,
+        startDate: input.start_date,
+        endDate: input.end_date,
+        status: 'active',
+      })
+      .returning(scheduleColumns),
+  ]
+  for (let i = 0; i < rows.length; i += INSERT_CHUNK) {
+    statements.push(db.insert(slots).values(rows.slice(i, i + INSERT_CHUNK)))
   }
+
+  const [scheduleResult] = await db.batch(
+    statements as [BatchItem<'sqlite'>, ...BatchItem<'sqlite'>[]],
+  )
 
   return c.json(
     {
-      schedule: serializeSchedule(scheduleResult[0]),
+      schedule: serializeSchedule((scheduleResult as ScheduleRow[])[0]),
       slots_generated: rows.length,
     },
     201,
