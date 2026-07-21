@@ -1,20 +1,28 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  // Deployed Cloudflare worker name — kept from the GuideMe era on purpose:
-  // renaming it would create a brand-new worker and orphan the custom domain.
-  "name": "api-guideme",
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Multi-environment config, resolved by @cloudflare/vite-plugin at BUILD time via the
+  // CLOUDFLARE_ENV variable (NOT `wrangler deploy --env`, which the plugin's build-output
+  // config ignores). The package scripts set it:
+  //   pnpm deploy:api:dev   → CLOUDFLARE_ENV=dev        (api-guideme-dev · api-dev.turistearya.com · guideme-db)
+  //   pnpm deploy:api:prod  → CLOUDFLARE_ENV=production (api-guideme     · api.turistearya.com     · guideme-db-prod)
+  // D1 migrations bypass vite, so THEY use `--env` directly (pnpm db:migrate:dev|prod).
+  //
+  // The TOP LEVEL is the LOCAL profile only (`vite dev`); its fallback name
+  // `api-guideme-local` keeps a stray `wrangler deploy` (CLOUDFLARE_ENV unset) OFF the
+  // prod worker. Named envs do NOT inherit `vars`, `d1_databases`, `services`, `routes`,
+  // or `triggers` — each restates them IN FULL; `main`, `compatibility_date`,
+  // `compatibility_flags` ARE inherited.
+  //
+  // Deployed worker names are kept from the GuideMe era: renaming the production worker
+  // would orphan its custom domain, secrets, and D1 binding.
+  // ─────────────────────────────────────────────────────────────────────────────
+  "name": "api-guideme-local",
   "compatibility_date": "2025-08-03",
   "main": "./src/index.tsx",
-  "routes": [
-    {
-      "pattern": "api.turistearya.com",
-      "custom_domain": true
-    }
-  ],
-  // US-AG07 (P3) — every 15 min, auto-cancel expired bookings and release their spots.
-  "triggers": {
-    "crons": ["*/15 * * * *"]
-  },
+
+  // Local (`vite dev`) bindings + vars. Secrets come from `.dev.vars`. Migrations run
+  // against the local SQLite replica via `pnpm db:migrate:local`.
   "d1_databases": [
     {
       "binding": "DB",
@@ -39,5 +47,90 @@
     // Idle-session window (seconds). Keep in sync with `refreshTokenTtlSeconds`
     // in the agnostic-auth APP_REGISTRY KV entry for app "guide-me".
     "SESSION_REFRESH_TTL_SECONDS": "2592000"
+  },
+
+  "env": {
+    // ─── DEV ─── api-guideme-dev · api-dev.turistearya.com · guideme-db-dev ───────
+    "dev": {
+      "name": "api-guideme-dev",
+      "routes": [
+        {
+          "pattern": "api-dev.turistearya.com",
+          "custom_domain": true
+        }
+      ],
+      // US-AG07 (P3) — auto-cancel expired bookings every 15 min (against the dev DB).
+      "triggers": {
+        "crons": ["*/15 * * * *"]
+      },
+      // Dev intentionally reuses the ORIGINAL guideme-db — its pre-split data was all
+      // dev/test, so it becomes the dev environment's realistic dataset. Prod starts empty
+      // on guideme-db-prod (below).
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "guideme-db",
+          "database_id": "15cd8f75-c94e-41e8-9ec0-d43b1cf73a04",
+          "migrations_dir": "migrations"
+        }
+      ],
+      // Shared auth realm (decision: dev uses the production agnostic-auth service +
+      // the "guide-me" app id; the `.turistearya.com` cookie domain spans both subdomains).
+      "services": [
+        {
+          "binding": "AGNOSTIC_AUTH_API",
+          "service": "agnostic-auth"
+        }
+      ],
+      "vars": {
+        "AGNOSTIC_AUTH_APP_ID": "guide-me",
+        "COOKIE_DOMAIN": ".turistearya.com",
+        "CORS_ORIGIN": "http://localhost:5173,https://app-dev.turistearya.com",
+        "API_BASE_URL": "https://api-dev.turistearya.com",
+        "APP_BASE_URL": "https://app-dev.turistearya.com",
+        "RESEND_FROM": "no-reply@turistearya.com",
+        "SESSION_REFRESH_TTL_SECONDS": "2592000"
+      }
+    },
+
+    // ─── PRODUCTION ─── api-guideme · api.turistearya.com · guideme-db-prod ───────
+    "production": {
+      "name": "api-guideme",
+      "routes": [
+        {
+          "pattern": "api.turistearya.com",
+          "custom_domain": true
+        }
+      ],
+      // US-AG07 (P3) — every 15 min, auto-cancel expired bookings and release their spots.
+      "triggers": {
+        "crons": ["*/15 * * * *"]
+      },
+      // Fresh, EMPTY database for the production launch (the original guideme-db, with its
+      // dev/test data, moved to env.dev above).
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "guideme-db-prod",
+          "database_id": "4f7e6b53-af6c-4c99-96e2-625f08b52c37",
+          "migrations_dir": "migrations"
+        }
+      ],
+      "services": [
+        {
+          "binding": "AGNOSTIC_AUTH_API",
+          "service": "agnostic-auth"
+        }
+      ],
+      "vars": {
+        "AGNOSTIC_AUTH_APP_ID": "guide-me",
+        "COOKIE_DOMAIN": ".turistearya.com",
+        "CORS_ORIGIN": "http://localhost:5173,https://app.turistearya.com",
+        "API_BASE_URL": "https://api.turistearya.com",
+        "APP_BASE_URL": "https://app.turistearya.com",
+        "RESEND_FROM": "no-reply@turistearya.com",
+        "SESSION_REFRESH_TTL_SECONDS": "2592000"
+      }
+    }
   }
 }

@@ -8,15 +8,18 @@
     "dev:app": "pnpm --filter app-turistear dev",
     "build:api": "pnpm --filter api-turistear build",
     "build:app": "pnpm --filter app-turistear build",
-    "deploy:api": "pnpm --filter api-turistear run deploy",
-    "deploy:app": "pnpm --filter app-turistear run deploy",
+    "deploy:api:dev": "pnpm --filter api-turistear run deploy:dev",
+    "deploy:api:prod": "pnpm --filter api-turistear run deploy:prod",
+    "deploy:app:dev": "pnpm --filter app-turistear run deploy:dev",
+    "deploy:app:prod": "pnpm --filter app-turistear run deploy:prod",
     "cf-typegen:api": "pnpm --filter api-turistear cf-typegen",
     "cf-typegen:app": "pnpm --filter app-turistear cf-typegen",
     "lint:app": "pnpm --filter app-turistear lint",
     "dev": "pnpm --parallel dev",
     "test:api": "pnpm --filter api-turistear test",
     "db:migrate:local": "pnpm --filter api-turistear db:migrate:local",
-    "db:migrate": "pnpm --filter api-turistear db:migrate",
+    "db:migrate:dev": "pnpm --filter api-turistear db:migrate:dev",
+    "db:migrate:prod": "pnpm --filter api-turistear db:migrate:prod",
     "db:generate": "pnpm --filter api-turistear db:generate"
   }
 }

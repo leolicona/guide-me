@@ -1,0 +1,53 @@
+name: Deploy Prod
+
+# main → Prod. Gated by the GitHub "production" environment: add a Required Reviewer
+# to it (Settings → Environments → production) and every run pauses for your manual
+# approval before any migration or deploy step executes.
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-prod
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    # Protection rules on this environment (required reviewer) create the approval gate.
+    environment: production
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      # Last line of defense before touching production.
+      - name: Test (api)
+        run: pnpm test:api
+
+      - name: Apply D1 migrations (prod)
+        run: pnpm db:migrate:prod
+
+      - name: Deploy API (prod)
+        run: pnpm deploy:api:prod
+
+      - name: Deploy App (prod)
+        env:
+          VITE_API_BASE_URL: https://api.turistearya.com
+        run: pnpm deploy:app:prod

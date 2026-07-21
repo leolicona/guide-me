@@ -8,7 +8,8 @@
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "npm run build && vite preview",
-    "deploy": "npm run build && wrangler deploy",
+    "deploy:dev": "CLOUDFLARE_ENV=dev npm run build && wrangler deploy",
+    "deploy:prod": "CLOUDFLARE_ENV=production npm run build && wrangler deploy",
     "cf-typegen": "wrangler types"
   },
   "dependencies": {

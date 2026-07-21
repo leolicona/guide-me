@@ -5,13 +5,15 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "$npm_execpath run build && vite preview",
-    "deploy": "$npm_execpath run build && wrangler deploy",
+    "deploy:dev": "CLOUDFLARE_ENV=dev $npm_execpath run build && wrangler deploy",
+    "deploy:prod": "CLOUDFLARE_ENV=production $npm_execpath run build && wrangler deploy",
     "cf-typegen": "wrangler types --env-interface CloudflareBindings",
     "test": "vitest run",
     "test:watch": "vitest",
     "db:generate": "drizzle-kit generate",
     "db:migrate:local": "wrangler d1 migrations apply guideme-db --local",
-    "db:migrate": "wrangler d1 migrations apply guideme-db --remote"
+    "db:migrate:dev": "wrangler d1 migrations apply guideme-db --remote --env dev",
+    "db:migrate:prod": "wrangler d1 migrations apply guideme-db-prod --remote --env production"
   },
   "dependencies": {
     "@hono/zod-validator": "^0.8.0",
