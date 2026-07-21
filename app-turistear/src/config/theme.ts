@@ -116,8 +116,24 @@ export const theme = createTheme({
             borderColor: theme.palette.primary.main,
             borderWidth: 1,
           },
-          // Focus "bloom": teal border + soft 3px outer glow.
-          '&.Mui-focused': { boxShadow: `0 0 0 3px ${theme.palette.primary.main}47` }, // ~28%
+          // Focus "bloom": teal border + soft 3px outer glow, via a pseudo-element sized to
+          // match the notched fieldset's own box (it sits 5px above the root on TOP only —
+          // MUI's built-in offset that makes room for the floating-label notch cutout). Applying
+          // box-shadow to `root` directly leaves a ~2px seam on the top edge only, where the
+          // fieldset's opaque border and the glow don't share the same box (visible as a stray
+          // hairline floating above the glow). Mirroring the fieldset's box here fixes it on all
+          // four edges.
+          '&.Mui-focused::after': {
+            content: '""',
+            position: 'absolute',
+            top: -5,
+            right: 0,
+            bottom: 0,
+            left: 0,
+            borderRadius: 'inherit',
+            boxShadow: `0 0 0 3px ${theme.palette.primary.main}47`, // ~28%
+            pointerEvents: 'none',
+          },
         }),
         input: { minHeight: 24, paddingTop: 12, paddingBottom: 12 },
       },

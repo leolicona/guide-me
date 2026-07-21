@@ -107,6 +107,7 @@ function LinePriceField({ line }: { line: SlotCartLine }) {
   return (
     <TextField
       label="Precio unitario"
+      placeholder="0.00"
       type="number"
       size="small"
       value={value}
@@ -121,6 +122,7 @@ function LinePriceField({ line }: { line: SlotCartLine }) {
             : `Mín ${formatMoney(min)} · base ${formatMoney(base)}`
       }
       slotProps={{
+        inputLabel: { shrink: true },
         input: {
           startAdornment: <InputAdornment position="start">$</InputAdornment>,
         },
@@ -336,18 +338,22 @@ export default function PosCheckoutPage() {
                 <Stack spacing={2}>
                   <TextField
                     label="Nombre (opcional)"
+                    placeholder="Juan Pérez"
                     size="small"
                     value={customerName}
                     onChange={(e) => setCustomer({ name: e.target.value })}
+                    slotProps={{ inputLabel: { shrink: true } }}
                   />
                   <TextField
                     label={isAffiliate ? 'Copia al cliente (opcional)' : 'Correo electrónico'}
+                    placeholder="cliente@correo.com"
                     size="small"
                     type="email"
                     required={!isAffiliate}
                     value={customerEmail}
                     onChange={(e) => setCustomer({ email: e.target.value })}
                     error={emailTrimmed.length > 0 && !emailValid}
+                    slotProps={{ inputLabel: { shrink: true } }}
                     helperText={
                       emailTrimmed.length > 0 && !emailValid
                         ? 'Ingresa un correo electrónico válido.'
@@ -358,9 +364,11 @@ export default function PosCheckoutPage() {
                   />
                   <TextField
                     label="Teléfono"
+                    placeholder="55 1234 5678"
                     size="small"
                     value={customerPhone}
                     onChange={(e) => setCustomer({ phone: e.target.value })}
+                    slotProps={{ inputLabel: { shrink: true } }}
                   />
                 </Stack>
             </SectionCard>
@@ -480,12 +488,14 @@ export default function PosCheckoutPage() {
                 </Stack>
                 <TextField
                   label="Monto recibido"
+                  placeholder="0.00"
                   type="number"
                   fullWidth
                   value={amountInput}
                   onChange={(e) => setAmountInput(e.target.value)}
                   error={saleState === 'INSUFFICIENT' || saleState === 'EXCESS'}
                   slotProps={{
+                    inputLabel: { shrink: true },
                     input: {
                       startAdornment: <InputAdornment position="start">$</InputAdornment>,
                     },
