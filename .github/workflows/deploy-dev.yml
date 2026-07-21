@@ -1,0 +1,54 @@
+name: Deploy Dev
+
+# develop → Dev (automatic). Migrations are applied to the dev D1 BEFORE the workers
+# ship, so the new schema is in place when the new code lands. Keep migrations additive
+# and backward-compatible (D1 has no cross-statement transaction).
+on:
+  push:
+    branches: [develop]
+
+permissions:
+  contents: read
+
+# Never let two dev deploys race; queue them instead.
+concurrency:
+  group: deploy-dev
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    # Bind this job to the GitHub "dev" environment (no protection rules).
+    environment: dev
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      # Safety net: a broken develop branch never reaches the dev workers.
+      - name: Test (api)
+        run: pnpm test:api
+
+      - name: Apply D1 migrations (dev)
+        run: pnpm db:migrate:dev
+
+      - name: Deploy API (dev)
+        run: pnpm deploy:api:dev
+
+      - name: Deploy App (dev)
+        env:
+          VITE_API_BASE_URL: https://api-dev.turistearya.com
+        run: pnpm deploy:app:dev
