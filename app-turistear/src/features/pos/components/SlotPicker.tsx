@@ -7,8 +7,9 @@ import { effectiveRemaining } from '../capacity'
 interface SlotPickerProps {
   /** All slots in the loaded window (unfiltered by party — the matrix filters per day). */
   slots: PosSlot[]
-  /** US-AG33 — the day axis to render, in order: 3 days on the "Hoy" anchor, 1 for an
-   * explicit date. A row renders for every entry, even when that day has no slot. */
+  /** US-AG33 — the candidate day axis, in order: 3 days on the "Hoy" anchor, 1 for an explicit
+   * date. A day the service doesn't operate (no slots at all) is dropped, not rendered — only
+   * operating days appear (a full one reads "Agotado"). */
   days: string[]
   /** Real org-local today, for the "Hoy" relative label. */
   today: string
@@ -31,10 +32,13 @@ const dayLabel = (date: string, today: string): string => {
   return `${cap} ${d.getDate()}`
 }
 
-// US-AG33/AG34 — the Bottom Sheet's date/time matrix. One row per `days` entry (always
-// rendered, so a sold-out day still shows its "(Agotado)" label); within a day, only slots
-// that seat the whole group are shown (US-AG32), and a slot dipping into the overbooking
-// cushion is painted orange with "Usando X cupos extra" (US-AG34) — advisory, never blocking.
+// US-AG33/AG34 — the Bottom Sheet's date/time matrix. A row renders only for days the service
+// actually operates (≥ 1 slot in the window): a day with no slots at all is a NON-operating day
+// (the service doesn't run then) and is dropped entirely — never mislabeled "Agotado", which
+// means sold out and would imply it runs. An operating day with no seats left for the group DOES
+// read "Agotado" (US-AG33). Within a day, only slots that seat the whole group are shown
+// (US-AG32); a slot dipping into the overbooking cushion is painted orange with "Usando X cupos
+// extra" (US-AG34) — advisory, never blocking.
 export function SlotPicker({
   slots,
   days,
@@ -48,12 +52,15 @@ export function SlotPicker({
   return (
     <Stack spacing={2}>
       {days.map((date) => {
-        // US-AG32 — only slots that seat the whole group survive (non-fitting stay out of
-        // the DOM). A day with none left renders disabled as "(Agotado)" (US-AG33).
-        const fitting = slots.filter(
-          (s) =>
-            s.date === date &&
-            effectiveRemaining(s, isFlexible, flexCapacityPct) >= partySize,
+        // A day the service doesn't operate has no slot rows at all — drop it so the window
+        // never presents a non-running day as "Agotado" (sold out). Only operating days remain.
+        const daySlots = slots.filter((s) => s.date === date)
+        if (daySlots.length === 0) return null
+
+        // US-AG32 — only slots that seat the whole group survive (non-fitting stay out of the
+        // DOM). An operating day with none left renders disabled as "(Agotado)" (US-AG33).
+        const fitting = daySlots.filter(
+          (s) => effectiveRemaining(s, isFlexible, flexCapacityPct) >= partySize,
         )
         const soldOut = fitting.length === 0
 

@@ -13,6 +13,7 @@ import {
   Alert,
   Fade,
   Stack,
+  Chip,
   Badge,
   Snackbar,
 } from '@mui/material'
@@ -20,9 +21,11 @@ import { filterChipSx, filterStripSx } from '../features/filters'
 import { MoneyText } from '../components'
 import ShoppingCartRounded from '@mui/icons-material/ShoppingCartRounded'
 import CalendarMonthRounded from '@mui/icons-material/CalendarMonthRounded'
+import TuneRounded from '@mui/icons-material/TuneRounded'
 import { usePosServices } from '../features/pos/hooks'
 import { AvailabilityChip } from '../features/pos/components/AvailabilityChip'
 import { ServiceSheet } from '../features/pos/components/ServiceSheet'
+import { PosCategorySheet } from '../features/pos/components/PosCategorySheet'
 import {
   LodgingStaySheet,
   type LodgingStayTarget,
@@ -114,13 +117,20 @@ export default function PosCatalogPage() {
       prev.includes(c) ? prev.filter((x) => x !== c) : [...prev, c],
     )
   // US-AG31 — tapping a card opens this service in the Bottom Sheet (no navigation, the
-  // catalog stays mounted). `added` drives the success Snackbar lifted up from the sheet.
-  const [openServiceId, setOpenServiceId] = useState<string | null>(null)
+  // catalog stays mounted). We carry the card's `next_slot_date` so the sheet can open on the
+  // service's next available departure (US-AG33) without touching the global filter. `added`
+  // drives the success Snackbar lifted up from the sheet.
+  const [openService, setOpenService] = useState<{
+    id: string
+    nextSlotDate: string | null
+  } | null>(null)
   // US-AG36 (v2) — a unit-type card opens the type-centric stay sheet instead of the slot sheet.
   const [openLodging, setOpenLodging] = useState<LodgingStayTarget | null>(null)
   const [added, setAdded] = useState(false)
   // US-AG35 — the calendar Bottom Sheet (single-day or range picker) toggles off this state.
   const [datePickerOpen, setDatePickerOpen] = useState(false)
+  // US-A37 — the category filter now lives in its own Bottom Sheet (opened from the strip icon).
+  const [categoryPickerOpen, setCategoryPickerOpen] = useState(false)
 
   const all = services ?? []
   const byAvailability = hideSoldOut ? all.filter((s) => s.has_availability) : all
@@ -148,26 +158,26 @@ export default function PosCatalogPage() {
 
       <Fade in timeout={400}>
         <Box>
-        {/* US-AG35 — Inline Filter Strip: multi-select category chips + a calendar button,
-            all in one horizontally scrollable row (the calendar scrolls with the chips). The
-            24px bottom margin separates this control group from the service list below. */}
+        {/* US-AG35/A37 — Filter Strip: a category-filter button (opens the category Bottom Sheet)
+            beside the calendar button. Both are icon buttons at the SAME 48px height (filterChipSx),
+            each showing its active selection inline. The 24px bottom margin separates this control
+            group from the service list below. */}
         <Box sx={{ ...filterStripSx, mb: 3 }}>
-          {/* Category chips — "Todas" clears the filter; each category toggles (US-A37). */}
-          <ButtonBase
-            onClick={() => setActiveCategories([])}
-            sx={filterChipSx(activeCategories.length === 0)}
-          >
-            Todas
-          </ButtonBase>
-          {presentCategories.map((c) => (
+          {/* Category filter — opens the sheet; mirrors the calendar button's height. Shown only
+              when the catalog actually has categories to filter by. */}
+          {presentCategories.length > 0 && (
             <ButtonBase
-              key={c}
-              onClick={() => toggleCategory(c)}
-              sx={filterChipSx(activeCategories.includes(c))}
+              onClick={() => setCategoryPickerOpen(true)}
+              sx={filterChipSx(activeCategories.length > 0)}
+              aria-label="Filtrar por categoría"
             >
-              {categoryLabel(c)}
+              <TuneRounded sx={{ fontSize: 20 }} />
+              {activeCategories.length > 0 &&
+                (activeCategories.length === 1
+                  ? categoryLabel(activeCategories[0])
+                  : `${activeCategories.length} categorías`)}
             </ButtonBase>
-          ))}
+          )}
 
           {/* Calendar button — opens the sheet; shows any explicit day/range pick. */}
           <ButtonBase
@@ -216,7 +226,10 @@ export default function PosCatalogPage() {
                             propertyName: item.property_name || undefined,
                             maxCapacity: item.max_capacity,
                           })
-                        : setOpenServiceId(item.id)
+                        : setOpenService({
+                            id: item.id,
+                            nextSlotDate: item.next_slot_date,
+                          })
                     }
                     sx={{
                       height: '100%',
@@ -225,21 +238,23 @@ export default function PosCatalogPage() {
                     }}
                   >
                     <CardContent sx={{ p: 3, '&:last-child': { pb: 3 } }}>
-                      {/* Availability leads — the agent reads this before the name. The type
-                          card adds the low-inventory "Quedan N" urgency chip (icon-paired
-                          semantics live in the chip color; never teal). */}
+                      {/* Availability leads — the agent reads this before the name.
+                          With "ocultar agotados" on, the list is already availability-only, so a
+                          "Disponible" chip on every card is redundant — show it only when sold-out
+                          cards can appear (filter off), where it earns its place distinguishing
+                          Disponible from Agotado. The category tag (US-A37) follows, so it still
+                          leads the row when availability is hidden. */}
                       <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
-                        <AvailabilityChip available={item.has_availability} />
-                        {item.item_type === 'unit_type' &&
-                          item.has_availability &&
-                          item.remaining <= 2 && (
-                            <Typography
-                              variant="caption"
-                              sx={{ color: 'var(--amber-700, #B45309)', fontWeight: 600 }}
-                            >
-                              Quedan {item.remaining}
-                            </Typography>
-                          )}
+                        {!hideSoldOut && (
+                          <AvailabilityChip available={item.has_availability} />
+                        )}
+                        {item.category && (
+                          <Chip
+                            size="small"
+                            variant="outlined"
+                            label={categoryLabel(item.category)}
+                          />
+                        )}
                       </Stack>
 
                       <Typography
@@ -378,12 +393,23 @@ export default function PosCatalogPage() {
         }}
       />
 
+      {/* US-A37 — the category filter Bottom Sheet (multi-select, applies live). */}
+      <PosCategorySheet
+        open={categoryPickerOpen}
+        onClose={() => setCategoryPickerOpen(false)}
+        categories={presentCategories}
+        active={activeCategories}
+        onToggle={toggleCategory}
+        onClear={() => setActiveCategories([])}
+      />
+
       {/* US-AG31 — Bottom Sheet for fast sale config; closes + snackbars on add. */}
       <ServiceSheet
-        serviceId={openServiceId}
-        onClose={() => setOpenServiceId(null)}
+        serviceId={openService?.id ?? null}
+        nextSlotDate={openService?.nextSlotDate ?? null}
+        onClose={() => setOpenService(null)}
         onAdded={() => {
-          setOpenServiceId(null)
+          setOpenService(null)
           setAdded(true)
         }}
       />
