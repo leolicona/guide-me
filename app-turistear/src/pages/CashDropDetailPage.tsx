@@ -17,13 +17,15 @@ import {
   DialogActions,
 } from '@mui/material'
 import ArrowBackRounded from '@mui/icons-material/ArrowBackRounded'
+import ReceiptLongRounded from '@mui/icons-material/ReceiptLong'
+import LockRounded from '@mui/icons-material/Lock'
 import { useDrop, useResolveDispute, useReviewDrop } from '../features/cash/hooks'
 import { AckChip } from '../features/cash/components/AckChip'
 import { SOURCE_LABEL } from '../features/cash/components/ackPresentation'
 import type { DropStatus, ReviewDropInput } from '../features/cash/types'
 import { formatMoney, amountToCents } from '../features/catalog/types'
 import { ROUTES } from '../config/routes'
-import { SectionCard, MoneyText } from '../components'
+import { SectionCard, MoneyText, StatusChip, InfoPopover } from '../components'
 
 const DROP_COLOR: Record<DropStatus, 'warning' | 'success' | 'error'> = {
   pending: 'warning',
@@ -224,11 +226,23 @@ export default function CashDropDetailPage() {
         <Dialog open={confirmOpen} onClose={() => setConfirmOpen(false)} fullWidth maxWidth="xs">
           <DialogTitle>Confirmar recibo</DialogTitle>
           <DialogContent>
-            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-              Confirma el efectivo que realmente recibiste. Si difiere de lo que el agente
-              registró ({drop ? formatMoney(drop.amount) : ''}), captura el monto corregido —
-              se descontará ese del saldo del agente y se registrará el ajuste.
-            </Typography>
+            {/* The agent-registered amount shown as a reference chip; the adjustment mechanics
+                (rarely needed) move behind the info tap. The field carries the actionable copy. */}
+            <Stack
+              direction="row"
+              spacing={1}
+              sx={{ alignItems: 'center', flexWrap: 'wrap', mb: 2 }}
+            >
+              <StatusChip
+                tone="neutral"
+                icon={<ReceiptLongRounded />}
+                label={`El agente registró ${drop ? formatMoney(drop.amount) : ''}`}
+              />
+              <InfoPopover label="Sobre el monto corregido">
+                Si el efectivo difiere de lo registrado, captura el monto corregido — se descontará
+                ese del saldo del agente y se registrará el ajuste.
+              </InfoPopover>
+            </Stack>
             <TextField
               label="Monto corregido (opcional)"
               type="number"
@@ -263,11 +277,17 @@ export default function CashDropDetailPage() {
         <Dialog open={resolveOpen} onClose={() => setResolveOpen(false)} fullWidth maxWidth="xs">
           <DialogTitle>Resolver disputa</DialogTitle>
           <DialogContent>
-            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-              Cierra la disputa con una explicación para el agente. Esto no cambia ningún
-              monto — si el agente tiene razón, registra después la corrección como un pago
-              o un nuevo cobro.
-            </Typography>
+            <Stack
+              direction="row"
+              spacing={1}
+              sx={{ alignItems: 'center', flexWrap: 'wrap', mb: 2 }}
+            >
+              <StatusChip tone="neutral" icon={<LockRounded />} label="No cambia montos" />
+              <InfoPopover label="Cómo corregir un monto">
+                Si el agente tiene razón, registra después la corrección como un pago o un nuevo
+                cobro. La resolución sólo cierra la disputa con una explicación.
+              </InfoPopover>
+            </Stack>
             <TextField
               label="Resolución"
               fullWidth
@@ -300,9 +320,13 @@ export default function CashDropDetailPage() {
         <Dialog open={rejectOpen} onClose={() => setRejectOpen(false)} fullWidth maxWidth="xs">
           <DialogTitle>¿Rechazar esta entrega?</DialogTitle>
           <DialogContent>
-            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-              El agente sigue siendo responsable de este efectivo — su saldo no cambia. Agrega una nota explicando por qué (ej. una diferencia en el monto).
-            </Typography>
+            <Box sx={{ mb: 2 }}>
+              <StatusChip
+                tone="neutral"
+                icon={<LockRounded />}
+                label="Su saldo no cambia · sigue responsable"
+              />
+            </Box>
             <TextField
               label="Razón (opcional)"
               fullWidth
