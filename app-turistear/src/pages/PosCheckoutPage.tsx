@@ -14,6 +14,7 @@ import {
   ToggleButton,
   ToggleButtonGroup,
   Chip,
+  Tooltip,
 } from '@mui/material'
 import ArrowBackRounded from '@mui/icons-material/ArrowBackRounded'
 import AddRounded from '@mui/icons-material/AddRounded'
@@ -23,6 +24,7 @@ import PaymentsRounded from '@mui/icons-material/PaymentsRounded'
 import CreditCardRounded from '@mui/icons-material/CreditCardRounded'
 import AccountBalanceRounded from '@mui/icons-material/AccountBalanceRounded'
 import LinkRounded from '@mui/icons-material/LinkRounded'
+import SavingsRounded from '@mui/icons-material/SavingsRounded'
 import { useConfirmSale } from '../features/pos/hooks'
 import { useMyOrganization } from '../features/organization'
 import { useCurrentUser } from '../features/auth/CurrentUserContext'
@@ -40,7 +42,7 @@ import { StayCartLine } from '../features/pos/components/StayCartLine'
 import { ServiceError } from '../services/authService'
 import { formatMoney, amountToCents, centsToAmount } from '../features/catalog/types'
 import { ROUTES } from '../config/routes'
-import { SectionCard, MoneyText } from '../components'
+import { SectionCard, MoneyText, InfoPopover } from '../components'
 
 // customer_email is mandatory at POS — it's the only delivery channel for the ticket + QR
 // in Phase 1. Mirror the backend's validation so the agent gets immediate feedback.
@@ -294,14 +296,26 @@ export default function PosCheckoutPage() {
                               <Typography sx={{ minWidth: 24, textAlign: 'center' }}>
                                 {line.quantity}
                               </Typography>
-                              <IconButton
-                                size="small"
-                                aria-label="Más personas"
-                                onClick={() => updateQuantity(lineKey(line), line.quantity + 1)}
-                                disabled={line.quantity >= line.slot.remaining}
+                              <Tooltip
+                                title={
+                                  line.quantity >= line.slot.remaining
+                                    ? `Máximo disponible: ${line.slot.remaining}`
+                                    : ''
+                                }
+                                enterTouchDelay={0}
                               >
-                                <AddRounded fontSize="small" />
-                              </IconButton>
+                                {/* span keeps the tooltip reachable while the button is disabled */}
+                                <span>
+                                  <IconButton
+                                    size="small"
+                                    aria-label="Más personas"
+                                    onClick={() => updateQuantity(lineKey(line), line.quantity + 1)}
+                                    disabled={line.quantity >= line.slot.remaining}
+                                  >
+                                    <AddRounded fontSize="small" />
+                                  </IconButton>
+                                </span>
+                              </Tooltip>
                               <IconButton
                                 size="small"
                                 aria-label="Eliminar artículo"
@@ -351,7 +365,22 @@ export default function PosCheckoutPage() {
                 </Stack>
             </SectionCard>
 
-            <SectionCard title="Método de pago">
+            <SectionCard
+              title="Método de pago"
+              action={
+                <InfoPopover label="Cómo afecta el método de pago a tu caja">
+                  <Stack spacing={1}>
+                    <Box>
+                      <b>Efectivo</b> entra a tu caja — lo entregas a la empresa en el corte.
+                    </Box>
+                    <Box>
+                      <b>Tarjeta, transferencia y link</b> los cobra la empresa directamente: no
+                      suman a tu caja, pero generas tu comisión igual.
+                    </Box>
+                  </Stack>
+                </InfoPopover>
+              }
+            >
                 {/* US-AG29 — four methods; everything except Efectivo is electronic (no
                     cash debt, commission still earned). Two rows so each stays tappable. */}
                 <Stack spacing={1}>
@@ -388,15 +417,27 @@ export default function PosCheckoutPage() {
                     </ToggleButton>
                   </ToggleButtonGroup>
                 </Stack>
-                <Typography
-                  variant="caption"
-                  color="text.secondary"
-                  sx={{ display: 'block', mt: 1.5 }}
+                {/* Structured, at-a-glance consequence — flips with the selection (replaces the
+                    former help paragraph; the full rules live behind the header's info tap). */}
+                <Stack
+                  direction="row"
+                  spacing={0.75}
+                  sx={{ alignItems: 'center', mt: 1.5, color: 'text.secondary' }}
                 >
-                  {paymentMethod === 'cash'
-                    ? 'Efectivo recibido — se suma al saldo de caja que entregas a la empresa.'
-                    : 'Cobro electrónico — lo recibe la empresa: no suma efectivo a tu caja, pero sí genera comisión.'}
-                </Typography>
+                  {paymentMethod === 'cash' ? (
+                    <>
+                      <SavingsRounded sx={{ fontSize: 18 }} />
+                      <Typography variant="caption">Entra a tu caja</Typography>
+                    </>
+                  ) : (
+                    <>
+                      <AccountBalanceRounded sx={{ fontSize: 18 }} />
+                      <Typography variant="caption">
+                        Lo cobra la empresa · generas comisión
+                      </Typography>
+                    </>
+                  )}
+                </Stack>
             </SectionCard>
 
             <SectionCard>
