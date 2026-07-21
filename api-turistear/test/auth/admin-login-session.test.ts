@@ -134,7 +134,7 @@ describe('Admin Login — POST /api/auth/login', () => {
     expect(cookieHeader).toMatch(/Secure/i)
     expect(cookieHeader).toMatch(/SameSite=Lax/i)
     expect(cookieHeader).toMatch(/Max-Age=900/)
-    expect(cookieHeader).toMatch(/Max-Age=2592000/)
+    expect(cookieHeader).toMatch(/Max-Age=5184000/)
   })
 
   it('Scenario 2: returns 401 INVALID_CREDENTIALS when password is incorrect', async () => {
@@ -286,7 +286,7 @@ describe('Auth Middleware — protected routes', () => {
     expect(cookieHeader).toMatch(/gm_access=/)
     expect(cookieHeader).toMatch(/gm_refresh=/)
     expect(cookieHeader).toMatch(/Max-Age=900/)
-    expect(cookieHeader).toMatch(/Max-Age=2592000/)
+    expect(cookieHeader).toMatch(/Max-Age=5184000/)
   })
 
   it('Scenario 8: returns 401 UNAUTHORIZED — and does NOT clear cookies — when refresh fails (BUG-014)', async () => {
