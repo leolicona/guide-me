@@ -109,7 +109,7 @@ function KpiHeader({ balances }: { balances: BalanceListItem[] }) {
         <Stack direction="row" spacing={2} divider={<Divider orientation="vertical" flexItem />}>
           <KpiStat label="Efectivo en la calle" value={formatMoney(cashInField)} />
           <KpiStat
-            label="Entregas por confirmar"
+            label="Por confirmar"
             value={String(pending)}
             accent={pending > 0 ? 'warning' : undefined}
           />
@@ -578,10 +578,15 @@ function DropsTab() {
 }
 
 export default function CashBalancesPage() {
+  // Top-level split: the admin's own drawer ("Mi caja") vs. the team ("Equipo"). Mi caja is the
+  // default landing — it's the admin's own actionable cash.
+  const [section, setSection] = useState(0)
+  // Within Equipo: the balances list vs. the drops review queue.
   const [tab, setTab] = useState(0)
-  // Pending hand-ins awaiting confirmation — surfaced as a badge on the Entregas tab so the
-  // admin sees there is review work without switching to it. Shares the balances cache.
+  // Pending hand-ins awaiting confirmation — surfaced as a badge on BOTH the top-level Equipo tab
+  // (so the admin sees review work while on Mi caja) and the Entregas sub-tab. Shares the cache.
   const { data: pendingCount } = usePendingDropCount(true)
+  const pendingBadgeSx = { '& .MuiBadge-badge': { right: -14, top: 2 } }
 
   return (
     <Fade in timeout={400}>
@@ -590,28 +595,36 @@ export default function CashBalancesPage() {
           Caja
         </Typography>
 
-        {/* US-A35 — the admin's own drawer, pinned above the team. */}
-        <TuCajaSection />
-
-        <Typography variant="overline" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
-          Equipo
-        </Typography>
-        <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ mb: 3 }}>
-          <Tab label="Saldos" />
+        <Tabs value={section} onChange={(_, v) => setSection(v)} sx={{ mb: 3 }}>
+          <Tab label="Mi caja" />
           <Tab
             label={
-              <Badge
-                color="warning"
-                badgeContent={pendingCount ?? 0}
-                sx={{ '& .MuiBadge-badge': { right: -14, top: 2 } }}
-              >
-                Entregas
+              <Badge color="warning" badgeContent={pendingCount ?? 0} sx={pendingBadgeSx}>
+                Equipo
               </Badge>
             }
           />
         </Tabs>
 
-        {tab === 0 ? <BalancesTab /> : <DropsTab />}
+        {section === 0 ? (
+          // US-A35 — the admin's own drawer, self-authorized moves.
+          <TuCajaSection />
+        ) : (
+          <>
+            <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ mb: 3 }}>
+              <Tab label="Saldos" />
+              <Tab
+                label={
+                  <Badge color="warning" badgeContent={pendingCount ?? 0} sx={pendingBadgeSx}>
+                    Entregas
+                  </Badge>
+                }
+              />
+            </Tabs>
+
+            {tab === 0 ? <BalancesTab /> : <DropsTab />}
+          </>
+        )}
       </Box>
     </Fade>
   )

@@ -82,12 +82,9 @@ export function TuCajaSection() {
 
   return (
     <Box sx={{ mb: 4 }}>
-      {/* The old "se confirman de inmediato (auto-confirmados)" sentence, shown structurally:
-          a persistent icon-paired badge with the full "why" one intentional tap away. */}
+      {/* The "Mi caja" tab already names this section. Lead with the auto-confirmed status —
+          the "se confirman de inmediato" rule shown as a badge, with the full "why" one tap away. */}
       <Stack direction="row" sx={{ alignItems: 'center', gap: 1, mb: 0.5 }}>
-        <Typography variant="overline" color="text.secondary">
-          Tu caja
-        </Typography>
         <StatusChip tone="neutral" icon={<BoltRounded />} label="Auto-confirmado" sx={{ height: 22 }} />
         <InfoPopover label="Cómo se confirman tus movimientos de caja">
           Como administrador, tus entregas y pagos se confirman de inmediato y se descuentan de tu
