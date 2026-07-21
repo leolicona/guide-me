@@ -492,7 +492,7 @@ describe('Complete Invitation — POST /api/auth/invite/complete', () => {
     expect(cookieHeader).toMatch(/Secure/i)
     expect(cookieHeader).toMatch(/SameSite=Lax/i)
     expect(cookieHeader).toMatch(/Max-Age=900/)
-    expect(cookieHeader).toMatch(/Max-Age=2592000/)
+    expect(cookieHeader).toMatch(/Max-Age=5184000/)
   })
 
   it('Scenario 10: returns 400 INVALID_TOKEN when invitation has already been accepted', async () => {

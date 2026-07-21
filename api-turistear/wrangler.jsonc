@@ -46,7 +46,7 @@
     "RESEND_FROM": "no-reply@turistearya.com",
     // Idle-session window (seconds). Keep in sync with `refreshTokenTtlSeconds`
     // in the agnostic-auth APP_REGISTRY KV entry for app "guide-me".
-    "SESSION_REFRESH_TTL_SECONDS": "2592000"
+    "SESSION_REFRESH_TTL_SECONDS": "5184000"
   },
 
   "env": {
@@ -89,7 +89,7 @@
         "API_BASE_URL": "https://api-dev.turistearya.com",
         "APP_BASE_URL": "https://app-dev.turistearya.com",
         "RESEND_FROM": "no-reply@turistearya.com",
-        "SESSION_REFRESH_TTL_SECONDS": "2592000"
+        "SESSION_REFRESH_TTL_SECONDS": "5184000"
       }
     },
 
@@ -129,7 +129,7 @@
         "API_BASE_URL": "https://api.turistearya.com",
         "APP_BASE_URL": "https://app.turistearya.com",
         "RESEND_FROM": "no-reply@turistearya.com",
-        "SESSION_REFRESH_TTL_SECONDS": "2592000"
+        "SESSION_REFRESH_TTL_SECONDS": "5184000"
       }
     }
   }
