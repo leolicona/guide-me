@@ -27,6 +27,9 @@ import {
 } from '@mui/material'
 import ExpandMoreRounded from '@mui/icons-material/ExpandMoreRounded'
 import StorefrontRounded from '@mui/icons-material/StorefrontRounded'
+import PersonRounded from '@mui/icons-material/Person'
+import TrendingDownRounded from '@mui/icons-material/TrendingDown'
+import TrendingUpRounded from '@mui/icons-material/TrendingUp'
 import {
   useBalances,
   useDrops,
@@ -41,7 +44,7 @@ import { METHOD_LABEL } from '../features/cash/components/paymentPresentation'
 import type { BalanceListItem, DropStatus } from '../features/cash/types'
 import { formatMoney, amountToCents, centsToAmount } from '../features/catalog/types'
 import { ROUTES } from '../config/routes'
-import { MoneyText } from '../components'
+import { MoneyText, StatusChip, InfoPopover } from '../components'
 
 const DROP_COLOR: Record<DropStatus, 'warning' | 'success' | 'error'> = {
   pending: 'warning',
@@ -379,11 +382,29 @@ function BalancesTab() {
       <Dialog open={!!collectTarget} onClose={() => setCollectTarget(null)} fullWidth maxWidth="xs">
         <DialogTitle>Registrar cobro directo</DialogTitle>
         <DialogContent>
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-            Registra el efectivo que recibiste de {collectTarget?.agent.name} en persona. Su
-            saldo se reduce de inmediato y se le pedirá firmar de conformidad (si no firma,
-            se confirma automáticamente).
-          </Typography>
+          {/* Structured context: who + effect as icon-paired chips; the signature nuance
+              (rarely needed at the moment of collecting) sits one tap away in the popover. */}
+          <Stack
+            direction="row"
+            spacing={1}
+            useFlexGap
+            sx={{ alignItems: 'center', flexWrap: 'wrap', mb: 2 }}
+          >
+            <StatusChip
+              tone="neutral"
+              icon={<PersonRounded />}
+              label={collectTarget?.agent.name ?? ''}
+            />
+            <StatusChip
+              tone="neutral"
+              icon={<TrendingDownRounded />}
+              label="Reduce su saldo al instante"
+            />
+            <InfoPopover label="Sobre la firma de conformidad">
+              Se le pedirá al agente firmar de conformidad. Si no firma, el cobro se confirma
+              automáticamente.
+            </InfoPopover>
+          </Stack>
           <Stack spacing={2}>
             <TextField
               label="Monto recibido"
@@ -424,9 +445,23 @@ function BalancesTab() {
       <Dialog open={!!target} onClose={() => setTarget(null)} fullWidth maxWidth="xs">
         <DialogTitle>Registrar pago</DialogTitle>
         <DialogContent>
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-            Págale a {target?.agent.name} lo que la empresa le debe. Esto aumentará su saldo hacia cero.
-          </Typography>
+          <Stack
+            direction="row"
+            spacing={1}
+            useFlexGap
+            sx={{ alignItems: 'center', flexWrap: 'wrap', mb: 2 }}
+          >
+            <StatusChip
+              tone="neutral"
+              icon={<PersonRounded />}
+              label={target?.agent.name ?? ''}
+            />
+            <StatusChip
+              tone="neutral"
+              icon={<TrendingUpRounded />}
+              label="Sube su saldo hacia cero"
+            />
+          </Stack>
           <Stack spacing={2}>
             <TextField
               label="Monto"
