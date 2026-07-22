@@ -133,7 +133,7 @@ const confirmSale = async (email: string, body: Record<string, unknown>) => {
   const res = await SELF.fetch('http://api.local/api/pos/folios', {
     method: 'POST',
     headers: jsonAuth(email),
-    body: JSON.stringify(body),
+    body: JSON.stringify({ customer_name: 'Cliente Test', customer_phone: '5512345678', ...body }),
   })
   return { status: res.status, json: (await res.json()) as any }
 }
@@ -181,7 +181,7 @@ const confirmRefund = async (email: string, folioId: string, body: Record<string
   const res = await SELF.fetch(`http://api.local/api/folios/${folioId}/refund/confirm`, {
     method: 'POST',
     headers: jsonAuth(email),
-    body: JSON.stringify(body),
+    body: JSON.stringify({ customer_name: 'Cliente Test', customer_phone: '5512345678', ...body }),
   })
   return { status: res.status, json: (await res.json()) as any }
 }

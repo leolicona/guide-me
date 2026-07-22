@@ -48,7 +48,7 @@ const confirmSale = async (email: string, body: any) => {
   return SELF.fetch('http://api.local/api/pos/folios', {
     method: 'POST',
     headers: jsonAuth(email),
-    body: JSON.stringify(body),
+    body: JSON.stringify({ customer_name: 'Cliente Test', customer_phone: '5512345678', ...body }),
   })
 }
 
@@ -56,7 +56,7 @@ const cancelFolio = async (email: string, folioId: string, body: any) => {
   return SELF.fetch(`http://api.local/api/folios/${folioId}/cancel`, {
     method: 'POST',
     headers: jsonAuth(email),
-    body: JSON.stringify(body),
+    body: JSON.stringify({ customer_name: 'Cliente Test', customer_phone: '5512345678', ...body }),
   })
 }
 
@@ -120,9 +120,10 @@ describe('US-AG09 / US-C01 — Confirmation Email', () => {
     expect(call.html).toContain('Tour B')
   })
 
-  it('Scenario 2 — Sale without customer_email is rejected (400); no Resend call', async () => {
-    // customer_email is now mandatory at POS — a sale without it must be rejected,
-    // and obviously no confirmation email is attempted.
+  it('Scenario 2 — Sale WITHOUT customer_email succeeds (email optional); no Resend call', async () => {
+    // D2 (whatsapp-qr-delivery) — email is no longer mandatory at POS (WhatsApp is the primary
+    // channel). A sale with a name + phone but no email is accepted; with no address to send to,
+    // no confirmation email is attempted. (The helper injects name + phone, not email.)
     const { organizationId } = await seedUser({ email: AGENT_EMAIL, role: 'agent' })
     const svc = await seedService(organizationId)
     const slot = await seedSlot(organizationId, svc.id)
@@ -130,8 +131,7 @@ describe('US-AG09 / US-C01 — Confirmation Email', () => {
     const res = await confirmSale(AGENT_EMAIL, {
       lines: [{ slot_id: slot.id, quantity: 1, unit_price: 150000 }]
     })
-    expect(res.status).toBe(400)
-    expect(((await res.json()) as any).error.code).toBe('VALIDATION_ERROR')
+    expect(res.status).toBe(201)
     expect(resendCalls).toHaveLength(0)
   })
 

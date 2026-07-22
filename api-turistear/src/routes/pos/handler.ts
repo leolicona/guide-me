@@ -800,12 +800,9 @@ export const confirmSale = async (c: PosContext) => {
   const isAffiliate = agent.role === 'affiliate'
   const affiliateCompanyId = isAffiliate ? agent.affiliateCompanyId : null
 
-  // Ticket delivery channel: an agent/admin sale REQUIRES a customer email (the only channel).
-  // An affiliate sale delivers to the affiliate's own account email (D8), so customer_email is
-  // an optional copy there. (The schema validates the format when present; this guards presence.)
-  if (!isAffiliate && !input.customer_email) {
-    throw new ApiError('VALIDATION_ERROR', 400, 'A valid customer email is required')
-  }
+  // D2 (whatsapp-qr-delivery) — email is no longer a required delivery channel. WhatsApp (the
+  // agent-sent portal link, name + phone required by the schema) is now primary; email is an
+  // optional copy for any role. The schema still validates the address format when present.
   const affiliateRates = new Map<string, { type: 'percent' | 'fixed'; value: number }>()
   if (isAffiliate) {
     if (!affiliateCompanyId) {

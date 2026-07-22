@@ -41,6 +41,7 @@ const createBooking = async (email: string, slotId: string, quantity = 2): Promi
     headers: jsonAuth(email),
     body: JSON.stringify({
       customer_email: 'c@example.com',
+      customer_name: 'Cliente Test',
       customer_phone: PHONE,
       down_payment: 45000,
       lines: [{ slot_id: slotId, quantity, unit_price: 150000 }],
@@ -159,6 +160,7 @@ describe('US-AG07.3 — reminder claim + dashboard', () => {
       amount_paid: 45000,
       pending_balance: 255000,
       reminder_status: 'none',
+      customer_name: 'Cliente Test',
       customer_phone: PHONE,
     })
     expect(body.folios[0].booking_expires_at).toBeGreaterThan(0)

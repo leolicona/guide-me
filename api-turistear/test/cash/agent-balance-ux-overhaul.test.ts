@@ -163,6 +163,8 @@ const confirmSale = async (email: string, slotId: string, paymentMethod?: string
     method: 'POST',
     headers: jsonAuth(email),
     body: JSON.stringify({
+      customer_name: 'Cliente Test',
+      customer_phone: '5512345678',
       customer_email: 'cliente@example.com',
       ...(paymentMethod ? { payment_method: paymentMethod } : {}),
       lines: [{ slot_id: slotId, quantity: 1, unit_price: 150000 }],

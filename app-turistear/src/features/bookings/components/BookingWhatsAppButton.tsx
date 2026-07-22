@@ -4,6 +4,7 @@ import { useClaimReminder } from '../hooks/useBookingActions'
 import { useMyOrganization } from '../../organization'
 import { useMe } from '../../auth/hooks/useMe'
 import { formatMoney } from '../../catalog/types'
+import { normalizePhone } from '../../pos/phone'
 
 // Minimal shape the reminder flow needs — satisfied by both the agent (pos) folio rows and the
 // admin folio rows/detail, so this one button serves every list surface (D5/D9).
@@ -28,7 +29,8 @@ export function BookingWhatsAppButton({ folio }: { folio: ReminderTarget }) {
   const reminded = folio.reminder_status === 'sent'
 
   const openWhatsApp = () => {
-    const phone = (folio.customer_phone ?? '').replace(/\D/g, '')
+    // Shared normalizer (D3) — prepends the +52 default so a bare local number doesn't misroute.
+    const phone = normalizePhone(folio.customer_phone).e164
     const name = folio.customer_name ?? 'Hola'
     const agent = me?.name ?? ''
     const orgName = org?.name ?? ''

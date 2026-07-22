@@ -38,6 +38,7 @@ const createBooking = async (email: string, slotId: string): Promise<string> => 
     headers: jsonAuth(email),
     body: JSON.stringify({
       customer_email: 'c@example.com',
+      customer_name: 'Cliente Test',
       customer_phone: PHONE,
       down_payment: 45000,
       lines: [{ slot_id: slotId, quantity: 2, unit_price: 150000 }],

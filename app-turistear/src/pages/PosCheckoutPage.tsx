@@ -27,7 +27,6 @@ import LinkRounded from '@mui/icons-material/LinkRounded'
 import SavingsRounded from '@mui/icons-material/SavingsRounded'
 import { useConfirmSale } from '../features/pos/hooks'
 import { useMyOrganization } from '../features/organization'
-import { useCurrentUser } from '../features/auth/CurrentUserContext'
 import {
   usePosCart,
   toConfirmPayload,
@@ -43,13 +42,11 @@ import { ServiceError } from '../services/authService'
 import { formatMoney, amountToCents, centsToAmount } from '../features/catalog/types'
 import { ROUTES } from '../config/routes'
 import { SectionCard, MoneyText, InfoPopover } from '../components'
+import { isSendablePhone } from '../features/pos/phone'
 
 // customer_email is mandatory at POS — it's the only delivery channel for the ticket + QR
 // in Phase 1. Mirror the backend's validation so the agent gets immediate feedback.
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
-
-// US-AG07 D4 — a booking needs a dialable phone (mirrors the server's ≥ 8-digit check).
-const isDialable = (phone: string): boolean => phone.replace(/\D/g, '').length >= 8
 
 // US-AG07.2 — the adaptive checkout's derived state from the entered amount vs the cart total
 // and the org minimum deposit. Drives the button label/enablement and the sale type.
@@ -152,16 +149,12 @@ export default function PosCheckoutPage() {
 
   const navigate = useNavigate()
   const confirm = useConfirmSale()
-  const user = useCurrentUser()
-  // Affiliate-portal D8: the ticket is addressed to the affiliate's own account email, so the
-  // customer email here is an OPTIONAL copy to the tourist. For an agent/admin it stays the
-  // mandatory delivery channel.
-  const isAffiliate = user.role === 'affiliate'
-
+  // D2 (whatsapp-qr-delivery) — every POS sale now requires a name + a sendable phone (WhatsApp
+  // is the primary ticket-delivery channel); email drops to an optional copy, valid if present.
   const emailTrimmed = customerEmail.trim()
-  const emailValid = isAffiliate
-    ? emailTrimmed === '' || EMAIL_RE.test(emailTrimmed)
-    : EMAIL_RE.test(emailTrimmed)
+  const emailValid = emailTrimmed === '' || EMAIL_RE.test(emailTrimmed)
+  const nameValid = customerName.trim().length > 0
+  const phoneValid = isSendablePhone(customerPhone)
 
   // US-AG07.2 — adaptive, amount-driven checkout. The amount input pre-loads the cart total; the
   // sale type / button / validity derive from it. A suggested-deposit chip reuses the org minimum %.
@@ -193,12 +186,13 @@ export default function PosCheckoutPage() {
             : 'INSUFFICIENT'
 
   const chipLit = suggestedCents > 0 && amountCents === suggestedCents
-  const phoneOk = isDialable(customerPhone)
-  // A booking additionally requires a dialable phone (D4).
+  // Name + phone are required for EVERY sale now (D2); email only has to be valid-if-present.
   const canSubmit =
     !confirm.isPending &&
+    nameValid &&
+    phoneValid &&
     emailValid &&
-    (saleState === 'FULL' || (saleState === 'PARTIAL' && phoneOk))
+    (saleState === 'FULL' || saleState === 'PARTIAL')
 
   const buttonLabel = confirm.isPending
     ? saleState === 'FULL'
@@ -337,19 +331,36 @@ export default function PosCheckoutPage() {
             <SectionCard title="Cliente">
                 <Stack spacing={2}>
                   <TextField
-                    label="Nombre (opcional)"
+                    label="Nombre"
                     placeholder="Juan Pérez"
                     size="small"
+                    required
                     value={customerName}
                     onChange={(e) => setCustomer({ name: e.target.value })}
+                    error={customerName.length > 0 && !nameValid}
                     slotProps={{ inputLabel: { shrink: true } }}
                   />
                   <TextField
-                    label={isAffiliate ? 'Copia al cliente (opcional)' : 'Correo electrónico'}
+                    label="Teléfono"
+                    placeholder="55 1234 5678"
+                    size="small"
+                    required
+                    type="tel"
+                    value={customerPhone}
+                    onChange={(e) => setCustomer({ phone: e.target.value })}
+                    error={customerPhone.length > 0 && !phoneValid}
+                    slotProps={{ inputLabel: { shrink: true } }}
+                    helperText={
+                      customerPhone.length > 0 && !phoneValid
+                        ? 'Ingresa un teléfono válido (10 dígitos).'
+                        : 'Obligatorio — por aquí se envían los boletos por WhatsApp.'
+                    }
+                  />
+                  <TextField
+                    label="Correo electrónico (opcional)"
                     placeholder="cliente@correo.com"
                     size="small"
                     type="email"
-                    required={!isAffiliate}
                     value={customerEmail}
                     onChange={(e) => setCustomer({ email: e.target.value })}
                     error={emailTrimmed.length > 0 && !emailValid}
@@ -357,18 +368,8 @@ export default function PosCheckoutPage() {
                     helperText={
                       emailTrimmed.length > 0 && !emailValid
                         ? 'Ingresa un correo electrónico válido.'
-                        : isAffiliate
-                          ? 'El boleto QR se envía a tu correo; agrega uno para enviarle copia al cliente.'
-                          : 'Obligatorio — el recibo y el boleto QR se envían a este correo.'
+                        : 'Opcional — copia del recibo y del boleto por correo.'
                     }
-                  />
-                  <TextField
-                    label="Teléfono"
-                    placeholder="55 1234 5678"
-                    size="small"
-                    value={customerPhone}
-                    onChange={(e) => setCustomer({ phone: e.target.value })}
-                    slotProps={{ inputLabel: { shrink: true } }}
                   />
                 </Stack>
             </SectionCard>
@@ -513,11 +514,6 @@ export default function PosCheckoutPage() {
                             : 'Captura el monto recibido'
                   }
                 />
-                {saleState === 'PARTIAL' && !phoneOk && (
-                  <Typography variant="caption" color="error" sx={{ display: 'block', mt: 1 }}>
-                    Un apartado requiere un teléfono válido para dar seguimiento por WhatsApp.
-                  </Typography>
-                )}
             </SectionCard>
 
             {/* One confident teal action, pinned to the thumb zone — reachable one-handed as the
@@ -544,13 +540,13 @@ export default function PosCheckoutPage() {
               >
                 {buttonLabel}
               </Button>
-              {!emailValid && (
+              {(!nameValid || !phoneValid) && (
                 <Typography
                   variant="caption"
                   color="text.secondary"
                   sx={{ display: 'block', textAlign: 'center', mt: 1 }}
                 >
-                  Captura el correo del cliente para enviar el boleto y poder cobrar.
+                  Captura nombre y teléfono del cliente para enviar los boletos y cobrar.
                 </Typography>
               )}
             </Box>
