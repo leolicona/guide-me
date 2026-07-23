@@ -19,6 +19,7 @@ export const listFolios = async (filters: FolioFilters = {}): Promise<FolioListI
   if (filters.status) params.set('status', filters.status)
   if (filters.date) params.set('date', filters.date)
   if (filters.agentId) params.set('agent_id', filters.agentId)
+  if (filters.verification) params.set('verification', filters.verification)
   const qs = params.toString()
   const res = await request<{ folios: FolioListItem[] }>(`/api/folios${qs ? `?${qs}` : ''}`)
   return res.folios

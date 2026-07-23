@@ -313,6 +313,19 @@ export const folios = sqliteTable('folios', {
   paymentMethod: text('payment_method', { enum: ['cash', 'card', 'transfer', 'link'] })
     .notNull()
     .default('cash'),
+  // US-AG41/US-A67 (docs/payment-verification/spec.md). paymentReference: the transfer's bank ref
+  // (free text; null for cash; holds the most recent transfer awaiting verification). The RE-ARMABLE
+  // paymentVerification axis gates QR: 'not_required' (all-cash) · 'pending' (a transfer payment
+  // awaits an admin) · 'verified'. A slot line's QR is signed only when the folio is `paid` AND this
+  // is NOT 'pending' (i.e. cash, or the electronic money has been verified). verifiedAt/By: audit.
+  paymentReference: text('payment_reference'),
+  paymentVerification: text('payment_verification', {
+    enum: ['not_required', 'pending', 'verified'],
+  })
+    .notNull()
+    .default('not_required'),
+  paymentVerifiedAt: integer('payment_verified_at', { mode: 'timestamp' }),
+  paymentVerifiedBy: text('payment_verified_by').references(() => users.id),
   subtotal: integer('subtotal').notNull(),
   discountTotal: integer('discount_total').notNull().default(0),
   total: integer('total').notNull(),

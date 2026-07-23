@@ -21,9 +21,8 @@ import AddRounded from '@mui/icons-material/AddRounded'
 import RemoveRounded from '@mui/icons-material/RemoveRounded'
 import DeleteOutlineRounded from '@mui/icons-material/DeleteOutlineRounded'
 import PaymentsRounded from '@mui/icons-material/PaymentsRounded'
-import CreditCardRounded from '@mui/icons-material/CreditCardRounded'
 import AccountBalanceRounded from '@mui/icons-material/AccountBalanceRounded'
-import LinkRounded from '@mui/icons-material/LinkRounded'
+import HourglassTopRounded from '@mui/icons-material/HourglassTopRounded'
 import SavingsRounded from '@mui/icons-material/SavingsRounded'
 import { useConfirmSale } from '../features/pos/hooks'
 import { useMyOrganization } from '../features/organization'
@@ -155,6 +154,10 @@ export default function PosCheckoutPage() {
   const emailValid = emailTrimmed === '' || EMAIL_RE.test(emailTrimmed)
   const nameValid = customerName.trim().length > 0
   const phoneValid = isSendablePhone(customerPhone)
+  // US-AG41 — a bank transfer needs a reference (≥ 4 chars). The customer's tickets are then held
+  // until an admin verifies the money (US-A67). Local state — it isn't persisted with the cart.
+  const [reference, setReference] = useState('')
+  const referenceValid = paymentMethod !== 'transfer' || reference.trim().length >= 4
 
   // US-AG07.2 — adaptive, amount-driven checkout. The amount input pre-loads the cart total; the
   // sale type / button / validity derive from it. A suggested-deposit chip reuses the org minimum %.
@@ -192,6 +195,7 @@ export default function PosCheckoutPage() {
     nameValid &&
     phoneValid &&
     emailValid &&
+    referenceValid &&
     (saleState === 'FULL' || saleState === 'PARTIAL')
 
   const buttonLabel = confirm.isPending
@@ -212,6 +216,8 @@ export default function PosCheckoutPage() {
     // Read the current state directly so the payload reflects any last edits.
     const payload = toConfirmPayload(usePosCart.getState())
     if (saleState === 'PARTIAL') payload.down_payment = amountCents
+    // US-AG41 — carry the transfer reference (ignored server-side for other methods).
+    if (paymentMethod === 'transfer') payload.payment_reference = reference.trim()
     confirm.mutate(payload, {
       onSuccess: (folio) => {
         clear()
@@ -383,51 +389,50 @@ export default function PosCheckoutPage() {
                       <b>Efectivo</b> entra a tu caja — lo entregas a la empresa en el corte.
                     </Box>
                     <Box>
-                      <b>Tarjeta, transferencia y link</b> los cobra la empresa directamente: no
-                      suman a tu caja, pero generas tu comisión igual.
+                      <b>Transferencia</b> la cobra la empresa: no suma a tu caja (generas comisión
+                      igual), y los boletos se envían cuando un administrador verifica el pago.
                     </Box>
                   </Stack>
                 </InfoPopover>
               }
             >
-                {/* US-AG29 — four methods; everything except Efectivo is electronic (no
-                    cash debt, commission still earned). Two rows so each stays tappable. */}
-                <Stack spacing={1}>
-                  <ToggleButtonGroup
-                    exclusive
+                {/* US-AG41 (D1) — only Efectivo + Transferencia for now (card/link hidden). */}
+                <ToggleButtonGroup
+                  exclusive
+                  fullWidth
+                  value={paymentMethod}
+                  onChange={(_, value) => value && setPaymentMethod(value)}
+                  aria-label="Método de pago"
+                >
+                  <ToggleButton value="cash" aria-label="Efectivo">
+                    <PaymentsRounded fontSize="small" sx={{ mr: 1 }} />
+                    Efectivo
+                  </ToggleButton>
+                  <ToggleButton value="transfer" aria-label="Transferencia">
+                    <AccountBalanceRounded fontSize="small" sx={{ mr: 1 }} />
+                    Transferencia
+                  </ToggleButton>
+                </ToggleButtonGroup>
+
+                {/* US-AG41 — a transfer requires its bank reference; the QR is held until verified. */}
+                {paymentMethod === 'transfer' && (
+                  <TextField
+                    label="Referencia de la transferencia"
+                    placeholder="Ej. BBVA 0099887766"
+                    value={reference}
+                    onChange={(e) => setReference(e.target.value)}
+                    error={reference.trim().length > 0 && !referenceValid}
+                    helperText={
+                      reference.trim().length > 0 && !referenceValid
+                        ? 'Captura al menos 4 caracteres.'
+                        : 'Número o folio del comprobante — el administrador lo verifica.'
+                    }
                     fullWidth
-                    value={paymentMethod}
-                    onChange={(_, value) => value && setPaymentMethod(value)}
-                    aria-label="Método de pago"
-                  >
-                    <ToggleButton value="cash" aria-label="Efectivo">
-                      <PaymentsRounded fontSize="small" sx={{ mr: 1 }} />
-                      Efectivo
-                    </ToggleButton>
-                    <ToggleButton value="card" aria-label="Tarjeta">
-                      <CreditCardRounded fontSize="small" sx={{ mr: 1 }} />
-                      Tarjeta
-                    </ToggleButton>
-                  </ToggleButtonGroup>
-                  <ToggleButtonGroup
-                    exclusive
-                    fullWidth
-                    value={paymentMethod}
-                    onChange={(_, value) => value && setPaymentMethod(value)}
-                    aria-label="Método de pago electrónico"
-                  >
-                    <ToggleButton value="transfer" aria-label="Transferencia">
-                      <AccountBalanceRounded fontSize="small" sx={{ mr: 1 }} />
-                      Transferencia
-                    </ToggleButton>
-                    <ToggleButton value="link" aria-label="Link de pago">
-                      <LinkRounded fontSize="small" sx={{ mr: 1 }} />
-                      Link de pago
-                    </ToggleButton>
-                  </ToggleButtonGroup>
-                </Stack>
-                {/* Structured, at-a-glance consequence — flips with the selection (replaces the
-                    former help paragraph; the full rules live behind the header's info tap). */}
+                    sx={{ mt: 2 }}
+                  />
+                )}
+
+                {/* Structured, at-a-glance consequence — flips with the selection. */}
                 <Stack
                   direction="row"
                   spacing={0.75}
@@ -440,9 +445,9 @@ export default function PosCheckoutPage() {
                     </>
                   ) : (
                     <>
-                      <AccountBalanceRounded sx={{ fontSize: 18 }} />
+                      <HourglassTopRounded sx={{ fontSize: 18 }} />
                       <Typography variant="caption">
-                        Lo cobra la empresa · generas comisión
+                        En verificación · los boletos se envían al confirmar el pago
                       </Typography>
                     </>
                   )}
