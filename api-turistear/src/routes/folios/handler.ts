@@ -243,6 +243,9 @@ export const listFolios = async (c: FoliosContext) => {
     verificationQ === 'not_required'
   ) {
     filters.push(eq(folios.paymentVerification, verificationQ))
+    // US-A67 — the "Por verificar" queue is ACTIVE folios awaiting an admin: a rejected payment
+    // cancels the folio (its stale 'pending' flag stays), so exclude cancelled to drop it out.
+    if (verificationQ === 'pending') filters.push(ne(folios.status, 'cancelled'))
   }
   if (dateQ) {
     filters.push(

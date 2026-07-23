@@ -189,6 +189,13 @@ describe('US-A67 — reject voids the sale', () => {
     expect(status).toBe(200)
     expect(json.folio.status).toBe('cancelled')
     expect(await bookedOf(slotId)).toBe(0)
+
+    // …and it leaves the admin "Por verificar" queue (a rejected folio is resolved).
+    const res = await SELF.fetch('http://api.local/api/folios?verification=pending', {
+      headers: auth(ADMIN_EMAIL),
+    })
+    const queue = ((await res.json()) as any).folios
+    expect(queue.find((f: any) => f.id === sold.folio.id)).toBeUndefined()
   })
 })
 
