@@ -39,6 +39,7 @@ import {
 } from '../features/cash/hooks'
 import { AckChip } from '../features/cash/components/AckChip'
 import { TuCajaSection } from '../features/cash/components/TuCajaSection'
+import { useOrgDateFormatter } from '../features/organization'
 import { SOURCE_LABEL } from '../features/cash/components/ackPresentation'
 import { METHOD_LABEL } from '../features/cash/components/paymentPresentation'
 import type { BalanceListItem, DropStatus } from '../features/cash/types'
@@ -58,13 +59,12 @@ const DROP_LABEL: Record<DropStatus, string> = {
   rejected: 'Rechazado',
 }
 
-const formatDate = (unixSeconds: number) =>
-  new Date(unixSeconds * 1000).toLocaleString(undefined, {
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  })
+const DATE_FMT: Intl.DateTimeFormatOptions = {
+  month: 'short',
+  day: 'numeric',
+  hour: '2-digit',
+  minute: '2-digit',
+}
 
 // 'disputed' is a pseudo-filter: it queries by acknowledgment (any status) so open disputes
 // — which live on already-confirmed drops — surface in one tap.
@@ -161,6 +161,7 @@ function BalanceRow({
   onCollect: (row: BalanceListItem) => void
   onPayout: (row: BalanceListItem) => void
 }) {
+  const formatDate = useOrgDateFormatter(DATE_FMT) // US-A66 — org-local audit timestamps
   const [open, setOpen] = useState(false)
   const negative = row.balance < 0
   const isAffiliate = row.role === 'affiliate'
@@ -504,6 +505,7 @@ function BalancesTab() {
 
 // --- Drops tab: the review queue (US-A19) + open disputes (US-A27/A28) ---
 function DropsTab() {
+  const formatDate = useOrgDateFormatter(DATE_FMT) // US-A66 — org-local audit timestamps
   const [filter, setFilter] = useState<DropFilter>('pending')
   const { data: drops, isLoading, isError } = useDrops(
     filter === 'disputed' ? { status: 'all', ack: 'disputed' } : { status: filter },

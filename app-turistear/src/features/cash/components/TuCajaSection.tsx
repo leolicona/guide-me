@@ -19,14 +19,14 @@ import { SalesSummaryCard } from './SalesSummaryCard'
 import { CommissionsCard } from './CommissionsCard'
 import { formatMoney, amountToCents, centsToAmount } from '../../catalog/types'
 import { SectionCard, MoneyText, StatusChip, InfoPopover } from '../../../components'
+import { useOrgDateFormatter } from '../../organization'
 
-const formatDate = (unixSeconds: number) =>
-  new Date(unixSeconds * 1000).toLocaleString(undefined, {
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  })
+const DATE_FMT: Intl.DateTimeFormatOptions = {
+  month: 'short',
+  day: 'numeric',
+  hour: '2-digit',
+  minute: '2-digit',
+}
 
 // US-A35 — "Tu caja": the admin's own drawer, pinned above the team ("Equipo") on the Caja
 // screen. It reuses the agent's CashBoxCard for the common (non-negative) case, but every
@@ -35,6 +35,7 @@ const formatDate = (unixSeconds: number) =>
 // so, and the agent's "pendiente de confirmación" hint never shows (admin drops are never
 // pending).
 export function TuCajaSection() {
+  const formatDate = useOrgDateFormatter(DATE_FMT) // US-A66 — org-local audit timestamps
   const user = useCurrentUser()
   const { data: balance, isLoading, isError } = useMyBalance()
   const createDrop = useCreateDrop()

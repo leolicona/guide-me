@@ -45,6 +45,7 @@ import { ROUTES } from '../config/routes'
 // Org-local "today" (device-local calendar string, BUG-007) — the anchor for the default
 // week context and the floor for the date picker; shared with the sheet/detail views.
 import { todayStr, contextPills } from '../features/pos/dates'
+import { useMyOrganization } from '../features/organization'
 
 const WEEKDAYS_ES = ['DOM', 'LUN', 'MAR', 'MIÉ', 'JUE', 'VIE', 'SÁB']
 const MONTHS_ES = ['ENE', 'FEB', 'MAR', 'ABR', 'MAY', 'JUN', 'JUL', 'AGO', 'SEP', 'OCT', 'NOV', 'DIC']
@@ -76,7 +77,10 @@ export default function PosCatalogPage() {
   // hide-sold-out is a persisted preference from Settings.
   const selection = usePosFilters((s) => s.selection)
   const setSelection = usePosFilters((s) => s.setSelection)
-  const today = todayStr()
+  // US-A66 — anchor "today" to the org's time zone (not the device's), so every agent shares the
+  // same catalog day. Falls back to device-local until the org loads.
+  const { data: org } = useMyOrganization()
+  const today = todayStr(org?.timezone)
 
   // US-AG35 — when no explicit selection is made, the catalog defaults to the contextual week
   // (today → Sunday). The date filter is picked from the calendar sheet; the week is the anchor.

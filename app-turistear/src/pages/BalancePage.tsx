@@ -28,6 +28,7 @@ import {
   useCancelDrop,
 } from '../features/cash/hooks'
 import { PendingAcknowledgments } from '../features/cash/components/PendingAcknowledgments'
+import { useOrgDateFormatter } from '../features/organization'
 import { AckChip } from '../features/cash/components/AckChip'
 import { CashBoxCard } from '../features/cash/components/CashBoxCard'
 import { SalesSummaryCard } from '../features/cash/components/SalesSummaryCard'
@@ -49,15 +50,15 @@ const DROP_LABEL: Record<DropStatus, string> = {
   rejected: 'Rechazado',
 }
 
-const formatDate = (unixSeconds: number) =>
-  new Date(unixSeconds * 1000).toLocaleString(undefined, {
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  })
+const DATE_FMT: Intl.DateTimeFormatOptions = {
+  month: 'short',
+  day: 'numeric',
+  hour: '2-digit',
+  minute: '2-digit',
+}
 
 export default function BalancePage() {
+  const formatDate = useOrgDateFormatter(DATE_FMT) // US-A66 — org-local audit timestamps
   // Affiliate-portal D4/D5: an affiliate carries the same running balance + cash-drop flow as an
   // agent, but has NO expenses — hide the Gastos card for that role (the API also denies it 403).
   const user = useCurrentUser()

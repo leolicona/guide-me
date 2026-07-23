@@ -29,6 +29,7 @@ import {
 import type { CancellationRequest, CancellationRequestStatus } from '../types'
 import { formatMoney } from '../../catalog/types'
 import { ROUTES } from '../../../config/routes'
+import { useOrgDateFormatter } from '../../organization'
 
 const REQUEST_COLOR: Record<CancellationRequestStatus, 'warning' | 'success' | 'error'> = {
   pending: 'warning',
@@ -42,18 +43,18 @@ const REQUEST_LABEL: Record<CancellationRequestStatus, string> = {
   rejected: 'Rechazada',
 }
 
-const formatDate = (unixSeconds: number) =>
-  new Date(unixSeconds * 1000).toLocaleString(undefined, {
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  })
+const DATE_FMT: Intl.DateTimeFormatOptions = {
+  month: 'short',
+  day: 'numeric',
+  hour: '2-digit',
+  minute: '2-digit',
+}
 
 // US-T04 — the tourists' cancellation-request review queue. Approving runs the full
 // US-A21 cancellation (seats released, client emailed) and — on a paid folio — opens the
 // refund obligation with a portal PIN; rejecting requires a note the tourist will read.
 export function CancellationRequestsTab() {
+  const formatDate = useOrgDateFormatter(DATE_FMT) // US-A66 — org-local audit timestamps
   const [filter, setFilter] = useState<CancellationRequestStatus | 'all'>('pending')
   const { data: requests, isLoading, isError } = useCancellationRequests(filter)
   const approve = useApproveCancellationRequest()

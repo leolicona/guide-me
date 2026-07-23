@@ -19,6 +19,7 @@ import {
   ToggleButtonGroup,
 } from '@mui/material'
 import { useFolios, usePendingCancellationCount, FolioStatusChip } from '../features/folios'
+import { useOrgDateFormatter } from '../features/organization'
 import type { FolioStatus } from '../features/folios'
 import { CancellationRequestsTab } from '../features/folios/components/CancellationRequestsTab'
 import {
@@ -30,19 +31,19 @@ import {
 import { MoneyText } from '../components'
 import { ROUTES } from '../config/routes'
 
-const formatDate = (unixSeconds: number) =>
-  new Date(unixSeconds * 1000).toLocaleString(undefined, {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  })
+const DATE_FMT: Intl.DateTimeFormatOptions = {
+  year: 'numeric',
+  month: 'short',
+  day: 'numeric',
+  hour: '2-digit',
+  minute: '2-digit',
+}
 
 type Filter = 'all' | FolioStatus
 
 // The browse-and-cancel list (US-A21), unchanged — now one tab of the Folios screen.
 function FoliosTab() {
+  const formatDate = useOrgDateFormatter(DATE_FMT) // US-A66 — org-local audit timestamps
   const [filter, setFilter] = useState<Filter>('all')
   const { data: folios, isLoading, isError } = useFolios(
     filter === 'all' ? {} : { status: filter },

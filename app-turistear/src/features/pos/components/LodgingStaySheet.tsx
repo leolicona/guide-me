@@ -17,6 +17,7 @@ import { useLodgingAvailability, useUnitTypeCalendar } from '../hooks'
 import { usePosCart } from '../../../store/posCart'
 import { amenityLabel } from '../../catalog/lodging'
 import { todayStr, addDays } from '../dates'
+import { useMyOrganization } from '../../organization'
 
 /** The unit-type card the agent tapped (v2 flattened catalog — a card IS a type). */
 export interface LodgingStayTarget {
@@ -109,7 +110,8 @@ export function LodgingStaySheet({
   onAdded,
   initialRange,
 }: LodgingStaySheetProps) {
-  const today = todayStr()
+  const { data: org } = useMyOrganization()
+  const today = todayStr(org?.timezone) // US-A66 — org-local "today"
   const addStayLine = usePosCart((s) => s.addStayLine)
   const emptyRange: DateRangeValue = { check_in: null, check_out: null }
   const [range, setRange] = useState<DateRangeValue>(() => initialRange ?? emptyRange)
