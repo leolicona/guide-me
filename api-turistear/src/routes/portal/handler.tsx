@@ -1,5 +1,5 @@
 import type { Context } from 'hono'
-import { and, desc, eq } from 'drizzle-orm'
+import { and, desc, eq, isNull } from 'drizzle-orm'
 import { renderSVG } from 'uqr'
 import { getDb, type Db } from '../../db/client'
 import {
@@ -267,6 +267,16 @@ const PortalPage = ({ data }: { data: PortalData }) => {
           lo compartas.
         </p>
       </footer>
+      {/* "Visto" beacon (whatsapp-qr-delivery D6): fired from client JS AFTER render, so
+          link-preview crawlers (facebookexternalhit et al.) — which fetch the HTML but never
+          execute JS — can't forge a delivery confirmation. One-shot; failures are swallowed. */}
+      <script
+        dangerouslySetInnerHTML={{
+          __html: `addEventListener('DOMContentLoaded',function(){try{fetch('/portal/'+${JSON.stringify(
+            data.token,
+          )}+'/seen',{method:'POST',keepalive:true}).catch(function(){})}catch(e){}})`,
+        }}
+      />
     </main>
   )
 }
@@ -371,6 +381,32 @@ export const viewPortal = async (c: PortalContext) => {
 
   c.header('X-Robots-Tag', 'noindex')
   return c.render(<PortalPage data={data} />)
+}
+
+// POST /portal/:token/seen — the bot-proof "Visto" beacon (whatsapp-qr-delivery D6). The portal
+// page calls this from client JS after render, so link-preview crawlers (which fetch HTML but never
+// run JS) can't forge it. Idempotent first-view: stamps the folio's tickets_viewed_at once. Always
+// 204 — a bad/expired token is a silent no-op (nothing to acknowledge, nothing to leak).
+export const markPortalSeen = async (c: PortalContext) => {
+  const db = getDb(c.env)
+  const resolution = await resolveToken(db, c.req.param('token'))
+  if (resolution.kind !== 'ok') return c.body(null, 204)
+
+  c.executionCtx.waitUntil(
+    db
+      .update(folios)
+      .set({ ticketsViewedAt: new Date() })
+      .where(
+        and(
+          eq(folios.id, resolution.folioId),
+          eq(folios.organizationId, resolution.organizationId),
+          isNull(folios.ticketsViewedAt), // first view wins the timestamp
+        ),
+      )
+      .then(() => undefined)
+      .catch(() => undefined),
+  )
+  return c.body(null, 204)
 }
 
 // US-T04 — POST /portal/:token/cancellation-request (classic form post, no client JS).

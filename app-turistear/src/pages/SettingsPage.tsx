@@ -22,7 +22,13 @@ import {
 import SavingsRounded from '@mui/icons-material/SavingsRounded'
 import StorefrontRounded from '@mui/icons-material/StorefrontRounded'
 import HotelRounded from '@mui/icons-material/HotelRounded'
+import WhatsAppIcon from '@mui/icons-material/WhatsApp'
 import { useMyOrganization, useUpdateOrganization } from '../features/organization'
+import {
+  DEFAULT_TICKET_TEMPLATE,
+  DEFAULT_REMINDER_TEMPLATE,
+  TEMPLATE_PLACEHOLDERS,
+} from '../features/pos/delivery'
 import { usePosPreferences } from '../store/posPreferences'
 
 // US-A47 — the backend stores a SIGNED departure offset (+ = before, − = after). The admin never
@@ -121,10 +127,15 @@ export default function SettingsPage() {
   const [freeCancelDays, setFreeCancelDays] = useState('')
   const [penaltyPct, setPenaltyPct] = useState('')
 
+  // whatsapp-qr-delivery D10 — the two admin-edited templates (seeded from the shipped default
+  // when the org hasn't customized them).
+  const [waTicket, setWaTicket] = useState('')
+  const [waReminder, setWaReminder] = useState('')
+
   // Seed the form from the org's saved values (render-phase, no effect). Re-seeds whenever the
   // saved values change — i.e. on first load and after a successful save — resetting the dirty flag.
   const savedSig = org
-    ? `${org.booking_min_down_payment_pct}|${org.booking_hold_days}|${org.sales_cutoff_offset_minutes}|${org.booking_grace_offset_minutes}|${org.lodging_weekend_days.join(',')}|${org.lodging_free_cancel_days}|${org.lodging_cancel_penalty_pct}`
+    ? `${org.booking_min_down_payment_pct}|${org.booking_hold_days}|${org.sales_cutoff_offset_minutes}|${org.booking_grace_offset_minutes}|${org.lodging_weekend_days.join(',')}|${org.lodging_free_cancel_days}|${org.lodging_cancel_penalty_pct}|${org.wa_ticket_template ?? ''}|${org.wa_reminder_template ?? ''}`
     : null
   const [seededSig, setSeededSig] = useState<string | null>(null)
   if (org && savedSig !== seededSig) {
@@ -140,6 +151,8 @@ export default function SettingsPage() {
     setWeekendDays(org.lodging_weekend_days)
     setFreeCancelDays(String(org.lodging_free_cancel_days))
     setPenaltyPct(String(org.lodging_cancel_penalty_pct))
+    setWaTicket(org.wa_ticket_template ?? DEFAULT_TICKET_TEMPLATE)
+    setWaReminder(org.wa_reminder_template ?? DEFAULT_REMINDER_TEMPLATE)
   }
 
   const pctNum = Number(minPct)
@@ -198,6 +211,21 @@ export default function SettingsPage() {
         lodging_free_cancel_days: freeCancelNum,
         lodging_cancel_penalty_pct: penaltyNum,
       },
+      { onSuccess: () => setSaved(true) },
+    )
+  }
+
+  // --- WhatsApp message templates (whatsapp-qr-delivery D10) ---
+  const waTicketInvalid = !waTicket.includes('{portal_link}')
+  const waDirty =
+    !!org &&
+    (waTicket !== (org.wa_ticket_template ?? DEFAULT_TICKET_TEMPLATE) ||
+      waReminder !== (org.wa_reminder_template ?? DEFAULT_REMINDER_TEMPLATE))
+
+  const handleSaveWa = () => {
+    if (waTicketInvalid) return
+    update.mutate(
+      { wa_ticket_template: waTicket.trim(), wa_reminder_template: waReminder.trim() },
       { onSuccess: () => setSaved(true) },
     )
   }
@@ -394,6 +422,58 @@ export default function SettingsPage() {
             </CardContent>
           </Card>
         )}
+
+        {/* whatsapp-qr-delivery D10 — admin-edited message templates (read-only for sellers, who
+            never reach this admin screen). {portal_link} is required on the ticket template. */}
+        <Card sx={{ mt: 3 }}>
+          <CardContent>
+            <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center', mb: 2 }}>
+              <WhatsAppIcon color="primary" />
+              <Typography variant="h6">Mensajes de WhatsApp</Typography>
+            </Stack>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+              El texto que se abre en WhatsApp al enviar los boletos. Variables:{' '}
+              {TEMPLATE_PLACEHOLDERS.join(' ')} — se reemplazan por los datos de la venta.
+            </Typography>
+            <Stack spacing={2.5}>
+              <TextField
+                label="Entrega de boletos"
+                multiline
+                minRows={4}
+                fullWidth
+                value={waTicket}
+                onChange={(e) => setWaTicket(e.target.value)}
+                error={waTicketInvalid}
+                helperText={
+                  waTicketInvalid
+                    ? 'Debe incluir {portal_link} — es el enlace a los boletos.'
+                    : 'Se envía al cobrar (tours y hospedaje).'
+                }
+                slotProps={{ inputLabel: { shrink: true } }}
+              />
+              <TextField
+                label="Recordatorio de apartado"
+                multiline
+                minRows={3}
+                fullWidth
+                value={waReminder}
+                onChange={(e) => setWaReminder(e.target.value)}
+                helperText="Se usa al recordar el saldo pendiente de un apartado."
+                slotProps={{ inputLabel: { shrink: true } }}
+              />
+              <Stack direction="row" sx={{ justifyContent: 'flex-end' }}>
+                <Button
+                  variant="contained"
+                  disableElevation
+                  disabled={!waDirty || waTicketInvalid || update.isPending}
+                  onClick={handleSaveWa}
+                >
+                  {update.isPending ? 'Guardando…' : 'Guardar mensajes'}
+                </Button>
+              </Stack>
+            </Stack>
+          </CardContent>
+        </Card>
 
         <Card sx={{ mt: 3 }}>
           <CardContent>

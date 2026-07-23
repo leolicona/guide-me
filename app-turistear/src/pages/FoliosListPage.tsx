@@ -21,7 +21,12 @@ import {
 import { useFolios, usePendingCancellationCount, FolioStatusChip } from '../features/folios'
 import type { FolioStatus } from '../features/folios'
 import { CancellationRequestsTab } from '../features/folios/components/CancellationRequestsTab'
-import { BookingWhatsAppButton, isUrgentBooking, venceLabel } from '../features/bookings'
+import {
+  BookingWhatsAppButton,
+  DeliveryBadge,
+  isUrgentBooking,
+  venceLabel,
+} from '../features/bookings'
 import { MoneyText } from '../components'
 import { ROUTES } from '../config/routes'
 
@@ -123,6 +128,8 @@ function FoliosTab() {
                           sx={{ alignItems: 'center', flexShrink: 0 }}
                         >
                           <FolioStatusChip status={f.status} />
+                          {/* whatsapp-qr-delivery — admin oversight of undelivered tickets. */}
+                          <DeliveryBadge folio={f} />
                           {isBooking && <BookingWhatsAppButton folio={f} />}
                         </Stack>
                       </Stack>

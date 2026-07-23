@@ -16,6 +16,9 @@ export interface MyOrganization {
   lodging_weekend_days: number[]
   lodging_free_cancel_days: number
   lodging_cancel_penalty_pct: number
+  // whatsapp-qr-delivery D10 — admin-edited message templates; null ⇒ the shipped default is used.
+  wa_ticket_template: string | null
+  wa_reminder_template: string | null
 }
 
 export const getMyOrganization = async (): Promise<MyOrganization> => {
@@ -31,6 +34,9 @@ export interface UpdateOrganizationInput {
   lodging_weekend_days?: number[]
   lodging_free_cancel_days?: number
   lodging_cancel_penalty_pct?: number
+  // null resets to the shipped default; a string must contain {portal_link} (server-validated).
+  wa_ticket_template?: string | null
+  wa_reminder_template?: string | null
 }
 
 // US-A46 — admin updates the org booking policy.

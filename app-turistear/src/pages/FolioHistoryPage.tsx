@@ -16,7 +16,12 @@ import {
   ToggleButtonGroup,
 } from '@mui/material'
 import { useMyFolios } from '../features/pos/hooks'
-import { BookingWhatsAppButton, isUrgentBooking, venceLabel } from '../features/bookings'
+import {
+  BookingWhatsAppButton,
+  DeliveryBadge,
+  isUrgentBooking,
+  venceLabel,
+} from '../features/bookings'
 import { FolioStatusChip } from '../features/folios'
 import type { FolioStatus } from '../features/pos/types'
 import { MoneyText } from '../components'
@@ -132,6 +137,8 @@ export default function FolioHistoryPage() {
                           sx={{ alignItems: 'center', flexShrink: 0 }}
                         >
                           <FolioStatusChip status={f.status} />
+                          {/* whatsapp-qr-delivery — the delivery badge (send lives on detail). */}
+                          <DeliveryBadge folio={f} />
                           {isBooking && <BookingWhatsAppButton folio={f} />}
                         </Stack>
                       </Stack>

@@ -11,6 +11,7 @@ import {
   getFolioDetail,
   listCancellationRequests,
   listFolios,
+  markTicketsSentAdmin,
   rejectCancellationRequest,
 } from './handler'
 import {
@@ -58,5 +59,7 @@ foliosRouter.post(
   zValidator('json', confirmRefundSchema, validationHook),
   confirmRefund,
 )
+// whatsapp-qr-delivery — admin records the tickets were sent over WhatsApp (oversight re-send).
+foliosRouter.post('/:id/ticket-delivery', markTicketsSentAdmin)
 
 export default foliosRouter
