@@ -15,11 +15,19 @@ import {
 import CheckCircleRounded from '@mui/icons-material/CheckCircleRounded'
 import EventAvailableRounded from '@mui/icons-material/EventAvailableRounded'
 import EventBusyRounded from '@mui/icons-material/EventBusyRounded'
+import WarningAmberRounded from '@mui/icons-material/WarningAmberRounded'
 import { useFolio } from '../features/pos/hooks'
 import { TicketQr } from '../features/pos/components/TicketQr'
-import { BookingActions, ExpiredBookingBanner } from '../features/bookings'
+import {
+  BookingActions,
+  ExpiredBookingBanner,
+  TicketWhatsAppButton,
+  DeliveryBadge,
+} from '../features/bookings'
+import { deliveryState } from '../features/pos/delivery'
 import { formatMoney } from '../features/catalog/types'
 import { folioLineMeta } from '../features/folios/folioLineLabel'
+import { SectionCard } from '../components'
 import { ROUTES } from '../config/routes'
 
 export default function FolioReceiptPage() {
@@ -73,6 +81,36 @@ export default function FolioReceiptPage() {
             </Box>
 
             <ExpiredBookingBanner folio={folio} />
+
+            {/* whatsapp-qr-delivery — the primary post-payment action: send the portal link (QR +
+                itinerary) over WhatsApp. Leads the receipt for a paid folio; the QR below is the
+                in-person fallback. Pendiente → Enviado → Visto shown alongside. */}
+            {folio.status === 'paid' && folio.portal_link && (
+              <SectionCard>
+                <Stack spacing={1.5}>
+                  <Stack
+                    direction="row"
+                    sx={{ alignItems: 'center', justifyContent: 'space-between' }}
+                  >
+                    <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
+                      Entregar boletos
+                    </Typography>
+                    <DeliveryBadge folio={folio} />
+                  </Stack>
+                  <TicketWhatsAppButton folio={folio} surface="seller" variant="primary" />
+                  {deliveryState(folio) === 'pending' && (
+                    <Stack
+                      direction="row"
+                      spacing={0.5}
+                      sx={{ alignItems: 'center', color: 'warning.main' }}
+                    >
+                      <WarningAmberRounded fontSize="small" />
+                      <Typography variant="caption">Aún no enviado al cliente</Typography>
+                    </Stack>
+                  )}
+                </Stack>
+              </SectionCard>
+            )}
 
             <Card>
               <CardContent>

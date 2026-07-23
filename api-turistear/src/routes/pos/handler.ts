@@ -730,6 +730,27 @@ async function issuePortalLink(
   }
 }
 
+// Look up an already-issued portal link for a folio (whatsapp-qr-delivery). Returns the newest
+// token's URL, or null when none exists yet (unpaid booking / pre-feature sale). Drives the
+// receipt/folio-detail "Enviar por WhatsApp" affordance and the delivery badge.
+async function folioPortalLink(
+  db: Db,
+  org: string,
+  folioId: string,
+  apiBaseUrl: string,
+): Promise<string | null> {
+  const rows = await db
+    .select({ token: folioAccessTokens.token })
+    .from(folioAccessTokens)
+    .where(
+      and(eq(folioAccessTokens.folioId, folioId), eq(folioAccessTokens.organizationId, org)),
+    )
+    .orderBy(desc(folioAccessTokens.createdAt))
+    .limit(1)
+  const row = rows[0]
+  return row ? `${apiBaseUrl}/portal/${row.token}` : null
+}
+
 interface TicketEmailMeta {
   customerEmail: string | null
   customerName: string | null
@@ -800,12 +821,9 @@ export const confirmSale = async (c: PosContext) => {
   const isAffiliate = agent.role === 'affiliate'
   const affiliateCompanyId = isAffiliate ? agent.affiliateCompanyId : null
 
-  // Ticket delivery channel: an agent/admin sale REQUIRES a customer email (the only channel).
-  // An affiliate sale delivers to the affiliate's own account email (D8), so customer_email is
-  // an optional copy there. (The schema validates the format when present; this guards presence.)
-  if (!isAffiliate && !input.customer_email) {
-    throw new ApiError('VALIDATION_ERROR', 400, 'A valid customer email is required')
-  }
+  // D2 (whatsapp-qr-delivery) — email is no longer a required delivery channel. WhatsApp (the
+  // agent-sent portal link, name + phone required by the schema) is now primary; email is an
+  // optional copy for any role. The schema still validates the address format when present.
   const affiliateRates = new Map<string, { type: 'percent' | 'fixed'; value: number }>()
   if (isAffiliate) {
     if (!affiliateCompanyId) {
@@ -1520,17 +1538,17 @@ export const confirmSale = async (c: PosContext) => {
 
   const orgName = orgRow?.name ?? 'Turistear Ya!'
 
-  // Ticket/QR recipients (affiliate-portal.spec.md D8): an affiliate sale is addressed to the
-  // affiliate (concierge) for group distribution, with the optional customer_email sent a copy;
-  // an agent/admin sale goes to the customer as before. Deduped so a self-addressed copy sends once.
+  // Ticket/QR delivery is customer-direct for EVERY role now (whatsapp-qr-delivery D9): the tourist
+  // (name + phone captured) gets the WhatsApp portal link, and email — when a customer email was
+  // captured — is an optional copy. An affiliate no longer receives a self-addressed copy; they
+  // re-open the sale from their own /history.
   const ticketRecipients = [
-    ...new Set(
-      (isAffiliate
-        ? [agent.email, input.customer_email]
-        : [input.customer_email]
-      ).filter((e): e is string => !!e),
-    ),
+    ...new Set([input.customer_email].filter((e): e is string => !!e)),
   ]
+
+  // The portal link is surfaced to the client (receipt CTA + folio detail) so the agent can send it
+  // over WhatsApp. Minted on the paid path only (a booking has no QR/portal token yet).
+  let portalLink: string | undefined
 
   // Post-commit side effects diverge by sale type. A booking gets the apartado email (no QR, no
   // portal token); the paid sale mints the portal token + sends the full ticket + QR email. Both
@@ -1564,7 +1582,7 @@ export const confirmSale = async (c: PosContext) => {
       }
     }
   } else {
-    const portalLink = await issuePortalLink(
+    portalLink = await issuePortalLink(
       db,
       c.env,
       org,
@@ -1614,6 +1632,11 @@ export const confirmSale = async (c: PosContext) => {
         customer_name: input.customer_name ?? null,
         customer_email: input.customer_email ?? null,
         customer_phone: input.customer_phone ?? null,
+        // Delivery axis (whatsapp-qr-delivery) — the receipt CTA sends this portal link; a fresh
+        // sale is "pendiente de enviar" (nothing sent/viewed yet).
+        portal_link: portalLink ?? null,
+        tickets_sent_at: null,
+        tickets_viewed_at: null,
         subtotal,
         discount_total: discountTotal,
         total,
@@ -1666,6 +1689,7 @@ const readFolio = async (
   agentId: string,
   folioId: string,
   qrSecret: string,
+  apiBaseUrl: string,
 ) => {
   const folioRows = await db
     .select({
@@ -1681,6 +1705,8 @@ const readFolio = async (
       amountPaid: folios.amountPaid,
       commissionAmount: folios.commissionAmount,
       cancelledAt: folios.cancelledAt,
+      ticketsSentAt: folios.ticketsSentAt,
+      ticketsViewedAt: folios.ticketsViewedAt,
       createdAt: folios.createdAt,
     })
     .from(folios)
@@ -1788,6 +1814,8 @@ const readFolio = async (
     }),
   )
 
+  const portalLink = await folioPortalLink(db, org, folioId, apiBaseUrl)
+
   return {
     id: folio.id,
     status: folio.status,
@@ -1802,6 +1830,13 @@ const readFolio = async (
     commission_amount: folio.commissionAmount,
     cancelled_at: folio.cancelledAt
       ? Math.floor(folio.cancelledAt.getTime() / 1000)
+      : null,
+    // Delivery axis (whatsapp-qr-delivery) — portal_link drives the WhatsApp send; sent/viewed
+    // stamps drive the Pendiente → Enviado → Visto badge.
+    portal_link: portalLink,
+    tickets_sent_at: folio.ticketsSentAt ? Math.floor(folio.ticketsSentAt.getTime() / 1000) : null,
+    tickets_viewed_at: folio.ticketsViewedAt
+      ? Math.floor(folio.ticketsViewedAt.getTime() / 1000)
       : null,
     created_at: Math.floor(folio.createdAt.getTime() / 1000),
     lines,
@@ -1821,12 +1856,42 @@ export const getFolio = async (c: PosContext) => {
     agent.userId,
     id,
     c.env.QR_SECRET,
+    c.env.API_BASE_URL,
   )
   if (!folio) {
     throw new ApiError('NOT_FOUND', 404, 'Folio not found')
   }
 
   return c.json({ folio })
+}
+
+// POST /pos/folios/:id/ticket-delivery — the seller records that they sent the tickets over
+// WhatsApp (whatsapp-qr-delivery D4). Clears "Pendiente de enviar". D13 — simple idempotent mark
+// (last-write-wins: a re-send restamps who/when, no atomic claim). Scoped to the caller's own folio.
+export const markTicketsSent = async (c: PosContext) => {
+  const agent = c.get('user')
+  const id = c.req.param('id')
+  const db = getDb(c.env)
+  const now = new Date()
+
+  const updated = await db
+    .update(folios)
+    .set({ ticketsSentAt: now, ticketsSentBy: agent.userId, updatedAt: now })
+    .where(
+      and(
+        eq(folios.id, id),
+        eq(folios.organizationId, agent.organizationId),
+        eq(folios.agentId, agent.userId),
+      ),
+    )
+    .returning({ sentAt: folios.ticketsSentAt, viewedAt: folios.ticketsViewedAt })
+
+  const row = updated[0]
+  if (!row) throw new ApiError('NOT_FOUND', 404, 'Folio not found')
+  return c.json({
+    tickets_sent_at: row.sentAt ? Math.floor(row.sentAt.getTime() / 1000) : null,
+    tickets_viewed_at: row.viewedAt ? Math.floor(row.viewedAt.getTime() / 1000) : null,
+  })
 }
 
 // US-AG07 — settle a booking (one-shot): collect the full balance, flip to `paid`, mint the
@@ -1998,7 +2063,7 @@ export const settleBooking = async (c: PosContext) => {
     portalLink,
   )
 
-  const settled = await readFolio(db, org, agent.userId, id, c.env.QR_SECRET)
+  const settled = await readFolio(db, org, agent.userId, id, c.env.QR_SECRET, c.env.API_BASE_URL)
   return c.json({ folio: settled })
 }
 
@@ -2088,7 +2153,7 @@ export const cancelBooking = async (c: PosContext) => {
   )
   await db.batch(statements as [BatchItem<'sqlite'>, ...BatchItem<'sqlite'>[]])
 
-  const updated = await readFolio(db, org, agent.userId, id, c.env.QR_SECRET)
+  const updated = await readFolio(db, org, agent.userId, id, c.env.QR_SECRET, c.env.API_BASE_URL)
   return c.json({ folio: updated ?? { id, status: 'cancelled' } })
 }
 
@@ -2406,7 +2471,7 @@ export const reactivateBooking = async (c: PosContext) => {
     })
     .where(and(eq(folios.id, id), eq(folios.organizationId, org)))
 
-  const updated = await readFolio(db, org, agent.userId, id, c.env.QR_SECRET)
+  const updated = await readFolio(db, org, agent.userId, id, c.env.QR_SECRET, c.env.API_BASE_URL)
   return c.json({ folio: updated ?? { id, status: 'booking' } })
 }
 
@@ -2450,6 +2515,8 @@ export const listAgentFolios = async (c: PosContext) => {
       reminderStatus: folios.reminderStatus,
       reminderSentAt: folios.reminderSentAt,
       reminderSentBy: folios.reminderSentBy,
+      ticketsSentAt: folios.ticketsSentAt,
+      ticketsViewedAt: folios.ticketsViewedAt,
     })
     .from(folios)
     .where(and(...filters))
@@ -2464,6 +2531,11 @@ export const listAgentFolios = async (c: PosContext) => {
       status: r.status,
       total: r.total,
       amount_paid: r.amountPaid,
+      // Delivery axis (whatsapp-qr-delivery) — a paid folio is "deliverable" (a portal token
+      // exists); the sent/viewed stamps drive the Pendiente → Enviado → Visto list badge.
+      deliverable: r.status === 'paid',
+      tickets_sent_at: r.ticketsSentAt ? Math.floor(r.ticketsSentAt.getTime() / 1000) : null,
+      tickets_viewed_at: r.ticketsViewedAt ? Math.floor(r.ticketsViewedAt.getTime() / 1000) : null,
       // US-AG07.3 — derived pending balance + booking fields drive the Apartados dashboard.
       pending_balance: r.total - r.amountPaid,
       created_at: Math.floor(r.createdAt.getTime() / 1000),

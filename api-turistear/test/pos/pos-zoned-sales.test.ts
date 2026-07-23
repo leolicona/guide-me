@@ -118,7 +118,7 @@ const sell = (email: string, lines: object[]) =>
   SELF.fetch(`${base}/folios`, {
     method: 'POST',
     headers: jsonAuth(email),
-    body: JSON.stringify({ customer_email: 'cliente@example.com', lines }),
+    body: JSON.stringify({ customer_name: 'Cliente Test', customer_phone: '5512345678', customer_email: 'cliente@example.com', lines }),
   })
 
 const clearDb = async () => {

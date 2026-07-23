@@ -208,6 +208,12 @@ export interface Folio {
   payment_method: PaymentMethod
   /** Set when the folio was cancelled by an admin (US-A21); null otherwise. */
   cancelled_at: number | null
+  /** Delivery axis (whatsapp-qr-delivery). portal_link: the WhatsApp/QR portal URL (null until a
+   *  QR/portal exists — unpaid booking / pre-feature). tickets_sent_at: the agent sent it (unix
+   *  secs). tickets_viewed_at: the tourist opened the portal ("Visto"). */
+  portal_link?: string | null
+  tickets_sent_at?: number | null
+  tickets_viewed_at?: number | null
   created_at: number
   lines: FolioLine[]
 }
@@ -232,4 +238,9 @@ export interface FolioHistoryItem {
   reminder_status?: ReminderStatus
   reminder_sent_at?: number | null
   reminder_sent_by?: string | null
+  /** Delivery axis (whatsapp-qr-delivery) — deliverable = a portal link exists (paid folio); the
+   *  sent/viewed stamps drive the Pendiente → Enviado → Visto list badge. */
+  deliverable?: boolean
+  tickets_sent_at?: number | null
+  tickets_viewed_at?: number | null
 }

@@ -25,6 +25,11 @@ export const organizations = sqliteTable('organizations', {
   lodgingWeekendDays: text('lodging_weekend_days').notNull().default('5,6'),
   lodgingFreeCancelDays: integer('lodging_free_cancel_days').notNull().default(0),
   lodgingCancelPenaltyPct: integer('lodging_cancel_penalty_pct').notNull().default(0),
+  // WhatsApp message templates (docs/whatsapp-qr-delivery/spec.md — D10). Admin-edited in Settings.
+  // NULL ⇒ use the shipped default (see utils/waTemplates). waTicketTemplate delivers paid tickets
+  // (tours + lodging) and MUST contain {portal_link}; waReminderTemplate is the apartado reminder.
+  waTicketTemplate: text('wa_ticket_template'),
+  waReminderTemplate: text('wa_reminder_template'),
   createdAt: integer('created_at', { mode: 'timestamp' })
     .notNull()
     .default(sql`(unixepoch())`),
@@ -344,6 +349,14 @@ export const folios = sqliteTable('folios', {
   refundNote: text('refund_note'),
   refundedAt: integer('refunded_at', { mode: 'timestamp' }),
   refundedBy: text('refunded_by').references(() => users.id),
+  // WhatsApp ticket delivery (docs/whatsapp-qr-delivery/spec.md — D4). A separate axis from
+  // payment status. ticketsSentAt: the agent tapped "Enviar por WhatsApp" (their metric, cleared
+  // once they act — idempotent last-write-wins, D13). ticketsViewedAt: the tourist opened the
+  // portal (the bot-proof "Visto" beacon, first-view). A folio is "pendiente de enviar" once a
+  // portal link exists and ticketsSentAt is null.
+  ticketsSentAt: integer('tickets_sent_at', { mode: 'timestamp' }),
+  ticketsSentBy: text('tickets_sent_by').references(() => users.id),
+  ticketsViewedAt: integer('tickets_viewed_at', { mode: 'timestamp' }),
   createdAt: integer('created_at', { mode: 'timestamp' })
     .notNull()
     .default(sql`(unixepoch())`),

@@ -19,6 +19,16 @@ export const updateOrganizationSchema = z.object({
     .optional(),
   lodging_free_cancel_days: z.number().int().min(0).optional(),
   lodging_cancel_penalty_pct: z.number().int().min(0).max(100).optional(),
+  // WhatsApp message templates (whatsapp-qr-delivery D10). `null` resets to the shipped default.
+  // The ticket template MUST contain {portal_link} — without it the tourist can't reach their QR.
+  wa_ticket_template: z
+    .string()
+    .trim()
+    .max(2000)
+    .refine((t) => t.includes('{portal_link}'), 'The template must include {portal_link}')
+    .nullable()
+    .optional(),
+  wa_reminder_template: z.string().trim().max(2000).nullable().optional(),
 })
 
 export type UpdateOrganizationInput = z.infer<typeof updateOrganizationSchema>

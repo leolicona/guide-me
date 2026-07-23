@@ -111,7 +111,7 @@ const confirm = async (email: string, body: Record<string, unknown>) => {
   const res = await SELF.fetch(`${base}/folios`, {
     method: 'POST',
     headers: jsonAuth(email),
-    body: JSON.stringify({ customer_email: 'cliente@example.com', ...body }),
+    body: JSON.stringify({ customer_name: 'Cliente Test', customer_phone: '5512345678', customer_email: 'cliente@example.com', ...body }),
   })
   return { status: res.status, json: (await res.json()) as any }
 }
@@ -217,8 +217,9 @@ describe('Folio QR signing', () => {
   it('Scenario 5 — client_identity falls back name → email', async () => {
     // customer_email is now mandatory at POS, so the final `folio:<id>` fallback in the
     // signing code is defensive-only (unreachable from a POS sale: email is always present,
-    // and the identity is baked into the token at confirm time). Cover the two reachable
-    // identities here: full name wins; email is used when no name is given.
+    // and the identity is baked into the token at confirm time). A name is now REQUIRED (D2 —
+    // whatsapp-qr-delivery), so the identity is always the customer name, even when an email is
+    // also present (the name wins over the email).
     const { organizationId } = await seedUser({ email: AGENT_EMAIL, role: 'agent' })
     const serviceId = await seedService(organizationId)
     const slotId = await seedSlot(organizationId, serviceId, { capacity: 12 })
@@ -229,7 +230,8 @@ describe('Folio QR signing', () => {
       customer_email: 'jane@example.com',
       lines: [{ slot_id: slotId, quantity: 1, unit_price: 150000 }],
     })
-    const emailOnly = await confirm(AGENT_EMAIL, {
+    const nameWins = await confirm(AGENT_EMAIL, {
+      customer_name: 'Solo Nombre',
       customer_email: 'jane@example.com',
       lines: [{ slot_id: slotId, quantity: 1, unit_price: 150000 }],
     })
@@ -238,7 +240,7 @@ describe('Folio QR signing', () => {
       (await verifyTicket(r.json.folio.lines[0].qr_token, key))?.client_identity
 
     expect(await idOf(named)).toBe('Jane Tourist')
-    expect(await idOf(emailOnly)).toBe('jane@example.com')
+    expect(await idOf(nameWins)).toBe('Solo Nombre')
   })
 
   it('Scenario 6 — multi-line folio yields one distinct, verifying token per line', async () => {

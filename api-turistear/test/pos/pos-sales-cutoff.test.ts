@@ -57,7 +57,7 @@ const sell = async (email: string, body: Record<string, unknown>) => {
   const res = await SELF.fetch(`${base}/folios`, {
     method: 'POST',
     headers: jsonAuth(email),
-    body: JSON.stringify({ customer_email: 'cliente@example.com', ...body }),
+    body: JSON.stringify({ customer_name: 'Cliente Test', customer_phone: '5512345678', customer_email: 'cliente@example.com', ...body }),
   })
   return { status: res.status, json: (await res.json()) as any }
 }

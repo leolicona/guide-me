@@ -13,6 +13,7 @@ import {
   listAgentFolios,
   listAvailabilityDays,
   listPosServices,
+  markTicketsSent,
   reactivateBooking,
   settleBooking,
 } from './handler'
@@ -64,5 +65,7 @@ pos.post('/folios/:id/cancel', cancelBooking)
 pos.post('/folios/:id/reminder', claimReminder)
 // US-AG07.5 — reactivate an expired booking when capacity allows (reactivation only).
 pos.post('/folios/:id/reactivate', reactivateBooking)
+// whatsapp-qr-delivery — the seller records they sent the tickets over WhatsApp (clears Pendiente).
+pos.post('/folios/:id/ticket-delivery', markTicketsSent)
 
 export default pos

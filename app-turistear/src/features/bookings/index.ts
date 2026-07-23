@@ -8,3 +8,5 @@ export { BookingActions, ExpiredBookingBanner } from './components/BookingAction
 export type { BookingFolio } from './components/BookingActions'
 export { BookingWhatsAppButton } from './components/BookingWhatsAppButton'
 export type { ReminderTarget } from './components/BookingWhatsAppButton'
+export { TicketWhatsAppButton } from './components/TicketWhatsAppButton'
+export { DeliveryBadge } from './components/DeliveryBadge'

@@ -29,6 +29,10 @@ export interface FolioListItem {
   reminder_status?: ReminderStatus
   reminder_sent_at?: number | null
   reminder_sent_by?: string | null
+  // whatsapp-qr-delivery — admin oversight of undelivered tickets.
+  deliverable?: boolean
+  tickets_sent_at?: number | null
+  tickets_viewed_at?: number | null
 }
 
 export interface FolioLineExtra {
@@ -93,6 +97,10 @@ export interface FolioDetail {
   refund_note: string | null // the admin's audit note on a no-PIN override confirm
   refunded_at: number | null
   refunded_by: string | null
+  // whatsapp-qr-delivery — portal_link drives the admin Reenviar action; sent/viewed → the badge.
+  portal_link?: string | null
+  tickets_sent_at?: number | null
+  tickets_viewed_at?: number | null
   created_at: number
   lines: FolioDetailLine[]
 }

@@ -5,6 +5,7 @@ import { getDb, type Db } from '../../db/client'
 import {
   accommodationReservations,
   cancellationRequests,
+  folioAccessTokens,
   folioLineExtras,
   folioLines,
   folios,
@@ -38,13 +39,15 @@ const tsOrNull = (d: Date | null) => (d ? Math.floor(d.getTime() / 1000) : null)
 // Re-read one folio (lines + extras) scoped to the caller's org, with its cancellation
 // audit. Returns null when no such folio exists in the org. Shared by getFolioDetail and
 // the response of cancelFolio.
-const readFolio = async (db: Db, org: string, folioId: string) => {
+const readFolio = async (db: Db, org: string, folioId: string, apiBaseUrl?: string) => {
   const folioRows = await db
     .select({
       id: folios.id,
       agentId: folios.agentId,
       agentName: users.name,
       status: folios.status,
+      ticketsSentAt: folios.ticketsSentAt,
+      ticketsViewedAt: folios.ticketsViewedAt,
       paymentMethod: folios.paymentMethod,
       customerName: folios.customerName,
       customerEmail: folios.customerEmail,
@@ -81,6 +84,21 @@ const readFolio = async (db: Db, org: string, folioId: string) => {
 
   const folio = folioRows[0]
   if (!folio) return null
+
+  // Delivery axis (whatsapp-qr-delivery) — the newest portal token's URL, for the admin's
+  // "Enviar/Reenviar por WhatsApp" affordance. Only when a base URL is supplied.
+  let portalLink: string | null = null
+  if (apiBaseUrl) {
+    const tokenRows = await db
+      .select({ token: folioAccessTokens.token })
+      .from(folioAccessTokens)
+      .where(
+        and(eq(folioAccessTokens.folioId, folioId), eq(folioAccessTokens.organizationId, org)),
+      )
+      .orderBy(desc(folioAccessTokens.createdAt))
+      .limit(1)
+    if (tokenRows[0]) portalLink = `${apiBaseUrl}/portal/${tokenRows[0].token}`
+  }
 
   const lineRows = await db
     .select({
@@ -157,6 +175,11 @@ const readFolio = async (db: Db, org: string, folioId: string) => {
     refund_note: folio.refundNote,
     refunded_at: tsOrNull(folio.refundedAt),
     refunded_by: folio.refundedBy,
+    // Delivery axis (whatsapp-qr-delivery) — portal_link + sent/viewed stamps for the admin's
+    // oversight badge and Reenviar action.
+    portal_link: portalLink,
+    tickets_sent_at: tsOrNull(folio.ticketsSentAt),
+    tickets_viewed_at: tsOrNull(folio.ticketsViewedAt),
     created_at: Math.floor(folio.createdAt.getTime() / 1000),
     lines: lineRows.map((line) => ({
       id: line.id,
@@ -230,6 +253,8 @@ export const listFolios = async (c: FoliosContext) => {
       reminderStatus: folios.reminderStatus,
       reminderSentAt: folios.reminderSentAt,
       reminderSentBy: folios.reminderSentBy,
+      ticketsSentAt: folios.ticketsSentAt,
+      ticketsViewedAt: folios.ticketsViewedAt,
     })
     .from(folios)
     .innerJoin(users, eq(folios.agentId, users.id))
@@ -252,6 +277,10 @@ export const listFolios = async (c: FoliosContext) => {
       reminder_status: r.reminderStatus,
       reminder_sent_at: tsOrNull(r.reminderSentAt),
       reminder_sent_by: r.reminderSentBy,
+      // Delivery axis (whatsapp-qr-delivery) — admin oversight of undelivered tickets.
+      deliverable: r.status === 'paid',
+      tickets_sent_at: tsOrNull(r.ticketsSentAt),
+      tickets_viewed_at: tsOrNull(r.ticketsViewedAt),
     })),
   })
 }
@@ -262,12 +291,34 @@ export const getFolioDetail = async (c: FoliosContext) => {
   const id = c.req.param('id')
   const db = getDb(c.env)
 
-  const folio = await readFolio(db, admin.organizationId, id)
+  const folio = await readFolio(db, admin.organizationId, id, c.env.API_BASE_URL)
   if (!folio) {
     throw new ApiError('NOT_FOUND', 404, 'Folio not found')
   }
 
   return c.json({ folio })
+}
+
+// POST /folios/:id/ticket-delivery — the admin records the tickets were sent over WhatsApp
+// (whatsapp-qr-delivery D4/D13). Org-scoped (any folio in the org, no agent filter). Last-write-wins.
+export const markTicketsSentAdmin = async (c: FoliosContext) => {
+  const admin = c.get('user')
+  const id = c.req.param('id')
+  const db = getDb(c.env)
+  const now = new Date()
+
+  const updated = await db
+    .update(folios)
+    .set({ ticketsSentAt: now, ticketsSentBy: admin.userId, updatedAt: now })
+    .where(and(eq(folios.id, id), eq(folios.organizationId, admin.organizationId)))
+    .returning({ sentAt: folios.ticketsSentAt, viewedAt: folios.ticketsViewedAt })
+
+  const row = updated[0]
+  if (!row) throw new ApiError('NOT_FOUND', 404, 'Folio not found')
+  return c.json({
+    tickets_sent_at: tsOrNull(row.sentAt),
+    tickets_viewed_at: tsOrNull(row.viewedAt),
+  })
 }
 
 // The cancellation commit (US-A21), shared by the direct admin cancel and the

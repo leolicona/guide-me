@@ -183,7 +183,7 @@ const confirmOneLine = async (
   const res = await SELF.fetch(`${base}/folios`, {
     method: 'POST',
     headers: jsonAuth(email),
-    body: JSON.stringify({ customer_email: 'cliente@example.com', ...body }),
+    body: JSON.stringify({ customer_name: 'Cliente Test', customer_phone: '5512345678', customer_email: 'cliente@example.com', ...body }),
   })
   return { status: res.status, json: await res.json() }
 }
@@ -575,6 +575,8 @@ describe('POS — authorization', () => {
       method: 'POST',
       headers: jsonAuth(ADMIN_EMAIL),
       body: JSON.stringify({
+        customer_name: 'Cliente Test',
+        customer_phone: '5512345678',
         customer_email: 'cliente@example.com',
         lines: [{ slot_id: slotId, quantity: 1, unit_price: 150000 }],
       }),

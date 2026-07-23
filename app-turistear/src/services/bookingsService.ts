@@ -46,3 +46,16 @@ export const reactivateBooking = async (id: string): Promise<Folio> => {
   })
   return res.folio
 }
+
+// whatsapp-qr-delivery — record that the tickets were sent over WhatsApp. Two surfaces: the seller
+// (agent/affiliate, their own folio) and the admin oversight list.
+export interface TicketDelivery {
+  tickets_sent_at: number | null
+  tickets_viewed_at: number | null
+}
+
+export const markTicketsSent = (id: string): Promise<TicketDelivery> =>
+  request<TicketDelivery>(`/api/pos/folios/${id}/ticket-delivery`, { method: 'POST' })
+
+export const markTicketsSentAdmin = (id: string): Promise<TicketDelivery> =>
+  request<TicketDelivery>(`/api/folios/${id}/ticket-delivery`, { method: 'POST' })

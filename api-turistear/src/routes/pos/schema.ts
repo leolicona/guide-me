@@ -43,14 +43,17 @@ const lineSchema = z.union([stayLineSchema, slotLineSchema])
 
 export const confirmSaleSchema = z
   .object({
-    customer_name: z.string().nullable().optional(),
-    // For an agent/admin sale, customer_email is the only ticket-delivery channel and is
-    // REQUIRED — enforced in the handler (it can't be enforced here because an affiliate sale
-    // delivers to the affiliate's own account email, so the field is optional for that role;
-    // affiliate-portal.spec.md D8). When present it must be a valid address either way.
+    // D2 (whatsapp-qr-delivery) — every POS sale requires a name and a dialable phone: WhatsApp
+    // is now the primary ticket-delivery channel (the agent sends the portal link). Uniform for
+    // all roles, so it's enforced here in the schema (no per-role exemption).
+    customer_name: z.string().trim().min(1, 'A customer name is required'),
+    // Email drops to an OPTIONAL copy — valid only if present (no longer the required channel).
     customer_email: z.string().trim().email('A valid customer email is required').nullish(),
-    // Phone stays optional metadata (no delivery dependency on it yet).
-    customer_phone: z.string().nullable().optional(),
+    // Dialable (≥ 10 digits after stripping formatting; mirrors the client's +52 normalizer floor).
+    customer_phone: z
+      .string()
+      .trim()
+      .refine((p) => p.replace(/\D/g, '').length >= 10, 'A dialable customer phone is required'),
     // US-AG25/AG29 — how the payment was collected. Defaults to 'cash' (the common case
     // and the pre-feature behaviour). Every non-cash method is electronic: it still earns
     // commission but adds no cash debt (US-AG24 path).

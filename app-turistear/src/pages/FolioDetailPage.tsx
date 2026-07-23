@@ -23,11 +23,19 @@ import {
 } from '@mui/material'
 import ArrowBackRounded from '@mui/icons-material/ArrowBackRounded'
 import { useFolio, useCancelFolio, useConfirmRefund, FolioStatusChip } from '../features/folios'
-import { BookingActions, ExpiredBookingBanner, venceLabel } from '../features/bookings'
+import WarningAmberRounded from '@mui/icons-material/WarningAmberRounded'
+import {
+  BookingActions,
+  ExpiredBookingBanner,
+  venceLabel,
+  TicketWhatsAppButton,
+  DeliveryBadge,
+} from '../features/bookings'
+import { deliveryState } from '../features/pos/delivery'
 import { ServiceError } from '../services/authService'
 import { formatMoney } from '../features/catalog/types'
 import { folioLineMeta } from '../features/folios/folioLineLabel'
-import { MoneyText } from '../components'
+import { MoneyText, SectionCard } from '../components'
 import { ROUTES } from '../config/routes'
 
 const formatDate = (unixSeconds: number) =>
@@ -257,6 +265,40 @@ export default function FolioDetailPage() {
 
             {cancel.isError && (
               <Alert severity="error">No se pudo cancelar este folio. Inténtalo de nuevo.</Alert>
+            )}
+
+            {/* whatsapp-qr-delivery — admin oversight: re-send the tickets over WhatsApp on the
+                seller's behalf (D15). Uses the seller's name in the message. */}
+            {folio.status === 'paid' && folio.portal_link && (
+              <SectionCard>
+                <Stack spacing={1.5}>
+                  <Stack
+                    direction="row"
+                    sx={{ alignItems: 'center', justifyContent: 'space-between' }}
+                  >
+                    <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
+                      Entregar boletos
+                    </Typography>
+                    <DeliveryBadge folio={folio} />
+                  </Stack>
+                  <TicketWhatsAppButton
+                    folio={folio}
+                    surface="admin"
+                    variant="primary"
+                    agentName={folio.agent.name}
+                  />
+                  {deliveryState(folio) === 'pending' && (
+                    <Stack
+                      direction="row"
+                      spacing={0.5}
+                      sx={{ alignItems: 'center', color: 'warning.main' }}
+                    >
+                      <WarningAmberRounded fontSize="small" />
+                      <Typography variant="caption">Aún no enviado al cliente</Typography>
+                    </Stack>
+                  )}
+                </Stack>
+              </SectionCard>
             )}
 
             {/* US-AG07/07.4/07.5 — a live apartado settles/cancels (non-refundable) or, once

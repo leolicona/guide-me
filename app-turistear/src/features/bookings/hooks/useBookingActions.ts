@@ -2,6 +2,8 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   cancelBooking,
   claimReminder,
+  markTicketsSent,
+  markTicketsSentAdmin,
   reactivateBooking,
   settleBooking,
 } from '../../../services/bookingsService'
@@ -45,6 +47,17 @@ export function useClaimReminder() {
   const invalidate = useInvalidateBookings()
   return useMutation({
     mutationFn: (v: { id: string; force?: boolean }) => claimReminder(v.id, v.force),
+    onSuccess: invalidate,
+  })
+}
+
+// whatsapp-qr-delivery — record the tickets were sent over WhatsApp (clears "Pendiente"). D13:
+// simple idempotent mark, no claim. `surface` picks the seller vs. admin endpoint.
+export function useMarkTicketsSent(surface: 'seller' | 'admin' = 'seller') {
+  const invalidate = useInvalidateBookings()
+  return useMutation({
+    mutationFn: (id: string) =>
+      surface === 'admin' ? markTicketsSentAdmin(id) : markTicketsSent(id),
     onSuccess: invalidate,
   })
 }
