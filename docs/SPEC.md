@@ -4,7 +4,7 @@
 
 Turistear Ya! is a multi-tenant, mobile-optimized SaaS platform that centralizes the sale of tourist services, real-time inventory control, commission calculation, and access validation via QR codes. It is designed so that tourism companies (organizations) can operate agilely in the field, ensuring financial control and a modern digital experience for the tourist.
 
-**Problem solved:** Tourism sales teams operate with spreadsheets, informal WhatsApp, and untraceable cash. Turistear Ya! replaces this chaos with a mobile-first tool that prevents overbooking, controls commissions, and automatically delivers digital receipts.
+**Problem solved:** Tourism sales teams operate with spreadsheets, informal WhatsApp, and untraceable cash. Turistear Ya! replaces this chaos with a mobile-first tool that prevents overbooking, controls commissions, and delivers digital receipts + QR tickets — by Email and **agent-sent WhatsApp** (the portal link), with delivery **tracked to receipt**.
 
 ---
 
@@ -163,6 +163,7 @@ Turistear Ya! is a multi-tenant, mobile-optimized SaaS platform that centralizes
 - **US-A45** — As an admin selling on `/pos`, I want the **same Date filter** agents use — a **quick-day strip** (`HOY` + the next two days + a calendar button) and a **calendar Bottom Sheet** of square day chips marking the **available days of the month** with month navigation — so I pick the selling day exactly as my agents do, with no admin-specific divergence. *(Satisfied by the shared `/pos` control of US-AG35, via the same-POS-flow guarantee of US-A31.)* — `docs/pos/date-filter-calendar-sheet.spec.md`
 - **US-A46** — As an admin, I want to configure the **booking policy** for my organization — the **minimum deposit percentage** (`booking_min_down_payment_pct`, 0–100) and the **hold window** (`booking_hold_days`, ≥ 1) after which an unsettled apartado auto-cancels and releases its spots — so apartados match my business rules. Org-scoped; takes effect for **new** bookings only (existing bookings keep their snapshotted expiry). *(New; feeds the US-AG07.1 resolver — the deposit floor and the auto-expiry sweep.)* — `docs/bookings/bookings-down-payments.spec.md`
 - **US-A47** — As an admin, I want **two independent time-of-departure policies** so I can stop selling a slot that has already left while controlling apartado grace separately: a **sales cutoff** (`sales_cutoff_offset_minutes`) that closes **new walk-in sales and booking creation** for a slot once its departure crosses the offset, and a **booking grace** (`booking_grace_offset_minutes`, renamed from `same_day_buffer_minutes`) that decides **when an unsettled same-day apartado auto-cancels**. Both are **signed minutes** — positive = *before* departure, negative = *after* (a grace window); the admin UI uses a positive number + a **Before/After** selector and translates "After" to a negative integer. Enforced server-side at `confirmSale` (and `reactivate`) → **`409 SLOT_CLOSED`**, and applied to the read filters so the catalog, calendar, and **detail bottom-sheet matrix show only still-sellable times**. *(New; fixes selling/booking a departed slot, which also made a same-day apartado expire on creation. Single-timezone UTC model.)* — `docs/bookings/bookings-down-payments.spec.md`
+- **US-A65** — As an admin, I want to **edit the WhatsApp message templates** my sellers send — a **ticket-delivery** template (tours + lodging) and an **apartado reminder** template — in Settings, with placeholders (`{customer_name} {agent_name} {org_name} {folio_ref} {total} {pending_balance} {portal_link}` + an auto-expanding `{itinerary}`), so the outbound voice matches my brand. The ticket template **must contain `{portal_link}`** — saving is blocked otherwise, since without it the tourist can't reach their QR. I also want the **Pendiente/Enviado/Visto** delivery badge on my **/folios** list + detail so I can oversee undelivered tickets and **re-send on a seller's behalf**. Org-scoped (`wa_ticket_template`, `wa_reminder_template`; null ⇒ the shipped default). *(New; admin-only editing, read-only for sellers.)* — `docs/whatsapp-qr-delivery/spec.md`
 
 ---
 
@@ -205,6 +206,16 @@ Turistear Ya! is a multi-tenant, mobile-optimized SaaS platform that centralizes
 - **US-AG36** — As an agent/affiliate, I want to sell a stay **range-first**: I pick a **check-in and check-out date**, the number of **guests**, and a **room quantity**, and the POS shows me **only the unit types with enough per-night inventory for the whole range** with the **computed total** (rooms × nights × nightly rate, including weekend/seasonal rates and the extra-person surcharge over an even guest split), so a tourist can stay more than one day. Powered by `GET /api/pos/lodging/:serviceId/availability?check_in=&check_out=&guests=&quantity=`; types that fail min-stay, capacity (`guests ≤ max_capacity × quantity`), or per-night remaining are hidden. Adding a type puts a **stay line** (`quantity` rooms) in the cart. *(D7/D8/D12 — reuses the cart/folio flow.)* — `docs/lodging/accommodation-stays.spec.md`
 - **US-AG37** — As an agent/affiliate, I want to also sell a stay **type-first**: unit types appear as **their own cards in the flattened POS catalog** (exact nightly rate, "Quedan N" low-inventory badge); I open one, see its month **remaining-count calendar** (rooms free per day at that day's rate), and select the range on it, so I can satisfy a tourist who wants a particular cabin or room class. Powered by `GET /api/pos/lodging/unit-types/:typeId/calendar?from=&to=`. *(D8/D14 — both entry points, flattened catalog.)* — `docs/lodging/accommodation-stays.spec.md`
 - **US-AG38** — As an agent/affiliate, I want a stay to **check out like any other sale** — the line shows type × quantity · `Sáb 10 → Mar 13 · 3 noches` · guests · total (with a per-night breakdown), and the **adaptive amount-driven checkout** (US-AG07.2) lets me take **full payment or a deposit (apartado)**, holding the rooms for the dates immediately. On confirm the server re-quotes and snapshots the price and inserts the reservation under a **per-night atomic count guard** — ∀ night: `reserved + blocked + requested ≤ inventory_count` — so a concurrent oversell gets `409 INSUFFICIENT_INVENTORY`; cancel/expiry/reactivate release or re-claim the quantity under the same guard. Commission follows US-A12 (percent on the stay amount; **fixed counts per room-stay** = value × quantity). *(D7/D9/D10/D13; builds on US-AG07/AG07.2/AG07.4/AG07.5 and US-AG11.)* — `docs/lodging/accommodation-stays.spec.md`
+
+#### Ticket Delivery (WhatsApp)
+
+> Once payment is complete, the agent delivers the tickets over WhatsApp — a preconfigured message
+> carrying the **portal link** (itinerary + QR + cancellation). WhatsApp is the primary channel;
+> email becomes an optional copy. The loop is closed by a receipt signal (US-T06). Full spec:
+> `docs/whatsapp-qr-delivery/spec.md`.
+
+- **US-AG39** — As an agent/affiliate, once a sale is paid I want a prominent **"Enviar boletos por WhatsApp"** action on the receipt (and on my folio detail, to re-send) that opens **my own WhatsApp** with the customer's number and a **preconfigured message** carrying the **portal link** (itinerary + QR + cancellation), so I hand the tourist their tickets in one tap. `wa.me` is text-only, so the link — not an attached image — is the payload; the phone is normalized to an international number (default +52). *(Generalizes the US-AG07.3 WhatsApp deep-link; the portal link is now exposed to the client on confirm + folio detail. Fulfils the WhatsApp half of the deferred US-AG22 re-send.)* — `docs/whatsapp-qr-delivery/spec.md`
+- **US-AG40** — As an agent/affiliate (and admin), I want each paid folio to show a **delivery status — Pendiente de enviar → Enviado → Visto** — on the receipt, my history list/detail, and the admin folios list/detail, so I can see at a glance which tickets still need sending and which the customer has actually opened. **Enviado** is set when I tap send (my accountability — I can't force a customer to open); **Visto** is set when the tourist **opens their portal**, captured by a bot-proof client-side beacon so link-preview crawlers can't forge it. It is **"Visto"**, never "Validado" (that word means QR-scanned at access). A customer with no WhatsApp simply stays *Pendiente*. *(Delivery axis is separate from payment status, like the US-AG07.3 reminder flag.)* — `docs/whatsapp-qr-delivery/spec.md`
 
 #### Real-Time Availability
 
@@ -310,6 +321,7 @@ Turistear Ya! is a multi-tenant, mobile-optimized SaaS platform that centralizes
 - **US-T03** — As a tourist, I want to view and download my digital QR tickets from the portal to present them at the access control.
 - **US-T04** — As a tourist, I want to initiate a cancellation request directly from the portal so the agency is notified automatically without me having to make a phone call.
 - **US-T05** — As a tourist, when my cancellation is approved, I want to see my secure "Refund PIN" in the portal, which I must give to the agent/admin to confirm I received my physical cash back.
+- **US-T06** — As a tourist, when I open my portal link I want to see my reservation immediately — and, transparently to me, my opening it **confirms receipt** to the agency (the folio flips to **"Visto"** on their dashboard), so the agent knows their WhatsApp/email reached me without having to chase me. The signal is captured by a client-side beacon that only a real browser fires — link-preview bots that fetch the link never trigger it. *(New; the receipt-confirmation half of the WhatsApp delivery loop — no tourist action required.)* — `docs/whatsapp-qr-delivery/spec.md`
 
 ---
 
@@ -362,6 +374,7 @@ Turistear Ya! is a multi-tenant, mobile-optimized SaaS platform that centralizes
 - [x] **Cash refund tracking** *(US-A23)* - *To ensure the admin can reconcile physical cash returns. Pairs with the Tourist Portal's Refund PIN (US-T05) to confirm the customer received the cash.* — **delivered with** `docs/tourist-portal/tourist-self-service-portal.spec.md` (the request→approve→PIN→confirm loop ships as one feature).
 - [ ] **Folio audit timeline** *(US-A24)* - *To track the lifecycle of a sale and resolve internal disputes.*
 - [x] **Tourist Self-Service Portal (Magic Link, itinerary, QR, cancellation request + Refund PIN)** *(US-T01, US-T02, US-T03, US-T04, US-T05)* - *B2C portal. Depends on the Email feature (US-AG09/US-C01) for the Magic Link; the cancellation-request + Refund-PIN flow extends Total Folio Cancellation (US-A21) and Cash refund tracking (US-A23).* — `docs/tourist-portal/tourist-self-service-portal.spec.md` (bundles US-A23 refund tracking).
+- [ ] **WhatsApp QR Ticket Delivery (agent-sent portal link · Pendiente→Enviado→Visto · templates)** *(US-AG39, US-AG40, US-T06, US-A65; refines Customer Contact — name+phone required, email optional)* - *Agents deliver tickets over WhatsApp: one tap opens their own WhatsApp with the customer's number + a preconfigured message carrying the **portal link** (itinerary + QR). A folio runs a delivery axis **Pendiente → Enviado → Visto** — "Visto" set when the tourist opens their portal via a **bot-proof client-JS beacon** (link-preview crawlers can't forge it). **Name + phone become required at checkout, email optional** (WhatsApp is the primary channel); affiliate delivery is customer-direct (drops the affiliate own-email copy). Admin edits two message templates in Settings (`{portal_link}` enforced; auto-expanding `{itinerary}`). Migrations `0044` (folio `tickets_sent_at`/`_by`/`tickets_viewed_at`) + `0045` (org `wa_ticket_template`/`wa_reminder_template`); new `POST /pos/folios/:id/ticket-delivery`, `/folios/:id/ticket-delivery`, `/portal/:token/seen` (the Visto beacon). Implemented on `feat/whatsapp-delivery-phase1` (PR #8); box unchecked until merged.* — `docs/whatsapp-qr-delivery/spec.md`
 
 #### 🧭 REORG: Role-Aligned IA & Admin Selling
 
@@ -452,12 +465,16 @@ Turistear Ya! is a multi-tenant, mobile-optimized SaaS platform that centralizes
 
 ### Customer Contact
 
-- A **valid customer email is mandatory** to confirm a sale. In Phase 1, email is the only
-  channel that delivers the ticket + QR to the tourist (the self-service portal is Phase 2),
-  so a sale without a deliverable address would produce an unreachable ticket. The POS
-  rejects a confirmation with a missing or malformed email (`400`), and the agent UI
-  disables the confirm button until a valid email is entered.
-- Customer **name** and **phone** remain optional metadata.
+- **Name and a dialable phone are required; email is optional** *(Rev. — WhatsApp QR Delivery,
+  D2)*. WhatsApp is now the primary ticket-delivery channel (the agent sends the portal link),
+  so the POS requires a customer **name** and a **phone** — normalized to an international number
+  (default +52) — and rejects a confirmation missing either (`400`); the confirm button stays
+  disabled until both are valid, uniformly for **every role** (agent, admin, affiliate).
+- **Email is now optional.** When present it must be a valid address and still receives the ticket
+  + portal link (an optional copy); a sale **without** an email is allowed — the tourist gets the
+  tickets over WhatsApp. *(Supersedes the earlier email-mandatory rule; an affiliate sale is
+  customer-direct — the affiliate no longer receives a self-addressed copy. See
+  `docs/whatsapp-qr-delivery/spec.md`.)*
 
 ### QR and Access Validation
 
