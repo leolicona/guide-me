@@ -6,7 +6,11 @@ import { useMe } from '../../auth/hooks/useMe'
 import { isSendablePhone } from '../../pos/phone'
 import { ticketWhatsAppUrl, DEFAULT_TICKET_TEMPLATE, type TemplateContext } from '../../pos/delivery'
 
-type DeliverableFolio = TemplateContext['folio'] & { portal_link?: string | null }
+type DeliverableFolio = TemplateContext['folio'] & {
+  portal_link?: string | null
+  // US-A67 — 'pending' ⇒ an admin hasn't verified the electronic payment yet; delivery is blocked.
+  payment_verification?: 'not_required' | 'pending' | 'verified'
+}
 
 // The agent-driven ticket send (whatsapp-qr-delivery). Builds wa.me from the org's ticket template
 // (or the shipped default) + the portal link, opens the agent's own WhatsApp, then records the send
@@ -31,7 +35,10 @@ export function TicketWhatsAppButton({
 
   const portalLink = folio.portal_link ?? ''
   const phoneOk = isSendablePhone(folio.customer_phone)
-  const disabled = !portalLink || !phoneOk || mark.isPending
+  // US-A67 — an unverified electronic payment has no portal link yet; block delivery with a clear
+  // reason until an admin verifies the money.
+  const pendingVerification = folio.payment_verification === 'pending'
+  const disabled = !portalLink || !phoneOk || pendingVerification || mark.isPending
 
   const send = () => {
     if (disabled) return
@@ -48,11 +55,13 @@ export function TicketWhatsAppButton({
     mark.mutate(folio.id, { onSuccess: () => onSent?.() })
   }
 
-  const tip = !portalLink
-    ? 'Los boletos aún no están listos'
-    : !phoneOk
-      ? 'Sin teléfono válido'
-      : 'Enviar boletos por WhatsApp'
+  const tip = pendingVerification
+    ? 'Pendiente de verificación del pago'
+    : !portalLink
+      ? 'Los boletos aún no están listos'
+      : !phoneOk
+        ? 'Sin teléfono válido'
+        : 'Enviar boletos por WhatsApp'
 
   if (variant === 'icon') {
     return (
@@ -77,7 +86,7 @@ export function TicketWhatsAppButton({
   }
 
   return (
-    <Tooltip title={disabled && portalLink ? tip : ''}>
+    <Tooltip title={pendingVerification || (disabled && portalLink) ? tip : ''}>
       <span style={{ display: 'block' }}>
         <Button
           fullWidth

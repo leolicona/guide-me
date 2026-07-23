@@ -20,7 +20,7 @@ import ReceiptLongRounded from '@mui/icons-material/ReceiptLongRounded'
 import TodayRounded from '@mui/icons-material/TodayRounded'
 import { useCurrentUser } from '../features/auth/CurrentUserContext'
 import { usePendingAckCount, usePendingDropCount } from '../features/cash/hooks'
-import { usePendingCancellationCount } from '../features/folios/hooks'
+import { usePendingCancellationCount, usePendingVerificationCount } from '../features/folios/hooks'
 import { ROUTES } from '../config/routes'
 import { AccountMenu } from './AccountMenu'
 import { TopBar } from './TopBar'
@@ -86,6 +86,8 @@ export function AppLayout() {
   const { data: pendingCancellationCount = 0 } = usePendingCancellationCount(
     user.role === 'admin',
   )
+  // US-A67 — electronic payments awaiting verification, also surfaced on the admin's Ventas badge.
+  const { data: pendingVerificationCount = 0 } = usePendingVerificationCount(user.role === 'admin')
   // US-UX06 — agent cash drops awaiting confirmation, surfaced on the admin's Caja destination.
   // Admins only; the admin's own (self-authorized) drops never count.
   const { data: pendingDropCount = 0 } = usePendingDropCount(user.role === 'admin')
@@ -110,7 +112,7 @@ export function AppLayout() {
   )
   const badgeFor = (to: string) => {
     if (to === ROUTES.BALANCE) return pendingAckCount
-    if (to === ROUTES.FOLIOS) return pendingCancellationCount
+    if (to === ROUTES.FOLIOS) return pendingCancellationCount + pendingVerificationCount
     if (to === ROUTES.CASH) return pendingDropCount
     return 0
   }

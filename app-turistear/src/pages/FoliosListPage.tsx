@@ -18,10 +18,16 @@ import {
   ToggleButton,
   ToggleButtonGroup,
 } from '@mui/material'
-import { useFolios, usePendingCancellationCount, FolioStatusChip } from '../features/folios'
+import {
+  useFolios,
+  usePendingCancellationCount,
+  usePendingVerificationCount,
+  FolioStatusChip,
+} from '../features/folios'
 import { useOrgDateFormatter } from '../features/organization'
 import type { FolioStatus } from '../features/folios'
 import { CancellationRequestsTab } from '../features/folios/components/CancellationRequestsTab'
+import { PaymentVerificationTab } from '../features/folios/components/PaymentVerificationTab'
 import {
   BookingWhatsAppButton,
   DeliveryBadge,
@@ -176,6 +182,8 @@ export default function FoliosListPage() {
   // US-T04 (D7) — pending tourists' cancellation requests surface as a badge so the
   // queue can't be missed without polluting the main list.
   const { data: pendingCount = 0 } = usePendingCancellationCount(true)
+  // US-A67 — the "Por verificar" queue: electronic payments awaiting an admin.
+  const { data: verifyCount = 0 } = usePendingVerificationCount(true)
 
   return (
     <Fade in timeout={400}>
@@ -188,6 +196,13 @@ export default function FoliosListPage() {
           <Tab label="Folios" />
           <Tab
             label={
+              <Badge badgeContent={verifyCount} color="warning" sx={{ '& .MuiBadge-badge': { right: -12 } }}>
+                Por verificar
+              </Badge>
+            }
+          />
+          <Tab
+            label={
               <Badge badgeContent={pendingCount} color="warning" sx={{ '& .MuiBadge-badge': { right: -12 } }}>
                 Solicitudes
               </Badge>
@@ -195,7 +210,13 @@ export default function FoliosListPage() {
           />
         </Tabs>
 
-        {tab === 0 ? <FoliosTab /> : <CancellationRequestsTab />}
+        {tab === 0 ? (
+          <FoliosTab />
+        ) : tab === 1 ? (
+          <PaymentVerificationTab />
+        ) : (
+          <CancellationRequestsTab />
+        )}
       </Box>
     </Fade>
   )
