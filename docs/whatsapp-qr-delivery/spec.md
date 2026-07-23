@@ -1,8 +1,9 @@
 # Feature: WhatsApp Ticket Delivery — Agent-Sent Portal Link, Delivery Tracking & Portal-View Acknowledgment ("Visto")
 
-**User stories (provisional — confirm numbering):** US-AG40 (agent sends tickets via WhatsApp),
-US-AG41 (delivery state: Pendiente → Enviado → Visto), US-T06 (portal-view acknowledgment),
-US-A65 (admin-edited message templates). **Phase:** 2 (Core Enhancements) · **agent + B2C surface.**
+**User stories:** US-AG39 (agent sends tickets via WhatsApp),
+US-AG40 (delivery state: Pendiente → Enviado → Visto), US-T06 (portal-view acknowledgment / "Visto"),
+US-A65 (admin-edited message templates). Registered in `docs/SPEC.md`. **Phase:** 2 (Core
+Enhancements) · **agent + B2C surface.**
 **Depends on:** *Client Ticket Delivery* (`docs/email/client-ticket-delivery.spec.md`) — reuses the
 portal link + QR echo, and the fire-and-forget dispatch pattern · *Tourist Self-Service Portal*
 (`docs/tourist-portal/tourist-self-service-portal.spec.md`) — the portal page the link opens and
@@ -166,7 +167,7 @@ never teal; `SectionCard`; `InfoPopover`). Delivery state is functional, icon-pa
 
 ## Open / to-confirm at build time
 
-- **US numbering** — the IDs above are provisional; assign real ones.
+- **US numbering** — assigned (US-AG39/AG40, US-T06, US-A65) and registered in `docs/SPEC.md`.
 - **Default template copy** (Spanish) for `wa_ticket_template` / `wa_reminder_template`.
 - **`{itinerary}` lodging line format** — confirm `name · checkin–checkout · N noches · guests`.
 - Whether the admin folios badge lets an **admin** send on the seller's behalf, or is view-only
