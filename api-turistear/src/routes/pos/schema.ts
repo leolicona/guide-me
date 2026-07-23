@@ -14,6 +14,11 @@ const extraSchema = z.object({
   quantity: z.number().int().min(1),
 })
 
+// US-AG41 — the bank reference for an electronic (transfer) payment. Free text (bank confirmation
+// numbers vary), trimmed, 4–64 chars. Required only when the method is 'transfer' (enforced by the
+// refine below / the settle handler); absent for cash.
+export const paymentReferenceSchema = z.string().trim().min(4).max(64)
+
 // A tour/activity line — a slot + quantity + (discountable) unit price.
 // US-A64 — `zone_id` targets a physical zone on a zoned service (required there, refused otherwise;
 // enforced in the handler since it depends on the slot's service). A split party is one line per
@@ -58,6 +63,9 @@ export const confirmSaleSchema = z
     // and the pre-feature behaviour). Every non-cash method is electronic: it still earns
     // commission but adds no cash debt (US-AG24 path).
     payment_method: z.enum(['cash', 'card', 'transfer', 'link']).optional().default('cash'),
+    // US-AG41 — the transfer's bank reference; required iff payment_method is 'transfer' (see the
+    // refine below). Ignored for cash.
+    payment_reference: paymentReferenceSchema.optional(),
     // US-AG07 — present ⇒ BOOKING (apartado) mode: the deposit in minor units. Absent ⇒ the
     // existing full paid sale (byte-unchanged). The bounds (0 < deposit < total and ≥ the org
     // minimum %) depend on the server-computed total + org policy, so they live in the handler,
@@ -78,8 +86,23 @@ export const confirmSaleSchema = z
     },
     { message: 'Each slot (zone) may appear at most once', path: ['lines'] },
   )
+  // US-AG41 — a transfer payment must carry its bank reference (WhatsApp/QR is held until an admin
+  // verifies it against this reference; US-A67).
+  .refine((v) => v.payment_method !== 'transfer' || !!v.payment_reference, {
+    message: 'A payment reference is required for a bank transfer',
+    path: ['payment_reference'],
+  })
 
 export type ConfirmSaleInput = z.infer<typeof confirmSaleSchema>
+
+// US-AG41 — settle body: collecting a booking's balance. The settle re-uses the folio's own payment
+// method; when that method is 'transfer' the agent records the settling transfer's reference (the
+// handler enforces the required-when-transfer rule, since only it knows the folio's method).
+export const settleSchema = z.object({
+  payment_reference: paymentReferenceSchema.optional(),
+})
+
+export type SettleInput = z.infer<typeof settleSchema>
 
 // US-AG35 — month-availability query for the POS calendar Bottom Sheet. The caller names
 // a MONTH (not a free from/to range): the server derives the scan window itself, so there

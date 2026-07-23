@@ -41,7 +41,7 @@ import {
   type SeasonRate,
 } from '../../utils/lodging'
 import { lodgingAvailableDays, lodgingTypeCards } from './lodging.handler'
-import type { ConfirmSaleInput } from './schema'
+import { settleSchema, type ConfirmSaleInput, type SettleInput } from './schema'
 
 export type PosContext = Context<{
   Bindings: CloudflareBindings
@@ -1222,6 +1222,15 @@ export const confirmSale = async (c: PosContext) => {
     bookingGraceOffsetMinutes: orgRow?.bookingGraceOffsetMinutes ?? 15,
   })
   const isBooking = input.down_payment != null
+  // US-AG41/US-A67 — an electronic (transfer) payment is not yet in hand: the folio is created
+  // `pending` verification and its QR/portal/ticket-email are DEFERRED until an admin verifies it
+  // (verifyPayment). Cash clears immediately, exactly as before. `cleared` = the money is usable now.
+  const method = input.payment_method ?? 'cash'
+  const needsVerification = method === 'transfer'
+  const cleared = !needsVerification
+  const paymentVerification: 'not_required' | 'pending' = needsVerification
+    ? 'pending'
+    : 'not_required'
   let status: 'paid' | 'booking' = 'paid'
   let amountPaid = total
   let commissionAmount = fullPercentCommission + fullFixedCommission
@@ -1284,7 +1293,10 @@ export const confirmSale = async (c: PosContext) => {
     customerEmail: input.customer_email ?? null,
     customerPhone: input.customer_phone ?? null,
     status,
-    paymentMethod: input.payment_method ?? 'cash',
+    paymentMethod: method,
+    // US-AG41/US-A67 — the transfer's reference + the verification gate (see `cleared` above).
+    paymentReference: needsVerification ? (input.payment_reference ?? null) : null,
+    paymentVerification,
     subtotal,
     discountTotal,
     total,
@@ -1451,10 +1463,11 @@ export const confirmSale = async (c: PosContext) => {
     applied.push({ slotId: line.slotId!, qty: line.quantity })
   }
 
-  // 4. SIGN one QR access ticket per SLOT line — ONLY for a paid sale. A booking has no scannable
-  //    QR until it settles; a lodging stay line has no slot QR (its access is the reservation).
+  // 4. SIGN one QR access ticket per SLOT line — ONLY for a paid sale whose money has CLEARED (cash;
+  //    a transfer defers to admin verification, US-A67). A booking has no scannable QR until it
+  //    settles; a lodging stay line has no slot QR (its access is the reservation).
   const slotLines = prepared.filter((l) => l.lineType === 'slot' && l.slotId && l.slotDate)
-  if (!isBooking) {
+  if (!isBooking && cleared) {
     // The folio + holds are already committed (the reservation FK needs the folio first), so a
     // signing failure must compensate too — otherwise it would orphan the folio.
     try {
@@ -1558,8 +1571,9 @@ export const confirmSale = async (c: PosContext) => {
   let portalLink: string | undefined
 
   // Post-commit side effects diverge by sale type. A booking gets the apartado email (no QR, no
-  // portal token); the paid sale mints the portal token + sends the full ticket + QR email. Both
-  // are best-effort (waitUntil / try-catch) — a failure here must never roll back the committed sale.
+  // portal token); a CLEARED paid sale mints the portal token + sends the full ticket + QR email.
+  // An unverified electronic sale (`!cleared`) mints NOTHING here — verifyPayment (US-A67) runs this
+  // half once an admin confirms the money. All best-effort — a failure never rolls back the sale.
   if (isBooking) {
     if (c.env.RESEND_API_KEY && bookingExpiresAt) {
       const expiresAt = bookingExpiresAt
@@ -1588,7 +1602,7 @@ export const confirmSale = async (c: PosContext) => {
         )
       }
     }
-  } else {
+  } else if (cleared) {
     portalLink = await issuePortalLink(
       db,
       c.env,
@@ -1635,7 +1649,11 @@ export const confirmSale = async (c: PosContext) => {
       folio: {
         id: folioId,
         status,
-        payment_method: input.payment_method ?? 'cash',
+        payment_method: method,
+        // US-AG41/US-A67 — the transfer reference + verification gate. A pending folio has no QR
+        // and its delivery is blocked until an admin verifies (portal_link stays null here).
+        payment_reference: needsVerification ? (input.payment_reference ?? null) : null,
+        payment_verification: paymentVerification,
         customer_name: input.customer_name ?? null,
         customer_email: input.customer_email ?? null,
         customer_phone: input.customer_phone ?? null,
@@ -1703,6 +1721,9 @@ const readFolio = async (
       id: folios.id,
       status: folios.status,
       paymentMethod: folios.paymentMethod,
+      paymentReference: folios.paymentReference,
+      paymentVerification: folios.paymentVerification,
+      paymentVerifiedAt: folios.paymentVerifiedAt,
       customerName: folios.customerName,
       customerEmail: folios.customerEmail,
       customerPhone: folios.customerPhone,
@@ -1827,6 +1848,12 @@ const readFolio = async (
     id: folio.id,
     status: folio.status,
     payment_method: folio.paymentMethod,
+    // US-AG41/US-A67 — payment reference + verification gate (the delivery UI blocks while pending).
+    payment_reference: folio.paymentReference,
+    payment_verification: folio.paymentVerification,
+    payment_verified_at: folio.paymentVerifiedAt
+      ? Math.floor(folio.paymentVerifiedAt.getTime() / 1000)
+      : null,
     customer_name: folio.customerName,
     customer_email: folio.customerEmail,
     customer_phone: folio.customerPhone,
@@ -1940,6 +1967,24 @@ export const settleBooking = async (c: PosContext) => {
     throw new ApiError('BOOKING_EXPIRED', 409, 'Booking has expired')
   }
 
+  // US-AG41/US-A67 — the settle re-uses the folio's own payment method. Settling a TRANSFER folio is
+  // a fresh electronic payment: it requires a reference, re-arms verification to `pending`, and
+  // DEFERS the QR/portal/email until an admin verifies (verifyPayment). A cash folio settles
+  // immediately, exactly as before. `cleared` = the balance is usable now.
+  const parsed = settleSchema.safeParse(await c.req.json().catch(() => ({})))
+  if (!parsed.success) {
+    throw new ApiError('VALIDATION_ERROR', 400, 'Invalid settle payload')
+  }
+  const body: SettleInput = parsed.data
+  const cleared = folio.paymentMethod !== 'transfer'
+  if (!cleared && !body.payment_reference) {
+    throw new ApiError(
+      'VALIDATION_ERROR',
+      400,
+      'A payment reference is required to settle a bank transfer',
+    )
+  }
+
   const lineRows = await db
     .select({
       id: folioLines.id,
@@ -1969,6 +2014,27 @@ export const settleBooking = async (c: PosContext) => {
         : Math.round((l.lineTotal * l.commissionValue) / 10000)),
     0,
   )
+
+  // US-A67 — a TRANSFER settle reaches `paid` but DEFERS the QR: record the settling transfer's
+  // reference, re-arm verification to `pending`, and stop here. verifyPayment signs the QR + sends
+  // the tickets once an admin confirms the money. (No QR token, no portal link, no email yet.)
+  if (!cleared) {
+    await db
+      .update(folios)
+      .set({
+        status: 'paid',
+        amountPaid: folio.total,
+        commissionAmount,
+        settledAt: new Date(),
+        settledBy: agent.userId,
+        paymentReference: body.payment_reference ?? null,
+        paymentVerification: 'pending',
+        updatedAt: new Date(),
+      })
+      .where(and(eq(folios.id, id), eq(folios.organizationId, org)))
+    const pending = await readFolio(db, org, agent.userId, id, c.env.QR_SECRET, c.env.API_BASE_URL)
+    return c.json({ folio: pending })
+  }
 
   // Sign the per-line tickets now (the booking had none) — SLOT lines only; a lodging stay line
   // has no scannable QR (its access is the reservation).
@@ -2075,6 +2141,257 @@ export const settleBooking = async (c: PosContext) => {
 
   const settled = await readFolio(db, org, agent.userId, id, c.env.QR_SECRET, c.env.API_BASE_URL)
   return c.json({ folio: settled })
+}
+
+// US-A67 — ADMIN verifies an electronic (transfer) payment against the bank. Flips the folio's
+// `payment_verification` pending → verified; if the folio is already `paid` (a full transfer sale or
+// a transfer settle), this runs the DEFERRED half of the paid path — signs the per-line QR, mints
+// the portal token, and fires the ticket email (auto-delivery). A `booking` (a transfer DEPOSIT)
+// just records the confirmation — its QR still waits for settle. Admin-only (the seller can never
+// verify their own money); org-scoped. Idempotent-ish: a non-pending folio → 409.
+export const verifyPayment = async (c: PosContext) => {
+  const admin = c.get('user')
+  const id = c.req.param('id')
+  const db = getDb(c.env)
+  const org = admin.organizationId
+  const { tz } = await loadOrgTiming(db, org)
+
+  const folioRows = await db
+    .select({
+      id: folios.id,
+      agentId: folios.agentId,
+      status: folios.status,
+      paymentMethod: folios.paymentMethod,
+      paymentVerification: folios.paymentVerification,
+      customerName: folios.customerName,
+      customerEmail: folios.customerEmail,
+      total: folios.total,
+    })
+    .from(folios)
+    .where(and(eq(folios.id, id), eq(folios.organizationId, org)))
+    .limit(1)
+  const folio = folioRows[0]
+  if (!folio) throw new ApiError('NOT_FOUND', 404, 'Folio not found')
+  if (folio.paymentVerification !== 'pending') {
+    throw new ApiError('NOT_PENDING_VERIFICATION', 409, 'This payment is not awaiting verification')
+  }
+
+  const now = new Date()
+  const verifyFields = {
+    paymentVerification: 'verified' as const,
+    paymentVerifiedAt: now,
+    paymentVerifiedBy: admin.userId,
+    updatedAt: now,
+  }
+
+  // A booking (deposit) is confirmed but mints no QR — its tickets wait for settle.
+  if (folio.status !== 'paid') {
+    await db
+      .update(folios)
+      .set(verifyFields)
+      .where(and(eq(folios.id, id), eq(folios.organizationId, org)))
+    const out = await readFolio(db, org, folio.agentId, id, c.env.QR_SECRET, c.env.API_BASE_URL)
+    return c.json({ folio: out })
+  }
+
+  // A paid folio → run the deferred paid-path side effects (mirrors settle's cleared branch).
+  const lineRows = await db
+    .select({
+      id: folioLines.id,
+      serviceId: folioLines.serviceId,
+      slotId: folioLines.slotId,
+      serviceName: folioLines.serviceName,
+      slotDate: folioLines.slotDate,
+      slotStartTime: folioLines.slotStartTime,
+      checkIn: folioLines.checkIn,
+      checkOut: folioLines.checkOut,
+      quantity: folioLines.quantity,
+      unitPrice: folioLines.unitPrice,
+      lineTotal: folioLines.lineTotal,
+    })
+    .from(folioLines)
+    .where(and(eq(folioLines.folioId, id), eq(folioLines.organizationId, org)))
+
+  const slotLineRows = lineRows.filter((l) => l.slotId && l.slotDate)
+  const identity = folio.customerName?.trim() || folio.customerEmail?.trim() || `folio:${id}`
+  const tickets = await signLineTickets(
+    c.env,
+    org,
+    id,
+    identity,
+    slotLineRows.map((l) => ({
+      id: l.id,
+      serviceId: l.serviceId,
+      slotId: l.slotId!,
+      quantity: l.quantity,
+      slotDate: l.slotDate!,
+    })),
+    tz,
+  )
+
+  const statements: BatchItem<'sqlite'>[] = [
+    db
+      .update(folios)
+      .set(verifyFields)
+      .where(and(eq(folios.id, id), eq(folios.organizationId, org))),
+  ]
+  for (const line of slotLineRows) {
+    statements.push(
+      db
+        .update(folioLines)
+        .set({ qrToken: tickets.get(line.id)!.token })
+        .where(and(eq(folioLines.id, line.id), eq(folioLines.organizationId, org))),
+    )
+  }
+  await db.batch(statements as [BatchItem<'sqlite'>, ...BatchItem<'sqlite'>[]])
+
+  // Deferred portal token + ticket email (auto-delivery on verify, US-A67 D8).
+  const portalLink = await issuePortalLink(
+    db,
+    c.env,
+    org,
+    id,
+    lineRows.map((l) => l.slotDate ?? l.checkOut ?? l.checkIn).filter((d): d is string => !!d),
+  )
+  const extraRows = await db
+    .select({
+      folioLineId: folioLineExtras.folioLineId,
+      name: folioLineExtras.name,
+      price: folioLineExtras.price,
+      quantity: folioLineExtras.quantity,
+    })
+    .from(folioLineExtras)
+    .where(and(eq(folioLineExtras.folioId, id), eq(folioLineExtras.organizationId, org)))
+  const extrasByLine = new Map<string, typeof extraRows>()
+  for (const ex of extraRows) {
+    const list = extrasByLine.get(ex.folioLineId) ?? []
+    list.push(ex)
+    extrasByLine.set(ex.folioLineId, list)
+  }
+  const orgRows = await db
+    .select({ name: organizations.name })
+    .from(organizations)
+    .where(eq(organizations.id, org))
+    .limit(1)
+  dispatchTicketEmail(
+    c,
+    orgRows[0]?.name ?? 'Turistear Ya!',
+    id,
+    {
+      customerEmail: folio.customerEmail,
+      customerName: folio.customerName,
+      paymentMethod: folio.paymentMethod,
+      total: folio.total,
+      createdAt: now,
+    },
+    slotLineRows.map((line) => ({
+      serviceName: line.serviceName,
+      slotDate: line.slotDate!,
+      slotStartTime: line.slotStartTime!,
+      quantity: line.quantity,
+      unitPrice: line.unitPrice,
+      lineTotal: line.lineTotal,
+      qrToken: tickets.get(line.id)!.token,
+      extras: (extrasByLine.get(line.id) ?? []).map((ex) => ({
+        name: ex.name,
+        price: ex.price,
+        quantity: ex.quantity,
+      })),
+    })),
+    portalLink,
+  )
+
+  const out = await readFolio(db, org, folio.agentId, id, c.env.QR_SECRET, c.env.API_BASE_URL)
+  return c.json({ folio: out })
+}
+
+// US-A67 (D6) — ADMIN rejects an electronic payment (bad reference / money never arrived): the sale
+// is void, so release the held spots, claw back the seller's commission, and cancel the folio (no
+// refund — nothing was collected). Admin-only; org-scoped; only a `pending` folio can be rejected.
+export const rejectPayment = async (c: PosContext) => {
+  const admin = c.get('user')
+  const id = c.req.param('id')
+  const db = getDb(c.env)
+  const org = admin.organizationId
+  const body = (await c.req.json().catch(() => ({}))) as { reason?: string }
+
+  const folioRows = await db
+    .select({ agentId: folios.agentId, paymentVerification: folios.paymentVerification })
+    .from(folios)
+    .where(and(eq(folios.id, id), eq(folios.organizationId, org)))
+    .limit(1)
+  const folio = folioRows[0]
+  if (!folio) throw new ApiError('NOT_FOUND', 404, 'Folio not found')
+  if (folio.paymentVerification !== 'pending') {
+    throw new ApiError('NOT_PENDING_VERIFICATION', 409, 'This payment is not awaiting verification')
+  }
+
+  const lineRows = await db
+    .select({
+      slotId: folioLines.slotId,
+      quantity: folioLines.quantity,
+      zoneId: folioLines.zoneId,
+    })
+    .from(folioLines)
+    .where(and(eq(folioLines.folioId, id), eq(folioLines.organizationId, org)))
+
+  const now = new Date()
+  const statements: BatchItem<'sqlite'>[] = [
+    db
+      .update(folios)
+      .set({
+        status: 'cancelled',
+        cancelledAt: now,
+        cancelledBy: admin.userId,
+        cancellationReason: body.reason ?? 'Pago electrónico rechazado',
+        cancellationClawback: true, // the sale was void — the seller loses the commission
+        refundStatus: 'none', // nothing was collected, so nothing to refund
+        updatedAt: now,
+      })
+      .where(and(eq(folios.id, id), eq(folios.organizationId, org))),
+  ]
+  // Release the held spots (mirrors cancelBooking): zone counter + slot reconcile, or the slot total.
+  for (const line of lineRows) {
+    if (!line.slotId) continue
+    if (line.zoneId) {
+      statements.push(
+        db
+          .update(slotZones)
+          .set({ booked: sql`${slotZones.booked} - ${line.quantity}`, updatedAt: now })
+          .where(
+            and(
+              eq(slotZones.slotId, line.slotId),
+              eq(slotZones.zoneId, line.zoneId),
+              eq(slotZones.organizationId, org),
+            ),
+          ),
+        reconcileSlotTotals(db, line.slotId),
+      )
+    } else {
+      statements.push(
+        db
+          .update(slots)
+          .set({ booked: sql`${slots.booked} - ${line.quantity}`, updatedAt: now })
+          .where(and(eq(slots.id, line.slotId), eq(slots.organizationId, org))),
+      )
+    }
+  }
+  statements.push(
+    db
+      .update(accommodationReservations)
+      .set({ status: 'cancelled', updatedAt: now })
+      .where(
+        and(
+          eq(accommodationReservations.folioId, id),
+          eq(accommodationReservations.organizationId, org),
+          eq(accommodationReservations.status, 'active'),
+        ),
+      ),
+  )
+  await db.batch(statements as [BatchItem<'sqlite'>, ...BatchItem<'sqlite'>[]])
+
+  const out = await readFolio(db, org, folio.agentId, id, c.env.QR_SECRET, c.env.API_BASE_URL)
+  return c.json({ folio: out ?? { id, status: 'cancelled' } })
 }
 
 // US-AG07.4 — manual cancellation of a booking: release the held spots immediately and close the
@@ -2532,6 +2849,8 @@ export const listAgentFolios = async (c: PosContext) => {
       reminderSentBy: folios.reminderSentBy,
       ticketsSentAt: folios.ticketsSentAt,
       ticketsViewedAt: folios.ticketsViewedAt,
+      paymentMethod: folios.paymentMethod,
+      paymentVerification: folios.paymentVerification,
     })
     .from(folios)
     .where(and(...filters))
@@ -2546,9 +2865,13 @@ export const listAgentFolios = async (c: PosContext) => {
       status: r.status,
       total: r.total,
       amount_paid: r.amountPaid,
-      // Delivery axis (whatsapp-qr-delivery) — a paid folio is "deliverable" (a portal token
-      // exists); the sent/viewed stamps drive the Pendiente → Enviado → Visto list badge.
-      deliverable: r.status === 'paid',
+      // US-AG41/US-A67 — the seller sees the verification state (delivery is blocked while pending).
+      payment_method: r.paymentMethod,
+      payment_verification: r.paymentVerification,
+      // Delivery axis (whatsapp-qr-delivery) — a paid folio is "deliverable" only once its money has
+      // cleared (cash, or the electronic payment verified). The sent/viewed stamps drive the
+      // Pendiente → Enviado → Visto list badge.
+      deliverable: r.status === 'paid' && r.paymentVerification !== 'pending',
       tickets_sent_at: r.ticketsSentAt ? Math.floor(r.ticketsSentAt.getTime() / 1000) : null,
       tickets_viewed_at: r.ticketsViewedAt ? Math.floor(r.ticketsViewedAt.getTime() / 1000) : null,
       // US-AG07.3 — derived pending balance + booking fields drive the Apartados dashboard.

@@ -49,6 +49,9 @@ const readFolio = async (db: Db, org: string, folioId: string, apiBaseUrl?: stri
       ticketsSentAt: folios.ticketsSentAt,
       ticketsViewedAt: folios.ticketsViewedAt,
       paymentMethod: folios.paymentMethod,
+      paymentReference: folios.paymentReference,
+      paymentVerification: folios.paymentVerification,
+      paymentVerifiedAt: folios.paymentVerifiedAt,
       customerName: folios.customerName,
       customerEmail: folios.customerEmail,
       customerPhone: folios.customerPhone,
@@ -153,6 +156,10 @@ const readFolio = async (db: Db, org: string, folioId: string, apiBaseUrl?: stri
     agent: { id: folio.agentId, name: folio.agentName },
     status: folio.status,
     payment_method: folio.paymentMethod,
+    // US-AG41/US-A67 — payment reference + verification gate for the admin detail + verify actions.
+    payment_reference: folio.paymentReference,
+    payment_verification: folio.paymentVerification,
+    payment_verified_at: tsOrNull(folio.paymentVerifiedAt),
     customer_name: folio.customerName,
     customer_email: folio.customerEmail,
     customer_phone: folio.customerPhone,
@@ -223,10 +230,19 @@ export const listFolios = async (c: FoliosContext) => {
   const statusQ = c.req.query('status')
   const dateQ = c.req.query('date')
   const agentQ = c.req.query('agent_id')
+  // US-A67 — the "Por verificar" queue filters to electronic payments awaiting an admin.
+  const verificationQ = c.req.query('verification')
 
   const filters = [eq(folios.organizationId, org)]
   if (statusQ === 'paid' || statusQ === 'booking' || statusQ === 'cancelled') {
     filters.push(eq(folios.status, statusQ))
+  }
+  if (
+    verificationQ === 'pending' ||
+    verificationQ === 'verified' ||
+    verificationQ === 'not_required'
+  ) {
+    filters.push(eq(folios.paymentVerification, verificationQ))
   }
   if (dateQ) {
     filters.push(
@@ -255,6 +271,9 @@ export const listFolios = async (c: FoliosContext) => {
       reminderSentBy: folios.reminderSentBy,
       ticketsSentAt: folios.ticketsSentAt,
       ticketsViewedAt: folios.ticketsViewedAt,
+      paymentMethod: folios.paymentMethod,
+      paymentReference: folios.paymentReference,
+      paymentVerification: folios.paymentVerification,
     })
     .from(folios)
     .innerJoin(users, eq(folios.agentId, users.id))
@@ -277,8 +296,14 @@ export const listFolios = async (c: FoliosContext) => {
       reminder_status: r.reminderStatus,
       reminder_sent_at: tsOrNull(r.reminderSentAt),
       reminder_sent_by: r.reminderSentBy,
-      // Delivery axis (whatsapp-qr-delivery) — admin oversight of undelivered tickets.
-      deliverable: r.status === 'paid',
+      // US-AG41/US-A67 — payment method + reference + the verification gate (the "Por verificar"
+      // queue reads these; the delivery axis is blocked while pending).
+      payment_method: r.paymentMethod,
+      payment_reference: r.paymentReference,
+      payment_verification: r.paymentVerification,
+      // Delivery axis (whatsapp-qr-delivery) — a paid folio is deliverable ONLY once its money has
+      // cleared (cash, or the electronic payment verified). Pending electronic → not yet.
+      deliverable: r.status === 'paid' && r.paymentVerification !== 'pending',
       tickets_sent_at: tsOrNull(r.ticketsSentAt),
       tickets_viewed_at: tsOrNull(r.ticketsViewedAt),
     })),
