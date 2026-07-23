@@ -10,6 +10,7 @@ import { usePosService } from '../hooks'
 import { usePosFilters } from '../../../store/posFilters'
 import { ServiceSelectionPanel } from './ServiceSelectionPanel'
 import { todayStr, addDays } from '../dates'
+import { useMyOrganization } from '../../organization'
 
 interface ServiceSheetProps {
   /** The service to configure; `null` keeps the sheet closed. */
@@ -40,7 +41,8 @@ export function ServiceSheet({
   // rolling 3-day window [start, start+2] from there. Falls back to today when the card reported
   // no in-window availability. The global filter is never mutated (`today` stays real today).
   const anchor = usePosFilters((s) => s.selection?.from ?? null)
-  const today = todayStr()
+  const { data: org } = useMyOrganization()
+  const today = todayStr(org?.timezone) // US-A66 — org-local "today"
   const start = anchor ?? nextSlotDate ?? today
   const days = anchor
     ? [anchor]

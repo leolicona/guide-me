@@ -13,6 +13,7 @@ import {
 } from '@mui/material'
 import ArrowBackRounded from '@mui/icons-material/ArrowBackRounded'
 import { useFolio } from '../features/pos/hooks'
+import { useOrgDateFormatter } from '../features/organization'
 import { TicketQr } from '../features/pos/components/TicketQr'
 import WarningAmberRounded from '@mui/icons-material/WarningAmberRounded'
 import {
@@ -29,19 +30,19 @@ import { formatMoney } from '../features/catalog/types'
 import { folioLineMeta } from '../features/folios/folioLineLabel'
 import { ROUTES } from '../config/routes'
 
-const formatDate = (unixSeconds: number) =>
-  new Date(unixSeconds * 1000).toLocaleString(undefined, {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  })
+const DATE_FMT: Intl.DateTimeFormatOptions = {
+  year: 'numeric',
+  month: 'short',
+  day: 'numeric',
+  hour: '2-digit',
+  minute: '2-digit',
+}
 
 // US-AG21 — read-only detail of one of the agent's own folios (answer customer queries,
 // re-show the QR). Reuses GET /api/pos/folios/:id via useFolio. Status-aware framing; no
 // cancel/edit affordance (cancellation is admin-only).
 export default function FolioHistoryDetailPage() {
+  const formatDate = useOrgDateFormatter(DATE_FMT) // US-A66 — org-local audit timestamps
   const { id } = useParams<{ id: string }>()
   const { data: folio, isLoading, isError } = useFolio(id)
 

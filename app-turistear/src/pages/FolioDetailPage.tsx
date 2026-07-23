@@ -23,6 +23,7 @@ import {
 } from '@mui/material'
 import ArrowBackRounded from '@mui/icons-material/ArrowBackRounded'
 import { useFolio, useCancelFolio, useConfirmRefund, FolioStatusChip } from '../features/folios'
+import { useOrgDateFormatter } from '../features/organization'
 import WarningAmberRounded from '@mui/icons-material/WarningAmberRounded'
 import {
   BookingActions,
@@ -38,16 +39,16 @@ import { folioLineMeta } from '../features/folios/folioLineLabel'
 import { MoneyText, SectionCard } from '../components'
 import { ROUTES } from '../config/routes'
 
-const formatDate = (unixSeconds: number) =>
-  new Date(unixSeconds * 1000).toLocaleString(undefined, {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  })
+const DATE_FMT: Intl.DateTimeFormatOptions = {
+  year: 'numeric',
+  month: 'short',
+  day: 'numeric',
+  hour: '2-digit',
+  minute: '2-digit',
+}
 
 export default function FolioDetailPage() {
+  const formatDate = useOrgDateFormatter(DATE_FMT) // US-A66 — org-local audit timestamps
   const { id } = useParams<{ id: string }>()
   const { data: folio, isLoading, isError } = useFolio(id)
   const cancel = useCancelFolio()

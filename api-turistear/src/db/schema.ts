@@ -30,6 +30,11 @@ export const organizations = sqliteTable('organizations', {
   // (tours + lodging) and MUST contain {portal_link}; waReminderTemplate is the apartado reminder.
   waTicketTemplate: text('wa_ticket_template'),
   waReminderTemplate: text('wa_reminder_template'),
+  // US-A66 (docs/timezone/spec.md) — the org's single IANA time zone. The one org-local clock all
+  // wall-clock scheduling resolves against: catalog "today", sale-cutoff/grace/expiry math (closes
+  // BUG-007), and audit-timestamp display. Stored slot strings stay naive wall-clock — this fixes
+  // only the "now" they compare against. Curated Mexican-zone picker in Settings (D5).
+  timezone: text('timezone').notNull().default('America/Mexico_City'),
   createdAt: integer('created_at', { mode: 'timestamp' })
     .notNull()
     .default(sql`(unixepoch())`),

@@ -20,6 +20,7 @@ import ArrowBackRounded from '@mui/icons-material/ArrowBackRounded'
 import ReceiptLongRounded from '@mui/icons-material/ReceiptLong'
 import LockRounded from '@mui/icons-material/Lock'
 import { useDrop, useResolveDispute, useReviewDrop } from '../features/cash/hooks'
+import { useOrgDateFormatter } from '../features/organization'
 import { AckChip } from '../features/cash/components/AckChip'
 import { SOURCE_LABEL } from '../features/cash/components/ackPresentation'
 import type { DropStatus, ReviewDropInput } from '../features/cash/types'
@@ -39,16 +40,16 @@ const DROP_LABEL: Record<DropStatus, string> = {
   rejected: 'Rechazado',
 }
 
-const formatDate = (unixSeconds: number) =>
-  new Date(unixSeconds * 1000).toLocaleString(undefined, {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  })
+const DATE_FMT: Intl.DateTimeFormatOptions = {
+  year: 'numeric',
+  month: 'short',
+  day: 'numeric',
+  hour: '2-digit',
+  minute: '2-digit',
+}
 
 export default function CashDropDetailPage() {
+  const formatDate = useOrgDateFormatter(DATE_FMT) // US-A66 — org-local audit timestamps
   const { id } = useParams<{ id: string }>()
   const { data: drop, isLoading, isError } = useDrop(id)
   const review = useReviewDrop()

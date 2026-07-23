@@ -33,6 +33,7 @@ import {
   type TicketPayload,
 } from '../../utils/qr'
 import { generatePortalToken, portalTokenExpiry } from '../../utils/portal'
+import { naiveEpoch, orgToday, orgWallClockMinute } from '../../utils/tz'
 import {
   nightsBetween,
   parseCsvInts,
@@ -47,10 +48,20 @@ export type PosContext = Context<{
   Variables: AppVariables
 }>
 
-// Org-local "today" as YYYY-MM-DD. MVP single-timezone assumption (mirrors schedules):
-// dates are naive calendar strings compared lexicographically. A `today` query param
-// lets the client pin the org-local day; otherwise fall back to the server's UTC date.
-const utcToday = () => new Date().toISOString().slice(0, 10)
+// US-A66 — the org's scheduling clock, loaded once per request: its IANA `tz` anchors "today" and
+// the sales-cutoff threshold math; `cutoffOffsetMin` (US-A47) is the signed sales-cutoff offset.
+// Falls back to the schema default zone if the row is somehow absent (an FK invariant).
+async function loadOrgTiming(
+  db: Db,
+  orgId: string,
+): Promise<{ tz: string; cutoffOffsetMin: number }> {
+  const rows = await db
+    .select({ tz: organizations.timezone, cutoff: organizations.salesCutoffOffsetMinutes })
+    .from(organizations)
+    .where(eq(organizations.id, orgId))
+    .limit(1)
+  return { tz: rows[0]?.tz ?? 'America/Mexico_City', cutoffOffsetMin: rows[0]?.cutoff ?? 0 }
+}
 
 // Add `n` whole days to a naive YYYY-MM-DD calendar string (UTC midnight arithmetic —
 // no timezone math, matching the single-timezone model). Used for the catalog's rolling
@@ -73,10 +84,10 @@ const lastOfMonth = (month: string): string => {
 
 // --- Signed QR access tickets (docs/qr/folio-qr-signing.spec.md) ---
 
-// MVP single-timezone (mirrors schedules/POS naive calendar): a ticket is valid through
-// the end of the day AFTER the slot date — a deliberate grace for late/next-morning scans.
-const ticketExpiry = (slotDate: string): number =>
-  Math.floor(Date.parse(`${slotDate}T00:00:00Z`) / 1000) + 48 * 3600
+// US-A66 — a ticket is valid through the end of the day AFTER the slot date (a deliberate grace for
+// late/next-morning scans), measured from the slot's org-local midnight in the org's time zone.
+const ticketExpiry = (slotDate: string, tz: string): number =>
+  naiveEpoch(slotDate, '00:00', tz) + 48 * 3600
 
 // Display/audit identity baked into the ticket: customer name, else email, else folio id.
 const clientIdentity = (input: ConfirmSaleInput, folioId: string): string =>
@@ -157,7 +168,11 @@ const extraReadColumns = {
 // pick), or a rolling 3-day span (today … today + 2) by default (US-AG30).
 export const listPosServices = async (c: PosContext) => {
   const agent = c.get('user')
-  const today = c.req.query('today') ?? utcToday()
+  const db = getDb(c.env)
+  const { tz, cutoffOffsetMin } = await loadOrgTiming(db, agent.organizationId)
+  // US-A66 — "today" is the org-local calendar day; the client pins it via `?today=`, else fall
+  // back to the org's time zone (no longer the server's UTC date, which rolled over early).
+  const today = c.req.query('today') ?? orgToday(tz)
   // US-AG35 — the selected range `[from, to]` bounds availability. A bare `from` (or the
   // legacy single `date`) collapses the window to that one day; absent both, the window is
   // today … today + AVAILABILITY_WINDOW_DAYS (the default "next 3 days").
@@ -166,7 +181,6 @@ export const listPosServices = async (c: PosContext) => {
   const windowTo = from
     ? (c.req.query('to') ?? from)
     : addDays(today, AVAILABILITY_WINDOW_DAYS)
-  const db = getDb(c.env)
 
   // Curated catalog (affiliate-portal.spec.md §4.2): for an `affiliate` caller, INNER JOIN the
   // allow-list so the list collapses to exactly the services the admin enabled for their company
@@ -209,14 +223,10 @@ export const listPosServices = async (c: PosContext) => {
   // its sellable last-minute spots instead of reading "Agotado".
   // US-A47 — exclude slots already past the sales cutoff so `has_availability` / `next_slot_date`
   // never advertise a departed time (e.g. a service whose only "remaining" slot today is over).
-  const cutoffRows = await db
-    .select({ v: organizations.salesCutoffOffsetMinutes })
-    .from(organizations)
-    .where(eq(organizations.id, agent.organizationId))
-    .limit(1)
   const sellableThreshold = salesThresholdStr(
     Math.floor(Date.now() / 1000),
-    cutoffRows[0]?.v ?? 0,
+    cutoffOffsetMin,
+    tz,
   )
 
   const availabilityRows = await db
@@ -331,7 +341,9 @@ export const listPosServices = async (c: PosContext) => {
 export const listAvailabilityDays = async (c: PosContext) => {
   const agent = c.get('user')
   const { month, today: todayParam, categories } = c.req.valid('query')
-  const today = todayParam ?? utcToday()
+  const db = getDb(c.env)
+  const { tz, cutoffOffsetMin } = await loadOrgTiming(db, agent.organizationId)
+  const today = todayParam ?? orgToday(tz)
 
   const monthStart = `${month}-01`
   const monthEnd = lastOfMonth(month)
@@ -342,17 +354,11 @@ export const listAvailabilityDays = async (c: PosContext) => {
     return c.json({ days: [] })
   }
 
-  const db = getDb(c.env)
-
   // US-A47 — drop days whose only slots have passed the sales cutoff (no past times in the picker).
-  const cutoffRows = await db
-    .select({ v: organizations.salesCutoffOffsetMinutes })
-    .from(organizations)
-    .where(eq(organizations.id, agent.organizationId))
-    .limit(1)
   const sellableThreshold = salesThresholdStr(
     Math.floor(Date.now() / 1000),
-    cutoffRows[0]?.v ?? 0,
+    cutoffOffsetMin,
+    tz,
   )
 
   const rows = await db
@@ -464,20 +470,13 @@ export const getPosService = async (c: PosContext) => {
     )
     .orderBy(asc(serviceExtras.name))
 
-  const from = c.req.query('from') ?? utcToday()
+  const { tz, cutoffOffsetMin } = await loadOrgTiming(db, agent.organizationId)
+  const from = c.req.query('from') ?? orgToday(tz)
   const to = c.req.query('to')
 
   // US-A47 — never surface a slot that's no longer sellable (its departure passed the cutoff),
   // so the matrix shows only the times an agent can actually sell today.
-  const cutoffRows = await db
-    .select({ v: organizations.salesCutoffOffsetMinutes })
-    .from(organizations)
-    .where(eq(organizations.id, agent.organizationId))
-    .limit(1)
-  const threshold = salesThresholdStr(
-    Math.floor(Date.now() / 1000),
-    cutoffRows[0]?.v ?? 0,
-  )
+  const threshold = salesThresholdStr(Math.floor(Date.now() / 1000), cutoffOffsetMin, tz)
 
   const slotFilters = [
     eq(slots.serviceId, id),
@@ -623,17 +622,18 @@ function resolveBookingPolicy(org: {
   }
 }
 
-// US-A47 — a slot is sellable only while its start is beyond the org's sales cutoff. SIGNED
-// offset: positive closes sales N min BEFORE departure; negative keeps them open until N min
-// AFTER (a walk-up grace). Threshold instant = now + offset; a slot is sellable ⟺ its start is
-// strictly after the threshold. Compared in the naive-UTC model (same as slotEpoch); absolute-
-// timezone correctness is the separate BUG-007 limitation.
-const salesThresholdStr = (nowSec: number, cutoffOffsetMin: number): string =>
-  new Date((nowSec + cutoffOffsetMin * 60) * 1000).toISOString().slice(0, 16)
+// US-A47/A66 — a slot is sellable only while its start is beyond the org's sales cutoff. SIGNED
+// offset: positive closes sales N min BEFORE departure; negative keeps them open until N min AFTER
+// (a walk-up grace). Threshold instant = now + offset; a slot is sellable ⟺ its start is strictly
+// after the threshold. Rendered as the org-local wall-clock of that instant so it is lexicographi-
+// cally comparable to the slot's naive `date||'T'||time` — resolving the comparison in the org's
+// time zone (this is what closes BUG-007).
+const salesThresholdStr = (nowSec: number, cutoffOffsetMin: number, tz: string): string =>
+  orgWallClockMinute((nowSec + cutoffOffsetMin * 60) * 1000, tz)
 
 // SQL predicate form for the read filters (matrix / availability): keep only future-of-cutoff
 // slots. `slots.date` is 'YYYY-MM-DD' and `slots.startTime` is 'HH:MM', so `date||'T'||time` is a
-// fixed-width ISO minute string, lexicographically comparable to the threshold.
+// fixed-width minute string, lexicographically comparable to the org-local threshold string.
 const sellableSlotSql = (thresholdStr: string) =>
   sql`(${slots.date} || 'T' || ${slots.startTime}) > ${thresholdStr}`
 
@@ -643,11 +643,12 @@ const isSlotSellable = (
   startTime: string,
   nowSec: number,
   cutoffOffsetMin: number,
-): boolean => slotEpoch(date, startTime) > nowSec + cutoffOffsetMin * 60
+  tz: string,
+): boolean => slotEpoch(date, startTime, tz) > nowSec + cutoffOffsetMin * 60
 
-// Epoch (seconds) of a naive slot start — single-timezone model (UTC arithmetic, no tz math).
-const slotEpoch = (date: string, time: string): number =>
-  Math.floor(Date.parse(`${date}T${time}:00Z`) / 1000)
+// Epoch (seconds) of a naive slot start, resolved in the org's time zone (US-A66).
+const slotEpoch = (date: string, time: string, tz: string): number =>
+  naiveEpoch(date, time, tz)
 
 // US-AG07.1 AC1 — release timestamp = min(createdAt + holdDuration, slotStart − tourBuffer).
 // Same-day tours use the org's tighter same-day buffer; otherwise a 24h pre-departure buffer.
@@ -685,6 +686,7 @@ async function signLineTickets(
   folioId: string,
   identity: string,
   lines: SignableLine[],
+  tz: string,
 ): Promise<Map<string, { token: string; qr: ReturnType<typeof qrEcho> }>> {
   const orgKey = await deriveOrgKey(env.QR_SECRET, org)
   const out = new Map<string, { token: string; qr: ReturnType<typeof qrEcho> }>()
@@ -699,7 +701,7 @@ async function signLineTickets(
       client_identity: identity,
       passes_total: line.quantity,
       issued_at: Math.floor(Date.now() / 1000),
-      expires_at: ticketExpiry(line.slotDate),
+      expires_at: ticketExpiry(line.slotDate, tz),
     }
     out.set(line.id, { token: await signTicket(payload, orgKey), qr: qrEcho(payload) })
   }
@@ -856,12 +858,16 @@ export const confirmSale = async (c: PosContext) => {
       salesCutoffOffsetMinutes: organizations.salesCutoffOffsetMinutes,
       bookingGraceOffsetMinutes: organizations.bookingGraceOffsetMinutes,
       lodgingWeekendDays: organizations.lodgingWeekendDays,
+      timezone: organizations.timezone,
     })
     .from(organizations)
     .where(eq(organizations.id, org))
     .limit(1)
   const orgRow = orgRows[0]
   const weekendDays = parseCsvInts(orgRow?.lodgingWeekendDays ?? '5,6')
+  // US-A66 — every wall-clock comparison below (cutoff, same-day booking grace, ticket expiry)
+  // resolves in the org's time zone.
+  const tz = orgRow?.timezone ?? 'America/Mexico_City'
   // US-A47 — the sales cutoff gates EVERY new folio (walk-in sale + booking creation): a slot
   // past its cutoff is no longer sellable. Evaluated once against the request's start instant.
   const saleNowSec = Math.floor(Date.now() / 1000)
@@ -1053,7 +1059,7 @@ export const confirmSale = async (c: PosContext) => {
     // US-A47 — refuse a slot whose departure has passed the sales cutoff (no selling a tour
     // that already left / is past the walk-in window). Closes the past-slot integrity hole for
     // both full sales and booking creation, regardless of a stale client.
-    if (!isSlotSellable(slot.date, slot.startTime, saleNowSec, salesCutoffOffset)) {
+    if (!isSlotSellable(slot.date, slot.startTime, saleNowSec, salesCutoffOffset, tz)) {
       throw new ApiError(
         'SLOT_CLOSED',
         409,
@@ -1252,7 +1258,7 @@ export const confirmSale = async (c: PosContext) => {
       (min, l) => {
         const date = l.lineType === 'stay' ? l.checkIn! : l.slotDate!
         const time = l.lineType === 'stay' ? '00:00' : l.slotStartTime!
-        const e = slotEpoch(date, time)
+        const e = slotEpoch(date, time, tz)
         return e < min.epoch ? { epoch: e, date } : min
       },
       { epoch: Infinity, date: '' },
@@ -1261,7 +1267,7 @@ export const confirmSale = async (c: PosContext) => {
       policy,
       nowSec,
       earliest.epoch,
-      earliest.date === utcToday(),
+      earliest.date === orgToday(tz),
     )
   }
 
@@ -1465,6 +1471,7 @@ export const confirmSale = async (c: PosContext) => {
           quantity: l.quantity,
           slotDate: l.slotDate!,
         })),
+        tz,
       )
       for (const line of slotLines) {
         const t = tickets.get(line.id)!
@@ -1904,6 +1911,8 @@ export const settleBooking = async (c: PosContext) => {
   const id = c.req.param('id')
   const db = getDb(c.env)
   const org = agent.organizationId
+  // US-A66 — ticket expiry below is measured in the org's time zone.
+  const { tz } = await loadOrgTiming(db, org)
 
   const folioRows = await db
     .select({
@@ -1978,6 +1987,7 @@ export const settleBooking = async (c: PosContext) => {
       quantity: l.quantity,
       slotDate: l.slotDate!,
     })),
+    tz,
   )
 
   const statements: BatchItem<'sqlite'>[] = [
@@ -2263,6 +2273,7 @@ export const reactivateBooking = async (c: PosContext) => {
       bookingHoldDays: organizations.bookingHoldDays,
       salesCutoffOffsetMinutes: organizations.salesCutoffOffsetMinutes,
       bookingGraceOffsetMinutes: organizations.bookingGraceOffsetMinutes,
+      timezone: organizations.timezone,
     })
     .from(organizations)
     .where(eq(organizations.id, org))
@@ -2272,13 +2283,17 @@ export const reactivateBooking = async (c: PosContext) => {
     bookingHoldDays: orgRows[0]?.bookingHoldDays ?? 7,
     bookingGraceOffsetMinutes: orgRows[0]?.bookingGraceOffsetMinutes ?? 15,
   })
+  // US-A66 — the cutoff guard + fresh same-day expiry below resolve in the org's time zone.
+  const tz = orgRows[0]?.timezone ?? 'America/Mexico_City'
 
   // US-A47 — don't reactivate onto a slot whose departure has passed the sales cutoff (that
   // would re-create an already-expired booking). Guard BEFORE re-blocking any spots.
   const reactivateNowSec = Math.floor(Date.now() / 1000)
   const salesCutoffOffset = orgRows[0]?.salesCutoffOffsetMinutes ?? 0
   for (const line of lineRows) {
-    if (!isSlotSellable(line.slotDate, line.slotStartTime, reactivateNowSec, salesCutoffOffset)) {
+    if (
+      !isSlotSellable(line.slotDate, line.slotStartTime, reactivateNowSec, salesCutoffOffset, tz)
+    ) {
       throw new ApiError(
         'SLOT_CLOSED',
         409,
@@ -2445,8 +2460,8 @@ export const reactivateBooking = async (c: PosContext) => {
   // Fresh expiry from the current org policy (read above) + earliest departure — a slot start or a
   // stay check-in (midnight), whichever comes first across the cart.
   const departures: { epoch: number; date: string }[] = [
-    ...lineRows.map((l) => ({ epoch: slotEpoch(l.slotDate, l.slotStartTime), date: l.slotDate })),
-    ...stayReservations.map((r) => ({ epoch: slotEpoch(r.checkIn!, '00:00'), date: r.checkIn! })),
+    ...lineRows.map((l) => ({ epoch: slotEpoch(l.slotDate, l.slotStartTime, tz), date: l.slotDate })),
+    ...stayReservations.map((r) => ({ epoch: slotEpoch(r.checkIn!, '00:00', tz), date: r.checkIn! })),
   ]
   const earliest = departures.reduce(
     (min, d) => (d.epoch < min.epoch ? d : min),
@@ -2456,7 +2471,7 @@ export const reactivateBooking = async (c: PosContext) => {
     policy,
     reactivateNowSec,
     earliest.epoch,
-    earliest.date === utcToday(),
+    earliest.date === orgToday(tz),
   )
 
   await db

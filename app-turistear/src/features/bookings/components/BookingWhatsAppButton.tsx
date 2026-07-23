@@ -54,6 +54,7 @@ export function BookingWhatsAppButton({ folio }: { folio: ReminderTarget }) {
               ? new Date(res.reminder_sent_at * 1000).toLocaleTimeString('es-MX', {
                   hour: '2-digit',
                   minute: '2-digit',
+                  timeZone: org?.timezone, // US-A66 — org-local reminder time
                 })
               : ''
             if (window.confirm(`Ya contactado${at ? ` a las ${at}` : ''}. ¿Reenviar?`)) {

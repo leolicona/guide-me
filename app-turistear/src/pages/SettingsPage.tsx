@@ -30,6 +30,7 @@ import {
   TEMPLATE_PLACEHOLDERS,
 } from '../features/pos/delivery'
 import { usePosPreferences } from '../store/posPreferences'
+import { ORG_TIMEZONE_OPTIONS, DEFAULT_ORG_TIMEZONE } from '../config/timezones'
 
 // US-A47 — the backend stores a SIGNED departure offset (+ = before, − = after). The admin never
 // types a negative: they enter a positive magnitude and pick a direction; the page translates.
@@ -114,6 +115,7 @@ export default function SettingsPage() {
   const hideSoldOut = usePosPreferences((s) => s.hideSoldOut)
   const setHideSoldOut = usePosPreferences((s) => s.setHideSoldOut)
 
+  const [timezone, setTimezone] = useState('')
   const [minPct, setMinPct] = useState('')
   const [holdDays, setHoldDays] = useState('')
   const [cutoffMag, setCutoffMag] = useState('')
@@ -135,11 +137,12 @@ export default function SettingsPage() {
   // Seed the form from the org's saved values (render-phase, no effect). Re-seeds whenever the
   // saved values change — i.e. on first load and after a successful save — resetting the dirty flag.
   const savedSig = org
-    ? `${org.booking_min_down_payment_pct}|${org.booking_hold_days}|${org.sales_cutoff_offset_minutes}|${org.booking_grace_offset_minutes}|${org.lodging_weekend_days.join(',')}|${org.lodging_free_cancel_days}|${org.lodging_cancel_penalty_pct}|${org.wa_ticket_template ?? ''}|${org.wa_reminder_template ?? ''}`
+    ? `${org.timezone}|${org.booking_min_down_payment_pct}|${org.booking_hold_days}|${org.sales_cutoff_offset_minutes}|${org.booking_grace_offset_minutes}|${org.lodging_weekend_days.join(',')}|${org.lodging_free_cancel_days}|${org.lodging_cancel_penalty_pct}|${org.wa_ticket_template ?? ''}|${org.wa_reminder_template ?? ''}`
     : null
   const [seededSig, setSeededSig] = useState<string | null>(null)
   if (org && savedSig !== seededSig) {
     setSeededSig(savedSig)
+    setTimezone(org.timezone)
     setMinPct(String(org.booking_min_down_payment_pct))
     setHoldDays(String(org.booking_hold_days))
     const c = splitOffset(org.sales_cutoff_offset_minutes)
@@ -173,7 +176,8 @@ export default function SettingsPage() {
 
   const dirty =
     !!org &&
-    (pctNum !== org.booking_min_down_payment_pct ||
+    (timezone !== org.timezone ||
+      pctNum !== org.booking_min_down_payment_pct ||
       holdNum !== org.booking_hold_days ||
       cutoffSigned !== org.sales_cutoff_offset_minutes ||
       graceSigned !== org.booking_grace_offset_minutes)
@@ -181,6 +185,7 @@ export default function SettingsPage() {
   const handleSave = () => {
     update.mutate(
       {
+        timezone,
         booking_min_down_payment_pct: pctNum,
         booking_hold_days: holdNum,
         sales_cutoff_offset_minutes: cutoffSigned,
@@ -259,6 +264,24 @@ export default function SettingsPage() {
               </Stack>
 
               <Stack spacing={3}>
+                {/* US-A66 — the org's time zone: the single clock the catalog "hoy", the sales
+                    cutoff, and every registered time resolve against. */}
+                <TextField
+                  select
+                  label="Zona horaria"
+                  value={timezone || DEFAULT_ORG_TIMEZONE}
+                  onChange={(e) => setTimezone(e.target.value)}
+                  helperText="Define la hora local del negocio: el día de «hoy» en el catálogo, el cierre de ventas y las horas que se registran."
+                >
+                  {ORG_TIMEZONE_OPTIONS.map((tz) => (
+                    <MenuItem key={tz.value} value={tz.value}>
+                      {tz.label}
+                    </MenuItem>
+                  ))}
+                </TextField>
+
+                <Divider flexItem />
+
                 <TextField
                   label="Anticipo mínimo"
                   type="number"

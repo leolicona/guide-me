@@ -16,6 +16,7 @@ import {
   ToggleButtonGroup,
 } from '@mui/material'
 import { useMyFolios } from '../features/pos/hooks'
+import { useOrgDateFormatter } from '../features/organization'
 import {
   BookingWhatsAppButton,
   DeliveryBadge,
@@ -27,20 +28,20 @@ import type { FolioStatus } from '../features/pos/types'
 import { MoneyText } from '../components'
 import { ROUTES } from '../config/routes'
 
-const formatDate = (unixSeconds: number) =>
-  new Date(unixSeconds * 1000).toLocaleString(undefined, {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  })
+const DATE_FMT: Intl.DateTimeFormatOptions = {
+  year: 'numeric',
+  month: 'short',
+  day: 'numeric',
+  hour: '2-digit',
+  minute: '2-digit',
+}
 
 type Filter = 'all' | FolioStatus
 
 // US-AG20 — the agent's own read-only sales history. Tapping a row opens the detail
 // (US-AG21). No cancel/edit affordance — cancellation is admin-only.
 export default function FolioHistoryPage() {
+  const formatDate = useOrgDateFormatter(DATE_FMT) // US-A66 — org-local audit timestamps
   const [filter, setFilter] = useState<Filter>('all')
   const { data: folios, isLoading, isError } = useMyFolios(
     filter === 'all' ? {} : { status: filter },

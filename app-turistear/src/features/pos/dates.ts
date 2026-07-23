@@ -3,13 +3,23 @@
 // strings compared lexicographically; no timezone math.
 
 /**
- * Org-local "today" as a naive YYYY-MM-DD string — the DEVICE's local calendar date
- * (single-timezone MVP: staff operate in the org's timezone). NOT `toISOString()`:
- * that is the UTC date, which rolls over hours early (BUG-007 — in UTC-6 the catalog's
- * "Hoy" anchored on tomorrow from ~6 pm, hiding the rest of today's slots). The client
- * pins this value to the API via `?today=` / `?from=`, overriding the server's UTC fallback.
+ * Org-local "today" as a naive YYYY-MM-DD string (US-A66). When the org's IANA `tz` is known it is
+ * computed in that zone via `Intl` — the single org-local clock all staff share — so the catalog
+ * "Hoy" rolls over at the ORG's midnight, not each device's (this is what closes BUG-007). The
+ * client pins this value to the API via `?today=` / `?from=`; the server independently derives the
+ * same org-local day as its fallback. Absent a `tz` (org not yet loaded) it falls back to the
+ * device's local calendar date, which staff at the location share anyway.
  */
-export const todayStr = (): string => {
+export const todayStr = (tz?: string): string => {
+  if (tz) {
+    // 'en-CA' yields an ISO-shaped YYYY-MM-DD; `timeZone` resolves the org-local day.
+    return new Intl.DateTimeFormat('en-CA', {
+      timeZone: tz,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(new Date())
+  }
   const d = new Date()
   const month = String(d.getMonth() + 1).padStart(2, '0')
   const day = String(d.getDate()).padStart(2, '0')
