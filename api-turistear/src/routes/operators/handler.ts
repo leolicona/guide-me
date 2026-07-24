@@ -8,6 +8,7 @@ import {
   setOperatorSessionCookie,
 } from '../../utils/cookies'
 import { signOperatorSession } from '../../utils/operatorSession'
+import { derivePinSecret } from '../../utils/pin'
 import { normalizePhone } from '../../utils/phone'
 import { ApiError } from '../../types/errors'
 import type { AppVariables, OperatorPayload } from '../../types/context'
@@ -217,7 +218,7 @@ export const setPin = async (c: OpContext) => {
     throw new ApiError('PIN_ALREADY_SET', 409, 'El PIN ya fue configurado')
   }
   const input = (await c.req.json()) as SetPinInput
-  const { hash, salt } = await hashPassword(c.env, input.pin)
+  const { hash, salt } = await hashPassword(c.env, await derivePinSecret(c.env, input.pin))
   const db = getDb(c.env)
   await db
     .update(affiliateOperators)
@@ -242,7 +243,7 @@ export const login = async (c: OpContext) => {
   let ok = true
   try {
     await verifyPassword(c.env, {
-      password: input.pin,
+      password: await derivePinSecret(c.env, input.pin),
       hash: op.pinHash,
       salt: op.pinSalt,
       identity: op.id,
@@ -290,7 +291,7 @@ export const changePin = async (c: OpContext) => {
 
   try {
     await verifyPassword(c.env, {
-      password: input.current,
+      password: await derivePinSecret(c.env, input.current),
       hash: op.pinHash,
       salt: op.pinSalt,
       identity: op.id,
@@ -299,7 +300,7 @@ export const changePin = async (c: OpContext) => {
     throw new ApiError('INVALID_PIN', 401, 'El PIN actual es incorrecto')
   }
 
-  const { hash, salt } = await hashPassword(c.env, input.new)
+  const { hash, salt } = await hashPassword(c.env, await derivePinSecret(c.env, input.new))
   await db
     .update(affiliateOperators)
     .set({ pinHash: hash, pinSalt: salt, updatedAt: new Date() })

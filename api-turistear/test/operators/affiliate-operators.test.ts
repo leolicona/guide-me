@@ -14,9 +14,10 @@ const base = 'http://api.local'
 const auth = (email: string) => ({ Cookie: `gm_access=${buildFakeJwt(email)}` })
 const jsonAuth = (email: string) => ({ ...auth(email), 'Content-Type': 'application/json' })
 
-// hashPassword / verifyPassword hit the external agnostic-auth service — mock it. verify-password
-// succeeds iff the attempted PIN matches `correctPin` (mutable for change-pin tests).
-let correctPin = CORRECT_PIN
+// The PIN is hashed through the agnostic-auth service on a DERIVED secret (utils/pin.ts —
+// derivePinSecret), so the mock stays transform-agnostic: /auth/hash echoes the derived secret back
+// as the stored hash, and /auth/verify-password succeeds iff the attempted secret equals it. This
+// mirrors a real hash/verify without the test knowing the PIN→secret derivation.
 const mockAuth = () => {
   vi.spyOn(env.AGNOSTIC_AUTH_API, 'fetch').mockImplementation(
     async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -24,10 +25,13 @@ const mockAuth = () => {
       const pathname = new URL(url).pathname
       const body = init?.body ? JSON.parse(init.body as string) : {}
       if (pathname === '/auth/hash') {
-        return new Response(JSON.stringify({ success: true, data: { hash: 'H', salt: 'S' } }), { status: 200 })
+        return new Response(
+          JSON.stringify({ success: true, data: { hash: body.password, salt: 'S' } }),
+          { status: 200 },
+        )
       }
       if (pathname === '/auth/verify-password') {
-        const ok = body.attemptedPassword === correctPin
+        const ok = body.attemptedPassword === body.storedHash
         return new Response(
           JSON.stringify(
             ok
@@ -109,7 +113,6 @@ const createOperator = async (email: string, name = 'Juan', phone = '5512340001'
 const tokenOf = (accessUrl: string): string => accessUrl.split('/o/')[1]
 
 beforeEach(async () => {
-  correctPin = CORRECT_PIN
   await clearAll()
   mockAuth()
 })
