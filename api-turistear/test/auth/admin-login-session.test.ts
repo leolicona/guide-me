@@ -135,6 +135,9 @@ describe('Admin Login — POST /api/auth/login', () => {
     expect(cookieHeader).toMatch(/SameSite=Lax/i)
     expect(cookieHeader).toMatch(/Max-Age=900/)
     expect(cookieHeader).toMatch(/Max-Age=5184000/)
+    // A real login SUPERSEDES any operator shift — it must clear gm_op (which authMiddleware
+    // checks first), else a stale operator cookie hijacks the session with its manager's identity.
+    expect(cookieHeader).toMatch(/gm_op=;/)
   })
 
   it('Scenario 2: returns 401 INVALID_CREDENTIALS when password is incorrect', async () => {
