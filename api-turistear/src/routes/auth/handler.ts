@@ -320,6 +320,29 @@ export const completeInvite = async (c: AuthContext) => {
   const isAffiliate = invitation.kind === 'affiliate'
   const role = isAffiliate ? 'affiliate' : 'agent'
 
+  // D13 (docs/affiliate-operators/spec.md) — at most ONE affiliate (the manager) per company. Guard
+  // the accept path too (a race where a stale second invite is redeemed): if a manager already
+  // exists for this company, refuse. Extra sellers are added as PIN operators (US-AF10).
+  if (isAffiliate) {
+    const existingManager = await db
+      .select({ id: users.id })
+      .from(users)
+      .where(
+        and(
+          eq(users.affiliateCompanyId, invitation.affiliateCompanyId),
+          eq(users.role, 'affiliate'),
+        ),
+      )
+      .limit(1)
+    if (existingManager.length > 0) {
+      throw new ApiError(
+        'AFFILIATE_MANAGER_EXISTS',
+        409,
+        'Esta empresa ya tiene un gerente registrado.',
+      )
+    }
+  }
+
   await db.insert(users).values({
     id: userId,
     organizationId: invitation.organizationId,

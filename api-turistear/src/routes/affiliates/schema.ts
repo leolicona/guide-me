@@ -20,10 +20,12 @@ const companyFields = {
 
 // Wizard finalize (US-A54–A57, D9). `commissions` + `invites` default to [] so an empty Step 2/3
 // is valid (invite later). Per Multitenancy Rule 1, no organization_id is ever accepted.
+// D13 (docs/affiliate-operators/spec.md) — at most ONE affiliate (the manager) per company; extra
+// sellers are PIN operators (US-AF10). So Step 3 invites at most one email.
 export const createAffiliateSchema = z.object({
   company: z.object(companyFields),
   commissions: z.array(commissionEntrySchema).default([]),
-  invites: z.array(z.string().email()).default([]),
+  invites: z.array(z.string().email()).max(1).default([]),
 })
 
 export type CreateAffiliateInput = z.infer<typeof createAffiliateSchema>

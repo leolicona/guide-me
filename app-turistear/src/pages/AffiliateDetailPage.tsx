@@ -273,7 +273,7 @@ function AffiliateView({ affiliate }: { affiliate: AffiliateDetail }) {
               <Stack spacing={1} sx={{ mt: 2 }}>
                 {affiliate.users.length === 0 && affiliate.pending_invites.length === 0 && (
                   <Typography variant="body2" color="text.secondary">
-                    Aún no hay usuarios. Invita al primero.
+                    Aún no hay gerente. Invítalo con su correo.
                   </Typography>
                 )}
                 {affiliate.users.map((u) => (
@@ -318,37 +318,47 @@ function AffiliateView({ affiliate }: { affiliate: AffiliateDetail }) {
 
               <Divider sx={{ my: 2 }} />
 
-              <Stack direction="row" spacing={1} sx={{ alignItems: 'flex-start' }}>
-                <TextField
-                  label="Invitar por correo"
-                  type="email"
-                  size="small"
-                  value={emailInput}
-                  onChange={(e) => {
-                    setEmailInput(e.target.value)
-                    setEmailError('')
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault()
-                      addInvite()
-                    }
-                  }}
-                  error={!!emailError}
-                  helperText={emailError || ' '}
-                  fullWidth
-                />
-                <Button
-                  onClick={addInvite}
-                  variant="outlined"
-                  color="secondary"
-                  startIcon={<AddRounded />}
-                  disabled={!emailInput.trim() || inviteMutation.isPending}
-                  sx={{ mt: 0.5, flexShrink: 0 }}
-                >
-                  Invitar
-                </Button>
-              </Stack>
+              {/* D13 — at most ONE credentialed affiliate (the manager) per company. Once the seat
+                  is filled (a user or a pending invite), the invite input is replaced by a hint:
+                  extra sellers are added by the manager as PIN operators, not as more logins. */}
+              {affiliate.users.length > 0 || affiliate.pending_invites.length > 0 ? (
+                <Typography variant="body2" color="text.secondary">
+                  Esta empresa ya tiene un gerente. Los cajeros o vendedores adicionales los agrega el
+                  propio gerente como <strong>operadores</strong> (con PIN) desde su panel.
+                </Typography>
+              ) : (
+                <Stack direction="row" spacing={1} sx={{ alignItems: 'flex-start' }}>
+                  <TextField
+                    label="Invitar gerente por correo"
+                    type="email"
+                    size="small"
+                    value={emailInput}
+                    onChange={(e) => {
+                      setEmailInput(e.target.value)
+                      setEmailError('')
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault()
+                        addInvite()
+                      }
+                    }}
+                    error={!!emailError}
+                    helperText={emailError || ' '}
+                    fullWidth
+                  />
+                  <Button
+                    onClick={addInvite}
+                    variant="outlined"
+                    color="secondary"
+                    startIcon={<AddRounded />}
+                    disabled={!emailInput.trim() || inviteMutation.isPending}
+                    sx={{ mt: 0.5, flexShrink: 0 }}
+                  >
+                    Invitar
+                  </Button>
+                </Stack>
+              )}
             </CardContent>
           </Card>
         </Stack>

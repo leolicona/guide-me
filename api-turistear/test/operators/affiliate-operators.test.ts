@@ -168,6 +168,21 @@ describe('US-OP01/OP02 — PIN setup, unlock, lockout', () => {
     expect(meJson.operator.name).toBe('Juan')
   })
 
+  it('starting a shift supersedes any user session (clears gm_access/gm_refresh)', async () => {
+    const { managerEmail } = await seedHotel()
+    const { json } = await createOperator(managerEmail)
+    const token = tokenOf(json.operator.access_url)
+    const setRes = await SELF.fetch(`${base}/api/operator/access/${token}/set-pin`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pin: CORRECT_PIN, confirm: CORRECT_PIN }),
+    })
+    const cookies = (setRes.headers.getSetCookie?.() ?? []).join('\n')
+    expect(cookies).toMatch(/gm_op=/) // shift minted
+    expect(cookies).toMatch(/gm_access=;/) // user session cleared (mutual exclusion)
+    expect(cookies).toMatch(/gm_refresh=;/)
+  })
+
   it('set-pin twice → 409', async () => {
     const { managerEmail } = await seedHotel()
     const { json } = await createOperator(managerEmail)
