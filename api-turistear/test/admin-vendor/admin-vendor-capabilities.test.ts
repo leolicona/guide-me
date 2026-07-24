@@ -90,6 +90,8 @@ const confirmSale = async (email: string, slotId: string, unitPrice = 250000, qu
     method: 'POST',
     headers: jsonAuth(email),
     body: JSON.stringify({
+      customer_name: 'Cliente Test',
+      customer_phone: '5512345678',
       customer_email: 'cliente@example.com',
       lines: [{ slot_id: slotId, quantity, unit_price: unitPrice }],
     }),
@@ -353,7 +355,7 @@ describe('Administrator Vendor Capabilities', () => {
     const sell = await SELF.fetch(`${POS}/folios`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ customer_email: 'x@y.com', lines: [] }),
+      body: JSON.stringify({ customer_name: 'Cliente Test', customer_phone: '5512345678', customer_email: 'x@y.com', lines: [] }),
     })
     expect(sell.status).toBe(401)
 

@@ -46,3 +46,33 @@ export const reactivateBooking = async (id: string): Promise<Folio> => {
   })
   return res.folio
 }
+
+// whatsapp-qr-delivery — record that the tickets were sent over WhatsApp. Two surfaces: the seller
+// (agent/affiliate, their own folio) and the admin oversight list.
+export interface TicketDelivery {
+  tickets_sent_at: number | null
+  tickets_viewed_at: number | null
+}
+
+export const markTicketsSent = (id: string): Promise<TicketDelivery> =>
+  request<TicketDelivery>(`/api/pos/folios/${id}/ticket-delivery`, { method: 'POST' })
+
+export const markTicketsSentAdmin = (id: string): Promise<TicketDelivery> =>
+  request<TicketDelivery>(`/api/folios/${id}/ticket-delivery`, { method: 'POST' })
+
+// US-A67 — ADMIN verifies an electronic (transfer) payment: pending → verified. If the folio is
+// paid, the server signs the QR + auto-sends the ticket email and returns the updated folio.
+export const verifyPayment = async (id: string): Promise<Folio> => {
+  const res = await request<{ folio: Folio }>(`/api/pos/folios/${id}/verify`, { method: 'POST' })
+  return res.folio
+}
+
+// US-A67 — ADMIN rejects an electronic payment (money never arrived): voids the folio, releasing
+// spots and clawing back commission. `reason` is an optional audit note.
+export const rejectPayment = async (id: string, reason?: string): Promise<Folio> => {
+  const res = await request<{ folio: Folio }>(`/api/pos/folios/${id}/reject`, {
+    method: 'POST',
+    body: JSON.stringify({ reason }),
+  })
+  return res.folio
+}

@@ -15,12 +15,29 @@ import {
 import CheckCircleRounded from '@mui/icons-material/CheckCircleRounded'
 import EventAvailableRounded from '@mui/icons-material/EventAvailableRounded'
 import EventBusyRounded from '@mui/icons-material/EventBusyRounded'
+import WarningAmberRounded from '@mui/icons-material/WarningAmberRounded'
+import HourglassTopRounded from '@mui/icons-material/HourglassTopRounded'
 import { useFolio } from '../features/pos/hooks'
 import { TicketQr } from '../features/pos/components/TicketQr'
-import { BookingActions, ExpiredBookingBanner } from '../features/bookings'
+import {
+  BookingActions,
+  ExpiredBookingBanner,
+  TicketWhatsAppButton,
+  DeliveryBadge,
+} from '../features/bookings'
+import { deliveryState } from '../features/pos/delivery'
 import { formatMoney } from '../features/catalog/types'
 import { folioLineMeta } from '../features/folios/folioLineLabel'
+import { SectionCard } from '../components'
 import { ROUTES } from '../config/routes'
+import type { PaymentMethod } from '../features/pos/types'
+
+const PAYMENT_METHOD_LABEL: Record<PaymentMethod, string> = {
+  cash: 'Efectivo',
+  transfer: 'Transferencia',
+  card: 'Tarjeta',
+  link: 'Link de pago',
+}
 
 export default function FolioReceiptPage() {
   const { id } = useParams<{ id: string }>()
@@ -73,6 +90,53 @@ export default function FolioReceiptPage() {
             </Box>
 
             <ExpiredBookingBanner folio={folio} />
+
+            {/* US-A67 — a transfer whose money an admin hasn't verified yet: no QR, no delivery. */}
+            {folio.payment_verification === 'pending' && (
+              <SectionCard>
+                <Stack direction="row" spacing={1.5} sx={{ alignItems: 'flex-start' }}>
+                  <HourglassTopRounded sx={{ color: 'warning.main', mt: 0.25 }} />
+                  <Box>
+                    <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
+                      Pago en verificación
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      Los boletos se enviarán en cuanto un administrador confirme la transferencia.
+                    </Typography>
+                  </Box>
+                </Stack>
+              </SectionCard>
+            )}
+
+            {/* whatsapp-qr-delivery — the primary post-payment action: send the portal link (QR +
+                itinerary) over WhatsApp. Leads the receipt for a paid folio; the QR below is the
+                in-person fallback. Pendiente → Enviado → Visto shown alongside. */}
+            {folio.status === 'paid' && folio.portal_link && (
+              <SectionCard>
+                <Stack spacing={1.5}>
+                  <Stack
+                    direction="row"
+                    sx={{ alignItems: 'center', justifyContent: 'space-between' }}
+                  >
+                    <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
+                      Entregar boletos
+                    </Typography>
+                    <DeliveryBadge folio={folio} />
+                  </Stack>
+                  <TicketWhatsAppButton folio={folio} surface="seller" variant="primary" />
+                  {deliveryState(folio) === 'pending' && (
+                    <Stack
+                      direction="row"
+                      spacing={0.5}
+                      sx={{ alignItems: 'center', color: 'warning.main' }}
+                    >
+                      <WarningAmberRounded fontSize="small" />
+                      <Typography variant="caption">Aún no enviado al cliente</Typography>
+                    </Stack>
+                  )}
+                </Stack>
+              </SectionCard>
+            )}
 
             <Card>
               <CardContent>
@@ -158,10 +222,15 @@ export default function FolioReceiptPage() {
                   )}
                   <Stack direction="row" sx={{ justifyContent: 'space-between' }}>
                     <Typography color="text.secondary">Método de pago</Typography>
-                    <Typography>
-                      {folio.payment_method === 'card' ? 'Tarjeta' : 'Efectivo'}
-                    </Typography>
+                    <Typography>{PAYMENT_METHOD_LABEL[folio.payment_method]}</Typography>
                   </Stack>
+                  {/* US-AF13 — who took the sale (only when an operator, not the manager, sold it). */}
+                  {folio.operator_name && (
+                    <Stack direction="row" sx={{ justifyContent: 'space-between' }}>
+                      <Typography color="text.secondary">Vendido por</Typography>
+                      <Typography>{folio.operator_name}</Typography>
+                    </Stack>
+                  )}
                 </Stack>
               </CardContent>
             </Card>

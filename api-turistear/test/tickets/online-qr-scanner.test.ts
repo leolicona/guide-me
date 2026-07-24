@@ -104,6 +104,8 @@ const mintTicket = async (
     method: 'POST',
     headers: jsonAuth(email),
     body: JSON.stringify({
+      customer_name: 'Cliente Test',
+      customer_phone: '5512345678',
       customer_email: 'cliente@example.com',
       lines: [{ slot_id: slotId, quantity, unit_price: 150000 }],
     }),
@@ -353,6 +355,8 @@ describe('US-A64 — zone on the scan result', () => {
       method: 'POST',
       headers: jsonAuth(email),
       body: JSON.stringify({
+        customer_name: 'Cliente Test',
+        customer_phone: '5512345678',
         customer_email: 'cliente@example.com',
         lines: [{ slot_id: slotId, zone_id: zoneId, quantity: 1, unit_price: 150000 }],
       }),

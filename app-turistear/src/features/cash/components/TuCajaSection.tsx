@@ -11,21 +11,22 @@ import {
   TextField,
   Typography,
 } from '@mui/material'
+import BoltRounded from '@mui/icons-material/Bolt'
 import { useCurrentUser } from '../../auth/CurrentUserContext'
 import { useMyBalance, useCreateDrop, useRegisterPayout } from '../hooks'
 import { CashBoxCard } from './CashBoxCard'
 import { SalesSummaryCard } from './SalesSummaryCard'
 import { CommissionsCard } from './CommissionsCard'
 import { formatMoney, amountToCents, centsToAmount } from '../../catalog/types'
-import { SectionCard, MoneyText } from '../../../components'
+import { SectionCard, MoneyText, StatusChip, InfoPopover } from '../../../components'
+import { useOrgDateFormatter } from '../../organization'
 
-const formatDate = (unixSeconds: number) =>
-  new Date(unixSeconds * 1000).toLocaleString(undefined, {
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  })
+const DATE_FMT: Intl.DateTimeFormatOptions = {
+  month: 'short',
+  day: 'numeric',
+  hour: '2-digit',
+  minute: '2-digit',
+}
 
 // US-A35 — "Tu caja": the admin's own drawer, pinned above the team ("Equipo") on the Caja
 // screen. It reuses the agent's CashBoxCard for the common (non-negative) case, but every
@@ -34,6 +35,7 @@ const formatDate = (unixSeconds: number) =>
 // so, and the agent's "pendiente de confirmación" hint never shows (admin drops are never
 // pending).
 export function TuCajaSection() {
+  const formatDate = useOrgDateFormatter(DATE_FMT) // US-A66 — org-local audit timestamps
   const user = useCurrentUser()
   const { data: balance, isLoading, isError } = useMyBalance()
   const createDrop = useCreateDrop()
@@ -81,9 +83,15 @@ export function TuCajaSection() {
 
   return (
     <Box sx={{ mb: 4 }}>
-      <Typography variant="overline" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
-        Tu caja
-      </Typography>
+      {/* The "Mi caja" tab already names this section. Lead with the auto-confirmed status —
+          the "se confirman de inmediato" rule shown as a badge, with the full "why" one tap away. */}
+      <Stack direction="row" sx={{ alignItems: 'center', gap: 1, mb: 0.5 }}>
+        <StatusChip tone="neutral" icon={<BoltRounded />} label="Auto-confirmado" sx={{ height: 22 }} />
+        <InfoPopover label="Cómo se confirman tus movimientos de caja">
+          Como administrador, tus entregas y pagos se confirman de inmediato y se descuentan de tu
+          caja al instante — sin estado pendiente ni firma.
+        </InfoPopover>
+      </Stack>
       {/* One shift timeline for all three blocks, mirroring the agent's Caja. */}
       <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
         {balance.last_drop
@@ -134,10 +142,6 @@ export function TuCajaSection() {
         <CashBoxCard balance={balance} onRegisterDrop={openDrop} />
       )}
 
-      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
-        Tus entregas y pagos se confirman de inmediato (auto-confirmados).
-      </Typography>
-
       {/* US-AG29 reuse — the admin sees their own sales & earned commission like an agent
           does, so "did I earn commission on my sale?" is answered on sight, not buried in
           the collapsed breakdown. Rendered only when there is shift activity to show. */}
@@ -152,10 +156,9 @@ export function TuCajaSection() {
       <Dialog open={dropOpen} onClose={() => setDropOpen(false)} fullWidth maxWidth="xs">
         <DialogTitle>Entregar efectivo</DialogTitle>
         <DialogContent>
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-            Registra el efectivo que vas a entregar. Como administrador, la entrega se confirma
-            de inmediato y se descuenta de tu caja al instante.
-          </Typography>
+          <Box sx={{ mb: 2 }}>
+            <StatusChip tone="neutral" icon={<BoltRounded />} label="Se confirma al instante" />
+          </Box>
           <TextField
             label="Monto"
             type="number"
@@ -206,10 +209,29 @@ export function TuCajaSection() {
       <Dialog open={payoutOpen} onClose={() => setPayoutOpen(false)} fullWidth maxWidth="xs">
         <DialogTitle>Registrar pago</DialogTitle>
         <DialogContent>
-          <Typography variant="body2" color="text.secondary">
-            La empresa te debe {formatMoney(Math.abs(balance.balance))}. Registra el pago para
-            dejar tu caja en cero; se confirma de inmediato.
-          </Typography>
+          <Stack spacing={1.5}>
+            <Stack
+              direction="row"
+              sx={{ justifyContent: 'space-between', alignItems: 'baseline' }}
+            >
+              <Typography variant="body2" color="text.secondary">
+                La empresa te debe
+              </Typography>
+              <MoneyText
+                cents={balance.balance}
+                absolute
+                semantic="negative"
+                variant="h6"
+                srLabel="La empresa te debe"
+              />
+            </Stack>
+            <StatusChip
+              tone="neutral"
+              icon={<BoltRounded />}
+              label="Se confirma al instante"
+              sx={{ alignSelf: 'flex-start' }}
+            />
+          </Stack>
           {payout.isError && (
             <Alert severity="error" sx={{ mt: 2 }}>
               No se pudo registrar el pago. Inténtalo de nuevo.

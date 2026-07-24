@@ -84,6 +84,8 @@ const sellPaid = async (slotId: string, zoneId: string, qty: number): Promise<st
     method: 'POST',
     headers: jsonAuth(AGENT),
     body: JSON.stringify({
+      customer_name: 'Cliente Test',
+      customer_phone: '5512345678',
       customer_email: 'c@example.com',
       lines: [{ slot_id: slotId, zone_id: zoneId, quantity: qty, unit_price: 150000 }],
     }),
@@ -100,6 +102,7 @@ const bookZone = async (slotId: string, zoneId: string, qty: number): Promise<st
     headers: jsonAuth(AGENT),
     body: JSON.stringify({
       customer_email: 'c@example.com',
+      customer_name: 'Cliente Test',
       customer_phone: PHONE,
       down_payment: 30000,
       lines: [{ slot_id: slotId, zone_id: zoneId, quantity: qty, unit_price: 150000 }],

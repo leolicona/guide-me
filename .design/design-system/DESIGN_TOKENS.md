@@ -7,9 +7,10 @@
 > source of truth. Stack is **MUI v6 CSS-in-JS** (`cssVariables: true`).
 >
 > **Contrast:** every text/UI value below was computed for WCAG **AA**, biased to the high end for
-> daylight (see the ratio comments). Resting control borders are intentionally subtle and rely on
-> **fill + focus state** to identify the control (WCAG 1.4.11 exception); the focus state carries
-> the high-contrast boundary.
+> daylight (see the ratio comments). Resting control borders are intentionally subtle; on inputs,
+> focus is communicated by a **background tint only** — no border/outline/box-shadow change (kept
+> minimal-weight by design; `--shadow-focus` remains the keyboard focus-visible ring for
+> non-text controls such as ListRow).
 >
 > Three laws this encodes: **legible-in-sunlight · one confident accent · reach & repetition.**
 
@@ -76,8 +77,8 @@ Semantic surface/text/border tokens (light mode):
 --color-text-link:       var(--teal-700);
 
 --color-border-primary:  var(--slate-200);   /* #E2E8F0 — card edge / divider (decorative) */
---color-border-control:  var(--slate-300);   /* #CBD5E1 — resting input/control edge */
---color-border-focus:    var(--teal-700);    /* focus border, paired with the glow ring */
+--color-border-control:  var(--slate-300);   /* #CBD5E1 — resting input/control edge, unchanged on focus */
+--color-border-focus:    var(--teal-700);    /* keyboard focus-visible ring on non-text controls (ListRow) — NOT used on inputs */
 ```
 
 ## 3. Color — Functional (meaning only, muted, never neon)
@@ -112,7 +113,8 @@ users (state is never color-alone). Three states only — green / amber / red �
 
 ```
 --color-surface-overlay:  rgba(15, 23, 42, 0.45);   /* scrim behind sheets/modals (slate-900 α) */
---shadow-focus:           0 0 0 3px rgba(15, 118, 110, 0.28);  /* teal-700 @ 28% — focus ring */
+--shadow-focus:           0 0 0 3px rgba(15, 118, 110, 0.28);  /* teal-700 @ 28% — keyboard focus-visible ring, non-text controls only (e.g. ListRow) */
+--color-focus-tint:       rgba(15, 118, 110, 0.08);            /* teal-700 @ 8% — input focus background (bg-only, no border/outline/box-shadow) */
 ```
 
 ---
@@ -198,7 +200,7 @@ hairline border + surface tint (reads in any light). Real shadow is reserved for
                       0 1px 2px rgba(15,23,42,0.04);         /* menus, popovers, dropdowns */
 --shadow-overlay-md:  0 12px 32px rgba(15,23,42,0.14);       /* modals / dialogs */
 --shadow-sheet:       0 -8px 30px rgba(15,23,42,0.12);       /* bottom sheets (upward cast) */
---shadow-focus:       0 0 0 3px rgba(15,118,110,0.28);       /* = §4 */
+--shadow-focus:       0 0 0 3px rgba(15,118,110,0.28);       /* = §4 — non-text keyboard focus only */
 ```
 > MUI `shadows[]`: index 0 = none; map card elevation to `none` + border; reserve higher indices for
 > Menu/Popover (`overlay-sm`), Dialog (`overlay-md`), and the BottomSheet component (`shadow-sheet`).
@@ -236,7 +238,7 @@ opacity-only or instant).
 | **Button / primary** | bg `--teal-700` · text `#FFF` · hover `--teal-800` · active `--teal-900` · radius `--radius-md` · min-height 48 · weight 600 · `text-transform:none` · **no shadow** · disabled bg `--slate-200` / text `--slate-400` |
 | **Button / secondary (outline)** | text `--teal-700` · border `--teal-700` 1px · hover bg `--teal-50` |
 | **Button / ghost** | text `--slate-700` · hover bg `--slate-100` |
-| **Input / control** | bg `#FFFFFF` · border `--color-border-control` (`#CBD5E1`) 1px · radius `--radius-md` · min-height 48 · text `--text-body` · placeholder `--slate-400` · **focus:** border `--teal-700` + `--shadow-focus` |
+| **Input / control** | bg `#FFFFFF` · border `--color-border-control` (`#CBD5E1`) 1px, unchanged on focus · radius `--radius-md` · min-height 48 · text `--text-body` · placeholder `--slate-400` · **focus:** bg → `--color-focus-tint`, `transition: background-color var(--duration-fast) ease` — no outline/border/box-shadow |
 | **Card / SectionCard** | bg `#FFFFFF` · border `--slate-200` 1px · radius `--radius-lg` · padding `--space-3` (24) · **shadow none** |
 | **MoneyText** | `--numeric-feature-settings` · size `--text-display`/`--text-h1` · weight 700–800 · color: neutral `--slate-900`, positive `--color-success`, negative/owed `--color-error` |
 | **StatusChip** | radius `--radius-full` · height 28 · weight 600 · `{state}-bg` + `{state}-fg` + leading icon · never teal |
@@ -286,7 +288,8 @@ opacity-only or instant).
   --shadow-overlay-sm: 0 4px 12px rgba(0,0,0,0.4);
   --shadow-overlay-md: 0 12px 32px rgba(0,0,0,0.5);
   --shadow-sheet:      0 -8px 30px rgba(0,0,0,0.45);
-  --shadow-focus:      0 0 0 3px rgba(45,212,191,0.34);
+  --shadow-focus:      0 0 0 3px rgba(45,212,191,0.34);   /* non-text keyboard focus only */
+  --color-focus-tint:  rgba(45,212,191,0.10);             /* input focus background */
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) { /* mirror the [data-theme="dark"] block when built */ }

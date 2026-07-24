@@ -16,6 +16,12 @@ export interface MyOrganization {
   lodging_weekend_days: number[]
   lodging_free_cancel_days: number
   lodging_cancel_penalty_pct: number
+  // whatsapp-qr-delivery D10 — admin-edited message templates; null ⇒ the shipped default is used.
+  wa_ticket_template: string | null
+  wa_reminder_template: string | null
+  // US-A66 — the org's IANA time zone (one of ORG_TIMEZONES). The client anchors catalog "today"
+  // and all audit-timestamp display to it.
+  timezone: string
 }
 
 export const getMyOrganization = async (): Promise<MyOrganization> => {
@@ -31,6 +37,11 @@ export interface UpdateOrganizationInput {
   lodging_weekend_days?: number[]
   lodging_free_cancel_days?: number
   lodging_cancel_penalty_pct?: number
+  // null resets to the shipped default; a string must contain {portal_link} (server-validated).
+  wa_ticket_template?: string | null
+  wa_reminder_template?: string | null
+  // US-A66 — must be one of ORG_TIMEZONES (server-validated against the curated allow-list).
+  timezone?: string
 }
 
 // US-A46 — admin updates the org booking policy.

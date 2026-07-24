@@ -141,6 +141,11 @@ export type FolioStatus = 'paid' | 'booking' | 'cancelled'
  */
 export type PaymentMethod = 'cash' | 'card' | 'transfer' | 'link'
 
+// US-AG41/US-A67 — the re-armable electronic-payment verification axis. 'not_required' for cash;
+// 'pending' while a transfer awaits an admin; 'verified' once confirmed. Delivery (QR/WhatsApp) is
+// blocked while 'pending'.
+export type PaymentVerification = 'not_required' | 'pending' | 'verified'
+
 export interface FolioLineExtra {
   id: string
   extra_id: string
@@ -206,8 +211,21 @@ export interface Folio {
   booking_expires_at?: number | null
   /** How payment was collected (US-AG25). */
   payment_method: PaymentMethod
+  /** US-AG41/US-A67 — the transfer's bank reference + the verification gate. Delivery is blocked
+   *  while `payment_verification === 'pending'`. */
+  payment_reference?: string | null
+  payment_verification?: PaymentVerification
+  payment_verified_at?: number | null
   /** Set when the folio was cancelled by an admin (US-A21); null otherwise. */
   cancelled_at: number | null
+  /** Delivery axis (whatsapp-qr-delivery). portal_link: the WhatsApp/QR portal URL (null until a
+   *  QR/portal exists — unpaid booking / pre-feature). tickets_sent_at: the agent sent it (unix
+   *  secs). tickets_viewed_at: the tourist opened the portal ("Visto"). */
+  portal_link?: string | null
+  tickets_sent_at?: number | null
+  tickets_viewed_at?: number | null
+  /** US-AF13 — the affiliate shift operator who made the sale; null if sold directly. */
+  operator_name?: string | null
   created_at: number
   lines: FolioLine[]
 }
@@ -232,4 +250,14 @@ export interface FolioHistoryItem {
   reminder_status?: ReminderStatus
   reminder_sent_at?: number | null
   reminder_sent_by?: string | null
+  /** Delivery axis (whatsapp-qr-delivery) — deliverable = a portal link exists (paid folio); the
+   *  sent/viewed stamps drive the Pendiente → Enviado → Visto list badge. */
+  deliverable?: boolean
+  tickets_sent_at?: number | null
+  tickets_viewed_at?: number | null
+  /** US-AG41/US-A67 — the seller sees the verification state (delivery blocked while pending). */
+  payment_method?: PaymentMethod
+  payment_verification?: PaymentVerification
+  /** US-AF13 — "Vendido por: {name}" (null if the manager/agent sold directly). */
+  operator_name?: string | null
 }

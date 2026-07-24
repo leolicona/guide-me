@@ -18,26 +18,38 @@ import {
   ToggleButton,
   ToggleButtonGroup,
 } from '@mui/material'
-import { useFolios, usePendingCancellationCount, FolioStatusChip } from '../features/folios'
+import {
+  useFolios,
+  usePendingCancellationCount,
+  usePendingVerificationCount,
+  FolioStatusChip,
+} from '../features/folios'
+import { useOrgDateFormatter } from '../features/organization'
 import type { FolioStatus } from '../features/folios'
 import { CancellationRequestsTab } from '../features/folios/components/CancellationRequestsTab'
-import { BookingWhatsAppButton, isUrgentBooking, venceLabel } from '../features/bookings'
+import { PaymentVerificationTab } from '../features/folios/components/PaymentVerificationTab'
+import {
+  BookingWhatsAppButton,
+  DeliveryBadge,
+  isUrgentBooking,
+  venceLabel,
+} from '../features/bookings'
 import { MoneyText } from '../components'
 import { ROUTES } from '../config/routes'
 
-const formatDate = (unixSeconds: number) =>
-  new Date(unixSeconds * 1000).toLocaleString(undefined, {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  })
+const DATE_FMT: Intl.DateTimeFormatOptions = {
+  year: 'numeric',
+  month: 'short',
+  day: 'numeric',
+  hour: '2-digit',
+  minute: '2-digit',
+}
 
 type Filter = 'all' | FolioStatus
 
 // The browse-and-cancel list (US-A21), unchanged — now one tab of the Folios screen.
 function FoliosTab() {
+  const formatDate = useOrgDateFormatter(DATE_FMT) // US-A66 — org-local audit timestamps
   const [filter, setFilter] = useState<Filter>('all')
   const { data: folios, isLoading, isError } = useFolios(
     filter === 'all' ? {} : { status: filter },
@@ -123,6 +135,8 @@ function FoliosTab() {
                           sx={{ alignItems: 'center', flexShrink: 0 }}
                         >
                           <FolioStatusChip status={f.status} />
+                          {/* whatsapp-qr-delivery — admin oversight of undelivered tickets. */}
+                          <DeliveryBadge folio={f} />
                           {isBooking && <BookingWhatsAppButton folio={f} />}
                         </Stack>
                       </Stack>
@@ -168,6 +182,8 @@ export default function FoliosListPage() {
   // US-T04 (D7) — pending tourists' cancellation requests surface as a badge so the
   // queue can't be missed without polluting the main list.
   const { data: pendingCount = 0 } = usePendingCancellationCount(true)
+  // US-A67 — the "Por verificar" queue: electronic payments awaiting an admin.
+  const { data: verifyCount = 0 } = usePendingVerificationCount(true)
 
   return (
     <Fade in timeout={400}>
@@ -180,6 +196,13 @@ export default function FoliosListPage() {
           <Tab label="Folios" />
           <Tab
             label={
+              <Badge badgeContent={verifyCount} color="warning" sx={{ '& .MuiBadge-badge': { right: -12 } }}>
+                Por verificar
+              </Badge>
+            }
+          />
+          <Tab
+            label={
               <Badge badgeContent={pendingCount} color="warning" sx={{ '& .MuiBadge-badge': { right: -12 } }}>
                 Solicitudes
               </Badge>
@@ -187,7 +210,13 @@ export default function FoliosListPage() {
           />
         </Tabs>
 
-        {tab === 0 ? <FoliosTab /> : <CancellationRequestsTab />}
+        {tab === 0 ? (
+          <FoliosTab />
+        ) : tab === 1 ? (
+          <PaymentVerificationTab />
+        ) : (
+          <CancellationRequestsTab />
+        )}
       </Box>
     </Fade>
   )

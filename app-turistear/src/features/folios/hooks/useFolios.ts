@@ -25,6 +25,20 @@ export const useFolios = (filters: FolioFilters = {}) =>
     queryFn: () => listFolios(filters),
   })
 
+// US-A67 — the admin "Por verificar" queue: electronic payments awaiting verification.
+export const usePendingVerificationFolios = () =>
+  useFolios({ verification: 'pending' })
+
+// US-A67 — badge feed for the Folios nav (admins only — pass `enabled`). Shares the pending-queue
+// cache with the "Por verificar" tab, so it adds no extra request when both mount.
+export const usePendingVerificationCount = (enabled: boolean) =>
+  useQuery({
+    queryKey: [...FOLIOS_KEY, { verification: 'pending' }] as const,
+    queryFn: () => listFolios({ verification: 'pending' }),
+    enabled,
+    select: (folios) => folios.length,
+  })
+
 // US-A21 — one folio's detail.
 export const useFolio = (id: string | undefined) =>
   useQuery({

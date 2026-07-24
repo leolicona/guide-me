@@ -47,3 +47,30 @@ export const clearSessionCookies = (
   deleteCookie(c, 'gm_access', { path: '/', domain })
   deleteCookie(c, 'gm_refresh', { path: '/', domain })
 }
+
+// Operator shift session (US-OP01/OP02). A single httpOnly cookie holding the HMAC-signed shift
+// token (24h). No refresh token — when it expires the operator re-enters their PIN via the saved
+// link. `OPERATOR_SESSION_MAX_AGE` matches the token's own `exp`.
+const OPERATOR_SESSION_MAX_AGE = 60 * 60 * 24 // 24h
+
+export const setOperatorSessionCookie = (
+  c: Context<{ Bindings: CloudflareBindings }>,
+  token: string,
+): void => {
+  const domain = c.env.COOKIE_DOMAIN || undefined
+  setCookie(c, 'gm_op', token, {
+    httpOnly: true,
+    secure: true,
+    sameSite: 'Lax',
+    path: '/',
+    domain,
+    maxAge: OPERATOR_SESSION_MAX_AGE,
+  })
+}
+
+export const clearOperatorSessionCookie = (
+  c: Context<{ Bindings: CloudflareBindings }>,
+): void => {
+  const domain = c.env.COOKIE_DOMAIN || undefined
+  deleteCookie(c, 'gm_op', { path: '/', domain })
+}

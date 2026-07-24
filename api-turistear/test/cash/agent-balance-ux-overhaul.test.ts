@@ -163,8 +163,12 @@ const confirmSale = async (email: string, slotId: string, paymentMethod?: string
     method: 'POST',
     headers: jsonAuth(email),
     body: JSON.stringify({
+      customer_name: 'Cliente Test',
+      customer_phone: '5512345678',
       customer_email: 'cliente@example.com',
       ...(paymentMethod ? { payment_method: paymentMethod } : {}),
+      // US-AG41 — a transfer sale now requires a bank reference.
+      ...(paymentMethod === 'transfer' ? { payment_reference: 'REF-TEST-0001' } : {}),
       lines: [{ slot_id: slotId, quantity: 1, unit_price: 150000 }],
     }),
   })

@@ -27,6 +27,9 @@ import {
 } from '@mui/material'
 import ExpandMoreRounded from '@mui/icons-material/ExpandMoreRounded'
 import StorefrontRounded from '@mui/icons-material/StorefrontRounded'
+import PersonRounded from '@mui/icons-material/Person'
+import TrendingDownRounded from '@mui/icons-material/TrendingDown'
+import TrendingUpRounded from '@mui/icons-material/TrendingUp'
 import {
   useBalances,
   useDrops,
@@ -36,12 +39,13 @@ import {
 } from '../features/cash/hooks'
 import { AckChip } from '../features/cash/components/AckChip'
 import { TuCajaSection } from '../features/cash/components/TuCajaSection'
+import { useOrgDateFormatter } from '../features/organization'
 import { SOURCE_LABEL } from '../features/cash/components/ackPresentation'
 import { METHOD_LABEL } from '../features/cash/components/paymentPresentation'
 import type { BalanceListItem, DropStatus } from '../features/cash/types'
 import { formatMoney, amountToCents, centsToAmount } from '../features/catalog/types'
 import { ROUTES } from '../config/routes'
-import { MoneyText } from '../components'
+import { MoneyText, StatusChip, InfoPopover } from '../components'
 
 const DROP_COLOR: Record<DropStatus, 'warning' | 'success' | 'error'> = {
   pending: 'warning',
@@ -55,13 +59,12 @@ const DROP_LABEL: Record<DropStatus, string> = {
   rejected: 'Rechazado',
 }
 
-const formatDate = (unixSeconds: number) =>
-  new Date(unixSeconds * 1000).toLocaleString(undefined, {
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  })
+const DATE_FMT: Intl.DateTimeFormatOptions = {
+  month: 'short',
+  day: 'numeric',
+  hour: '2-digit',
+  minute: '2-digit',
+}
 
 // 'disputed' is a pseudo-filter: it queries by acknowledgment (any status) so open disputes
 // — which live on already-confirmed drops — surface in one tap.
@@ -106,7 +109,7 @@ function KpiHeader({ balances }: { balances: BalanceListItem[] }) {
         <Stack direction="row" spacing={2} divider={<Divider orientation="vertical" flexItem />}>
           <KpiStat label="Efectivo en la calle" value={formatMoney(cashInField)} />
           <KpiStat
-            label="Entregas por confirmar"
+            label="Por confirmar"
             value={String(pending)}
             accent={pending > 0 ? 'warning' : undefined}
           />
@@ -158,6 +161,7 @@ function BalanceRow({
   onCollect: (row: BalanceListItem) => void
   onPayout: (row: BalanceListItem) => void
 }) {
+  const formatDate = useOrgDateFormatter(DATE_FMT) // US-A66 — org-local audit timestamps
   const [open, setOpen] = useState(false)
   const negative = row.balance < 0
   const isAffiliate = row.role === 'affiliate'
@@ -379,11 +383,29 @@ function BalancesTab() {
       <Dialog open={!!collectTarget} onClose={() => setCollectTarget(null)} fullWidth maxWidth="xs">
         <DialogTitle>Registrar cobro directo</DialogTitle>
         <DialogContent>
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-            Registra el efectivo que recibiste de {collectTarget?.agent.name} en persona. Su
-            saldo se reduce de inmediato y se le pedirá firmar de conformidad (si no firma,
-            se confirma automáticamente).
-          </Typography>
+          {/* Structured context: who + effect as icon-paired chips; the signature nuance
+              (rarely needed at the moment of collecting) sits one tap away in the popover. */}
+          <Stack
+            direction="row"
+            spacing={1}
+            useFlexGap
+            sx={{ alignItems: 'center', flexWrap: 'wrap', mb: 2 }}
+          >
+            <StatusChip
+              tone="neutral"
+              icon={<PersonRounded />}
+              label={collectTarget?.agent.name ?? ''}
+            />
+            <StatusChip
+              tone="neutral"
+              icon={<TrendingDownRounded />}
+              label="Reduce su saldo al instante"
+            />
+            <InfoPopover label="Sobre la firma de conformidad">
+              Se le pedirá al agente firmar de conformidad. Si no firma, el cobro se confirma
+              automáticamente.
+            </InfoPopover>
+          </Stack>
           <Stack spacing={2}>
             <TextField
               label="Monto recibido"
@@ -424,9 +446,23 @@ function BalancesTab() {
       <Dialog open={!!target} onClose={() => setTarget(null)} fullWidth maxWidth="xs">
         <DialogTitle>Registrar pago</DialogTitle>
         <DialogContent>
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-            Págale a {target?.agent.name} lo que la empresa le debe. Esto aumentará su saldo hacia cero.
-          </Typography>
+          <Stack
+            direction="row"
+            spacing={1}
+            useFlexGap
+            sx={{ alignItems: 'center', flexWrap: 'wrap', mb: 2 }}
+          >
+            <StatusChip
+              tone="neutral"
+              icon={<PersonRounded />}
+              label={target?.agent.name ?? ''}
+            />
+            <StatusChip
+              tone="neutral"
+              icon={<TrendingUpRounded />}
+              label="Sube su saldo hacia cero"
+            />
+          </Stack>
           <Stack spacing={2}>
             <TextField
               label="Monto"
@@ -469,6 +505,7 @@ function BalancesTab() {
 
 // --- Drops tab: the review queue (US-A19) + open disputes (US-A27/A28) ---
 function DropsTab() {
+  const formatDate = useOrgDateFormatter(DATE_FMT) // US-A66 — org-local audit timestamps
   const [filter, setFilter] = useState<DropFilter>('pending')
   const { data: drops, isLoading, isError } = useDrops(
     filter === 'disputed' ? { status: 'all', ack: 'disputed' } : { status: filter },
@@ -543,10 +580,15 @@ function DropsTab() {
 }
 
 export default function CashBalancesPage() {
+  // Top-level split: the admin's own drawer ("Mi caja") vs. the team ("Equipo"). Mi caja is the
+  // default landing — it's the admin's own actionable cash.
+  const [section, setSection] = useState(0)
+  // Within Equipo: the balances list vs. the drops review queue.
   const [tab, setTab] = useState(0)
-  // Pending hand-ins awaiting confirmation — surfaced as a badge on the Entregas tab so the
-  // admin sees there is review work without switching to it. Shares the balances cache.
+  // Pending hand-ins awaiting confirmation — surfaced as a badge on BOTH the top-level Equipo tab
+  // (so the admin sees review work while on Mi caja) and the Entregas sub-tab. Shares the cache.
   const { data: pendingCount } = usePendingDropCount(true)
+  const pendingBadgeSx = { '& .MuiBadge-badge': { right: -14, top: 2 } }
 
   return (
     <Fade in timeout={400}>
@@ -555,28 +597,36 @@ export default function CashBalancesPage() {
           Caja
         </Typography>
 
-        {/* US-A35 — the admin's own drawer, pinned above the team. */}
-        <TuCajaSection />
-
-        <Typography variant="overline" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
-          Equipo
-        </Typography>
-        <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ mb: 3 }}>
-          <Tab label="Saldos" />
+        <Tabs value={section} onChange={(_, v) => setSection(v)} sx={{ mb: 3 }}>
+          <Tab label="Mi caja" />
           <Tab
             label={
-              <Badge
-                color="warning"
-                badgeContent={pendingCount ?? 0}
-                sx={{ '& .MuiBadge-badge': { right: -14, top: 2 } }}
-              >
-                Entregas
+              <Badge color="warning" badgeContent={pendingCount ?? 0} sx={pendingBadgeSx}>
+                Equipo
               </Badge>
             }
           />
         </Tabs>
 
-        {tab === 0 ? <BalancesTab /> : <DropsTab />}
+        {section === 0 ? (
+          // US-A35 — the admin's own drawer, self-authorized moves.
+          <TuCajaSection />
+        ) : (
+          <>
+            <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ mb: 3 }}>
+              <Tab label="Saldos" />
+              <Tab
+                label={
+                  <Badge color="warning" badgeContent={pendingCount ?? 0} sx={pendingBadgeSx}>
+                    Entregas
+                  </Badge>
+                }
+              />
+            </Tabs>
+
+            {tab === 0 ? <BalancesTab /> : <DropsTab />}
+          </>
+        )}
       </Box>
     </Fade>
   )

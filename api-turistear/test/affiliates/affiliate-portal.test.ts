@@ -142,7 +142,7 @@ describe('AF04/AF06 — checkout: guard, commission source, discount floor', () 
     const res = await SELF.fetch('http://api.local/api/pos/folios', {
       method: 'POST',
       headers: jsonAuth(AFF_EMAIL),
-      body: JSON.stringify({ lines: [{ slot_id: slot, quantity: 1, unit_price: 150000 }] }),
+      body: JSON.stringify({ customer_name: 'Cliente Test', customer_phone: '5512345678', lines: [{ slot_id: slot, quantity: 1, unit_price: 150000 }] }),
     })
     expect(res.status).toBe(403)
     expect(JSON.stringify(await res.json())).toContain('SERVICE_NOT_ALLOWED')
@@ -155,7 +155,7 @@ describe('AF04/AF06 — checkout: guard, commission source, discount floor', () 
     const res = await SELF.fetch('http://api.local/api/pos/folios', {
       method: 'POST',
       headers: jsonAuth(AFF_EMAIL),
-      body: JSON.stringify({ lines: [{ slot_id: slot, quantity: 1, unit_price: 150000 }] }),
+      body: JSON.stringify({ customer_name: 'Cliente Test', customer_phone: '5512345678', lines: [{ slot_id: slot, quantity: 1, unit_price: 150000 }] }),
     })
     expect(res.status).toBe(201)
     const body = (await res.json()) as { folio: { id: string; commission_amount: number } }
@@ -188,6 +188,8 @@ describe('AF04/AF06 — checkout: guard, commission source, discount floor', () 
       method: 'POST',
       headers: jsonAuth(AGENT_EMAIL),
       body: JSON.stringify({
+        customer_name: 'Cliente Test',
+        customer_phone: '5512345678',
         customer_email: 'tourist@example.com',
         lines: [{ slot_id: slot, quantity: 1, unit_price: 150000 }],
       }),
@@ -207,7 +209,7 @@ describe('AF04/AF06 — checkout: guard, commission source, discount floor', () 
     const res = await SELF.fetch('http://api.local/api/pos/folios', {
       method: 'POST',
       headers: jsonAuth(AFF_EMAIL),
-      body: JSON.stringify({ lines: [{ slot_id: slot, quantity: 1, unit_price: 90000 }] }),
+      body: JSON.stringify({ customer_name: 'Cliente Test', customer_phone: '5512345678', lines: [{ slot_id: slot, quantity: 1, unit_price: 90000 }] }),
     })
     expect(res.status).toBe(400)
     expect(JSON.stringify(await res.json())).toContain('PRICE_BELOW_MINIMUM')
@@ -257,7 +259,7 @@ describe('Admin Caja folds in affiliates (D5/D6)', () => {
     await SELF.fetch('http://api.local/api/pos/folios', {
       method: 'POST',
       headers: jsonAuth(AFF_EMAIL),
-      body: JSON.stringify({ lines: [{ slot_id: slot, quantity: 1, unit_price: 150000 }] }),
+      body: JSON.stringify({ customer_name: 'Cliente Test', customer_phone: '5512345678', lines: [{ slot_id: slot, quantity: 1, unit_price: 150000 }] }),
     })
 
     const res = await SELF.fetch('http://api.local/api/cash/balances', { headers: auth(ADMIN_EMAIL) })
@@ -279,7 +281,7 @@ describe('Admin Caja folds in affiliates (D5/D6)', () => {
     const sale = await SELF.fetch('http://api.local/api/pos/folios', {
       method: 'POST',
       headers: jsonAuth(AFF_EMAIL),
-      body: JSON.stringify({ lines: [{ slot_id: slot, quantity: 1, unit_price: 150000 }] }),
+      body: JSON.stringify({ customer_name: 'Cliente Test', customer_phone: '5512345678', lines: [{ slot_id: slot, quantity: 1, unit_price: 150000 }] }),
     })
     const saleBody = (await sale.json()) as { folio: { id: string } }
     // Backdate the sale so it sits clearly before the collection watermark (avoids the
@@ -367,7 +369,7 @@ describe('Multitenancy + cross-affiliate isolation', () => {
     const res = await SELF.fetch('http://api.local/api/pos/folios', {
       method: 'POST',
       headers: jsonAuth(AFF_EMAIL),
-      body: JSON.stringify({ lines: [{ slot_id: bSlot, quantity: 1, unit_price: 150000 }] }),
+      body: JSON.stringify({ customer_name: 'Cliente Test', customer_phone: '5512345678', lines: [{ slot_id: bSlot, quantity: 1, unit_price: 150000 }] }),
     })
     expect(res.status).toBe(404)
   })
@@ -389,7 +391,7 @@ describe('Multitenancy + cross-affiliate isolation', () => {
     await SELF.fetch('http://api.local/api/pos/folios', {
       method: 'POST',
       headers: jsonAuth(AFF_EMAIL),
-      body: JSON.stringify({ lines: [{ slot_id: slot, quantity: 1, unit_price: 150000 }] }),
+      body: JSON.stringify({ customer_name: 'Cliente Test', customer_phone: '5512345678', lines: [{ slot_id: slot, quantity: 1, unit_price: 150000 }] }),
     })
 
     const res = await SELF.fetch('http://api.local/api/pos/folios', { headers: auth(AFF_EMAIL) })

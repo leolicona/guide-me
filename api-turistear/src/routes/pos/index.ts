@@ -13,8 +13,11 @@ import {
   listAgentFolios,
   listAvailabilityDays,
   listPosServices,
+  markTicketsSent,
   reactivateBooking,
+  rejectPayment,
   settleBooking,
+  verifyPayment,
 } from './handler'
 import { getLodgingAvailability, getUnitTypeCalendar } from './lodging.handler'
 import { availabilityDaysQuerySchema, confirmSaleSchema } from './schema'
@@ -56,13 +59,21 @@ pos.post(
 )
 pos.get('/folios', listAgentFolios)
 pos.get('/folios/:id', getFolio)
-// US-AG07 — one-shot settlement of a booking (collect the balance → paid + QR).
+// US-AG07 — one-shot settlement of a booking (collect the balance → paid + QR). US-AG41: a transfer
+// settle carries its reference and defers the QR to admin verification. The body is optional (a cash
+// settle sends none), so it is parsed/validated inside the handler rather than via zValidator.
 pos.post('/folios/:id/settle', settleBooking)
+// US-A67 — ADMIN verifies / rejects an electronic (transfer) payment. Verify releases the tickets
+// (signs QR + auto-emails); reject voids the folio (releases spots + commission clawback).
+pos.post('/folios/:id/verify', requireRole('admin'), verifyPayment)
+pos.post('/folios/:id/reject', requireRole('admin'), rejectPayment)
 // US-AG07.4 — manual cancellation of a booking (release spots; deposit retained).
 pos.post('/folios/:id/cancel', cancelBooking)
 // US-AG07.3 — claim the WhatsApp reminder (atomic, prevents double-contact).
 pos.post('/folios/:id/reminder', claimReminder)
 // US-AG07.5 — reactivate an expired booking when capacity allows (reactivation only).
 pos.post('/folios/:id/reactivate', reactivateBooking)
+// whatsapp-qr-delivery — the seller records they sent the tickets over WhatsApp (clears Pendiente).
+pos.post('/folios/:id/ticket-delivery', markTicketsSent)
 
 export default pos

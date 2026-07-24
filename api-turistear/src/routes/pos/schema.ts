@@ -14,6 +14,11 @@ const extraSchema = z.object({
   quantity: z.number().int().min(1),
 })
 
+// US-AG41 — the bank reference for an electronic (transfer) payment. Free text (bank confirmation
+// numbers vary), trimmed, 4–64 chars. Required only when the method is 'transfer' (enforced by the
+// refine below / the settle handler); absent for cash.
+export const paymentReferenceSchema = z.string().trim().min(4).max(64)
+
 // A tour/activity line — a slot + quantity + (discountable) unit price.
 // US-A64 — `zone_id` targets a physical zone on a zoned service (required there, refused otherwise;
 // enforced in the handler since it depends on the slot's service). A split party is one line per
@@ -43,18 +48,24 @@ const lineSchema = z.union([stayLineSchema, slotLineSchema])
 
 export const confirmSaleSchema = z
   .object({
-    customer_name: z.string().nullable().optional(),
-    // For an agent/admin sale, customer_email is the only ticket-delivery channel and is
-    // REQUIRED — enforced in the handler (it can't be enforced here because an affiliate sale
-    // delivers to the affiliate's own account email, so the field is optional for that role;
-    // affiliate-portal.spec.md D8). When present it must be a valid address either way.
+    // D2 (whatsapp-qr-delivery) — every POS sale requires a name and a dialable phone: WhatsApp
+    // is now the primary ticket-delivery channel (the agent sends the portal link). Uniform for
+    // all roles, so it's enforced here in the schema (no per-role exemption).
+    customer_name: z.string().trim().min(1, 'A customer name is required'),
+    // Email drops to an OPTIONAL copy — valid only if present (no longer the required channel).
     customer_email: z.string().trim().email('A valid customer email is required').nullish(),
-    // Phone stays optional metadata (no delivery dependency on it yet).
-    customer_phone: z.string().nullable().optional(),
+    // Dialable (≥ 10 digits after stripping formatting; mirrors the client's +52 normalizer floor).
+    customer_phone: z
+      .string()
+      .trim()
+      .refine((p) => p.replace(/\D/g, '').length >= 10, 'A dialable customer phone is required'),
     // US-AG25/AG29 — how the payment was collected. Defaults to 'cash' (the common case
     // and the pre-feature behaviour). Every non-cash method is electronic: it still earns
     // commission but adds no cash debt (US-AG24 path).
     payment_method: z.enum(['cash', 'card', 'transfer', 'link']).optional().default('cash'),
+    // US-AG41 — the transfer's bank reference; required iff payment_method is 'transfer' (see the
+    // refine below). Ignored for cash.
+    payment_reference: paymentReferenceSchema.optional(),
     // US-AG07 — present ⇒ BOOKING (apartado) mode: the deposit in minor units. Absent ⇒ the
     // existing full paid sale (byte-unchanged). The bounds (0 < deposit < total and ≥ the org
     // minimum %) depend on the server-computed total + org policy, so they live in the handler,
@@ -75,8 +86,23 @@ export const confirmSaleSchema = z
     },
     { message: 'Each slot (zone) may appear at most once', path: ['lines'] },
   )
+  // US-AG41 — a transfer payment must carry its bank reference (WhatsApp/QR is held until an admin
+  // verifies it against this reference; US-A67).
+  .refine((v) => v.payment_method !== 'transfer' || !!v.payment_reference, {
+    message: 'A payment reference is required for a bank transfer',
+    path: ['payment_reference'],
+  })
 
 export type ConfirmSaleInput = z.infer<typeof confirmSaleSchema>
+
+// US-AG41 — settle body: collecting a booking's balance. The settle re-uses the folio's own payment
+// method; when that method is 'transfer' the agent records the settling transfer's reference (the
+// handler enforces the required-when-transfer rule, since only it knows the folio's method).
+export const settleSchema = z.object({
+  payment_reference: paymentReferenceSchema.optional(),
+})
+
+export type SettleInput = z.infer<typeof settleSchema>
 
 // US-AG35 — month-availability query for the POS calendar Bottom Sheet. The caller names
 // a MONTH (not a free from/to range): the server derives the scan window itself, so there

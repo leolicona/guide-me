@@ -109,15 +109,21 @@ export const theme = createTheme({
         root: ({ theme }) => ({
           borderRadius: 12,
           backgroundColor: '#FFFFFF',
-          // Resting border is subtle; the control is identified by fill + the focus state
-          // (WCAG 1.4.11 exception). Focus carries the high-contrast boundary.
+          // Focus is background-only (no ring/outline/border change) — smooth fade between
+          // resting white and the focused tint.
+          transition: 'background-color 150ms ease',
           '& .MuiOutlinedInput-notchedOutline': { borderColor: CONTROL_BORDER },
+          // Neutralize MUI's built-in focus emphasis (thicker teal notchedOutline) — the
+          // border stays identical to resting in every state; only the fill communicates focus.
           '&.Mui-focused .MuiOutlinedInput-notchedOutline': {
-            borderColor: theme.palette.primary.main,
+            borderColor: CONTROL_BORDER,
             borderWidth: 1,
           },
-          // Focus "bloom": teal border + soft 3px outer glow.
-          '&.Mui-focused': { boxShadow: `0 0 0 3px ${theme.palette.primary.main}47` }, // ~28%
+          // Focus: a subtle ~8% tint of the primary color on the editable area signals
+          // interactivity without adding visual weight (no outline, no border, no box-shadow).
+          '&.Mui-focused': {
+            backgroundColor: `${theme.palette.primary.main}14`, // ~8%
+          },
         }),
         input: { minHeight: 24, paddingTop: 12, paddingBottom: 12 },
       },

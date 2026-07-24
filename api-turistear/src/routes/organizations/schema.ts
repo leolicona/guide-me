@@ -1,5 +1,18 @@
 import { z } from 'zod'
 
+// US-A66 (docs/timezone/spec.md — D3/D5) — the curated set of IANA zones an admin may pick, one
+// human label per mainland-Mexico offset. IANA (not a raw offset) so DST + multi-zone resolve
+// automatically — incl. the northern border strip that still observes US DST. The FIRST entry is
+// the app-wide default (D4). If non-Mexico operators ever onboard, widen this to a searchable list.
+export const ORG_TIMEZONES = [
+  'America/Mexico_City',
+  'America/Cancun',
+  'America/Hermosillo',
+  'America/Mazatlan',
+  'America/Tijuana',
+] as const
+export type OrgTimezone = (typeof ORG_TIMEZONES)[number]
+
 // US-A46 — admin edits the org's booking policy. All fields optional (a partial update);
 // per Multitenancy Rule 1 the org id comes from context, never the body (Zod strips it).
 export const updateOrganizationSchema = z.object({
@@ -19,6 +32,18 @@ export const updateOrganizationSchema = z.object({
     .optional(),
   lodging_free_cancel_days: z.number().int().min(0).optional(),
   lodging_cancel_penalty_pct: z.number().int().min(0).max(100).optional(),
+  // WhatsApp message templates (whatsapp-qr-delivery D10). `null` resets to the shipped default.
+  // The ticket template MUST contain {portal_link} — without it the tourist can't reach their QR.
+  wa_ticket_template: z
+    .string()
+    .trim()
+    .max(2000)
+    .refine((t) => t.includes('{portal_link}'), 'The template must include {portal_link}')
+    .nullable()
+    .optional(),
+  wa_reminder_template: z.string().trim().max(2000).nullable().optional(),
+  // US-A66 — the org's IANA time zone; must be one of the curated allow-list.
+  timezone: z.enum(ORG_TIMEZONES).optional(),
 })
 
 export type UpdateOrganizationInput = z.infer<typeof updateOrganizationSchema>

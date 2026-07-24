@@ -23,6 +23,9 @@ const orgColumns = {
   lodgingWeekendDays: organizations.lodgingWeekendDays,
   lodgingFreeCancelDays: organizations.lodgingFreeCancelDays,
   lodgingCancelPenaltyPct: organizations.lodgingCancelPenaltyPct,
+  waTicketTemplate: organizations.waTicketTemplate,
+  waReminderTemplate: organizations.waReminderTemplate,
+  timezone: organizations.timezone,
 } as const
 
 const serializeOrg = (o: {
@@ -35,6 +38,9 @@ const serializeOrg = (o: {
   lodgingWeekendDays: string
   lodgingFreeCancelDays: number
   lodgingCancelPenaltyPct: number
+  waTicketTemplate: string | null
+  waReminderTemplate: string | null
+  timezone: string
 }) => ({
   id: o.id,
   name: o.name,
@@ -47,6 +53,11 @@ const serializeOrg = (o: {
     : [],
   lodging_free_cancel_days: o.lodgingFreeCancelDays,
   lodging_cancel_penalty_pct: o.lodgingCancelPenaltyPct,
+  // WhatsApp templates (whatsapp-qr-delivery D10) — null ⇒ the client uses the shipped default.
+  wa_ticket_template: o.waTicketTemplate,
+  wa_reminder_template: o.waReminderTemplate,
+  // US-A66 — the org's IANA time zone (the client anchors "today" + audit-time display to it).
+  timezone: o.timezone,
 })
 
 export const getMyOrganization = async (c: OrganizationsContext) => {
@@ -92,6 +103,13 @@ export const updateMyOrganization = async (c: OrganizationsContext) => {
     updates.lodgingFreeCancelDays = input.lodging_free_cancel_days
   if (input.lodging_cancel_penalty_pct !== undefined)
     updates.lodgingCancelPenaltyPct = input.lodging_cancel_penalty_pct
+  // whatsapp-qr-delivery D10 — null resets to the shipped default; a string was {portal_link}-checked.
+  if (input.wa_ticket_template !== undefined)
+    updates.waTicketTemplate = input.wa_ticket_template
+  if (input.wa_reminder_template !== undefined)
+    updates.waReminderTemplate = input.wa_reminder_template
+  // US-A66 — the org's IANA time zone (Zod-validated against the curated allow-list).
+  if (input.timezone !== undefined) updates.timezone = input.timezone
 
   await db
     .update(organizations)

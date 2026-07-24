@@ -4,7 +4,9 @@ import { and, asc, desc, eq, ne, sql } from 'drizzle-orm'
 import { getDb, type Db } from '../../db/client'
 import {
   accommodationReservations,
+  affiliateOperators,
   cancellationRequests,
+  folioAccessTokens,
   folioLineExtras,
   folioLines,
   folios,
@@ -38,14 +40,20 @@ const tsOrNull = (d: Date | null) => (d ? Math.floor(d.getTime() / 1000) : null)
 // Re-read one folio (lines + extras) scoped to the caller's org, with its cancellation
 // audit. Returns null when no such folio exists in the org. Shared by getFolioDetail and
 // the response of cancelFolio.
-const readFolio = async (db: Db, org: string, folioId: string) => {
+const readFolio = async (db: Db, org: string, folioId: string, apiBaseUrl?: string) => {
   const folioRows = await db
     .select({
       id: folios.id,
       agentId: folios.agentId,
       agentName: users.name,
+      operatorName: affiliateOperators.name,
       status: folios.status,
+      ticketsSentAt: folios.ticketsSentAt,
+      ticketsViewedAt: folios.ticketsViewedAt,
       paymentMethod: folios.paymentMethod,
+      paymentReference: folios.paymentReference,
+      paymentVerification: folios.paymentVerification,
+      paymentVerifiedAt: folios.paymentVerifiedAt,
       customerName: folios.customerName,
       customerEmail: folios.customerEmail,
       customerPhone: folios.customerPhone,
@@ -76,11 +84,27 @@ const readFolio = async (db: Db, org: string, folioId: string) => {
     })
     .from(folios)
     .innerJoin(users, eq(folios.agentId, users.id))
+    .leftJoin(affiliateOperators, eq(folios.operatorId, affiliateOperators.id))
     .where(and(eq(folios.id, folioId), eq(folios.organizationId, org)))
     .limit(1)
 
   const folio = folioRows[0]
   if (!folio) return null
+
+  // Delivery axis (whatsapp-qr-delivery) — the newest portal token's URL, for the admin's
+  // "Enviar/Reenviar por WhatsApp" affordance. Only when a base URL is supplied.
+  let portalLink: string | null = null
+  if (apiBaseUrl) {
+    const tokenRows = await db
+      .select({ token: folioAccessTokens.token })
+      .from(folioAccessTokens)
+      .where(
+        and(eq(folioAccessTokens.folioId, folioId), eq(folioAccessTokens.organizationId, org)),
+      )
+      .orderBy(desc(folioAccessTokens.createdAt))
+      .limit(1)
+    if (tokenRows[0]) portalLink = `${apiBaseUrl}/portal/${tokenRows[0].token}`
+  }
 
   const lineRows = await db
     .select({
@@ -133,8 +157,14 @@ const readFolio = async (db: Db, org: string, folioId: string) => {
   return {
     id: folio.id,
     agent: { id: folio.agentId, name: folio.agentName },
+    // US-A68 — the affiliate shift operator who took the sale (null ⇒ sold directly).
+    operator_name: folio.operatorName ?? null,
     status: folio.status,
     payment_method: folio.paymentMethod,
+    // US-AG41/US-A67 — payment reference + verification gate for the admin detail + verify actions.
+    payment_reference: folio.paymentReference,
+    payment_verification: folio.paymentVerification,
+    payment_verified_at: tsOrNull(folio.paymentVerifiedAt),
     customer_name: folio.customerName,
     customer_email: folio.customerEmail,
     customer_phone: folio.customerPhone,
@@ -157,6 +187,11 @@ const readFolio = async (db: Db, org: string, folioId: string) => {
     refund_note: folio.refundNote,
     refunded_at: tsOrNull(folio.refundedAt),
     refunded_by: folio.refundedBy,
+    // Delivery axis (whatsapp-qr-delivery) — portal_link + sent/viewed stamps for the admin's
+    // oversight badge and Reenviar action.
+    portal_link: portalLink,
+    tickets_sent_at: tsOrNull(folio.ticketsSentAt),
+    tickets_viewed_at: tsOrNull(folio.ticketsViewedAt),
     created_at: Math.floor(folio.createdAt.getTime() / 1000),
     lines: lineRows.map((line) => ({
       id: line.id,
@@ -200,10 +235,22 @@ export const listFolios = async (c: FoliosContext) => {
   const statusQ = c.req.query('status')
   const dateQ = c.req.query('date')
   const agentQ = c.req.query('agent_id')
+  // US-A67 — the "Por verificar" queue filters to electronic payments awaiting an admin.
+  const verificationQ = c.req.query('verification')
 
   const filters = [eq(folios.organizationId, org)]
   if (statusQ === 'paid' || statusQ === 'booking' || statusQ === 'cancelled') {
     filters.push(eq(folios.status, statusQ))
+  }
+  if (
+    verificationQ === 'pending' ||
+    verificationQ === 'verified' ||
+    verificationQ === 'not_required'
+  ) {
+    filters.push(eq(folios.paymentVerification, verificationQ))
+    // US-A67 — the "Por verificar" queue is ACTIVE folios awaiting an admin: a rejected payment
+    // cancels the folio (its stale 'pending' flag stays), so exclude cancelled to drop it out.
+    if (verificationQ === 'pending') filters.push(ne(folios.status, 'cancelled'))
   }
   if (dateQ) {
     filters.push(
@@ -230,9 +277,16 @@ export const listFolios = async (c: FoliosContext) => {
       reminderStatus: folios.reminderStatus,
       reminderSentAt: folios.reminderSentAt,
       reminderSentBy: folios.reminderSentBy,
+      ticketsSentAt: folios.ticketsSentAt,
+      ticketsViewedAt: folios.ticketsViewedAt,
+      paymentMethod: folios.paymentMethod,
+      paymentReference: folios.paymentReference,
+      paymentVerification: folios.paymentVerification,
+      operatorName: affiliateOperators.name,
     })
     .from(folios)
     .innerJoin(users, eq(folios.agentId, users.id))
+    .leftJoin(affiliateOperators, eq(folios.operatorId, affiliateOperators.id))
     .where(and(...filters))
     .orderBy(desc(folios.createdAt))
 
@@ -252,6 +306,18 @@ export const listFolios = async (c: FoliosContext) => {
       reminder_status: r.reminderStatus,
       reminder_sent_at: tsOrNull(r.reminderSentAt),
       reminder_sent_by: r.reminderSentBy,
+      // US-AG41/US-A67 — payment method + reference + the verification gate (the "Por verificar"
+      // queue reads these; the delivery axis is blocked while pending).
+      payment_method: r.paymentMethod,
+      payment_reference: r.paymentReference,
+      payment_verification: r.paymentVerification,
+      // Delivery axis (whatsapp-qr-delivery) — a paid folio is deliverable ONLY once its money has
+      // cleared (cash, or the electronic payment verified). Pending electronic → not yet.
+      deliverable: r.status === 'paid' && r.paymentVerification !== 'pending',
+      tickets_sent_at: tsOrNull(r.ticketsSentAt),
+      tickets_viewed_at: tsOrNull(r.ticketsViewedAt),
+      // US-A68 — the affiliate shift operator who took the sale (null ⇒ sold directly).
+      operator_name: r.operatorName ?? null,
     })),
   })
 }
@@ -262,12 +328,34 @@ export const getFolioDetail = async (c: FoliosContext) => {
   const id = c.req.param('id')
   const db = getDb(c.env)
 
-  const folio = await readFolio(db, admin.organizationId, id)
+  const folio = await readFolio(db, admin.organizationId, id, c.env.API_BASE_URL)
   if (!folio) {
     throw new ApiError('NOT_FOUND', 404, 'Folio not found')
   }
 
   return c.json({ folio })
+}
+
+// POST /folios/:id/ticket-delivery — the admin records the tickets were sent over WhatsApp
+// (whatsapp-qr-delivery D4/D13). Org-scoped (any folio in the org, no agent filter). Last-write-wins.
+export const markTicketsSentAdmin = async (c: FoliosContext) => {
+  const admin = c.get('user')
+  const id = c.req.param('id')
+  const db = getDb(c.env)
+  const now = new Date()
+
+  const updated = await db
+    .update(folios)
+    .set({ ticketsSentAt: now, ticketsSentBy: admin.userId, updatedAt: now })
+    .where(and(eq(folios.id, id), eq(folios.organizationId, admin.organizationId)))
+    .returning({ sentAt: folios.ticketsSentAt, viewedAt: folios.ticketsViewedAt })
+
+  const row = updated[0]
+  if (!row) throw new ApiError('NOT_FOUND', 404, 'Folio not found')
+  return c.json({
+    tickets_sent_at: tsOrNull(row.sentAt),
+    tickets_viewed_at: tsOrNull(row.viewedAt),
+  })
 }
 
 // The cancellation commit (US-A21), shared by the direct admin cancel and the

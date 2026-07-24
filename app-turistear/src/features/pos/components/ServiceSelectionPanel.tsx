@@ -6,6 +6,7 @@ import {
   Stack,
   Divider,
   IconButton,
+  Tooltip,
 } from '@mui/material'
 import AddRounded from '@mui/icons-material/AddRounded'
 import RemoveRounded from '@mui/icons-material/RemoveRounded'
@@ -205,16 +206,24 @@ export function ServiceSelectionPanel({
             >
               {partySize}
             </Typography>
-            <IconButton
-              size="small"
-              aria-label="Más personas"
-              color="secondary"
-              disabled={partySize >= maxParty}
-              sx={{ touchAction: 'none' }}
-              {...incHandlers}
+            <Tooltip
+              title={partySize >= maxParty ? `Máximo disponible: ${maxParty}` : ''}
+              enterTouchDelay={0}
             >
-              <AddRounded fontSize="small" />
-            </IconButton>
+              {/* span keeps the tooltip reachable while the button is disabled */}
+              <span>
+                <IconButton
+                  size="small"
+                  aria-label="Más personas"
+                  color="secondary"
+                  disabled={partySize >= maxParty}
+                  sx={{ touchAction: 'none' }}
+                  {...incHandlers}
+                >
+                  <AddRounded fontSize="small" />
+                </IconButton>
+              </span>
+            </Tooltip>
           </Stack>
         </Stack>
       </Box>
@@ -255,29 +264,37 @@ export function ServiceSelectionPanel({
                 const fits = z.remaining >= partySize
                 const selected = zone?.zone_id === z.zone_id
                 return (
-                  <Box
+                  <Tooltip
                     key={z.zone_id}
-                    component="button"
-                    type="button"
-                    disabled={!fits}
-                    onClick={() => setZone(z)}
-                    sx={{
-                      ...chipPillSx(selected),
-                      border: 'none',
-                      cursor: fits ? 'pointer' : 'default',
-                      opacity: fits ? 1 : 0.5,
-                      flexDirection: 'column',
-                      height: 'auto',
-                      py: 1,
-                    }}
+                    title={!fits ? `No alcanza para ${partySize} personas` : ''}
+                    enterTouchDelay={0}
                   >
-                    <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                      {z.name}
-                    </Typography>
-                    <Typography variant="caption" color={selected ? 'primary.main' : 'text.secondary'}>
-                      {z.remaining} disponibles
-                    </Typography>
-                  </Box>
+                    {/* inline-flex span keeps the tooltip reachable while the chip is disabled */}
+                    <Box component="span" sx={{ display: 'inline-flex' }}>
+                      <Box
+                        component="button"
+                        type="button"
+                        disabled={!fits}
+                        onClick={() => setZone(z)}
+                        sx={{
+                          ...chipPillSx(selected),
+                          border: 'none',
+                          cursor: fits ? 'pointer' : 'default',
+                          opacity: fits ? 1 : 0.5,
+                          flexDirection: 'column',
+                          height: 'auto',
+                          py: 1,
+                        }}
+                      >
+                        <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                          {z.name}
+                        </Typography>
+                        <Typography variant="caption" color={selected ? 'primary.main' : 'text.secondary'}>
+                          {z.remaining} disponibles
+                        </Typography>
+                      </Box>
+                    </Box>
+                  </Tooltip>
                 )
               })}
             </Stack>

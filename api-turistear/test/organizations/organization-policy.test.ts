@@ -86,3 +86,42 @@ describe('US-A46 — org booking policy', () => {
     expect(b.json.organization.booking_hold_days).toBe(7) // untouched default
   })
 })
+
+describe('US-A66 — organization time zone', () => {
+  it('the production default is America/Mexico_City', async () => {
+    // Insert an org relying on the column DEFAULT (seedUser seeds UTC, so create the org directly),
+    // then attach an admin who reuses it.
+    const orgId = crypto.randomUUID()
+    await env.DB.prepare('INSERT INTO organizations (id, name) VALUES (?, ?)')
+      .bind(orgId, 'Empresa Default')
+      .run()
+    await seedUser({ email: 'admin@default.com', role: 'admin', organizationId: orgId })
+
+    const { status, json } = await get('admin@default.com')
+    expect(status).toBe(200)
+    expect(json.organization.timezone).toBe('America/Mexico_City')
+  })
+
+  it('admin sets a valid zone; the read reflects it', async () => {
+    await seedUser({ email: 'admin@empresa.com', role: 'admin' })
+    const { status, json } = await put('admin@empresa.com', { timezone: 'America/Cancun' })
+    expect(status).toBe(200)
+    expect(json.organization.timezone).toBe('America/Cancun')
+    expect((await get('admin@empresa.com')).json.organization.timezone).toBe('America/Cancun')
+  })
+
+  it('rejects a zone outside the curated allow-list → 400', async () => {
+    await seedUser({ email: 'admin@empresa.com', role: 'admin' })
+    // A real IANA zone, but not one we offer — the Zod enum must reject it.
+    expect((await put('admin@empresa.com', { timezone: 'Europe/Paris' })).status).toBe(400)
+    expect((await put('admin@empresa.com', { timezone: 'UTC' })).status).toBe(400)
+  })
+
+  it('isolation — one admin\'s zone change never touches another org', async () => {
+    const { orgA, orgB } = await seedTwoOrgs()
+    await put(orgA.adminEmail, { timezone: 'America/Tijuana' })
+    expect((await get(orgA.adminEmail)).json.organization.timezone).toBe('America/Tijuana')
+    // orgB was seeded via seedUser (UTC) and must be untouched by orgA's edit.
+    expect((await get(orgB.adminEmail)).json.organization.timezone).toBe('UTC')
+  })
+})

@@ -105,7 +105,7 @@ const post = async (email: string, body: Record<string, unknown>) => {
   const res = await SELF.fetch(`${base}/folios`, {
     method: 'POST',
     headers: jsonAuth(email),
-    body: JSON.stringify({ customer_email: 'cliente@example.com', ...body }),
+    body: JSON.stringify({ customer_name: 'Cliente Test', customer_phone: '5512345678', customer_email: 'cliente@example.com', ...body }),
   })
   return { status: res.status, json: (await res.json()) as any }
 }
@@ -134,6 +134,7 @@ describe('US-AG07 — booking creation', () => {
     const { slotId } = await seedSlot({ organizationId, serviceId, date: slotDate, startTime: '06:00' })
 
     const { status, json } = await post(AGENT_EMAIL, {
+      customer_name: 'Cliente Test',
       customer_phone: PHONE,
       down_payment: 45000,
       lines: [{ slot_id: slotId, quantity: 2, unit_price: 150000 }],
@@ -156,23 +157,28 @@ describe('US-AG07 — booking creation', () => {
     expect(row).toMatchObject({ status: 'booking', amount_paid: 45000 })
   })
 
-  it('Sc.2 — phone required for a booking; full sale without phone still works', async () => {
+  // D2 (whatsapp-qr-delivery) — a dialable phone is now required for EVERY sale (WhatsApp is the
+  // primary ticket-delivery channel), not just bookings. Both a booking and a full sale without a
+  // phone are rejected. (`customer_phone: undefined` overrides the test helper's default.)
+  it('Sc.2 — phone is required for every sale (booking and full)', async () => {
     const { organizationId } = await seedUser({ email: AGENT_EMAIL, role: 'agent' })
     const { serviceId } = await seedService({ organizationId })
     const { slotId } = await seedSlot({ organizationId, serviceId })
 
-    const noPhone = await post(AGENT_EMAIL, {
+    const noPhoneBooking = await post(AGENT_EMAIL, {
+      customer_phone: undefined,
       down_payment: 50000,
       lines: [{ slot_id: slotId, quantity: 1, unit_price: 150000 }],
     })
-    expect(noPhone.status).toBe(400)
-    expect(noPhone.json.error.code).toBe('VALIDATION_ERROR')
+    expect(noPhoneBooking.status).toBe(400)
+    expect(noPhoneBooking.json.error.code).toBe('VALIDATION_ERROR')
 
-    const fullNoPhone = await post(AGENT_EMAIL, {
+    const noPhoneFull = await post(AGENT_EMAIL, {
+      customer_phone: undefined,
       lines: [{ slot_id: slotId, quantity: 1, unit_price: 150000 }],
     })
-    expect(fullNoPhone.status).toBe(201)
-    expect(fullNoPhone.json.folio.status).toBe('paid')
+    expect(noPhoneFull.status).toBe(400)
+    expect(noPhoneFull.json.error.code).toBe('VALIDATION_ERROR')
   })
 
   it('Sc.3 — below the org minimum % → 400; exactly the minimum → 201', async () => {
@@ -182,6 +188,7 @@ describe('US-AG07 — booking creation', () => {
     const { slotId } = await seedSlot({ organizationId, serviceId })
 
     const below = await post(AGENT_EMAIL, {
+      customer_name: 'Cliente Test',
       customer_phone: PHONE,
       down_payment: 30000, // 20% of 150000 < 30%
       lines: [{ slot_id: slotId, quantity: 1, unit_price: 150000 }],
@@ -191,6 +198,7 @@ describe('US-AG07 — booking creation', () => {
     expect(await getSlotBooked(slotId)).toBe(0) // no decrement on rejection
 
     const ok = await post(AGENT_EMAIL, {
+      customer_name: 'Cliente Test',
       customer_phone: PHONE,
       down_payment: 45000, // exactly 30%
       lines: [{ slot_id: slotId, quantity: 1, unit_price: 150000 }],
@@ -204,6 +212,7 @@ describe('US-AG07 — booking creation', () => {
     const { slotId } = await seedSlot({ organizationId, serviceId })
 
     const { status, json } = await post(AGENT_EMAIL, {
+      customer_name: 'Cliente Test',
       customer_phone: PHONE,
       down_payment: 150000,
       lines: [{ slot_id: slotId, quantity: 1, unit_price: 150000 }],
@@ -220,6 +229,7 @@ describe('US-AG07 — booking creation', () => {
     const { slotId } = await seedSlot({ organizationId, serviceId, date: today, startTime: '23:59' })
 
     const { status, json } = await post(AGENT_EMAIL, {
+      customer_name: 'Cliente Test',
       customer_phone: PHONE,
       down_payment: 45000,
       lines: [{ slot_id: slotId, quantity: 1, unit_price: 150000 }],
@@ -234,6 +244,7 @@ describe('US-AG07 — booking creation', () => {
     const pct = await seedService({ organizationId, basePrice: 150000, commissionType: 'percent', commissionValue: 1000 })
     const slotP = await seedSlot({ organizationId, serviceId: pct.serviceId })
     const bookingP = await post(AGENT_EMAIL, {
+      customer_name: 'Cliente Test',
       customer_phone: PHONE,
       down_payment: 45000,
       lines: [{ slot_id: slotP.slotId, quantity: 1, unit_price: 150000 }],
@@ -244,6 +255,7 @@ describe('US-AG07 — booking creation', () => {
     const fix = await seedService({ organizationId, basePrice: 150000, commissionType: 'fixed', commissionValue: 50000 })
     const slotF = await seedSlot({ organizationId, serviceId: fix.serviceId })
     const bookingF = await post(AGENT_EMAIL, {
+      customer_name: 'Cliente Test',
       customer_phone: PHONE,
       down_payment: 45000,
       lines: [{ slot_id: slotF.slotId, quantity: 1, unit_price: 150000 }],

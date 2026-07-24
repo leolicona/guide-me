@@ -7,6 +7,7 @@ import {
   accommodationSeasons,
   accommodationUnitTypes,
   affiliateCommissions,
+  affiliateOperators,
   folioAccessTokens,
   folioLineExtras,
   folioLines,
@@ -33,6 +34,7 @@ import {
   type TicketPayload,
 } from '../../utils/qr'
 import { generatePortalToken, portalTokenExpiry } from '../../utils/portal'
+import { naiveEpoch, orgToday, orgWallClockMinute } from '../../utils/tz'
 import {
   nightsBetween,
   parseCsvInts,
@@ -40,17 +42,27 @@ import {
   type SeasonRate,
 } from '../../utils/lodging'
 import { lodgingAvailableDays, lodgingTypeCards } from './lodging.handler'
-import type { ConfirmSaleInput } from './schema'
+import { settleSchema, type ConfirmSaleInput, type SettleInput } from './schema'
 
 export type PosContext = Context<{
   Bindings: CloudflareBindings
   Variables: AppVariables
 }>
 
-// Org-local "today" as YYYY-MM-DD. MVP single-timezone assumption (mirrors schedules):
-// dates are naive calendar strings compared lexicographically. A `today` query param
-// lets the client pin the org-local day; otherwise fall back to the server's UTC date.
-const utcToday = () => new Date().toISOString().slice(0, 10)
+// US-A66 — the org's scheduling clock, loaded once per request: its IANA `tz` anchors "today" and
+// the sales-cutoff threshold math; `cutoffOffsetMin` (US-A47) is the signed sales-cutoff offset.
+// Falls back to the schema default zone if the row is somehow absent (an FK invariant).
+async function loadOrgTiming(
+  db: Db,
+  orgId: string,
+): Promise<{ tz: string; cutoffOffsetMin: number }> {
+  const rows = await db
+    .select({ tz: organizations.timezone, cutoff: organizations.salesCutoffOffsetMinutes })
+    .from(organizations)
+    .where(eq(organizations.id, orgId))
+    .limit(1)
+  return { tz: rows[0]?.tz ?? 'America/Mexico_City', cutoffOffsetMin: rows[0]?.cutoff ?? 0 }
+}
 
 // Add `n` whole days to a naive YYYY-MM-DD calendar string (UTC midnight arithmetic —
 // no timezone math, matching the single-timezone model). Used for the catalog's rolling
@@ -73,10 +85,10 @@ const lastOfMonth = (month: string): string => {
 
 // --- Signed QR access tickets (docs/qr/folio-qr-signing.spec.md) ---
 
-// MVP single-timezone (mirrors schedules/POS naive calendar): a ticket is valid through
-// the end of the day AFTER the slot date — a deliberate grace for late/next-morning scans.
-const ticketExpiry = (slotDate: string): number =>
-  Math.floor(Date.parse(`${slotDate}T00:00:00Z`) / 1000) + 48 * 3600
+// US-A66 — a ticket is valid through the end of the day AFTER the slot date (a deliberate grace for
+// late/next-morning scans), measured from the slot's org-local midnight in the org's time zone.
+const ticketExpiry = (slotDate: string, tz: string): number =>
+  naiveEpoch(slotDate, '00:00', tz) + 48 * 3600
 
 // Display/audit identity baked into the ticket: customer name, else email, else folio id.
 const clientIdentity = (input: ConfirmSaleInput, folioId: string): string =>
@@ -157,7 +169,11 @@ const extraReadColumns = {
 // pick), or a rolling 3-day span (today … today + 2) by default (US-AG30).
 export const listPosServices = async (c: PosContext) => {
   const agent = c.get('user')
-  const today = c.req.query('today') ?? utcToday()
+  const db = getDb(c.env)
+  const { tz, cutoffOffsetMin } = await loadOrgTiming(db, agent.organizationId)
+  // US-A66 — "today" is the org-local calendar day; the client pins it via `?today=`, else fall
+  // back to the org's time zone (no longer the server's UTC date, which rolled over early).
+  const today = c.req.query('today') ?? orgToday(tz)
   // US-AG35 — the selected range `[from, to]` bounds availability. A bare `from` (or the
   // legacy single `date`) collapses the window to that one day; absent both, the window is
   // today … today + AVAILABILITY_WINDOW_DAYS (the default "next 3 days").
@@ -166,7 +182,6 @@ export const listPosServices = async (c: PosContext) => {
   const windowTo = from
     ? (c.req.query('to') ?? from)
     : addDays(today, AVAILABILITY_WINDOW_DAYS)
-  const db = getDb(c.env)
 
   // Curated catalog (affiliate-portal.spec.md §4.2): for an `affiliate` caller, INNER JOIN the
   // allow-list so the list collapses to exactly the services the admin enabled for their company
@@ -209,14 +224,10 @@ export const listPosServices = async (c: PosContext) => {
   // its sellable last-minute spots instead of reading "Agotado".
   // US-A47 — exclude slots already past the sales cutoff so `has_availability` / `next_slot_date`
   // never advertise a departed time (e.g. a service whose only "remaining" slot today is over).
-  const cutoffRows = await db
-    .select({ v: organizations.salesCutoffOffsetMinutes })
-    .from(organizations)
-    .where(eq(organizations.id, agent.organizationId))
-    .limit(1)
   const sellableThreshold = salesThresholdStr(
     Math.floor(Date.now() / 1000),
-    cutoffRows[0]?.v ?? 0,
+    cutoffOffsetMin,
+    tz,
   )
 
   const availabilityRows = await db
@@ -331,7 +342,9 @@ export const listPosServices = async (c: PosContext) => {
 export const listAvailabilityDays = async (c: PosContext) => {
   const agent = c.get('user')
   const { month, today: todayParam, categories } = c.req.valid('query')
-  const today = todayParam ?? utcToday()
+  const db = getDb(c.env)
+  const { tz, cutoffOffsetMin } = await loadOrgTiming(db, agent.organizationId)
+  const today = todayParam ?? orgToday(tz)
 
   const monthStart = `${month}-01`
   const monthEnd = lastOfMonth(month)
@@ -342,17 +355,11 @@ export const listAvailabilityDays = async (c: PosContext) => {
     return c.json({ days: [] })
   }
 
-  const db = getDb(c.env)
-
   // US-A47 — drop days whose only slots have passed the sales cutoff (no past times in the picker).
-  const cutoffRows = await db
-    .select({ v: organizations.salesCutoffOffsetMinutes })
-    .from(organizations)
-    .where(eq(organizations.id, agent.organizationId))
-    .limit(1)
   const sellableThreshold = salesThresholdStr(
     Math.floor(Date.now() / 1000),
-    cutoffRows[0]?.v ?? 0,
+    cutoffOffsetMin,
+    tz,
   )
 
   const rows = await db
@@ -464,20 +471,13 @@ export const getPosService = async (c: PosContext) => {
     )
     .orderBy(asc(serviceExtras.name))
 
-  const from = c.req.query('from') ?? utcToday()
+  const { tz, cutoffOffsetMin } = await loadOrgTiming(db, agent.organizationId)
+  const from = c.req.query('from') ?? orgToday(tz)
   const to = c.req.query('to')
 
   // US-A47 — never surface a slot that's no longer sellable (its departure passed the cutoff),
   // so the matrix shows only the times an agent can actually sell today.
-  const cutoffRows = await db
-    .select({ v: organizations.salesCutoffOffsetMinutes })
-    .from(organizations)
-    .where(eq(organizations.id, agent.organizationId))
-    .limit(1)
-  const threshold = salesThresholdStr(
-    Math.floor(Date.now() / 1000),
-    cutoffRows[0]?.v ?? 0,
-  )
+  const threshold = salesThresholdStr(Math.floor(Date.now() / 1000), cutoffOffsetMin, tz)
 
   const slotFilters = [
     eq(slots.serviceId, id),
@@ -623,17 +623,18 @@ function resolveBookingPolicy(org: {
   }
 }
 
-// US-A47 — a slot is sellable only while its start is beyond the org's sales cutoff. SIGNED
-// offset: positive closes sales N min BEFORE departure; negative keeps them open until N min
-// AFTER (a walk-up grace). Threshold instant = now + offset; a slot is sellable ⟺ its start is
-// strictly after the threshold. Compared in the naive-UTC model (same as slotEpoch); absolute-
-// timezone correctness is the separate BUG-007 limitation.
-const salesThresholdStr = (nowSec: number, cutoffOffsetMin: number): string =>
-  new Date((nowSec + cutoffOffsetMin * 60) * 1000).toISOString().slice(0, 16)
+// US-A47/A66 — a slot is sellable only while its start is beyond the org's sales cutoff. SIGNED
+// offset: positive closes sales N min BEFORE departure; negative keeps them open until N min AFTER
+// (a walk-up grace). Threshold instant = now + offset; a slot is sellable ⟺ its start is strictly
+// after the threshold. Rendered as the org-local wall-clock of that instant so it is lexicographi-
+// cally comparable to the slot's naive `date||'T'||time` — resolving the comparison in the org's
+// time zone (this is what closes BUG-007).
+const salesThresholdStr = (nowSec: number, cutoffOffsetMin: number, tz: string): string =>
+  orgWallClockMinute((nowSec + cutoffOffsetMin * 60) * 1000, tz)
 
 // SQL predicate form for the read filters (matrix / availability): keep only future-of-cutoff
 // slots. `slots.date` is 'YYYY-MM-DD' and `slots.startTime` is 'HH:MM', so `date||'T'||time` is a
-// fixed-width ISO minute string, lexicographically comparable to the threshold.
+// fixed-width minute string, lexicographically comparable to the org-local threshold string.
 const sellableSlotSql = (thresholdStr: string) =>
   sql`(${slots.date} || 'T' || ${slots.startTime}) > ${thresholdStr}`
 
@@ -643,11 +644,12 @@ const isSlotSellable = (
   startTime: string,
   nowSec: number,
   cutoffOffsetMin: number,
-): boolean => slotEpoch(date, startTime) > nowSec + cutoffOffsetMin * 60
+  tz: string,
+): boolean => slotEpoch(date, startTime, tz) > nowSec + cutoffOffsetMin * 60
 
-// Epoch (seconds) of a naive slot start — single-timezone model (UTC arithmetic, no tz math).
-const slotEpoch = (date: string, time: string): number =>
-  Math.floor(Date.parse(`${date}T${time}:00Z`) / 1000)
+// Epoch (seconds) of a naive slot start, resolved in the org's time zone (US-A66).
+const slotEpoch = (date: string, time: string, tz: string): number =>
+  naiveEpoch(date, time, tz)
 
 // US-AG07.1 AC1 — release timestamp = min(createdAt + holdDuration, slotStart − tourBuffer).
 // Same-day tours use the org's tighter same-day buffer; otherwise a 24h pre-departure buffer.
@@ -685,6 +687,7 @@ async function signLineTickets(
   folioId: string,
   identity: string,
   lines: SignableLine[],
+  tz: string,
 ): Promise<Map<string, { token: string; qr: ReturnType<typeof qrEcho> }>> {
   const orgKey = await deriveOrgKey(env.QR_SECRET, org)
   const out = new Map<string, { token: string; qr: ReturnType<typeof qrEcho> }>()
@@ -699,7 +702,7 @@ async function signLineTickets(
       client_identity: identity,
       passes_total: line.quantity,
       issued_at: Math.floor(Date.now() / 1000),
-      expires_at: ticketExpiry(line.slotDate),
+      expires_at: ticketExpiry(line.slotDate, tz),
     }
     out.set(line.id, { token: await signTicket(payload, orgKey), qr: qrEcho(payload) })
   }
@@ -728,6 +731,27 @@ async function issuePortalLink(
     console.error('[portal] token issuance failed', folioId, err)
     return undefined
   }
+}
+
+// Look up an already-issued portal link for a folio (whatsapp-qr-delivery). Returns the newest
+// token's URL, or null when none exists yet (unpaid booking / pre-feature sale). Drives the
+// receipt/folio-detail "Enviar por WhatsApp" affordance and the delivery badge.
+async function folioPortalLink(
+  db: Db,
+  org: string,
+  folioId: string,
+  apiBaseUrl: string,
+): Promise<string | null> {
+  const rows = await db
+    .select({ token: folioAccessTokens.token })
+    .from(folioAccessTokens)
+    .where(
+      and(eq(folioAccessTokens.folioId, folioId), eq(folioAccessTokens.organizationId, org)),
+    )
+    .orderBy(desc(folioAccessTokens.createdAt))
+    .limit(1)
+  const row = rows[0]
+  return row ? `${apiBaseUrl}/portal/${row.token}` : null
 }
 
 interface TicketEmailMeta {
@@ -800,12 +824,9 @@ export const confirmSale = async (c: PosContext) => {
   const isAffiliate = agent.role === 'affiliate'
   const affiliateCompanyId = isAffiliate ? agent.affiliateCompanyId : null
 
-  // Ticket delivery channel: an agent/admin sale REQUIRES a customer email (the only channel).
-  // An affiliate sale delivers to the affiliate's own account email (D8), so customer_email is
-  // an optional copy there. (The schema validates the format when present; this guards presence.)
-  if (!isAffiliate && !input.customer_email) {
-    throw new ApiError('VALIDATION_ERROR', 400, 'A valid customer email is required')
-  }
+  // D2 (whatsapp-qr-delivery) — email is no longer a required delivery channel. WhatsApp (the
+  // agent-sent portal link, name + phone required by the schema) is now primary; email is an
+  // optional copy for any role. The schema still validates the address format when present.
   const affiliateRates = new Map<string, { type: 'percent' | 'fixed'; value: number }>()
   if (isAffiliate) {
     if (!affiliateCompanyId) {
@@ -838,12 +859,16 @@ export const confirmSale = async (c: PosContext) => {
       salesCutoffOffsetMinutes: organizations.salesCutoffOffsetMinutes,
       bookingGraceOffsetMinutes: organizations.bookingGraceOffsetMinutes,
       lodgingWeekendDays: organizations.lodgingWeekendDays,
+      timezone: organizations.timezone,
     })
     .from(organizations)
     .where(eq(organizations.id, org))
     .limit(1)
   const orgRow = orgRows[0]
   const weekendDays = parseCsvInts(orgRow?.lodgingWeekendDays ?? '5,6')
+  // US-A66 — every wall-clock comparison below (cutoff, same-day booking grace, ticket expiry)
+  // resolves in the org's time zone.
+  const tz = orgRow?.timezone ?? 'America/Mexico_City'
   // US-A47 — the sales cutoff gates EVERY new folio (walk-in sale + booking creation): a slot
   // past its cutoff is no longer sellable. Evaluated once against the request's start instant.
   const saleNowSec = Math.floor(Date.now() / 1000)
@@ -1035,7 +1060,7 @@ export const confirmSale = async (c: PosContext) => {
     // US-A47 — refuse a slot whose departure has passed the sales cutoff (no selling a tour
     // that already left / is past the walk-in window). Closes the past-slot integrity hole for
     // both full sales and booking creation, regardless of a stale client.
-    if (!isSlotSellable(slot.date, slot.startTime, saleNowSec, salesCutoffOffset)) {
+    if (!isSlotSellable(slot.date, slot.startTime, saleNowSec, salesCutoffOffset, tz)) {
       throw new ApiError(
         'SLOT_CLOSED',
         409,
@@ -1198,6 +1223,15 @@ export const confirmSale = async (c: PosContext) => {
     bookingGraceOffsetMinutes: orgRow?.bookingGraceOffsetMinutes ?? 15,
   })
   const isBooking = input.down_payment != null
+  // US-AG41/US-A67 — an electronic (transfer) payment is not yet in hand: the folio is created
+  // `pending` verification and its QR/portal/ticket-email are DEFERRED until an admin verifies it
+  // (verifyPayment). Cash clears immediately, exactly as before. `cleared` = the money is usable now.
+  const method = input.payment_method ?? 'cash'
+  const needsVerification = method === 'transfer'
+  const cleared = !needsVerification
+  const paymentVerification: 'not_required' | 'pending' = needsVerification
+    ? 'pending'
+    : 'not_required'
   let status: 'paid' | 'booking' = 'paid'
   let amountPaid = total
   let commissionAmount = fullPercentCommission + fullFixedCommission
@@ -1234,7 +1268,7 @@ export const confirmSale = async (c: PosContext) => {
       (min, l) => {
         const date = l.lineType === 'stay' ? l.checkIn! : l.slotDate!
         const time = l.lineType === 'stay' ? '00:00' : l.slotStartTime!
-        const e = slotEpoch(date, time)
+        const e = slotEpoch(date, time, tz)
         return e < min.epoch ? { epoch: e, date } : min
       },
       { epoch: Infinity, date: '' },
@@ -1243,7 +1277,7 @@ export const confirmSale = async (c: PosContext) => {
       policy,
       nowSec,
       earliest.epoch,
-      earliest.date === utcToday(),
+      earliest.date === orgToday(tz),
     )
   }
 
@@ -1256,11 +1290,16 @@ export const confirmSale = async (c: PosContext) => {
     agentId: agent.userId,
     // D5 — stamp the seller's company on an affiliate sale; null for in-house (agent/admin).
     affiliateCompanyId,
+    // US-AF13 — the shift operator who made the sale (null unless this is an operator session).
+    operatorId: c.get('operator')?.operatorId ?? null,
     customerName: input.customer_name ?? null,
     customerEmail: input.customer_email ?? null,
     customerPhone: input.customer_phone ?? null,
     status,
-    paymentMethod: input.payment_method ?? 'cash',
+    paymentMethod: method,
+    // US-AG41/US-A67 — the transfer's reference + the verification gate (see `cleared` above).
+    paymentReference: needsVerification ? (input.payment_reference ?? null) : null,
+    paymentVerification,
     subtotal,
     discountTotal,
     total,
@@ -1427,10 +1466,11 @@ export const confirmSale = async (c: PosContext) => {
     applied.push({ slotId: line.slotId!, qty: line.quantity })
   }
 
-  // 4. SIGN one QR access ticket per SLOT line — ONLY for a paid sale. A booking has no scannable
-  //    QR until it settles; a lodging stay line has no slot QR (its access is the reservation).
+  // 4. SIGN one QR access ticket per SLOT line — ONLY for a paid sale whose money has CLEARED (cash;
+  //    a transfer defers to admin verification, US-A67). A booking has no scannable QR until it
+  //    settles; a lodging stay line has no slot QR (its access is the reservation).
   const slotLines = prepared.filter((l) => l.lineType === 'slot' && l.slotId && l.slotDate)
-  if (!isBooking) {
+  if (!isBooking && cleared) {
     // The folio + holds are already committed (the reservation FK needs the folio first), so a
     // signing failure must compensate too — otherwise it would orphan the folio.
     try {
@@ -1447,6 +1487,7 @@ export const confirmSale = async (c: PosContext) => {
           quantity: l.quantity,
           slotDate: l.slotDate!,
         })),
+        tz,
       )
       for (const line of slotLines) {
         const t = tickets.get(line.id)!
@@ -1520,21 +1561,22 @@ export const confirmSale = async (c: PosContext) => {
 
   const orgName = orgRow?.name ?? 'Turistear Ya!'
 
-  // Ticket/QR recipients (affiliate-portal.spec.md D8): an affiliate sale is addressed to the
-  // affiliate (concierge) for group distribution, with the optional customer_email sent a copy;
-  // an agent/admin sale goes to the customer as before. Deduped so a self-addressed copy sends once.
+  // Ticket/QR delivery is customer-direct for EVERY role now (whatsapp-qr-delivery D9): the tourist
+  // (name + phone captured) gets the WhatsApp portal link, and email — when a customer email was
+  // captured — is an optional copy. An affiliate no longer receives a self-addressed copy; they
+  // re-open the sale from their own /history.
   const ticketRecipients = [
-    ...new Set(
-      (isAffiliate
-        ? [agent.email, input.customer_email]
-        : [input.customer_email]
-      ).filter((e): e is string => !!e),
-    ),
+    ...new Set([input.customer_email].filter((e): e is string => !!e)),
   ]
 
+  // The portal link is surfaced to the client (receipt CTA + folio detail) so the agent can send it
+  // over WhatsApp. Minted on the paid path only (a booking has no QR/portal token yet).
+  let portalLink: string | undefined
+
   // Post-commit side effects diverge by sale type. A booking gets the apartado email (no QR, no
-  // portal token); the paid sale mints the portal token + sends the full ticket + QR email. Both
-  // are best-effort (waitUntil / try-catch) — a failure here must never roll back the committed sale.
+  // portal token); a CLEARED paid sale mints the portal token + sends the full ticket + QR email.
+  // An unverified electronic sale (`!cleared`) mints NOTHING here — verifyPayment (US-A67) runs this
+  // half once an admin confirms the money. All best-effort — a failure never rolls back the sale.
   if (isBooking) {
     if (c.env.RESEND_API_KEY && bookingExpiresAt) {
       const expiresAt = bookingExpiresAt
@@ -1563,8 +1605,8 @@ export const confirmSale = async (c: PosContext) => {
         )
       }
     }
-  } else {
-    const portalLink = await issuePortalLink(
+  } else if (cleared) {
+    portalLink = await issuePortalLink(
       db,
       c.env,
       org,
@@ -1610,10 +1652,21 @@ export const confirmSale = async (c: PosContext) => {
       folio: {
         id: folioId,
         status,
-        payment_method: input.payment_method ?? 'cash',
+        payment_method: method,
+        // US-AG41/US-A67 — the transfer reference + verification gate. A pending folio has no QR
+        // and its delivery is blocked until an admin verifies (portal_link stays null here).
+        payment_reference: needsVerification ? (input.payment_reference ?? null) : null,
+        payment_verification: paymentVerification,
         customer_name: input.customer_name ?? null,
         customer_email: input.customer_email ?? null,
         customer_phone: input.customer_phone ?? null,
+        // US-AF13 — the shift operator who made the sale (null unless this is an operator session).
+        operator_name: c.get('operator')?.name ?? null,
+        // Delivery axis (whatsapp-qr-delivery) — the receipt CTA sends this portal link; a fresh
+        // sale is "pendiente de enviar" (nothing sent/viewed yet).
+        portal_link: portalLink ?? null,
+        tickets_sent_at: null,
+        tickets_viewed_at: null,
         subtotal,
         discount_total: discountTotal,
         total,
@@ -1666,12 +1719,16 @@ const readFolio = async (
   agentId: string,
   folioId: string,
   qrSecret: string,
+  apiBaseUrl: string,
 ) => {
   const folioRows = await db
     .select({
       id: folios.id,
       status: folios.status,
       paymentMethod: folios.paymentMethod,
+      paymentReference: folios.paymentReference,
+      paymentVerification: folios.paymentVerification,
+      paymentVerifiedAt: folios.paymentVerifiedAt,
       customerName: folios.customerName,
       customerEmail: folios.customerEmail,
       customerPhone: folios.customerPhone,
@@ -1681,9 +1738,15 @@ const readFolio = async (
       amountPaid: folios.amountPaid,
       commissionAmount: folios.commissionAmount,
       cancelledAt: folios.cancelledAt,
+      ticketsSentAt: folios.ticketsSentAt,
+      ticketsViewedAt: folios.ticketsViewedAt,
+      // US-AF13 — the shift operator who made the sale ("Vendido por: {name}"); null if the
+      // manager/agent sold directly.
+      operatorName: affiliateOperators.name,
       createdAt: folios.createdAt,
     })
     .from(folios)
+    .leftJoin(affiliateOperators, eq(folios.operatorId, affiliateOperators.id))
     .where(
       and(
         eq(folios.id, folioId),
@@ -1788,10 +1851,18 @@ const readFolio = async (
     }),
   )
 
+  const portalLink = await folioPortalLink(db, org, folioId, apiBaseUrl)
+
   return {
     id: folio.id,
     status: folio.status,
     payment_method: folio.paymentMethod,
+    // US-AG41/US-A67 — payment reference + verification gate (the delivery UI blocks while pending).
+    payment_reference: folio.paymentReference,
+    payment_verification: folio.paymentVerification,
+    payment_verified_at: folio.paymentVerifiedAt
+      ? Math.floor(folio.paymentVerifiedAt.getTime() / 1000)
+      : null,
     customer_name: folio.customerName,
     customer_email: folio.customerEmail,
     customer_phone: folio.customerPhone,
@@ -1802,6 +1873,15 @@ const readFolio = async (
     commission_amount: folio.commissionAmount,
     cancelled_at: folio.cancelledAt
       ? Math.floor(folio.cancelledAt.getTime() / 1000)
+      : null,
+    // US-AF13 — operator attribution (null ⇒ manager/agent sold directly).
+    operator_name: folio.operatorName ?? null,
+    // Delivery axis (whatsapp-qr-delivery) — portal_link drives the WhatsApp send; sent/viewed
+    // stamps drive the Pendiente → Enviado → Visto badge.
+    portal_link: portalLink,
+    tickets_sent_at: folio.ticketsSentAt ? Math.floor(folio.ticketsSentAt.getTime() / 1000) : null,
+    tickets_viewed_at: folio.ticketsViewedAt
+      ? Math.floor(folio.ticketsViewedAt.getTime() / 1000)
       : null,
     created_at: Math.floor(folio.createdAt.getTime() / 1000),
     lines,
@@ -1821,12 +1901,42 @@ export const getFolio = async (c: PosContext) => {
     agent.userId,
     id,
     c.env.QR_SECRET,
+    c.env.API_BASE_URL,
   )
   if (!folio) {
     throw new ApiError('NOT_FOUND', 404, 'Folio not found')
   }
 
   return c.json({ folio })
+}
+
+// POST /pos/folios/:id/ticket-delivery — the seller records that they sent the tickets over
+// WhatsApp (whatsapp-qr-delivery D4). Clears "Pendiente de enviar". D13 — simple idempotent mark
+// (last-write-wins: a re-send restamps who/when, no atomic claim). Scoped to the caller's own folio.
+export const markTicketsSent = async (c: PosContext) => {
+  const agent = c.get('user')
+  const id = c.req.param('id')
+  const db = getDb(c.env)
+  const now = new Date()
+
+  const updated = await db
+    .update(folios)
+    .set({ ticketsSentAt: now, ticketsSentBy: agent.userId, updatedAt: now })
+    .where(
+      and(
+        eq(folios.id, id),
+        eq(folios.organizationId, agent.organizationId),
+        eq(folios.agentId, agent.userId),
+      ),
+    )
+    .returning({ sentAt: folios.ticketsSentAt, viewedAt: folios.ticketsViewedAt })
+
+  const row = updated[0]
+  if (!row) throw new ApiError('NOT_FOUND', 404, 'Folio not found')
+  return c.json({
+    tickets_sent_at: row.sentAt ? Math.floor(row.sentAt.getTime() / 1000) : null,
+    tickets_viewed_at: row.viewedAt ? Math.floor(row.viewedAt.getTime() / 1000) : null,
+  })
 }
 
 // US-AG07 — settle a booking (one-shot): collect the full balance, flip to `paid`, mint the
@@ -1839,6 +1949,8 @@ export const settleBooking = async (c: PosContext) => {
   const id = c.req.param('id')
   const db = getDb(c.env)
   const org = agent.organizationId
+  // US-A66 — ticket expiry below is measured in the org's time zone.
+  const { tz } = await loadOrgTiming(db, org)
 
   const folioRows = await db
     .select({
@@ -1864,6 +1976,24 @@ export const settleBooking = async (c: PosContext) => {
   }
   if (folio.bookingExpiresAt && folio.bookingExpiresAt.getTime() <= Date.now()) {
     throw new ApiError('BOOKING_EXPIRED', 409, 'Booking has expired')
+  }
+
+  // US-AG41/US-A67 — the settle re-uses the folio's own payment method. Settling a TRANSFER folio is
+  // a fresh electronic payment: it requires a reference, re-arms verification to `pending`, and
+  // DEFERS the QR/portal/email until an admin verifies (verifyPayment). A cash folio settles
+  // immediately, exactly as before. `cleared` = the balance is usable now.
+  const parsed = settleSchema.safeParse(await c.req.json().catch(() => ({})))
+  if (!parsed.success) {
+    throw new ApiError('VALIDATION_ERROR', 400, 'Invalid settle payload')
+  }
+  const body: SettleInput = parsed.data
+  const cleared = folio.paymentMethod !== 'transfer'
+  if (!cleared && !body.payment_reference) {
+    throw new ApiError(
+      'VALIDATION_ERROR',
+      400,
+      'A payment reference is required to settle a bank transfer',
+    )
   }
 
   const lineRows = await db
@@ -1896,6 +2026,27 @@ export const settleBooking = async (c: PosContext) => {
     0,
   )
 
+  // US-A67 — a TRANSFER settle reaches `paid` but DEFERS the QR: record the settling transfer's
+  // reference, re-arm verification to `pending`, and stop here. verifyPayment signs the QR + sends
+  // the tickets once an admin confirms the money. (No QR token, no portal link, no email yet.)
+  if (!cleared) {
+    await db
+      .update(folios)
+      .set({
+        status: 'paid',
+        amountPaid: folio.total,
+        commissionAmount,
+        settledAt: new Date(),
+        settledBy: agent.userId,
+        paymentReference: body.payment_reference ?? null,
+        paymentVerification: 'pending',
+        updatedAt: new Date(),
+      })
+      .where(and(eq(folios.id, id), eq(folios.organizationId, org)))
+    const pending = await readFolio(db, org, agent.userId, id, c.env.QR_SECRET, c.env.API_BASE_URL)
+    return c.json({ folio: pending })
+  }
+
   // Sign the per-line tickets now (the booking had none) — SLOT lines only; a lodging stay line
   // has no scannable QR (its access is the reservation).
   const slotLineRows = lineRows.filter((l) => l.slotId && l.slotDate)
@@ -1913,6 +2064,7 @@ export const settleBooking = async (c: PosContext) => {
       quantity: l.quantity,
       slotDate: l.slotDate!,
     })),
+    tz,
   )
 
   const statements: BatchItem<'sqlite'>[] = [
@@ -1998,8 +2150,259 @@ export const settleBooking = async (c: PosContext) => {
     portalLink,
   )
 
-  const settled = await readFolio(db, org, agent.userId, id, c.env.QR_SECRET)
+  const settled = await readFolio(db, org, agent.userId, id, c.env.QR_SECRET, c.env.API_BASE_URL)
   return c.json({ folio: settled })
+}
+
+// US-A67 — ADMIN verifies an electronic (transfer) payment against the bank. Flips the folio's
+// `payment_verification` pending → verified; if the folio is already `paid` (a full transfer sale or
+// a transfer settle), this runs the DEFERRED half of the paid path — signs the per-line QR, mints
+// the portal token, and fires the ticket email (auto-delivery). A `booking` (a transfer DEPOSIT)
+// just records the confirmation — its QR still waits for settle. Admin-only (the seller can never
+// verify their own money); org-scoped. Idempotent-ish: a non-pending folio → 409.
+export const verifyPayment = async (c: PosContext) => {
+  const admin = c.get('user')
+  const id = c.req.param('id')
+  const db = getDb(c.env)
+  const org = admin.organizationId
+  const { tz } = await loadOrgTiming(db, org)
+
+  const folioRows = await db
+    .select({
+      id: folios.id,
+      agentId: folios.agentId,
+      status: folios.status,
+      paymentMethod: folios.paymentMethod,
+      paymentVerification: folios.paymentVerification,
+      customerName: folios.customerName,
+      customerEmail: folios.customerEmail,
+      total: folios.total,
+    })
+    .from(folios)
+    .where(and(eq(folios.id, id), eq(folios.organizationId, org)))
+    .limit(1)
+  const folio = folioRows[0]
+  if (!folio) throw new ApiError('NOT_FOUND', 404, 'Folio not found')
+  if (folio.paymentVerification !== 'pending') {
+    throw new ApiError('NOT_PENDING_VERIFICATION', 409, 'This payment is not awaiting verification')
+  }
+
+  const now = new Date()
+  const verifyFields = {
+    paymentVerification: 'verified' as const,
+    paymentVerifiedAt: now,
+    paymentVerifiedBy: admin.userId,
+    updatedAt: now,
+  }
+
+  // A booking (deposit) is confirmed but mints no QR — its tickets wait for settle.
+  if (folio.status !== 'paid') {
+    await db
+      .update(folios)
+      .set(verifyFields)
+      .where(and(eq(folios.id, id), eq(folios.organizationId, org)))
+    const out = await readFolio(db, org, folio.agentId, id, c.env.QR_SECRET, c.env.API_BASE_URL)
+    return c.json({ folio: out })
+  }
+
+  // A paid folio → run the deferred paid-path side effects (mirrors settle's cleared branch).
+  const lineRows = await db
+    .select({
+      id: folioLines.id,
+      serviceId: folioLines.serviceId,
+      slotId: folioLines.slotId,
+      serviceName: folioLines.serviceName,
+      slotDate: folioLines.slotDate,
+      slotStartTime: folioLines.slotStartTime,
+      checkIn: folioLines.checkIn,
+      checkOut: folioLines.checkOut,
+      quantity: folioLines.quantity,
+      unitPrice: folioLines.unitPrice,
+      lineTotal: folioLines.lineTotal,
+    })
+    .from(folioLines)
+    .where(and(eq(folioLines.folioId, id), eq(folioLines.organizationId, org)))
+
+  const slotLineRows = lineRows.filter((l) => l.slotId && l.slotDate)
+  const identity = folio.customerName?.trim() || folio.customerEmail?.trim() || `folio:${id}`
+  const tickets = await signLineTickets(
+    c.env,
+    org,
+    id,
+    identity,
+    slotLineRows.map((l) => ({
+      id: l.id,
+      serviceId: l.serviceId,
+      slotId: l.slotId!,
+      quantity: l.quantity,
+      slotDate: l.slotDate!,
+    })),
+    tz,
+  )
+
+  const statements: BatchItem<'sqlite'>[] = [
+    db
+      .update(folios)
+      .set(verifyFields)
+      .where(and(eq(folios.id, id), eq(folios.organizationId, org))),
+  ]
+  for (const line of slotLineRows) {
+    statements.push(
+      db
+        .update(folioLines)
+        .set({ qrToken: tickets.get(line.id)!.token })
+        .where(and(eq(folioLines.id, line.id), eq(folioLines.organizationId, org))),
+    )
+  }
+  await db.batch(statements as [BatchItem<'sqlite'>, ...BatchItem<'sqlite'>[]])
+
+  // Deferred portal token + ticket email (auto-delivery on verify, US-A67 D8).
+  const portalLink = await issuePortalLink(
+    db,
+    c.env,
+    org,
+    id,
+    lineRows.map((l) => l.slotDate ?? l.checkOut ?? l.checkIn).filter((d): d is string => !!d),
+  )
+  const extraRows = await db
+    .select({
+      folioLineId: folioLineExtras.folioLineId,
+      name: folioLineExtras.name,
+      price: folioLineExtras.price,
+      quantity: folioLineExtras.quantity,
+    })
+    .from(folioLineExtras)
+    .where(and(eq(folioLineExtras.folioId, id), eq(folioLineExtras.organizationId, org)))
+  const extrasByLine = new Map<string, typeof extraRows>()
+  for (const ex of extraRows) {
+    const list = extrasByLine.get(ex.folioLineId) ?? []
+    list.push(ex)
+    extrasByLine.set(ex.folioLineId, list)
+  }
+  const orgRows = await db
+    .select({ name: organizations.name })
+    .from(organizations)
+    .where(eq(organizations.id, org))
+    .limit(1)
+  dispatchTicketEmail(
+    c,
+    orgRows[0]?.name ?? 'Turistear Ya!',
+    id,
+    {
+      customerEmail: folio.customerEmail,
+      customerName: folio.customerName,
+      paymentMethod: folio.paymentMethod,
+      total: folio.total,
+      createdAt: now,
+    },
+    slotLineRows.map((line) => ({
+      serviceName: line.serviceName,
+      slotDate: line.slotDate!,
+      slotStartTime: line.slotStartTime!,
+      quantity: line.quantity,
+      unitPrice: line.unitPrice,
+      lineTotal: line.lineTotal,
+      qrToken: tickets.get(line.id)!.token,
+      extras: (extrasByLine.get(line.id) ?? []).map((ex) => ({
+        name: ex.name,
+        price: ex.price,
+        quantity: ex.quantity,
+      })),
+    })),
+    portalLink,
+  )
+
+  const out = await readFolio(db, org, folio.agentId, id, c.env.QR_SECRET, c.env.API_BASE_URL)
+  return c.json({ folio: out })
+}
+
+// US-A67 (D6) — ADMIN rejects an electronic payment (bad reference / money never arrived): the sale
+// is void, so release the held spots, claw back the seller's commission, and cancel the folio (no
+// refund — nothing was collected). Admin-only; org-scoped; only a `pending` folio can be rejected.
+export const rejectPayment = async (c: PosContext) => {
+  const admin = c.get('user')
+  const id = c.req.param('id')
+  const db = getDb(c.env)
+  const org = admin.organizationId
+  const body = (await c.req.json().catch(() => ({}))) as { reason?: string }
+
+  const folioRows = await db
+    .select({ agentId: folios.agentId, paymentVerification: folios.paymentVerification })
+    .from(folios)
+    .where(and(eq(folios.id, id), eq(folios.organizationId, org)))
+    .limit(1)
+  const folio = folioRows[0]
+  if (!folio) throw new ApiError('NOT_FOUND', 404, 'Folio not found')
+  if (folio.paymentVerification !== 'pending') {
+    throw new ApiError('NOT_PENDING_VERIFICATION', 409, 'This payment is not awaiting verification')
+  }
+
+  const lineRows = await db
+    .select({
+      slotId: folioLines.slotId,
+      quantity: folioLines.quantity,
+      zoneId: folioLines.zoneId,
+    })
+    .from(folioLines)
+    .where(and(eq(folioLines.folioId, id), eq(folioLines.organizationId, org)))
+
+  const now = new Date()
+  const statements: BatchItem<'sqlite'>[] = [
+    db
+      .update(folios)
+      .set({
+        status: 'cancelled',
+        cancelledAt: now,
+        cancelledBy: admin.userId,
+        cancellationReason: body.reason ?? 'Pago electrónico rechazado',
+        cancellationClawback: true, // the sale was void — the seller loses the commission
+        refundStatus: 'none', // nothing was collected, so nothing to refund
+        updatedAt: now,
+      })
+      .where(and(eq(folios.id, id), eq(folios.organizationId, org))),
+  ]
+  // Release the held spots (mirrors cancelBooking): zone counter + slot reconcile, or the slot total.
+  for (const line of lineRows) {
+    if (!line.slotId) continue
+    if (line.zoneId) {
+      statements.push(
+        db
+          .update(slotZones)
+          .set({ booked: sql`${slotZones.booked} - ${line.quantity}`, updatedAt: now })
+          .where(
+            and(
+              eq(slotZones.slotId, line.slotId),
+              eq(slotZones.zoneId, line.zoneId),
+              eq(slotZones.organizationId, org),
+            ),
+          ),
+        reconcileSlotTotals(db, line.slotId),
+      )
+    } else {
+      statements.push(
+        db
+          .update(slots)
+          .set({ booked: sql`${slots.booked} - ${line.quantity}`, updatedAt: now })
+          .where(and(eq(slots.id, line.slotId), eq(slots.organizationId, org))),
+      )
+    }
+  }
+  statements.push(
+    db
+      .update(accommodationReservations)
+      .set({ status: 'cancelled', updatedAt: now })
+      .where(
+        and(
+          eq(accommodationReservations.folioId, id),
+          eq(accommodationReservations.organizationId, org),
+          eq(accommodationReservations.status, 'active'),
+        ),
+      ),
+  )
+  await db.batch(statements as [BatchItem<'sqlite'>, ...BatchItem<'sqlite'>[]])
+
+  const out = await readFolio(db, org, folio.agentId, id, c.env.QR_SECRET, c.env.API_BASE_URL)
+  return c.json({ folio: out ?? { id, status: 'cancelled' } })
 }
 
 // US-AG07.4 — manual cancellation of a booking: release the held spots immediately and close the
@@ -2088,7 +2491,7 @@ export const cancelBooking = async (c: PosContext) => {
   )
   await db.batch(statements as [BatchItem<'sqlite'>, ...BatchItem<'sqlite'>[]])
 
-  const updated = await readFolio(db, org, agent.userId, id, c.env.QR_SECRET)
+  const updated = await readFolio(db, org, agent.userId, id, c.env.QR_SECRET, c.env.API_BASE_URL)
   return c.json({ folio: updated ?? { id, status: 'cancelled' } })
 }
 
@@ -2198,6 +2601,7 @@ export const reactivateBooking = async (c: PosContext) => {
       bookingHoldDays: organizations.bookingHoldDays,
       salesCutoffOffsetMinutes: organizations.salesCutoffOffsetMinutes,
       bookingGraceOffsetMinutes: organizations.bookingGraceOffsetMinutes,
+      timezone: organizations.timezone,
     })
     .from(organizations)
     .where(eq(organizations.id, org))
@@ -2207,13 +2611,17 @@ export const reactivateBooking = async (c: PosContext) => {
     bookingHoldDays: orgRows[0]?.bookingHoldDays ?? 7,
     bookingGraceOffsetMinutes: orgRows[0]?.bookingGraceOffsetMinutes ?? 15,
   })
+  // US-A66 — the cutoff guard + fresh same-day expiry below resolve in the org's time zone.
+  const tz = orgRows[0]?.timezone ?? 'America/Mexico_City'
 
   // US-A47 — don't reactivate onto a slot whose departure has passed the sales cutoff (that
   // would re-create an already-expired booking). Guard BEFORE re-blocking any spots.
   const reactivateNowSec = Math.floor(Date.now() / 1000)
   const salesCutoffOffset = orgRows[0]?.salesCutoffOffsetMinutes ?? 0
   for (const line of lineRows) {
-    if (!isSlotSellable(line.slotDate, line.slotStartTime, reactivateNowSec, salesCutoffOffset)) {
+    if (
+      !isSlotSellable(line.slotDate, line.slotStartTime, reactivateNowSec, salesCutoffOffset, tz)
+    ) {
       throw new ApiError(
         'SLOT_CLOSED',
         409,
@@ -2380,8 +2788,8 @@ export const reactivateBooking = async (c: PosContext) => {
   // Fresh expiry from the current org policy (read above) + earliest departure — a slot start or a
   // stay check-in (midnight), whichever comes first across the cart.
   const departures: { epoch: number; date: string }[] = [
-    ...lineRows.map((l) => ({ epoch: slotEpoch(l.slotDate, l.slotStartTime), date: l.slotDate })),
-    ...stayReservations.map((r) => ({ epoch: slotEpoch(r.checkIn!, '00:00'), date: r.checkIn! })),
+    ...lineRows.map((l) => ({ epoch: slotEpoch(l.slotDate, l.slotStartTime, tz), date: l.slotDate })),
+    ...stayReservations.map((r) => ({ epoch: slotEpoch(r.checkIn!, '00:00', tz), date: r.checkIn! })),
   ]
   const earliest = departures.reduce(
     (min, d) => (d.epoch < min.epoch ? d : min),
@@ -2391,7 +2799,7 @@ export const reactivateBooking = async (c: PosContext) => {
     policy,
     reactivateNowSec,
     earliest.epoch,
-    earliest.date === utcToday(),
+    earliest.date === orgToday(tz),
   )
 
   await db
@@ -2406,7 +2814,7 @@ export const reactivateBooking = async (c: PosContext) => {
     })
     .where(and(eq(folios.id, id), eq(folios.organizationId, org)))
 
-  const updated = await readFolio(db, org, agent.userId, id, c.env.QR_SECRET)
+  const updated = await readFolio(db, org, agent.userId, id, c.env.QR_SECRET, c.env.API_BASE_URL)
   return c.json({ folio: updated ?? { id, status: 'booking' } })
 }
 
@@ -2422,6 +2830,9 @@ export const listAgentFolios = async (c: PosContext) => {
 
   const statusQ = c.req.query('status')
   const dateQ = c.req.query('date')
+  // US-AF13 — the manager filters the hotel's folios by shift operator; an operator session may
+  // narrow to its own sales. Ignored for a plain agent (no operators exist under them).
+  const operatorQ = c.req.query('operator')
 
   const filters = [
     eq(folios.organizationId, org),
@@ -2434,6 +2845,9 @@ export const listAgentFolios = async (c: PosContext) => {
     filters.push(
       sql`strftime('%Y-%m-%d', ${folios.createdAt}, 'unixepoch') = ${dateQ}`,
     )
+  }
+  if (operatorQ) {
+    filters.push(eq(folios.operatorId, operatorQ))
   }
 
   const rows = await db
@@ -2450,8 +2864,14 @@ export const listAgentFolios = async (c: PosContext) => {
       reminderStatus: folios.reminderStatus,
       reminderSentAt: folios.reminderSentAt,
       reminderSentBy: folios.reminderSentBy,
+      ticketsSentAt: folios.ticketsSentAt,
+      ticketsViewedAt: folios.ticketsViewedAt,
+      paymentMethod: folios.paymentMethod,
+      paymentVerification: folios.paymentVerification,
+      operatorName: affiliateOperators.name,
     })
     .from(folios)
+    .leftJoin(affiliateOperators, eq(folios.operatorId, affiliateOperators.id))
     .where(and(...filters))
     .orderBy(desc(folios.createdAt))
 
@@ -2464,6 +2884,15 @@ export const listAgentFolios = async (c: PosContext) => {
       status: r.status,
       total: r.total,
       amount_paid: r.amountPaid,
+      // US-AG41/US-A67 — the seller sees the verification state (delivery is blocked while pending).
+      payment_method: r.paymentMethod,
+      payment_verification: r.paymentVerification,
+      // Delivery axis (whatsapp-qr-delivery) — a paid folio is "deliverable" only once its money has
+      // cleared (cash, or the electronic payment verified). The sent/viewed stamps drive the
+      // Pendiente → Enviado → Visto list badge.
+      deliverable: r.status === 'paid' && r.paymentVerification !== 'pending',
+      tickets_sent_at: r.ticketsSentAt ? Math.floor(r.ticketsSentAt.getTime() / 1000) : null,
+      tickets_viewed_at: r.ticketsViewedAt ? Math.floor(r.ticketsViewedAt.getTime() / 1000) : null,
       // US-AG07.3 — derived pending balance + booking fields drive the Apartados dashboard.
       pending_balance: r.total - r.amountPaid,
       created_at: Math.floor(r.createdAt.getTime() / 1000),
@@ -2478,6 +2907,8 @@ export const listAgentFolios = async (c: PosContext) => {
         ? Math.floor(r.reminderSentAt.getTime() / 1000)
         : null,
       reminder_sent_by: r.reminderSentBy,
+      // US-AF13 — "Vendido por: {name}" (null ⇒ the manager/agent sold directly).
+      operator_name: r.operatorName ?? null,
     })),
   })
 }

@@ -1,5 +1,5 @@
 import { Hono } from 'hono'
-import { submitCancellationRequest, viewPortal } from './handler'
+import { markPortalSeen, submitCancellationRequest, viewPortal } from './handler'
 
 // Tourist self-service portal (US-T01–T05) — PUBLIC routes: no authMiddleware, no role.
 // The folio-scoped access token in the path IS the credential (spec D2); it resolves to
@@ -9,5 +9,7 @@ const portal = new Hono<{ Bindings: CloudflareBindings }>()
 
 portal.get('/:token', viewPortal)
 portal.post('/:token/cancellation-request', submitCancellationRequest)
+// whatsapp-qr-delivery D6 — the "Visto" beacon (client-JS only; bot-proof). Always 204.
+portal.post('/:token/seen', markPortalSeen)
 
 export default portal

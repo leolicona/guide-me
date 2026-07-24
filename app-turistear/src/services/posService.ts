@@ -39,8 +39,10 @@ export interface ConfirmStayLineInput {
 /** A cart line is either a tour slot or a lodging stay. */
 export type ConfirmLineInput = ConfirmSlotLineInput | ConfirmStayLineInput
 
-/** How the agent collected payment. 'card' earns commission but adds no cash debt (US-AG25). */
-export type PaymentMethod = 'cash' | 'card'
+/** How the agent collected payment. Every non-cash method is electronic — it earns commission but
+ *  adds no cash debt (US-AG25/AG29). US-AG41: the POS checkout currently offers only cash + transfer
+ *  (card/link stay in the union for historical folios). */
+export type PaymentMethod = 'cash' | 'card' | 'transfer' | 'link'
 
 export interface ConfirmSaleInput {
   customer_name?: string | null
@@ -48,6 +50,8 @@ export interface ConfirmSaleInput {
   customer_phone?: string | null
   /** US-AG25 — collection channel. Server defaults to 'cash' when omitted. */
   payment_method?: PaymentMethod
+  /** US-AG41 — the transfer's bank reference; required by the server iff payment_method='transfer'. */
+  payment_reference?: string | null
   /** US-AG07 — present ⇒ BOOKING mode: the deposit (minor units). Requires a dialable phone.
    *  Absent ⇒ a normal full paid sale. */
   down_payment?: number

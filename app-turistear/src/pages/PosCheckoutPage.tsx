@@ -14,18 +14,18 @@ import {
   ToggleButton,
   ToggleButtonGroup,
   Chip,
+  Tooltip,
 } from '@mui/material'
 import ArrowBackRounded from '@mui/icons-material/ArrowBackRounded'
 import AddRounded from '@mui/icons-material/AddRounded'
 import RemoveRounded from '@mui/icons-material/RemoveRounded'
 import DeleteOutlineRounded from '@mui/icons-material/DeleteOutlineRounded'
 import PaymentsRounded from '@mui/icons-material/PaymentsRounded'
-import CreditCardRounded from '@mui/icons-material/CreditCardRounded'
 import AccountBalanceRounded from '@mui/icons-material/AccountBalanceRounded'
-import LinkRounded from '@mui/icons-material/LinkRounded'
+import HourglassTopRounded from '@mui/icons-material/HourglassTopRounded'
+import SavingsRounded from '@mui/icons-material/SavingsRounded'
 import { useConfirmSale } from '../features/pos/hooks'
 import { useMyOrganization } from '../features/organization'
-import { useCurrentUser } from '../features/auth/CurrentUserContext'
 import {
   usePosCart,
   toConfirmPayload,
@@ -40,14 +40,12 @@ import { StayCartLine } from '../features/pos/components/StayCartLine'
 import { ServiceError } from '../services/authService'
 import { formatMoney, amountToCents, centsToAmount } from '../features/catalog/types'
 import { ROUTES } from '../config/routes'
-import { SectionCard, MoneyText } from '../components'
+import { SectionCard, MoneyText, InfoPopover } from '../components'
+import { isSendablePhone } from '../features/pos/phone'
 
 // customer_email is mandatory at POS — it's the only delivery channel for the ticket + QR
 // in Phase 1. Mirror the backend's validation so the agent gets immediate feedback.
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
-
-// US-AG07 D4 — a booking needs a dialable phone (mirrors the server's ≥ 8-digit check).
-const isDialable = (phone: string): boolean => phone.replace(/\D/g, '').length >= 8
 
 // US-AG07.2 — the adaptive checkout's derived state from the entered amount vs the cart total
 // and the org minimum deposit. Drives the button label/enablement and the sale type.
@@ -105,6 +103,7 @@ function LinePriceField({ line }: { line: SlotCartLine }) {
   return (
     <TextField
       label="Precio unitario"
+      placeholder="0.00"
       type="number"
       size="small"
       value={value}
@@ -119,6 +118,7 @@ function LinePriceField({ line }: { line: SlotCartLine }) {
             : `Mín ${formatMoney(min)} · base ${formatMoney(base)}`
       }
       slotProps={{
+        inputLabel: { shrink: true },
         input: {
           startAdornment: <InputAdornment position="start">$</InputAdornment>,
         },
@@ -148,16 +148,16 @@ export default function PosCheckoutPage() {
 
   const navigate = useNavigate()
   const confirm = useConfirmSale()
-  const user = useCurrentUser()
-  // Affiliate-portal D8: the ticket is addressed to the affiliate's own account email, so the
-  // customer email here is an OPTIONAL copy to the tourist. For an agent/admin it stays the
-  // mandatory delivery channel.
-  const isAffiliate = user.role === 'affiliate'
-
+  // D2 (whatsapp-qr-delivery) — every POS sale now requires a name + a sendable phone (WhatsApp
+  // is the primary ticket-delivery channel); email drops to an optional copy, valid if present.
   const emailTrimmed = customerEmail.trim()
-  const emailValid = isAffiliate
-    ? emailTrimmed === '' || EMAIL_RE.test(emailTrimmed)
-    : EMAIL_RE.test(emailTrimmed)
+  const emailValid = emailTrimmed === '' || EMAIL_RE.test(emailTrimmed)
+  const nameValid = customerName.trim().length > 0
+  const phoneValid = isSendablePhone(customerPhone)
+  // US-AG41 — a bank transfer needs a reference (≥ 4 chars). The customer's tickets are then held
+  // until an admin verifies the money (US-A67). Local state — it isn't persisted with the cart.
+  const [reference, setReference] = useState('')
+  const referenceValid = paymentMethod !== 'transfer' || reference.trim().length >= 4
 
   // US-AG07.2 — adaptive, amount-driven checkout. The amount input pre-loads the cart total; the
   // sale type / button / validity derive from it. A suggested-deposit chip reuses the org minimum %.
@@ -189,12 +189,14 @@ export default function PosCheckoutPage() {
             : 'INSUFFICIENT'
 
   const chipLit = suggestedCents > 0 && amountCents === suggestedCents
-  const phoneOk = isDialable(customerPhone)
-  // A booking additionally requires a dialable phone (D4).
+  // Name + phone are required for EVERY sale now (D2); email only has to be valid-if-present.
   const canSubmit =
     !confirm.isPending &&
+    nameValid &&
+    phoneValid &&
     emailValid &&
-    (saleState === 'FULL' || (saleState === 'PARTIAL' && phoneOk))
+    referenceValid &&
+    (saleState === 'FULL' || saleState === 'PARTIAL')
 
   const buttonLabel = confirm.isPending
     ? saleState === 'FULL'
@@ -214,6 +216,8 @@ export default function PosCheckoutPage() {
     // Read the current state directly so the payload reflects any last edits.
     const payload = toConfirmPayload(usePosCart.getState())
     if (saleState === 'PARTIAL') payload.down_payment = amountCents
+    // US-AG41 — carry the transfer reference (ignored server-side for other methods).
+    if (paymentMethod === 'transfer') payload.payment_reference = reference.trim()
     confirm.mutate(payload, {
       onSuccess: (folio) => {
         clear()
@@ -294,14 +298,26 @@ export default function PosCheckoutPage() {
                               <Typography sx={{ minWidth: 24, textAlign: 'center' }}>
                                 {line.quantity}
                               </Typography>
-                              <IconButton
-                                size="small"
-                                aria-label="Más personas"
-                                onClick={() => updateQuantity(lineKey(line), line.quantity + 1)}
-                                disabled={line.quantity >= line.slot.remaining}
+                              <Tooltip
+                                title={
+                                  line.quantity >= line.slot.remaining
+                                    ? `Máximo disponible: ${line.slot.remaining}`
+                                    : ''
+                                }
+                                enterTouchDelay={0}
                               >
-                                <AddRounded fontSize="small" />
-                              </IconButton>
+                                {/* span keeps the tooltip reachable while the button is disabled */}
+                                <span>
+                                  <IconButton
+                                    size="small"
+                                    aria-label="Más personas"
+                                    onClick={() => updateQuantity(lineKey(line), line.quantity + 1)}
+                                    disabled={line.quantity >= line.slot.remaining}
+                                  >
+                                    <AddRounded fontSize="small" />
+                                  </IconButton>
+                                </span>
+                              </Tooltip>
                               <IconButton
                                 size="small"
                                 aria-label="Eliminar artículo"
@@ -321,82 +337,121 @@ export default function PosCheckoutPage() {
             <SectionCard title="Cliente">
                 <Stack spacing={2}>
                   <TextField
-                    label="Nombre (opcional)"
+                    label="Nombre"
+                    placeholder="Juan Pérez"
                     size="small"
+                    required
                     value={customerName}
                     onChange={(e) => setCustomer({ name: e.target.value })}
-                  />
-                  <TextField
-                    label={isAffiliate ? 'Copia al cliente (opcional)' : 'Correo electrónico'}
-                    size="small"
-                    type="email"
-                    required={!isAffiliate}
-                    value={customerEmail}
-                    onChange={(e) => setCustomer({ email: e.target.value })}
-                    error={emailTrimmed.length > 0 && !emailValid}
-                    helperText={
-                      emailTrimmed.length > 0 && !emailValid
-                        ? 'Ingresa un correo electrónico válido.'
-                        : isAffiliate
-                          ? 'El boleto QR se envía a tu correo; agrega uno para enviarle copia al cliente.'
-                          : 'Obligatorio — el recibo y el boleto QR se envían a este correo.'
-                    }
+                    error={customerName.length > 0 && !nameValid}
+                    slotProps={{ inputLabel: { shrink: true } }}
                   />
                   <TextField
                     label="Teléfono"
+                    placeholder="55 1234 5678"
                     size="small"
+                    required
+                    type="tel"
                     value={customerPhone}
                     onChange={(e) => setCustomer({ phone: e.target.value })}
+                    error={customerPhone.length > 0 && !phoneValid}
+                    slotProps={{ inputLabel: { shrink: true } }}
+                    helperText={
+                      customerPhone.length > 0 && !phoneValid
+                        ? 'Ingresa un teléfono válido (10 dígitos).'
+                        : 'Obligatorio — por aquí se envían los boletos por WhatsApp.'
+                    }
+                  />
+                  <TextField
+                    label="Correo electrónico (opcional)"
+                    placeholder="cliente@correo.com"
+                    size="small"
+                    type="email"
+                    value={customerEmail}
+                    onChange={(e) => setCustomer({ email: e.target.value })}
+                    error={emailTrimmed.length > 0 && !emailValid}
+                    slotProps={{ inputLabel: { shrink: true } }}
+                    helperText={
+                      emailTrimmed.length > 0 && !emailValid
+                        ? 'Ingresa un correo electrónico válido.'
+                        : 'Opcional — copia del recibo y del boleto por correo.'
+                    }
                   />
                 </Stack>
             </SectionCard>
 
-            <SectionCard title="Método de pago">
-                {/* US-AG29 — four methods; everything except Efectivo is electronic (no
-                    cash debt, commission still earned). Two rows so each stays tappable. */}
-                <Stack spacing={1}>
-                  <ToggleButtonGroup
-                    exclusive
-                    fullWidth
-                    value={paymentMethod}
-                    onChange={(_, value) => value && setPaymentMethod(value)}
-                    aria-label="Método de pago"
-                  >
-                    <ToggleButton value="cash" aria-label="Efectivo">
-                      <PaymentsRounded fontSize="small" sx={{ mr: 1 }} />
-                      Efectivo
-                    </ToggleButton>
-                    <ToggleButton value="card" aria-label="Tarjeta">
-                      <CreditCardRounded fontSize="small" sx={{ mr: 1 }} />
-                      Tarjeta
-                    </ToggleButton>
-                  </ToggleButtonGroup>
-                  <ToggleButtonGroup
-                    exclusive
-                    fullWidth
-                    value={paymentMethod}
-                    onChange={(_, value) => value && setPaymentMethod(value)}
-                    aria-label="Método de pago electrónico"
-                  >
-                    <ToggleButton value="transfer" aria-label="Transferencia">
-                      <AccountBalanceRounded fontSize="small" sx={{ mr: 1 }} />
-                      Transferencia
-                    </ToggleButton>
-                    <ToggleButton value="link" aria-label="Link de pago">
-                      <LinkRounded fontSize="small" sx={{ mr: 1 }} />
-                      Link de pago
-                    </ToggleButton>
-                  </ToggleButtonGroup>
-                </Stack>
-                <Typography
-                  variant="caption"
-                  color="text.secondary"
-                  sx={{ display: 'block', mt: 1.5 }}
+            <SectionCard
+              title="Método de pago"
+              action={
+                <InfoPopover label="Cómo afecta el método de pago a tu caja">
+                  <Stack spacing={1}>
+                    <Box>
+                      <b>Efectivo</b> entra a tu caja — lo entregas a la empresa en el corte.
+                    </Box>
+                    <Box>
+                      <b>Transferencia</b> la cobra la empresa: no suma a tu caja (generas comisión
+                      igual), y los boletos se envían cuando un administrador verifica el pago.
+                    </Box>
+                  </Stack>
+                </InfoPopover>
+              }
+            >
+                {/* US-AG41 (D1) — only Efectivo + Transferencia for now (card/link hidden). */}
+                <ToggleButtonGroup
+                  exclusive
+                  fullWidth
+                  value={paymentMethod}
+                  onChange={(_, value) => value && setPaymentMethod(value)}
+                  aria-label="Método de pago"
                 >
-                  {paymentMethod === 'cash'
-                    ? 'Efectivo recibido — se suma al saldo de caja que entregas a la empresa.'
-                    : 'Cobro electrónico — lo recibe la empresa: no suma efectivo a tu caja, pero sí genera comisión.'}
-                </Typography>
+                  <ToggleButton value="cash" aria-label="Efectivo">
+                    <PaymentsRounded fontSize="small" sx={{ mr: 1 }} />
+                    Efectivo
+                  </ToggleButton>
+                  <ToggleButton value="transfer" aria-label="Transferencia">
+                    <AccountBalanceRounded fontSize="small" sx={{ mr: 1 }} />
+                    Transferencia
+                  </ToggleButton>
+                </ToggleButtonGroup>
+
+                {/* US-AG41 — a transfer requires its bank reference; the QR is held until verified. */}
+                {paymentMethod === 'transfer' && (
+                  <TextField
+                    label="Referencia de la transferencia"
+                    placeholder="Ej. BBVA 0099887766"
+                    value={reference}
+                    onChange={(e) => setReference(e.target.value)}
+                    error={reference.trim().length > 0 && !referenceValid}
+                    helperText={
+                      reference.trim().length > 0 && !referenceValid
+                        ? 'Captura al menos 4 caracteres.'
+                        : 'Número o folio del comprobante — el administrador lo verifica.'
+                    }
+                    fullWidth
+                    sx={{ mt: 2 }}
+                  />
+                )}
+
+                {/* Structured, at-a-glance consequence — flips with the selection. */}
+                <Stack
+                  direction="row"
+                  spacing={0.75}
+                  sx={{ alignItems: 'center', mt: 1.5, color: 'text.secondary' }}
+                >
+                  {paymentMethod === 'cash' ? (
+                    <>
+                      <SavingsRounded sx={{ fontSize: 18 }} />
+                      <Typography variant="caption">Entra a tu caja</Typography>
+                    </>
+                  ) : (
+                    <>
+                      <HourglassTopRounded sx={{ fontSize: 18 }} />
+                      <Typography variant="caption">
+                        En verificación · los boletos se envían al confirmar el pago
+                      </Typography>
+                    </>
+                  )}
+                </Stack>
             </SectionCard>
 
             <SectionCard>
@@ -439,12 +494,14 @@ export default function PosCheckoutPage() {
                 </Stack>
                 <TextField
                   label="Monto recibido"
+                  placeholder="0.00"
                   type="number"
                   fullWidth
                   value={amountInput}
                   onChange={(e) => setAmountInput(e.target.value)}
                   error={saleState === 'INSUFFICIENT' || saleState === 'EXCESS'}
                   slotProps={{
+                    inputLabel: { shrink: true },
                     input: {
                       startAdornment: <InputAdornment position="start">$</InputAdornment>,
                     },
@@ -462,11 +519,6 @@ export default function PosCheckoutPage() {
                             : 'Captura el monto recibido'
                   }
                 />
-                {saleState === 'PARTIAL' && !phoneOk && (
-                  <Typography variant="caption" color="error" sx={{ display: 'block', mt: 1 }}>
-                    Un apartado requiere un teléfono válido para dar seguimiento por WhatsApp.
-                  </Typography>
-                )}
             </SectionCard>
 
             {/* One confident teal action, pinned to the thumb zone — reachable one-handed as the
@@ -493,13 +545,13 @@ export default function PosCheckoutPage() {
               >
                 {buttonLabel}
               </Button>
-              {!emailValid && (
+              {(!nameValid || !phoneValid) && (
                 <Typography
                   variant="caption"
                   color="text.secondary"
                   sx={{ display: 'block', textAlign: 'center', mt: 1 }}
                 >
-                  Captura el correo del cliente para enviar el boleto y poder cobrar.
+                  Captura nombre y teléfono del cliente para enviar los boletos y cobrar.
                 </Typography>
               )}
             </Box>

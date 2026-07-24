@@ -38,8 +38,13 @@ export const seedUser = async ({
   const userId = crypto.randomUUID()
 
   if (!organizationId) {
-    await env.DB.prepare('INSERT INTO organizations (id, name) VALUES (?, ?)')
-      .bind(orgId, organizationName)
+    // US-A66 — seed test orgs in UTC so the suite's frozen UTC clock IS the org-local clock. The
+    // whole suite reasons in naive-UTC wall-clock (slot times chosen against the frozen 12:00Z);
+    // the production default is 'America/Mexico_City' (asserted separately in the organizations
+    // suite, which seeds `timezone` explicitly). The tz-conversion math is covered by
+    // test/pos/timezone.test.ts.
+    await env.DB.prepare('INSERT INTO organizations (id, name, timezone) VALUES (?, ?, ?)')
+      .bind(orgId, organizationName, 'UTC')
       .run()
   }
 

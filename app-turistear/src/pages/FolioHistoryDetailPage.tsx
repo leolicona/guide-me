@@ -13,27 +13,36 @@ import {
 } from '@mui/material'
 import ArrowBackRounded from '@mui/icons-material/ArrowBackRounded'
 import { useFolio } from '../features/pos/hooks'
+import { useOrgDateFormatter } from '../features/organization'
 import { TicketQr } from '../features/pos/components/TicketQr'
-import { BookingActions, ExpiredBookingBanner, venceLabel } from '../features/bookings'
+import WarningAmberRounded from '@mui/icons-material/WarningAmberRounded'
+import {
+  BookingActions,
+  ExpiredBookingBanner,
+  venceLabel,
+  TicketWhatsAppButton,
+  DeliveryBadge,
+} from '../features/bookings'
+import { deliveryState } from '../features/pos/delivery'
 import { FolioStatusChip } from '../features/folios'
-import { MoneyText } from '../components'
+import { MoneyText, SectionCard } from '../components'
 import { formatMoney } from '../features/catalog/types'
 import { folioLineMeta } from '../features/folios/folioLineLabel'
 import { ROUTES } from '../config/routes'
 
-const formatDate = (unixSeconds: number) =>
-  new Date(unixSeconds * 1000).toLocaleString(undefined, {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  })
+const DATE_FMT: Intl.DateTimeFormatOptions = {
+  year: 'numeric',
+  month: 'short',
+  day: 'numeric',
+  hour: '2-digit',
+  minute: '2-digit',
+}
 
 // US-AG21 — read-only detail of one of the agent's own folios (answer customer queries,
 // re-show the QR). Reuses GET /api/pos/folios/:id via useFolio. Status-aware framing; no
 // cancel/edit affordance (cancellation is admin-only).
 export default function FolioHistoryDetailPage() {
+  const formatDate = useOrgDateFormatter(DATE_FMT) // US-A66 — org-local audit timestamps
   const { id } = useParams<{ id: string }>()
   const { data: folio, isLoading, isError } = useFolio(id)
 
@@ -175,6 +184,34 @@ export default function FolioHistoryDetailPage() {
                 </Stack>
               </CardContent>
             </Card>
+
+            {/* whatsapp-qr-delivery — re-send the tickets over WhatsApp from history. */}
+            {folio.status === 'paid' && folio.portal_link && (
+              <SectionCard>
+                <Stack spacing={1.5}>
+                  <Stack
+                    direction="row"
+                    sx={{ alignItems: 'center', justifyContent: 'space-between' }}
+                  >
+                    <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
+                      Entregar boletos
+                    </Typography>
+                    <DeliveryBadge folio={folio} />
+                  </Stack>
+                  <TicketWhatsAppButton folio={folio} surface="seller" variant="primary" />
+                  {deliveryState(folio) === 'pending' && (
+                    <Stack
+                      direction="row"
+                      spacing={0.5}
+                      sx={{ alignItems: 'center', color: 'warning.main' }}
+                    >
+                      <WarningAmberRounded fontSize="small" />
+                      <Typography variant="caption">Aún no enviado al cliente</Typography>
+                    </Stack>
+                  )}
+                </Stack>
+              </SectionCard>
+            )}
 
             {/* QR access only exists once the folio is paid — a live/expired apartado has none. */}
             {folio.status === 'paid' && (

@@ -2,6 +2,8 @@
 // integer minor units (centavos) — render with the helpers in features/catalog/types.
 // Spec: docs/cancellation/total-folio-cancellation.spec.md
 
+import type { PaymentMethod, PaymentVerification } from '../pos/types'
+
 export type FolioStatus = 'paid' | 'booking' | 'cancelled'
 
 // US-AG07.3 — last-reminder tracking for the WhatsApp recovery flow.
@@ -29,6 +31,16 @@ export interface FolioListItem {
   reminder_status?: ReminderStatus
   reminder_sent_at?: number | null
   reminder_sent_by?: string | null
+  // whatsapp-qr-delivery — admin oversight of undelivered tickets.
+  deliverable?: boolean
+  tickets_sent_at?: number | null
+  tickets_viewed_at?: number | null
+  // US-AG41/US-A67 — payment method + reference + the verification gate (the "Por verificar" queue).
+  payment_method?: PaymentMethod
+  payment_reference?: string | null
+  payment_verification?: PaymentVerification
+  // US-A68 — the affiliate shift operator who took the sale; null if sold directly.
+  operator_name?: string | null
 }
 
 export interface FolioLineExtra {
@@ -65,10 +77,17 @@ export interface FolioDetailLine {
 export interface FolioDetail {
   id: string
   agent: FolioAgent
+  // US-A68 — the affiliate shift operator who took the sale; null if sold directly.
+  operator_name?: string | null
   status: FolioStatus
   customer_name: string | null
   customer_email: string | null
   customer_phone: string | null
+  // US-AG41/US-A67 — payment method + reference + verification gate (drives verify/reject actions).
+  payment_method?: PaymentMethod
+  payment_reference?: string | null
+  payment_verification?: PaymentVerification
+  payment_verified_at?: number | null
   subtotal: number
   discount_total: number
   total: number
@@ -93,6 +112,10 @@ export interface FolioDetail {
   refund_note: string | null // the admin's audit note on a no-PIN override confirm
   refunded_at: number | null
   refunded_by: string | null
+  // whatsapp-qr-delivery — portal_link drives the admin Reenviar action; sent/viewed → the badge.
+  portal_link?: string | null
+  tickets_sent_at?: number | null
+  tickets_viewed_at?: number | null
   created_at: number
   lines: FolioDetailLine[]
 }
@@ -101,6 +124,8 @@ export interface FolioFilters {
   status?: FolioStatus
   date?: string
   agentId?: string
+  // US-A67 — the "Por verificar" queue filters to electronic payments awaiting an admin.
+  verification?: PaymentVerification
 }
 
 // --- Tourist cancellation requests + refund tracking (US-T04/T05, US-A23) ---

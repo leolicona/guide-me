@@ -714,6 +714,7 @@ const sellStay = (
     headers: jsonAuth(ADMIN_EMAIL),
     body: JSON.stringify({
       customer_name: 'Cliente',
+      customer_phone: '5512345678',
       customer_email: 'cliente@example.com',
       lines: [{ unit_type_id: typeId, check_in: checkIn, check_out: checkOut, guests, quantity }],
       ...extra,
@@ -887,6 +888,7 @@ describe('POS lodging sale path', () => {
 
     const booking = await sellStay(typeId, '2026-07-10', '2026-07-13', 2, 1, {
       down_payment: 150000,
+      customer_name: 'Cliente Test',
       customer_phone: '+525555555555',
     })
     expect(booking.status).toBe(201)
@@ -916,6 +918,7 @@ describe('POS lodging sale path', () => {
 
     const booking = await sellStay(typeId, '2026-07-10', '2026-07-13', 2, 1, {
       down_payment: 150000,
+      customer_name: 'Cliente Test',
       customer_phone: '+525555555555',
     })
     const folioId = ((await booking.json()) as SaleResponse).folio.id
@@ -940,6 +943,7 @@ describe('POS lodging sale path', () => {
 
     const booking = await sellStay(typeId, '2026-07-10', '2026-07-13', 2, 1, {
       down_payment: 150000,
+      customer_name: 'Cliente Test',
       customer_phone: '+525555555555',
     })
     const folioId = ((await booking.json()) as SaleResponse).folio.id
@@ -969,6 +973,7 @@ describe('POS lodging sale path', () => {
     const { typeId } = await seedUnitType({ organizationId: orgId, serviceId, baseRate: 100000 })
     const booking = await sellStay(typeId, '2026-07-10', '2026-07-13', 2, 1, {
       down_payment: 150000,
+      customer_name: 'Cliente Test',
       customer_phone: '+525555555555',
     })
     const folioId = ((await booking.json()) as SaleResponse).folio.id
@@ -1176,6 +1181,8 @@ describe('multitenancy', () => {
       method: 'POST',
       headers: jsonAuth(orgB.adminEmail),
       body: JSON.stringify({
+        customer_name: 'Cliente Test',
+        customer_phone: '5512345678',
         customer_email: 'x@example.com',
         lines: [{ unit_type_id: typeId, check_in: '2026-07-10', check_out: '2026-07-12', guests: 2, quantity: 1 }],
       }),

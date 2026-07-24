@@ -37,6 +37,8 @@ const BalancePage = lazy(() => import('./pages/BalancePage'))
 const CashBalancesPage = lazy(() => import('./pages/CashBalancesPage'))
 const CashDropDetailPage = lazy(() => import('./pages/CashDropDetailPage'))
 const ReportsPage = lazy(() => import('./pages/ReportsPage'))
+const OperatorsPage = lazy(() => import('./pages/OperatorsPage'))
+const OperatorAccessPage = lazy(() => import('./pages/OperatorAccessPage'))
 
 function PageLoader() {
   return (
@@ -67,6 +69,9 @@ function App() {
           <Route path={ROUTES.FORGOT_PASSWORD} element={<ForgotPasswordPage />} />
           <Route path={ROUTES.RESET_PASSWORD} element={<ResetPasswordPage />} />
           <Route path={ROUTES.INVITE_ACCEPT} element={<InviteAcceptPage />} />
+          {/* Operator saved WhatsApp link — PUBLIC (no session yet): set PIN or unlock a shift
+              (US-OP01/OP02). The server sets the shift cookie; the page then routes into the POS. */}
+          <Route path={ROUTES.OPERATOR_ACCESS} element={<OperatorAccessPage />} />
 
           {/* Authenticated app — shares the AppLayout navigation shell */}
           <Route
@@ -181,6 +186,18 @@ function App() {
               element={
                 <RoleGuard role={['agent', 'affiliate']}>
                   <BalancePage />
+                </RoleGuard>
+              }
+            />
+
+            {/* Affiliate manager — shift-cashier operators panel (US-AF10–AF12). Operator
+                sessions borrow the affiliate role but are rejected server-side (D6); this guard
+                keeps the panel off their nav. */}
+            <Route
+              path={ROUTES.OPERATORS}
+              element={
+                <RoleGuard role="affiliate">
+                  <OperatorsPage />
                 </RoleGuard>
               }
             />
