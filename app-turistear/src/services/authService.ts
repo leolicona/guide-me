@@ -166,9 +166,10 @@ export const completeInvite = (data: CompleteInviteInput) =>
     body: JSON.stringify(data),
   })
 
-export const getMe = async () => {
-  const res = await request<{ user: UserPayload }>('/api/me')
-  return res.user
+export const getMe = async (): Promise<UserPayload> => {
+  const res = await request<{ user: UserPayload; operator?: UserPayload['operator'] }>('/api/me')
+  // Fold the operator claim (US-OP01/OP02) into the session user so useCurrentUser exposes it.
+  return { ...res.user, operator: res.operator ?? null }
 }
 
 export const logout = () =>

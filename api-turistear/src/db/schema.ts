@@ -375,6 +375,9 @@ export const folios = sqliteTable('folios', {
   ticketsSentAt: integer('tickets_sent_at', { mode: 'timestamp' }),
   ticketsSentBy: text('tickets_sent_by').references(() => users.id),
   ticketsViewedAt: integer('tickets_viewed_at', { mode: 'timestamp' }),
+  // US-AF13 — the affiliate shift operator who made the sale (docs/affiliate-operators/spec.md).
+  // Null ⇒ the manager/agent sold directly. Pure attribution: agent_id still owns the caja/commission.
+  operatorId: text('operator_id').references((): any => affiliateOperators.id),
   createdAt: integer('created_at', { mode: 'timestamp' })
     .notNull()
     .default(sql`(unixepoch())`),
@@ -808,6 +811,44 @@ export const affiliateInvitations = sqliteTable('affiliate_invitations', {
     .notNull()
     .default(sql`(unixepoch())`),
 })
+
+// US-AF10–AF13 / US-OP01–OP02 (docs/affiliate-operators/spec.md). A shift cashier at an affiliate
+// company's register — NOT a `users` row (no email/password). Registered by the manager with name +
+// phone; identified by a durable access_token (the saved WhatsApp link) and unlocked by a 4-digit
+// PIN. Pure attribution: its sales roll into the owning manager's one caja (folios.agent_id stays
+// the manager); folios.operator_id only labels "Vendido por: {name}".
+export const affiliateOperators = sqliteTable('affiliate_operators', {
+  id: text('id').primaryKey(),
+  organizationId: text('organization_id')
+    .notNull()
+    .references(() => organizations.id),
+  affiliateCompanyId: text('affiliate_company_id')
+    .notNull()
+    .references(() => affiliateCompanies.id),
+  // The affiliate user who owns this operator — sales attribute to this manager's caja/balance
+  // (folios.agent_id) and it resolves the operator session's borrowed identity (D5).
+  managerId: text('manager_id')
+    .notNull()
+    .references(() => users.id),
+  name: text('name').notNull(),
+  phone: text('phone').notNull(), // MX-normalized; unique among the company's ACTIVE operators
+  pinHash: text('pin_hash'), // null until first-run PIN setup (US-OP01)
+  pinSalt: text('pin_salt'),
+  pinAttempts: integer('pin_attempts').notNull().default(0), // >= 5 ⇒ locked until a manager resets
+  accessToken: text('access_token').notNull().unique(), // the saved link's secret; rotated on remove/reset
+  status: text('status', { enum: ['active', 'removed'] })
+    .notNull()
+    .default('active'),
+  createdAt: integer('created_at', { mode: 'timestamp' })
+    .notNull()
+    .default(sql`(unixepoch())`),
+  updatedAt: integer('updated_at', { mode: 'timestamp' })
+    .notNull()
+    .default(sql`(unixepoch())`),
+})
+
+export type AffiliateOperator = typeof affiliateOperators.$inferSelect
+export type NewAffiliateOperator = typeof affiliateOperators.$inferInsert
 
 export type AffiliateCompany = typeof affiliateCompanies.$inferSelect
 export type NewAffiliateCompany = typeof affiliateCompanies.$inferInsert

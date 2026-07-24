@@ -10,6 +10,7 @@ import authRouter from './routes/auth'
 import cashRouter from './routes/cash'
 import organizationsRouter from './routes/organizations'
 import foliosRouter from './routes/folios'
+import { managerOperatorsRouter, operatorAccessRouter } from './routes/operators'
 import portalRouter from './routes/portal'
 import posRouter from './routes/pos'
 import { sweepExpiredBookings } from './routes/pos/sweep'
@@ -45,8 +46,12 @@ app.route('/api/folios', foliosRouter)
 app.route('/api/tickets', ticketsRouter)
 app.route('/api/cash', cashRouter)
 app.route('/api/reports', reportsRouter)
+app.route('/api/affiliate/operators', managerOperatorsRouter)
+app.route('/api/operator', operatorAccessRouter)
 
-app.get('/api/me', authMiddleware, (c) => c.json({ user: c.get('user') }))
+app.get('/api/me', authMiddleware, (c) =>
+  c.json({ user: c.get('user'), operator: c.get('operator') ?? null }),
+)
 
 app.post('/api/admin-only', authMiddleware, requireRole('admin'), (c) =>
   c.json({ ok: true }),
