@@ -2,14 +2,11 @@ import { useEffect, useState } from 'react'
 import {
   Box,
   Typography,
-  Button,
   Stack,
   Alert,
   CircularProgress,
   TextField,
-  Chip,
 } from '@mui/material'
-import AddRounded from '@mui/icons-material/AddRounded'
 import { useQuery } from '@tanstack/react-query'
 import { ConfirmSheet, WizardPage } from '../../../components'
 import { listServices } from '../../../services/catalogService'
@@ -45,9 +42,9 @@ export function AffiliateWizard({ onClose, onCreated }: Props) {
   const [contactEmail, setContactEmail] = useState('')
   const [contactPhone, setContactPhone] = useState('')
   const [commissions, setCommissions] = useState<CommissionDraftMap>({})
-  const [invites, setInvites] = useState<string[]>([])
-  const [emailInput, setEmailInput] = useState('')
-  const [emailError, setEmailError] = useState('')
+  // D13 — at most one credentialed affiliate (the manager) per company; extra sellers are PIN
+  // operators (US-AF10). So Step 3 collects a single optional manager email.
+  const [managerEmail, setManagerEmail] = useState('')
   const [confirmDiscard, setConfirmDiscard] = useState(false)
 
   const servicesQuery = useQuery({
@@ -61,7 +58,7 @@ export function AffiliateWizard({ onClose, onCreated }: Props) {
     contactEmail !== '' ||
     contactPhone !== '' ||
     enabledCount(commissions) > 0 ||
-    invites.length > 0
+    managerEmail.trim() !== ''
 
   const handleClose = () => {
     if (createMutation.isPending) return
@@ -83,24 +80,12 @@ export function AffiliateWizard({ onClose, onCreated }: Props) {
 
   const nameValid = name.trim().length > 0
   const step2Valid = draftsValid(commissions)
+  // The manager email is optional; when present it must be valid before Finalizar.
+  const managerEmailValid = managerEmail.trim() === '' || EMAIL_RE.test(managerEmail.trim())
   const canNext = step === 1 ? nameValid : step === 2 ? step2Valid : true
 
-  const addInvite = () => {
-    const e = emailInput.trim().toLowerCase()
-    if (!EMAIL_RE.test(e)) {
-      setEmailError('Correo inválido')
-      return
-    }
-    if (invites.includes(e)) {
-      setEmailError('Ya está en la lista')
-      return
-    }
-    setInvites((list) => [...list, e])
-    setEmailInput('')
-    setEmailError('')
-  }
-
   const finalize = () => {
+    const email = managerEmail.trim().toLowerCase()
     createMutation.mutate(
       {
         company: {
@@ -109,7 +94,7 @@ export function AffiliateWizard({ onClose, onCreated }: Props) {
           contact_phone: contactPhone.trim() || null,
         },
         commissions: draftToEntries(commissions),
-        invites,
+        invites: email ? [email] : [],
       },
       { onSuccess: (res) => onCreated(res.affiliate.id) },
     )
@@ -131,7 +116,7 @@ export function AffiliateWizard({ onClose, onCreated }: Props) {
         isLastStep={step === TOTAL_STEPS}
         finishLabel="Finalizar"
         canAdvance={canNext}
-        canFinish={nameValid && step2Valid}
+        canFinish={nameValid && step2Valid && managerEmailValid}
         busy={saving}
         error={
           createMutation.isError ? (
@@ -190,49 +175,26 @@ export function AffiliateWizard({ onClose, onCreated }: Props) {
             {step === 3 && (
               <Stack spacing={2}>
                 <Typography variant="body2" color="text.secondary">
-                  Invita a las personas que venderán desde esta empresa. Puedes dejarlo vacío e
-                  invitarlas más tarde.
+                  Invita al <strong>gerente</strong> de la empresa (su cuenta con correo y
+                  contraseña). Es quien administra la caja y da de alta a sus cajeros. Puedes dejarlo
+                  vacío e invitarlo más tarde.
                 </Typography>
-                <Stack direction="row" spacing={1} sx={{ alignItems: 'flex-start' }}>
-                  <TextField
-                    label="Invitar por correo"
-                    type="email"
-                    size="small"
-                    value={emailInput}
-                    onChange={(e) => {
-                      setEmailInput(e.target.value)
-                      setEmailError('')
-                    }}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        e.preventDefault()
-                        addInvite()
-                      }
-                    }}
-                    error={!!emailError}
-                    helperText={emailError || ' '}
-                    fullWidth
-                  />
-                  <Button
-                    onClick={addInvite}
-                    variant="outlined"
-                    color="secondary"
-                    startIcon={<AddRounded />}
-                    disabled={!emailInput.trim()}
-                    sx={{ mt: 0.5, flexShrink: 0 }}
-                  >
-                    Agregar
-                  </Button>
-                </Stack>
-                <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap', gap: 1 }}>
-                  {invites.map((e) => (
-                    <Chip
-                      key={e}
-                      label={e}
-                      onDelete={() => setInvites((list) => list.filter((x) => x !== e))}
-                    />
-                  ))}
-                </Stack>
+                <TextField
+                  label="Correo del gerente (opcional)"
+                  type="email"
+                  value={managerEmail}
+                  onChange={(e) => setManagerEmail(e.target.value)}
+                  error={managerEmail.trim() !== '' && !managerEmailValid}
+                  helperText={
+                    managerEmail.trim() !== '' && !managerEmailValid ? 'Correo inválido' : ' '
+                  }
+                  fullWidth
+                  autoFocus
+                />
+                <Typography variant="caption" color="text.secondary">
+                  Los cajeros o vendedores adicionales no se invitan aquí: el gerente los agrega como
+                  operadores con un PIN, desde su panel.
+                </Typography>
               </Stack>
             )}
       </WizardPage>

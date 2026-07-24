@@ -73,14 +73,15 @@ describe('US-A54–A57 — wizard finalize (POST /api/affiliates)', () => {
           { service_id: svc1, commission_type: 'percent', commission_value: 1500 },
           { service_id: svc2, commission_type: 'fixed', commission_value: 5000 },
         ],
-        invites: ['concierge@maya.com', 'desk@maya.com'],
+        // D13 — Step 3 invites at most ONE manager; extra sellers are operators.
+        invites: ['concierge@maya.com'],
       }),
     })
 
     expect(res.status).toBe(201)
     const body = (await res.json()) as { affiliate: { id: string; service_count: number; pending_invite_count: number } }
     expect(body.affiliate.service_count).toBe(2)
-    expect(body.affiliate.pending_invite_count).toBe(2)
+    expect(body.affiliate.pending_invite_count).toBe(1)
 
     const commissions = await env.DB.prepare(
       'SELECT count(*) as n FROM affiliate_commissions WHERE affiliate_company_id = ?',
@@ -94,7 +95,25 @@ describe('US-A54–A57 — wizard finalize (POST /api/affiliates)', () => {
     )
       .bind(body.affiliate.id, 'pending')
       .first<{ n: number }>()
-    expect(invites!.n).toBe(2)
+    expect(invites!.n).toBe(1)
+  })
+
+  it('D13 — two invites in the wizard → 400 (at most one manager per company)', async () => {
+    const { organizationId } = await seedUser({ email: ADMIN_EMAIL, role: 'admin' })
+    const svc = await seedService({ organizationId })
+    const res = await SELF.fetch(api(''), {
+      method: 'POST',
+      headers: jsonAuth(ADMIN_EMAIL),
+      body: JSON.stringify({
+        company: { name: 'Hotel Maya' },
+        commissions: [{ service_id: svc, commission_type: 'percent', commission_value: 1000 }],
+        invites: ['a@maya.com', 'b@maya.com'],
+      }),
+    })
+    expect(res.status).toBe(400)
+    // Atomic fail-all: no company persisted.
+    const n = await env.DB.prepare('SELECT count(*) as n FROM affiliate_companies').first<{ n: number }>()
+    expect(n!.n).toBe(0)
   })
 
   it('D2 — enabling a service at a zero rate → 400 (Zod positive)', async () => {
@@ -225,8 +244,8 @@ describe('US-A48/A50 — list / detail / edit / bulk commissions', () => {
   })
 })
 
-describe('US-A49 — invite', () => {
-  it('invites a login; a second pending invite for the same email → 409 ALREADY_INVITED', async () => {
+describe('US-A49 / D13 — one manager per company', () => {
+  it('invites a manager; a SECOND invite (any email) → 409 AFFILIATE_MANAGER_EXISTS', async () => {
     mockResend()
     const { organizationId } = await seedUser({ email: ADMIN_EMAIL, role: 'admin' })
     const { companyId } = await seedAffiliateCompany({ organizationId })
@@ -238,13 +257,35 @@ describe('US-A49 — invite', () => {
     })
     expect(first.status).toBe(201)
 
+    // A pending invite already holds the single manager seat — any further invite is refused.
     const second = await SELF.fetch(api(`/${companyId}/invite`), {
       method: 'POST',
       headers: jsonAuth(ADMIN_EMAIL),
-      body: JSON.stringify({ email: 'concierge@maya.com' }),
+      body: JSON.stringify({ email: 'otro@maya.com' }),
     })
     expect(second.status).toBe(409)
-    expect(JSON.stringify(await second.json())).toContain('ALREADY_INVITED')
+    expect(JSON.stringify(await second.json())).toContain('AFFILIATE_MANAGER_EXISTS')
+  })
+
+  it('an existing affiliate USER also blocks a further invite → 409', async () => {
+    mockResend()
+    const { organizationId } = await seedUser({ email: ADMIN_EMAIL, role: 'admin' })
+    const { companyId } = await seedAffiliateCompany({ organizationId })
+    // Seat already filled by an accepted affiliate user (the manager).
+    await seedUser({
+      email: 'gerente@maya.com',
+      role: 'affiliate',
+      organizationId,
+      affiliateCompanyId: companyId,
+    })
+
+    const res = await SELF.fetch(api(`/${companyId}/invite`), {
+      method: 'POST',
+      headers: jsonAuth(ADMIN_EMAIL),
+      body: JSON.stringify({ email: 'otro@maya.com' }),
+    })
+    expect(res.status).toBe(409)
+    expect(JSON.stringify(await res.json())).toContain('AFFILIATE_MANAGER_EXISTS')
   })
 })
 

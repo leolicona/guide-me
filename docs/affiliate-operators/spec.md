@@ -99,6 +99,16 @@ operator-flavored token.
 - **D11 — Admin sees the operator label too.** Operator attribution surfaces on the **admin's** folio
   reads (drill into a hotel's sales by operator), not just the manager's — harmless and useful for
   audits.
+- **D13 — At most ONE credentialed affiliate (the manager) per company.** The whole model rests on
+  "one hotel = one caja under one manager" (US-A68). Since the affiliate running balance/settlement
+  is **per-user** (US-AF08), allowing several `affiliate` users per company would fragment the caja
+  and re-introduce the very multi-seller problem operators exist to solve. So a company holds **one
+  credentialed seat** = an accepted `affiliate` user **or** a pending invitation; extra sellers are
+  **operators**, never more logins. Enforced at invite (`inviteAffiliate` → `409
+  AFFILIATE_MANAGER_EXISTS`), at wizard finalize (`invites` capped at 1), and at accept
+  (`completeInvite` re-checks). The frontend wizard Step 3 collects a single optional manager email,
+  and the affiliate detail hides the invite input once the seat is filled, pointing to Operadores.
+  *(No data migration — no existing company had >1 affiliate user.)*
 - **D12 — Credential is a 4-digit PIN, not a password.** The saved link already carries the entropy
   (a high-entropy signed token); the PIN is a **second factor** guarding an expired-session phone,
   with a lockout — matching a phone lock screen / restaurant terminal and the field ergonomics of a
