@@ -4,6 +4,7 @@ import { and, asc, desc, eq, ne, sql } from 'drizzle-orm'
 import { getDb, type Db } from '../../db/client'
 import {
   accommodationReservations,
+  affiliateOperators,
   cancellationRequests,
   folioAccessTokens,
   folioLineExtras,
@@ -45,6 +46,7 @@ const readFolio = async (db: Db, org: string, folioId: string, apiBaseUrl?: stri
       id: folios.id,
       agentId: folios.agentId,
       agentName: users.name,
+      operatorName: affiliateOperators.name,
       status: folios.status,
       ticketsSentAt: folios.ticketsSentAt,
       ticketsViewedAt: folios.ticketsViewedAt,
@@ -82,6 +84,7 @@ const readFolio = async (db: Db, org: string, folioId: string, apiBaseUrl?: stri
     })
     .from(folios)
     .innerJoin(users, eq(folios.agentId, users.id))
+    .leftJoin(affiliateOperators, eq(folios.operatorId, affiliateOperators.id))
     .where(and(eq(folios.id, folioId), eq(folios.organizationId, org)))
     .limit(1)
 
@@ -154,6 +157,8 @@ const readFolio = async (db: Db, org: string, folioId: string, apiBaseUrl?: stri
   return {
     id: folio.id,
     agent: { id: folio.agentId, name: folio.agentName },
+    // US-A68 — the affiliate shift operator who took the sale (null ⇒ sold directly).
+    operator_name: folio.operatorName ?? null,
     status: folio.status,
     payment_method: folio.paymentMethod,
     // US-AG41/US-A67 — payment reference + verification gate for the admin detail + verify actions.
@@ -277,9 +282,11 @@ export const listFolios = async (c: FoliosContext) => {
       paymentMethod: folios.paymentMethod,
       paymentReference: folios.paymentReference,
       paymentVerification: folios.paymentVerification,
+      operatorName: affiliateOperators.name,
     })
     .from(folios)
     .innerJoin(users, eq(folios.agentId, users.id))
+    .leftJoin(affiliateOperators, eq(folios.operatorId, affiliateOperators.id))
     .where(and(...filters))
     .orderBy(desc(folios.createdAt))
 
@@ -309,6 +316,8 @@ export const listFolios = async (c: FoliosContext) => {
       deliverable: r.status === 'paid' && r.paymentVerification !== 'pending',
       tickets_sent_at: tsOrNull(r.ticketsSentAt),
       tickets_viewed_at: tsOrNull(r.ticketsViewedAt),
+      // US-A68 — the affiliate shift operator who took the sale (null ⇒ sold directly).
+      operator_name: r.operatorName ?? null,
     })),
   })
 }

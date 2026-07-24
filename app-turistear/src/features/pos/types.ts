@@ -224,6 +224,8 @@ export interface Folio {
   portal_link?: string | null
   tickets_sent_at?: number | null
   tickets_viewed_at?: number | null
+  /** US-AF13 — the affiliate shift operator who made the sale; null if sold directly. */
+  operator_name?: string | null
   created_at: number
   lines: FolioLine[]
 }
@@ -256,4 +258,6 @@ export interface FolioHistoryItem {
   /** US-AG41/US-A67 — the seller sees the verification state (delivery blocked while pending). */
   payment_method?: PaymentMethod
   payment_verification?: PaymentVerification
+  /** US-AF13 — "Vendido por: {name}" (null if the manager/agent sold directly). */
+  operator_name?: string | null
 }

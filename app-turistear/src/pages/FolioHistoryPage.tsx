@@ -120,6 +120,8 @@ export default function FolioHistoryPage() {
                           </Typography>
                           <Typography variant="caption" color="text.secondary">
                             {formatDate(f.created_at)}
+                            {/* US-AF13 — "Vendido por" the shift operator (manager's reconciliation). */}
+                            {f.operator_name ? ` · ${f.operator_name}` : ''}
                           </Typography>
                           {isBooking && f.booking_expires_at != null && (
                             <Chip

@@ -7,6 +7,7 @@ import {
   accommodationSeasons,
   accommodationUnitTypes,
   affiliateCommissions,
+  affiliateOperators,
   folioAccessTokens,
   folioLineExtras,
   folioLines,
@@ -1289,6 +1290,8 @@ export const confirmSale = async (c: PosContext) => {
     agentId: agent.userId,
     // D5 — stamp the seller's company on an affiliate sale; null for in-house (agent/admin).
     affiliateCompanyId,
+    // US-AF13 — the shift operator who made the sale (null unless this is an operator session).
+    operatorId: c.get('operator')?.operatorId ?? null,
     customerName: input.customer_name ?? null,
     customerEmail: input.customer_email ?? null,
     customerPhone: input.customer_phone ?? null,
@@ -1657,6 +1660,8 @@ export const confirmSale = async (c: PosContext) => {
         customer_name: input.customer_name ?? null,
         customer_email: input.customer_email ?? null,
         customer_phone: input.customer_phone ?? null,
+        // US-AF13 — the shift operator who made the sale (null unless this is an operator session).
+        operator_name: c.get('operator')?.name ?? null,
         // Delivery axis (whatsapp-qr-delivery) — the receipt CTA sends this portal link; a fresh
         // sale is "pendiente de enviar" (nothing sent/viewed yet).
         portal_link: portalLink ?? null,
@@ -1735,9 +1740,13 @@ const readFolio = async (
       cancelledAt: folios.cancelledAt,
       ticketsSentAt: folios.ticketsSentAt,
       ticketsViewedAt: folios.ticketsViewedAt,
+      // US-AF13 — the shift operator who made the sale ("Vendido por: {name}"); null if the
+      // manager/agent sold directly.
+      operatorName: affiliateOperators.name,
       createdAt: folios.createdAt,
     })
     .from(folios)
+    .leftJoin(affiliateOperators, eq(folios.operatorId, affiliateOperators.id))
     .where(
       and(
         eq(folios.id, folioId),
@@ -1865,6 +1874,8 @@ const readFolio = async (
     cancelled_at: folio.cancelledAt
       ? Math.floor(folio.cancelledAt.getTime() / 1000)
       : null,
+    // US-AF13 — operator attribution (null ⇒ manager/agent sold directly).
+    operator_name: folio.operatorName ?? null,
     // Delivery axis (whatsapp-qr-delivery) — portal_link drives the WhatsApp send; sent/viewed
     // stamps drive the Pendiente → Enviado → Visto badge.
     portal_link: portalLink,
@@ -2819,6 +2830,9 @@ export const listAgentFolios = async (c: PosContext) => {
 
   const statusQ = c.req.query('status')
   const dateQ = c.req.query('date')
+  // US-AF13 — the manager filters the hotel's folios by shift operator; an operator session may
+  // narrow to its own sales. Ignored for a plain agent (no operators exist under them).
+  const operatorQ = c.req.query('operator')
 
   const filters = [
     eq(folios.organizationId, org),
@@ -2831,6 +2845,9 @@ export const listAgentFolios = async (c: PosContext) => {
     filters.push(
       sql`strftime('%Y-%m-%d', ${folios.createdAt}, 'unixepoch') = ${dateQ}`,
     )
+  }
+  if (operatorQ) {
+    filters.push(eq(folios.operatorId, operatorQ))
   }
 
   const rows = await db
@@ -2851,8 +2868,10 @@ export const listAgentFolios = async (c: PosContext) => {
       ticketsViewedAt: folios.ticketsViewedAt,
       paymentMethod: folios.paymentMethod,
       paymentVerification: folios.paymentVerification,
+      operatorName: affiliateOperators.name,
     })
     .from(folios)
+    .leftJoin(affiliateOperators, eq(folios.operatorId, affiliateOperators.id))
     .where(and(...filters))
     .orderBy(desc(folios.createdAt))
 
@@ -2888,6 +2907,8 @@ export const listAgentFolios = async (c: PosContext) => {
         ? Math.floor(r.reminderSentAt.getTime() / 1000)
         : null,
       reminder_sent_by: r.reminderSentBy,
+      // US-AF13 — "Vendido por: {name}" (null ⇒ the manager/agent sold directly).
+      operator_name: r.operatorName ?? null,
     })),
   })
 }

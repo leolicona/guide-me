@@ -39,6 +39,8 @@ export interface FolioListItem {
   payment_method?: PaymentMethod
   payment_reference?: string | null
   payment_verification?: PaymentVerification
+  // US-A68 — the affiliate shift operator who took the sale; null if sold directly.
+  operator_name?: string | null
 }
 
 export interface FolioLineExtra {
@@ -75,6 +77,8 @@ export interface FolioDetailLine {
 export interface FolioDetail {
   id: string
   agent: FolioAgent
+  // US-A68 — the affiliate shift operator who took the sale; null if sold directly.
+  operator_name?: string | null
   status: FolioStatus
   customer_name: string | null
   customer_email: string | null

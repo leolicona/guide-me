@@ -224,6 +224,13 @@ export default function FolioReceiptPage() {
                     <Typography color="text.secondary">Método de pago</Typography>
                     <Typography>{PAYMENT_METHOD_LABEL[folio.payment_method]}</Typography>
                   </Stack>
+                  {/* US-AF13 — who took the sale (only when an operator, not the manager, sold it). */}
+                  {folio.operator_name && (
+                    <Stack direction="row" sx={{ justifyContent: 'space-between' }}>
+                      <Typography color="text.secondary">Vendido por</Typography>
+                      <Typography>{folio.operator_name}</Typography>
+                    </Stack>
+                  )}
                 </Stack>
               </CardContent>
             </Card>

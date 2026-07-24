@@ -28,4 +28,6 @@ export const ROUTES = {
   CASH: '/cash', // admin — outstanding balances + drops review queue
   CASH_DROP_DETAIL: '/cash/drops/:id', // admin — one drop's detail
   REPORTS: '/reports', // admin — commission & settlement report by period (US-A17/A18/A20)
+  OPERATORS: '/operators', // affiliate manager — shift-cashier operators panel (US-AF10–AF12)
+  OPERATOR_ACCESS: '/o/:token', // public — operator saved link: set PIN / unlock shift (US-OP01/OP02)
 } as const

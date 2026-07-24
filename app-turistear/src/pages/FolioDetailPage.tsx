@@ -130,6 +130,8 @@ export default function FolioDetailPage() {
                 </Typography>
                 <Typography variant="caption" color="text.secondary">
                   {formatDate(folio.created_at)} · {folio.agent.name}
+                  {/* US-A68 — the affiliate shift operator who took the sale, when applicable. */}
+                  {folio.operator_name ? ` · ${folio.operator_name}` : ''}
                 </Typography>
                 {/* US-AG07.3 — live apartado countdown, inline on the existing detail. */}
                 {isBooking && folio.booking_expires_at != null && (
