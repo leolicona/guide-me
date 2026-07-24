@@ -29,6 +29,38 @@ type AffiliatesContext = Context<{
 
 const INVITATION_TTL_SECONDS = 60 * 60 * 24 * 7 // 7 days
 
+// One-manager invariant (docs/affiliate-operators/spec.md, D13): a company has AT MOST ONE
+// credentialed `affiliate` seat — the manager / "Hotel Cashier". Additional sellers are modeled as
+// PIN operators (US-AF10), not extra logins, so the hotel keeps a single caja (US-A68). A "seat" is
+// an accepted affiliate user OR a still-pending invitation. Throws 409 when one already exists.
+const assertNoManagerSeat = async (
+  db: ReturnType<typeof getDb>,
+  companyId: string,
+): Promise<void> => {
+  const existingUser = await db
+    .select({ id: users.id })
+    .from(users)
+    .where(and(eq(users.affiliateCompanyId, companyId), eq(users.role, 'affiliate')))
+    .limit(1)
+  const pendingInvite = await db
+    .select({ id: affiliateInvitations.id })
+    .from(affiliateInvitations)
+    .where(
+      and(
+        eq(affiliateInvitations.affiliateCompanyId, companyId),
+        eq(affiliateInvitations.status, 'pending'),
+      ),
+    )
+    .limit(1)
+  if (existingUser.length > 0 || pendingInvite.length > 0) {
+    throw new ApiError(
+      'AFFILIATE_MANAGER_EXISTS',
+      409,
+      'La empresa ya tiene un gerente. Los vendedores adicionales se agregan como operadores.',
+    )
+  }
+}
+
 // Validate an allow-list set (D2/D10) against the caller's org. Every service must exist, be in
 // THIS org, and be active (a cross-org or inactive service id is rejected). A `fixed` rate may
 // not exceed the service's minimum_price. Returns nothing; throws on the first offender.
@@ -395,6 +427,9 @@ export const inviteAffiliate = async (c: AffiliatesContext) => {
 
   const company = await requireCompany(c, id)
 
+  // D13 — at most one credentialed affiliate (the manager) per company; extra sellers are operators.
+  await assertNoManagerSeat(db, id)
+
   const existingUser = await db
     .select({ id: users.id })
     .from(users)
@@ -402,21 +437,6 @@ export const inviteAffiliate = async (c: AffiliatesContext) => {
     .limit(1)
   if (existingUser.length > 0) {
     throw new ApiError('IDENTITY_ALREADY_EXISTS', 409, 'A user with this email already exists')
-  }
-
-  const existingInvite = await db
-    .select({ id: affiliateInvitations.id })
-    .from(affiliateInvitations)
-    .where(
-      and(
-        eq(affiliateInvitations.affiliateCompanyId, id),
-        eq(affiliateInvitations.identity, email),
-        eq(affiliateInvitations.status, 'pending'),
-      ),
-    )
-    .limit(1)
-  if (existingInvite.length > 0) {
-    throw new ApiError('ALREADY_INVITED', 409, 'This email already has a pending invitation')
   }
 
   const token = crypto.randomUUID()
