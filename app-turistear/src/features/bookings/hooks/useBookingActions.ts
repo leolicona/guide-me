@@ -8,6 +8,7 @@ import {
   rejectPayment,
   settleBooking,
   verifyPayment,
+  type SettlePayload,
 } from '../../../services/bookingsService'
 
 // A booking action mutates a folio and (settle/cancel/reactivate) inventory, so every dependent
@@ -23,10 +24,13 @@ function useInvalidateBookings() {
   }
 }
 
-// US-AG07 — one-shot settlement (collect the balance → paid + QR).
+// US-AG07 / US-LG03 — one-shot settlement (collect the balance by its own method → paid + QR).
 export function useSettleBooking() {
   const invalidate = useInvalidateBookings()
-  return useMutation({ mutationFn: (id: string) => settleBooking(id), onSuccess: invalidate })
+  return useMutation({
+    mutationFn: (v: { id: string; payload?: SettlePayload }) => settleBooking(v.id, v.payload),
+    onSuccess: invalidate,
+  })
 }
 
 // US-AG07.4 — manual cancel (release spots; deposit retained).

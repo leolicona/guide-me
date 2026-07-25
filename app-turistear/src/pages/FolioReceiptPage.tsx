@@ -30,13 +30,14 @@ import { formatMoney } from '../features/catalog/types'
 import { folioLineMeta } from '../features/folios/folioLineLabel'
 import { SectionCard } from '../components'
 import { ROUTES } from '../config/routes'
-import type { PaymentMethod } from '../features/pos/types'
+import type { DisplayMethod } from '../features/pos/types'
 
-const PAYMENT_METHOD_LABEL: Record<PaymentMethod, string> = {
+const PAYMENT_METHOD_LABEL: Record<DisplayMethod, string> = {
   cash: 'Efectivo',
   transfer: 'Transferencia',
   card: 'Tarjeta',
   link: 'Link de pago',
+  Mixto: 'Mixto', // US-LG08 — a folio collected by more than one method
 }
 
 export default function FolioReceiptPage() {
