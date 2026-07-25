@@ -161,6 +161,46 @@ export const clearAffiliateDb = async () => {
   }
 }
 
+// US-LG04 — the cash engine reads the folio_payments LEDGER, so a directly-seeded folio must also
+// seed its ledger rows (mirrors what confirmSale / settle / cancellation write, and the 0049/0050
+// backfills). Call this from a test's seedFolio right after the folios INSERT. Emits: a `payment`
+// row (= amount_paid, at created_at); a `commission` row (= commission_amount, if > 0); and for a
+// cancelled folio the reversal rows — a negative `refund` (all cancellations) + a negative
+// `commission_reversal` (clawback only), dated at cancelled_at — so the folio nets out of the
+// sales/cash (and, on clawback, commission) buckets exactly as the engine expects.
+export const seedFolioLedgerRows = async (opts: {
+  folioId: string
+  organizationId: string
+  agentId: string
+  status?: 'paid' | 'booking' | 'cancelled'
+  paymentMethod?: string
+  amountPaid: number
+  commissionAmount?: number
+  cancellationClawback?: boolean
+  cancelledAt?: number // unix seconds; defaults to createdAt
+  createdAt?: number // unix seconds
+}): Promise<void> => {
+  const method = opts.paymentMethod ?? 'cash'
+  const commission = opts.commissionAmount ?? 0
+  const createdAt = opts.createdAt ?? Math.floor(Date.now() / 1000)
+  const insert = (entryType: string, amount: number, at: number) =>
+    env.DB.prepare(
+      `INSERT INTO folio_payments
+         (id, organization_id, folio_id, entry_type, amount, method, verification, collected_by, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, 'not_required', ?, ?)`,
+    )
+      .bind(crypto.randomUUID(), opts.organizationId, opts.folioId, entryType, amount, method, opts.agentId, at)
+      .run()
+
+  await insert('payment', opts.amountPaid, createdAt)
+  if (commission > 0) await insert('commission', commission, createdAt)
+  if (opts.status === 'cancelled') {
+    const at = opts.cancelledAt ?? createdAt
+    if (opts.amountPaid > 0) await insert('refund', -opts.amountPaid, at)
+    if (opts.cancellationClawback && commission > 0) await insert('commission_reversal', -commission, at)
+  }
+}
+
 export interface SeededOrg {
   organizationId: string
   adminUserId: string

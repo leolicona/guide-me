@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { env, SELF } from 'cloudflare:test'
-import { seedUser, seedTwoOrgs, clearTenancyDb } from '../helpers/tenancy'
+import { seedUser, seedTwoOrgs, clearTenancyDb, seedFolioLedgerRows } from '../helpers/tenancy'
 import { buildFakeJwt } from '../helpers/jwt'
 
 // Administrator Vendor Capabilities — US-A31, A32, A33, A34, A35.
@@ -80,6 +80,10 @@ const seedFolio = async (opts: {
   )
     .bind(id, organizationId, agentId, paymentMethod, amountPaid, amountPaid, amountPaid, commissionAmount, ts, ts)
     .run()
+  await seedFolioLedgerRows({
+    folioId: id, organizationId, agentId, status: 'paid', paymentMethod,
+    amountPaid, commissionAmount, createdAt: ts,
+  })
   return id
 }
 

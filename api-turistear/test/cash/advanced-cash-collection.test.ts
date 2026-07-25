@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { env, SELF } from 'cloudflare:test'
-import { seedUser, seedTwoOrgs, clearTenancyDb } from '../helpers/tenancy'
+import { seedUser, seedTwoOrgs, clearTenancyDb, seedFolioLedgerRows } from '../helpers/tenancy'
 import { buildFakeJwt } from '../helpers/jwt'
 
 // Advanced Cash Collection — Admin-Initiated Collections & Adjustments.
@@ -59,6 +59,16 @@ const seedFolio = async (opts: {
       ts,
     )
     .run()
+  await seedFolioLedgerRows({
+    folioId: id,
+    organizationId: opts.organizationId,
+    agentId: opts.agentId,
+    status: opts.status ?? 'paid',
+    paymentMethod: opts.paymentMethod ?? 'cash',
+    amountPaid: opts.amountPaid,
+    commissionAmount: opts.commissionAmount ?? 0,
+    createdAt: ts,
+  })
   return id
 }
 
