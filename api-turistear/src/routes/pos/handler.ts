@@ -1990,6 +1990,9 @@ export const settleBooking = async (c: PosContext) => {
       customerName: folios.customerName,
       customerEmail: folios.customerEmail,
       paymentMethod: folios.paymentMethod,
+      // US-A67 — the deposit's verification state coming in: a still-`pending` transfer DEPOSIT must
+      // keep the QR deferred even when the BALANCE is settled by cash (money not yet confirmed).
+      paymentVerification: folios.paymentVerification,
       // US-LG03 dual-write — the deposit already collected + commission already accrued, so the
       // balance movement (total − deposit) and the commission top-up post as their own ledger rows.
       amountPaid: folios.amountPaid,
@@ -2011,23 +2014,28 @@ export const settleBooking = async (c: PosContext) => {
     throw new ApiError('BOOKING_EXPIRED', 409, 'Booking has expired')
   }
 
-  // US-AG41/US-A67 — the settle re-uses the folio's own payment method. Settling a TRANSFER folio is
-  // a fresh electronic payment: it requires a reference, re-arms verification to `pending`, and
-  // DEFERS the QR/portal/email until an admin verifies (verifyPayment). A cash folio settles
-  // immediately, exactly as before. `cleared` = the balance is usable now.
+  // US-LG03 (paid-ledger, step 3) — the balance is collected by ITS OWN method, chosen at settle,
+  // independent of the deposit. `method` defaults to the deposit's method for a body-less cash
+  // settle (backward compatible). A TRANSFER balance is a fresh electronic payment: it requires a
+  // reference, re-arms verification to `pending`, and DEFERS the QR/portal/email until an admin
+  // verifies it. Any non-transfer balance settles immediately — UNLESS the deposit was itself a
+  // still-`pending` transfer, whose money is not yet confirmed, so the QR must keep waiting (US-A67).
   const parsed = settleSchema.safeParse(await c.req.json().catch(() => ({})))
   if (!parsed.success) {
     throw new ApiError('VALIDATION_ERROR', 400, 'Invalid settle payload')
   }
   const body: SettleInput = parsed.data
-  const cleared = folio.paymentMethod !== 'transfer'
-  if (!cleared && !body.payment_reference) {
+  const settleMethod = body.method ?? folio.paymentMethod
+  const balanceNeedsVerification = settleMethod === 'transfer'
+  if (balanceNeedsVerification && !body.payment_reference) {
     throw new ApiError(
       'VALIDATION_ERROR',
       400,
       'A payment reference is required to settle a bank transfer',
     )
   }
+  // The QR can mint now only if THIS balance clears AND no earlier payment is still awaiting an admin.
+  const cleared = !balanceNeedsVerification && folio.paymentVerification !== 'pending'
 
   const lineRows = await db
     .select({
@@ -2075,9 +2083,9 @@ export const settleBooking = async (c: PosContext) => {
           organizationId: org,
           folioId: id,
           amount: balanceAmount,
-          method: folio.paymentMethod,
-          reference: !cleared ? (body.payment_reference ?? null) : null,
-          verification: !cleared ? 'pending' : 'not_required',
+          method: settleMethod,
+          reference: balanceNeedsVerification ? (body.payment_reference ?? null) : null,
+          verification: balanceNeedsVerification ? 'pending' : 'not_required',
           collectedBy: agent.userId,
           operatorId: c.get('operator')?.operatorId ?? null,
         }),
@@ -2096,10 +2104,15 @@ export const settleBooking = async (c: PosContext) => {
     return rows
   }
 
-  // US-A67 — a TRANSFER settle reaches `paid` but DEFERS the QR: record the settling transfer's
-  // reference, re-arm verification to `pending`, and stop here. verifyPayment signs the QR + sends
-  // the tickets once an admin confirms the money. (No QR token, no portal link, no email yet.)
+  // US-A67 — the folio reaches `paid` but DEFERS the QR when it is not cleared. Two reasons land
+  // here: (a) the BALANCE is a transfer — record its reference + re-arm verification to `pending`;
+  // or (b) the balance cleared (cash/card/link) but the DEPOSIT was a still-`pending` transfer,
+  // whose money remains unconfirmed — leave that pending state (and its reference) untouched.
+  // verifyPayment signs the QR + sends the tickets once an admin confirms the money.
   if (!cleared) {
+    const deferUpdate = balanceNeedsVerification
+      ? { paymentReference: body.payment_reference ?? null, paymentVerification: 'pending' as const }
+      : {}
     const transferStatements: BatchItem<'sqlite'>[] = [
       db
         .update(folios)
@@ -2109,8 +2122,7 @@ export const settleBooking = async (c: PosContext) => {
           commissionAmount,
           settledAt: new Date(),
           settledBy: agent.userId,
-          paymentReference: body.payment_reference ?? null,
-          paymentVerification: 'pending',
+          ...deferUpdate,
           updatedAt: new Date(),
         })
         .where(and(eq(folios.id, id), eq(folios.organizationId, org))),
