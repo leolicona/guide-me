@@ -386,8 +386,8 @@ describe('Multitenancy + cross-affiliate isolation', () => {
     const adminRow = await env.DB.prepare('SELECT id FROM users WHERE email = ?').bind(ADMIN_EMAIL).first<{ id: string }>()
     const ts = Math.floor(Date.now() / 1000)
     await env.DB.prepare(
-      `INSERT INTO folios (id, organization_id, agent_id, status, payment_method, subtotal, discount_total, total, amount_paid, commission_amount, created_at, updated_at)
-       VALUES (?, ?, ?, 'paid', 'cash', 150000, 0, 150000, 150000, 0, ?, ?)`,
+      `INSERT INTO folios (id, organization_id, agent_id, status, subtotal, discount_total, total, amount_paid, commission_amount, created_at, updated_at)
+       VALUES (?, ?, ?, 'paid', 150000, 0, 150000, 150000, 0, ?, ?)`,
     )
       .bind(crypto.randomUUID(), organizationId, adminRow!.id, ts, ts)
       .run()

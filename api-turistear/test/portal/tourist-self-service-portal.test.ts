@@ -61,9 +61,9 @@ const seedRawFolio = async (orgId: string, agentId: string, amountPaid: number) 
   const id = crypto.randomUUID()
   const ts = nowSec()
   await env.DB.prepare(
-    `INSERT INTO folios (id, organization_id, agent_id, customer_name, customer_email, status, payment_method,
+    `INSERT INTO folios (id, organization_id, agent_id, customer_name, customer_email, status,
        subtotal, discount_total, total, amount_paid, commission_amount, cancellation_clawback, created_at, updated_at)
-     VALUES (?, ?, ?, 'Cliente Test', 'cliente@example.com', 'paid', 'cash', 100000, 0, 100000, ?, 0, 0, ?, ?)`,
+     VALUES (?, ?, ?, 'Cliente Test', 'cliente@example.com', 'paid', 100000, 0, 100000, ?, 0, 0, ?, ?)`,
   )
     .bind(id, orgId, agentId, amountPaid, ts, ts)
     .run()

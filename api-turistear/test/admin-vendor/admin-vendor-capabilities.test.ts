@@ -73,12 +73,12 @@ const seedFolio = async (opts: {
   const ts = Math.floor(Date.now() / 1000)
   await env.DB.prepare(
     `INSERT INTO folios
-       (id, organization_id, agent_id, customer_name, status, payment_method,
+       (id, organization_id, agent_id, customer_name, status,
         subtotal, discount_total, total, amount_paid, commission_amount,
         cancellation_clawback, cancelled_at, created_at, updated_at)
-     VALUES (?, ?, ?, 'John Diver', 'paid', ?, ?, 0, ?, ?, ?, 0, NULL, ?, ?)`,
+     VALUES (?, ?, ?, 'John Diver', 'paid', ?, 0, ?, ?, ?, 0, NULL, ?, ?)`,
   )
-    .bind(id, organizationId, agentId, paymentMethod, amountPaid, amountPaid, amountPaid, commissionAmount, ts, ts)
+    .bind(id, organizationId, agentId, amountPaid, amountPaid, amountPaid, commissionAmount, ts, ts)
     .run()
   await seedFolioLedgerRows({
     folioId: id, organizationId, agentId, status: 'paid', paymentMethod,
