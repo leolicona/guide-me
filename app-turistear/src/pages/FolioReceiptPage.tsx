@@ -18,6 +18,7 @@ import EventBusyRounded from '@mui/icons-material/EventBusyRounded'
 import WarningAmberRounded from '@mui/icons-material/WarningAmberRounded'
 import HourglassTopRounded from '@mui/icons-material/HourglassTopRounded'
 import { useFolio } from '../features/pos/hooks'
+import { PaymentBreakdown } from '../features/pos/components/PaymentBreakdown'
 import { TicketQr } from '../features/pos/components/TicketQr'
 import {
   BookingActions,
@@ -233,6 +234,15 @@ export default function FolioReceiptPage() {
                     </Stack>
                   )}
                 </Stack>
+
+                {/* US-LG08 — the per-payment breakdown (deposit vs balance, each method), when the
+                    folio was collected in more than one movement. */}
+                {folio.payments && folio.payments.length > 1 && (
+                  <>
+                    <Divider sx={{ my: 2 }} />
+                    <PaymentBreakdown payments={folio.payments} />
+                  </>
+                )}
               </CardContent>
             </Card>
 

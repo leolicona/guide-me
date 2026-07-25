@@ -50,6 +50,7 @@ import {
   buildCancellationReversal,
   displayMethodSql,
   depositMethodSql,
+  readFolioPayments,
 } from '../../utils/folioPayments'
 
 export type PosContext = Context<{
@@ -1890,6 +1891,8 @@ const readFolio = async (
   )
 
   const portalLink = await folioPortalLink(db, org, folioId, apiBaseUrl)
+  // US-LG08 — the per-payment breakdown (deposit vs balance, each with its own method).
+  const payments = await readFolioPayments(db, org, folioId)
 
   return {
     id: folio.id,
@@ -1922,6 +1925,7 @@ const readFolio = async (
       ? Math.floor(folio.ticketsViewedAt.getTime() / 1000)
       : null,
     created_at: Math.floor(folio.createdAt.getTime() / 1000),
+    payments,
     lines,
   }
 }

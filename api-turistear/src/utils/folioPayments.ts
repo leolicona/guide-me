@@ -1,6 +1,6 @@
-import { and, eq, inArray, sql } from 'drizzle-orm'
+import { and, asc, eq, inArray, sql } from 'drizzle-orm'
 import type { Db } from '../db/client'
-import { folioPayments } from '../db/schema'
+import { affiliateOperators, folioPayments } from '../db/schema'
 
 // US-LG08 — the folio's DISPLAY method, derived from its collection (payment) rows: the shared
 // method when all agree, else the literal 'Mixto'. A correlated subquery, so it drops into any
@@ -186,4 +186,58 @@ export const buildCancellationReversal = async (
     }
   }
   return rows
+}
+
+// US-LG08 — the folio's money movements for the per-payment breakdown on folio detail: each
+// collection (deposit, balance) and any cancellation reversal, in chronological order, with its own
+// method, reference, verification, and the operator who took it. Commission accruals are excluded —
+// this answers "how did the customer pay", not "what did the agent earn".
+export interface FolioPaymentEntry {
+  id: string
+  kind: 'payment' | 'refund'
+  method: 'cash' | 'card' | 'transfer' | 'link'
+  amount: number // signed minor units (a refund is negative)
+  reference: string | null
+  verification: 'not_required' | 'pending' | 'verified'
+  operator_name: string | null
+  collected_at: number // unix seconds
+}
+
+export const readFolioPayments = async (
+  db: Db,
+  org: string,
+  folioId: string,
+): Promise<FolioPaymentEntry[]> => {
+  const rows = await db
+    .select({
+      id: folioPayments.id,
+      entryType: folioPayments.entryType,
+      amount: folioPayments.amount,
+      method: folioPayments.method,
+      reference: folioPayments.reference,
+      verification: folioPayments.verification,
+      operatorName: affiliateOperators.name,
+      createdAt: folioPayments.createdAt,
+    })
+    .from(folioPayments)
+    .leftJoin(affiliateOperators, eq(folioPayments.operatorId, affiliateOperators.id))
+    .where(
+      and(
+        eq(folioPayments.organizationId, org),
+        eq(folioPayments.folioId, folioId),
+        inArray(folioPayments.entryType, ['payment', 'refund']),
+      ),
+    )
+    .orderBy(asc(folioPayments.createdAt))
+
+  return rows.map((r) => ({
+    id: r.id,
+    kind: r.entryType as 'payment' | 'refund',
+    method: r.method as 'cash' | 'card' | 'transfer' | 'link',
+    amount: r.amount,
+    reference: r.reference,
+    verification: r.verification,
+    operator_name: r.operatorName ?? null,
+    collected_at: Math.floor(r.createdAt.getTime() / 1000),
+  }))
 }

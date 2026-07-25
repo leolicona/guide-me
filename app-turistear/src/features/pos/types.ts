@@ -201,6 +201,20 @@ export interface FolioLine {
   extras: FolioLineExtra[]
 }
 
+// US-LG08 — one money movement in a folio's per-payment breakdown (deposit, balance, or a
+// cancellation reversal), each with its own method/reference/verification and who collected it.
+export interface FolioPaymentEntry {
+  id: string
+  kind: 'payment' | 'refund'
+  method: PaymentMethod
+  /** Signed minor units — a refund (cancellation reversal) is negative. */
+  amount: number
+  reference: string | null
+  verification: PaymentVerification
+  operator_name: string | null
+  collected_at: number
+}
+
 export interface Folio {
   id: string
   status: FolioStatus
@@ -232,6 +246,8 @@ export interface Folio {
   tickets_viewed_at?: number | null
   /** US-AF13 — the affiliate shift operator who made the sale; null if sold directly. */
   operator_name?: string | null
+  /** US-LG08 — the money movements that make up amount_paid (deposit, balance, reversals). */
+  payments?: FolioPaymentEntry[]
   created_at: number
   lines: FolioLine[]
 }
