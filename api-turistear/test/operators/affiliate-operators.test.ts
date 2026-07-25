@@ -49,7 +49,7 @@ const mockAuth = () => {
 const clearAll = async () => {
   for (const t of [
     'folio_line_extras', 'folio_lines', 'folio_access_tokens', 'cancellation_requests',
-    'accommodation_reservations', 'folios', 'affiliate_operators', 'affiliate_commissions',
+    'accommodation_reservations', 'folio_payments', 'folios', 'affiliate_operators', 'affiliate_commissions',
     'affiliate_invitations', 'slots', 'schedules', 'service_extras', 'services',
     'invitations', 'password_reset_tokens', 'users', 'affiliate_companies', 'organizations',
   ]) {

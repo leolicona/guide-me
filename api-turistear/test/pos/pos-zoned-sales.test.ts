@@ -129,6 +129,7 @@ const clearDb = async () => {
     'cancellation_requests',
     'slot_zones',
     'folio_lines',
+    'folio_payments',
     'folios',
     'service_zones',
     'slots',

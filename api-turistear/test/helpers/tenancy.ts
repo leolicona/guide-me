@@ -143,6 +143,7 @@ export const clearAffiliateDb = async () => {
     'folio_lines',
     'folio_access_tokens',
     'cancellation_requests',
+    'folio_payments',
     'folios',
     'affiliate_commissions',
     'affiliate_invitations',
