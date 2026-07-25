@@ -140,11 +140,17 @@ the admin queue.
   D7) and a **rejected** pending transfer (nothing collected) return no money → **no `refund`
   row**. Only `confirmRefund` (an actual hand-back) writes one. The clawback of *commission* is
   independent and still fires where it fires today.
-- **D6 — Refund rows are cash, dated at hand-back.** US-A23 is a physical cash hand-back proven by
-  PIN. The `refund` row is `method='cash'`, `amount = −refund_amount`, `created_at = refunded_at`,
-  `verified_by = admin`. It reverses the drawer when the cash actually leaves — regardless of how
-  the money originally came in. *(Mirroring the original channels is a possible future refinement;
-  out of scope.)*
+- **D6 — Reversal at cancellation (revised during Step 4).** The engine reverses money at the
+  moment a folio is **cancelled**, not at the later physical hand-back — preserving the established
+  "cancellation = removal" reconciliation the whole cash engine (and the drop watermark) is built
+  on. A cancellation writes negative **`refund`** rows (one per collected method) plus, on clawback,
+  **`commission_reversal`** rows — each mirroring the folio's own per-method net (so a MIXED folio
+  reverses cash and transfer in the right proportions), all dated at `cancelled_at`. Because those
+  rows carry a real date, the watermark fast-path absorbs a post-watermark cancellation as an
+  ordinary current-shift event — which is exactly what lets the §12a hack be deleted. `confirmRefund`
+  stays the audit/PIN hand-back gate and moves **no** money again (the sale was already reversed).
+  *(The earlier "reverse at confirmRefund hand-back" option was dropped: it rewrites ~12 proven
+  reconciliation scenarios + the watermark premise for a transient-state nicety.)*
 - **D7 — Settle stays one-shot.** The ledger *supports* N payments, but the settle UX keeps today's
   rule: settle collects the **full remaining balance** in one row and flips `booking → paid`.
   Installments are a documented follow-up.
@@ -157,6 +163,13 @@ the admin queue.
   (`paid ∧ verification ≠ pending`) is unchanged at the read site.
 - **D10 — `payment_method` dropped; `Mixto` derived.** No folio-level money method survives. Display
   reads derive a method from the rows, showing `Mixto` when they differ.
+- **D10a — Column functionally removed, physical drop deferred (Step 5 note).** `payment_method` is
+  removed from the Drizzle schema, written by nothing, and read by nothing — every serializer, the
+  settle default, the ticket email, and the admin-report + affiliate-settlement money-reads now
+  derive from the ledger. The physical `ALTER TABLE … DROP COLUMN` is deferred: it would force
+  stripping the column from ~14 test-suite `INSERT`s and rewriting the Step-1 backfill test (which
+  reads it), for no functional gain. The DB column remains as an unwritten, unread no-op until a
+  trivial isolated cleanup.
 - **D11 — Backfill = one synthetic row per folio.** Historical settled bookings already overwrote
   `amount_paid` to `total` and lost the deposit/balance split; the migration seeds **one** `payment`
   row (`amount=amount_paid`, `method=payment_method`, ref, verification, `created_at=created_at`,

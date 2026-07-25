@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { env, SELF } from 'cloudflare:test'
-import { seedUser, seedTwoOrgs, clearTenancyDb } from '../helpers/tenancy'
+import { seedUser, seedTwoOrgs, clearTenancyDb, seedFolioLedgerRows } from '../helpers/tenancy'
 import { buildFakeJwt } from '../helpers/jwt'
 
 // Administrator Vendor Capabilities — US-A31, A32, A33, A34, A35.
@@ -73,13 +73,17 @@ const seedFolio = async (opts: {
   const ts = Math.floor(Date.now() / 1000)
   await env.DB.prepare(
     `INSERT INTO folios
-       (id, organization_id, agent_id, customer_name, status, payment_method,
+       (id, organization_id, agent_id, customer_name, status,
         subtotal, discount_total, total, amount_paid, commission_amount,
         cancellation_clawback, cancelled_at, created_at, updated_at)
-     VALUES (?, ?, ?, 'John Diver', 'paid', ?, ?, 0, ?, ?, ?, 0, NULL, ?, ?)`,
+     VALUES (?, ?, ?, 'John Diver', 'paid', ?, 0, ?, ?, ?, 0, NULL, ?, ?)`,
   )
-    .bind(id, organizationId, agentId, paymentMethod, amountPaid, amountPaid, amountPaid, commissionAmount, ts, ts)
+    .bind(id, organizationId, agentId, amountPaid, amountPaid, amountPaid, commissionAmount, ts, ts)
     .run()
+  await seedFolioLedgerRows({
+    folioId: id, organizationId, agentId, status: 'paid', paymentMethod,
+    amountPaid, commissionAmount, createdAt: ts,
+  })
   return id
 }
 
@@ -180,6 +184,7 @@ beforeEach(async () => {
   await env.DB.exec('DELETE FROM folio_access_tokens')
   await env.DB.exec('DELETE FROM folio_line_extras')
   await env.DB.exec('DELETE FROM folio_lines')
+  await env.DB.exec('DELETE FROM folio_payments')
   await env.DB.exec('DELETE FROM folios')
   await env.DB.exec('DELETE FROM slots')
   await env.DB.exec('DELETE FROM schedules')

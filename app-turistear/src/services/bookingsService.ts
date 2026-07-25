@@ -1,5 +1,12 @@
 import { request } from './authService'
-import type { Folio } from '../features/pos/types'
+import type { Folio, PaymentMethod } from '../features/pos/types'
+
+// US-LG03 — how the BALANCE is being collected at settle, independent of the deposit. `method`
+// defaults server-side to the deposit's method when omitted; a transfer carries its bank reference.
+export interface SettlePayload {
+  method: PaymentMethod
+  payment_reference?: string
+}
 
 // Apartado (booking) management API — distinct from the sale-creation flow (`confirmSale` lives
 // in posService). These post-sale actions back the shared `features/bookings` domain. Money
@@ -12,10 +19,12 @@ export interface ReminderClaim {
   reminder_sent_by: string | null
 }
 
-// US-AG07 — one-shot settlement of a booking: collect the balance → paid + QR.
-export const settleBooking = async (id: string): Promise<Folio> => {
+// US-AG07 / US-LG03 — one-shot settlement of a booking: collect the balance (by its own method) →
+// paid + QR. A transfer balance defers the QR to admin verification (US-A67).
+export const settleBooking = async (id: string, payload?: SettlePayload): Promise<Folio> => {
   const res = await request<{ folio: Folio }>(`/api/pos/folios/${id}/settle`, {
     method: 'POST',
+    body: payload ? JSON.stringify(payload) : undefined,
   })
   return res.folio
 }

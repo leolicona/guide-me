@@ -69,8 +69,8 @@ const seedExtra = async (organizationId: string, serviceId: string): Promise<str
 const seedFolioLine = async (organizationId: string, agentId: string, serviceId: string, slotId: string) => {
   const folioId = crypto.randomUUID()
   await env.DB.prepare(
-    `INSERT INTO folios (id, organization_id, agent_id, status, payment_method, subtotal, discount_total, total, amount_paid, commission_amount, created_at, updated_at)
-     VALUES (?, ?, ?, 'paid', 'cash', 150000, 0, 150000, 150000, 0, ?, ?)`,
+    `INSERT INTO folios (id, organization_id, agent_id, status, subtotal, discount_total, total, amount_paid, commission_amount, created_at, updated_at)
+     VALUES (?, ?, ?, 'paid', 150000, 0, 150000, 150000, 0, ?, ?)`,
   )
     .bind(folioId, organizationId, agentId, ts(), ts())
     .run()

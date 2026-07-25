@@ -27,6 +27,7 @@ import {
   type CancellationEmailInput,
 } from '../../services/resend'
 import { generateRefundPin } from '../../utils/portal'
+import { buildCancellationReversal, displayMethodSql, readFolioPayments } from '../../utils/folioPayments'
 
 export type FoliosContext = Context<{
   Bindings: CloudflareBindings
@@ -50,7 +51,7 @@ const readFolio = async (db: Db, org: string, folioId: string, apiBaseUrl?: stri
       status: folios.status,
       ticketsSentAt: folios.ticketsSentAt,
       ticketsViewedAt: folios.ticketsViewedAt,
-      paymentMethod: folios.paymentMethod,
+      paymentMethod: displayMethodSql,
       paymentReference: folios.paymentReference,
       paymentVerification: folios.paymentVerification,
       paymentVerifiedAt: folios.paymentVerifiedAt,
@@ -154,6 +155,9 @@ const readFolio = async (db: Db, org: string, folioId: string, apiBaseUrl?: stri
     extrasByLine.set(ex.folioLineId, list)
   }
 
+  // US-LG08 — the per-payment breakdown (deposit vs balance, each with its own method).
+  const payments = await readFolioPayments(db, org, folioId)
+
   return {
     id: folio.id,
     agent: { id: folio.agentId, name: folio.agentName },
@@ -193,6 +197,7 @@ const readFolio = async (db: Db, org: string, folioId: string, apiBaseUrl?: stri
     tickets_sent_at: tsOrNull(folio.ticketsSentAt),
     tickets_viewed_at: tsOrNull(folio.ticketsViewedAt),
     created_at: Math.floor(folio.createdAt.getTime() / 1000),
+    payments,
     lines: lineRows.map((line) => ({
       id: line.id,
       line_type: line.lineType,
@@ -279,7 +284,7 @@ export const listFolios = async (c: FoliosContext) => {
       reminderSentBy: folios.reminderSentBy,
       ticketsSentAt: folios.ticketsSentAt,
       ticketsViewedAt: folios.ticketsViewedAt,
-      paymentMethod: folios.paymentMethod,
+      paymentMethod: displayMethodSql,
       paymentReference: folios.paymentReference,
       paymentVerification: folios.paymentVerification,
       operatorName: affiliateOperators.name,
@@ -378,6 +383,13 @@ const applyCancellation = async (
   now: Date,
   folioUpdate: Partial<typeof folios.$inferInsert>,
 ): Promise<boolean> => {
+  // The agent whose ledger the cancellation reversal (US-LG05/LG06) attributes to.
+  const [meta] = await db
+    .select({ agentId: folios.agentId })
+    .from(folios)
+    .where(and(eq(folios.id, folioId), eq(folios.organizationId, org)))
+    .limit(1)
+
   const won = await db
     .update(folios)
     .set({ ...folioUpdate, updatedAt: now })
@@ -402,6 +414,19 @@ const applyCancellation = async (
         })
         .where(and(eq(slots.id, line.slotId!), eq(slots.organizationId, org))),
     )
+
+  // US-LG — reverse the collected money per method + (on clawback) the commission, dated at the
+  // cancellation, so the folio drops out of the ledger buckets exactly as status-exclusion did.
+  if (meta) {
+    const reversal = await buildCancellationReversal(db, {
+      organizationId: org,
+      folioId,
+      collectedBy: meta.agentId,
+      at: now,
+      clawback: folioUpdate.cancellationClawback === true,
+    })
+    statements.push(...reversal)
+  }
   // Lodging: release any stay reservations on this folio (US-A21 / tourist-approved cancel).
   statements.push(
     db

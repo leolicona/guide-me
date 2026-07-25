@@ -157,9 +157,9 @@ const seedReservation = async (
     .bind(organizationId)
     .first<{ id: string }>()
   await env.DB.prepare(
-    `INSERT INTO folios (id, organization_id, agent_id, status, payment_method, subtotal,
+    `INSERT INTO folios (id, organization_id, agent_id, status, subtotal,
        discount_total, total, amount_paid)
-     VALUES (?, ?, ?, 'paid', 'cash', 0, 0, 0, 0)`,
+     VALUES (?, ?, ?, 'paid', 0, 0, 0, 0)`,
   )
     .bind(folioId, organizationId, admin!.id)
     .run()

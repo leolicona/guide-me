@@ -141,6 +141,12 @@ export type FolioStatus = 'paid' | 'booking' | 'cancelled'
  */
 export type PaymentMethod = 'cash' | 'card' | 'transfer' | 'link'
 
+// US-LG08 — a folio's DISPLAYED method is derived from its collection rows: one real method, or the
+// literal 'Mixto' when a folio was collected more than one way (e.g. cash deposit + transfer
+// balance). Only real methods are ever SENT to the server (the settle/checkout pickers); 'Mixto' is
+// a read-only display value.
+export type DisplayMethod = PaymentMethod | 'Mixto'
+
 // US-AG41/US-A67 — the re-armable electronic-payment verification axis. 'not_required' for cash;
 // 'pending' while a transfer awaits an admin; 'verified' once confirmed. Delivery (QR/WhatsApp) is
 // blocked while 'pending'.
@@ -195,6 +201,20 @@ export interface FolioLine {
   extras: FolioLineExtra[]
 }
 
+// US-LG08 — one money movement in a folio's per-payment breakdown (deposit, balance, or a
+// cancellation reversal), each with its own method/reference/verification and who collected it.
+export interface FolioPaymentEntry {
+  id: string
+  kind: 'payment' | 'refund'
+  method: PaymentMethod
+  /** Signed minor units — a refund (cancellation reversal) is negative. */
+  amount: number
+  reference: string | null
+  verification: PaymentVerification
+  operator_name: string | null
+  collected_at: number
+}
+
 export interface Folio {
   id: string
   status: FolioStatus
@@ -209,8 +229,8 @@ export interface Folio {
   pending_balance?: number
   /** US-AG07 — booking hold expiry (unix secs); null for a non-booking folio. */
   booking_expires_at?: number | null
-  /** How payment was collected (US-AG25). */
-  payment_method: PaymentMethod
+  /** How payment was collected — DERIVED from the ledger; 'Mixto' when multi-method (US-LG08). */
+  payment_method: DisplayMethod
   /** US-AG41/US-A67 — the transfer's bank reference + the verification gate. Delivery is blocked
    *  while `payment_verification === 'pending'`. */
   payment_reference?: string | null
@@ -226,6 +246,8 @@ export interface Folio {
   tickets_viewed_at?: number | null
   /** US-AF13 — the affiliate shift operator who made the sale; null if sold directly. */
   operator_name?: string | null
+  /** US-LG08 — the money movements that make up amount_paid (deposit, balance, reversals). */
+  payments?: FolioPaymentEntry[]
   created_at: number
   lines: FolioLine[]
 }

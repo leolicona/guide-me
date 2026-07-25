@@ -171,7 +171,8 @@ export interface TicketConfirmationEmailInput {
   orgName: string
   folioId: string
   createdAt: Date
-  paymentMethod: 'cash' | 'card' | 'transfer' | 'link'
+  // US-LG08 — the display method; 'Mixto' for a folio collected by more than one method.
+  paymentMethod: string
   total: number
   // US-T01 — Magic Link into the tourist self-service portal (itinerary, QR, cancellation
   // request). Absent when token issuance failed (best-effort; never blocks the sale).
@@ -224,12 +225,14 @@ export const sendTicketConfirmationEmail = async (
       </div>`
   }).join('')
 
-  const paymentLabel = {
-    cash: 'Efectivo',
-    card: 'Tarjeta',
-    transfer: 'Transferencia',
-    link: 'Link de pago',
-  }[data.paymentMethod]
+  const paymentLabel =
+    {
+      cash: 'Efectivo',
+      card: 'Tarjeta',
+      transfer: 'Transferencia',
+      link: 'Link de pago',
+      Mixto: 'Mixto',
+    }[data.paymentMethod] ?? data.paymentMethod
   const orgName = escapeHtml(data.orgName)
   const greeting = data.customerName ? `Hola ${escapeHtml(data.customerName)},` : 'Hola,'
   const dateStr = data.createdAt.toLocaleDateString('es-MX', {

@@ -1,10 +1,11 @@
 import type { Context } from 'hono'
-import { and, desc, eq, gt, inArray, isNotNull, lte, ne, or, sql } from 'drizzle-orm'
+import { and, desc, eq, gt, inArray, isNotNull, lte, or, sql } from 'drizzle-orm'
 import { getDb, type Db } from '../../db/client'
 import {
   affiliateCompanies,
   agentExpenses,
   cashDrops,
+  folioPayments,
   folios,
   organizations,
   payouts,
@@ -100,36 +101,41 @@ const zeroByMethod = (): Record<PaymentMethodKey, number> => ({
   link: 0,
 })
 
-// Σ amount_paid + folio count per payment method over non-cancelled folios — the same
-// population sumCashCollected counts, just grouped instead of filtered to 'cash'.
+// US-LG04 — sales per method from the LEDGER: Σ signed money rows (payment + refund) grouped by
+// their OWN method, so a mixed folio's cash and transfer land in the right buckets and a cancelled
+// folio's reversal (a negative refund row dated cancelled_at) nets it back out. `count` is the
+// signed movement count (payment +1, refund −1) so a cancelled sale drops to zero, matching the old
+// non-cancelled folio count. Keyed on collected_by (== the folio's agent for every row we write).
 const sumSalesByMethod = async (db: Db, org: string, agentId: string, since?: Date) => {
   const rows = await db
     .select({
-      method: folios.paymentMethod,
-      total: sql<number>`coalesce(sum(${folios.amountPaid}), 0)`,
-      count: sql<number>`count(*)`,
+      method: folioPayments.method,
+      total: sql<number>`coalesce(sum(${folioPayments.amount}), 0)`,
+      count: sql<number>`coalesce(sum(case when ${folioPayments.entryType} = 'payment' then 1 when ${folioPayments.entryType} = 'refund' then -1 else 0 end), 0)`,
     })
-    .from(folios)
+    .from(folioPayments)
     .where(
       and(
-        eq(folios.organizationId, org),
-        eq(folios.agentId, agentId),
-        ne(folios.status, 'cancelled'),
-        ...(since ? [gt(folios.createdAt, since)] : []),
+        eq(folioPayments.organizationId, org),
+        eq(folioPayments.collectedBy, agentId),
+        inArray(folioPayments.entryType, ['payment', 'refund']),
+        ...(since ? [gt(folioPayments.createdAt, since)] : []),
       ),
     )
-    .groupBy(folios.paymentMethod)
+    .groupBy(folioPayments.method)
   const totals = zeroByMethod()
   const counts = zeroByMethod()
   for (const r of rows) {
+    if (!r.method) continue
     totals[r.method] = Number(r.total ?? 0)
     counts[r.method] = Number(r.count ?? 0)
   }
   return { totals, counts }
 }
 
-// Σ commission_amount per payment method, same keep semantics as sumCommissions (kept on
-// any live folio, or a cancelled one the company absorbed).
+// US-LG04 — commission per method from the LEDGER: Σ (commission + commission_reversal), grouped by
+// the method each row carries. A clawed-back cancellation nets to zero (its reversal row); an
+// absorbed one keeps the commission (no reversal) — the same keep semantics, now event-sourced.
 const sumCommissionsByMethod = async (
   db: Db,
   org: string,
@@ -138,21 +144,24 @@ const sumCommissionsByMethod = async (
 ) => {
   const rows = await db
     .select({
-      method: folios.paymentMethod,
-      total: sql<number>`coalesce(sum(${folios.commissionAmount}), 0)`,
+      method: folioPayments.method,
+      total: sql<number>`coalesce(sum(${folioPayments.amount}), 0)`,
     })
-    .from(folios)
+    .from(folioPayments)
     .where(
       and(
-        eq(folios.organizationId, org),
-        eq(folios.agentId, agentId),
-        or(ne(folios.status, 'cancelled'), eq(folios.cancellationClawback, false)),
-        ...(since ? [gt(folios.createdAt, since)] : []),
+        eq(folioPayments.organizationId, org),
+        eq(folioPayments.collectedBy, agentId),
+        inArray(folioPayments.entryType, ['commission', 'commission_reversal']),
+        ...(since ? [gt(folioPayments.createdAt, since)] : []),
       ),
     )
-    .groupBy(folios.paymentMethod)
+    .groupBy(folioPayments.method)
   const totals = zeroByMethod()
-  for (const r of rows) totals[r.method] = Number(r.total ?? 0)
+  for (const r of rows) {
+    if (!r.method) continue
+    totals[r.method] = Number(r.total ?? 0)
+  }
   return totals
 }
 
@@ -180,6 +189,9 @@ const buildCommissionsBlock = (m: Record<PaymentMethodKey, number>) => {
 // Each sum accepts an optional `since` (a Date): when present, only events created strictly
 // after it are counted. This lets the same helpers compute both the all-time balance and the
 // shift-scoped breakdown (events since the agent's last confirmed drop).
+// US-LG04 — cash collected from the LEDGER: Σ signed cash money rows (payment + refund). A cancelled
+// folio's negative refund row (dated cancelled_at) nets its cash back out; a physical refund would
+// do the same at hand-back. No folio-status filter — cancellation is an event, not an exclusion.
 const sumCashCollected = async (
   db: Db,
   org: string,
@@ -187,20 +199,22 @@ const sumCashCollected = async (
   since?: Date,
 ) => {
   const [row] = await db
-    .select({ total: sql<number>`coalesce(sum(${folios.amountPaid}), 0)` })
-    .from(folios)
+    .select({ total: sql<number>`coalesce(sum(${folioPayments.amount}), 0)` })
+    .from(folioPayments)
     .where(
       and(
-        eq(folios.organizationId, org),
-        eq(folios.agentId, agentId),
-        ne(folios.status, 'cancelled'),
-        eq(folios.paymentMethod, 'cash'),
-        ...(since ? [gt(folios.createdAt, since)] : []),
+        eq(folioPayments.organizationId, org),
+        eq(folioPayments.collectedBy, agentId),
+        eq(folioPayments.method, 'cash'),
+        inArray(folioPayments.entryType, ['payment', 'refund']),
+        ...(since ? [gt(folioPayments.createdAt, since)] : []),
       ),
     )
   return Number(row?.total ?? 0)
 }
 
+// US-LG04 — commission from the LEDGER: Σ (commission + commission_reversal). A clawed-back
+// cancellation nets to zero via its reversal row; an absorbed one keeps the commission (no reversal).
 const sumCommissions = async (
   db: Db,
   org: string,
@@ -208,15 +222,14 @@ const sumCommissions = async (
   since?: Date,
 ) => {
   const [row] = await db
-    .select({ total: sql<number>`coalesce(sum(${folios.commissionAmount}), 0)` })
-    .from(folios)
+    .select({ total: sql<number>`coalesce(sum(${folioPayments.amount}), 0)` })
+    .from(folioPayments)
     .where(
       and(
-        eq(folios.organizationId, org),
-        eq(folios.agentId, agentId),
-        // Kept on any live folio, or on a cancelled folio the company absorbed.
-        or(ne(folios.status, 'cancelled'), eq(folios.cancellationClawback, false)),
-        ...(since ? [gt(folios.createdAt, since)] : []),
+        eq(folioPayments.organizationId, org),
+        eq(folioPayments.collectedBy, agentId),
+        inArray(folioPayments.entryType, ['commission', 'commission_reversal']),
+        ...(since ? [gt(folioPayments.createdAt, since)] : []),
       ),
     )
   return Number(row?.total ?? 0)
@@ -272,46 +285,10 @@ const dropsRollup = async (
   return { total: Number(row?.total ?? 0), count: Number(row?.count ?? 0) }
 }
 
-// Reversal of pre-watermark folios cancelled AFTER the watermark (TECH_DEBT §12a). A confirmed
-// drop's `balance_after` baked these folios in while they were still live; cancelling one later
-// must NOT silently rewrite that settled snapshot. Instead the cash (and any clawed-back
-// commission) is reversed in the CURRENT shift, dated to the cancellation. Detected purely from
-// existing columns: `created_at <= watermark AND cancelled_at > watermark`.
-const sumCancellationReversal = async (
-  db: Db,
-  org: string,
-  agentId: string,
-  since: Date,
-) => {
-  const base = and(
-    eq(folios.organizationId, org),
-    eq(folios.agentId, agentId),
-    eq(folios.status, 'cancelled'),
-    lte(folios.createdAt, since),
-    gt(folios.cancelledAt, since),
-  )
-  // Cash that balance_after counted as collected but is now cancelled (cash folios only).
-  const [cashRow] = await db
-    .select({ total: sql<number>`coalesce(sum(${folios.amountPaid}), 0)` })
-    .from(folios)
-    .where(and(base, eq(folios.paymentMethod, 'cash')))
-  // Commission that balance_after subtracted but is now clawed back (any payment method),
-  // grouped so the US-AG29 commission buckets reverse in step with the total.
-  const commissionRows = await db
-    .select({
-      method: folios.paymentMethod,
-      total: sql<number>`coalesce(sum(${folios.commissionAmount}), 0)`,
-    })
-    .from(folios)
-    .where(and(base, eq(folios.cancellationClawback, true)))
-    .groupBy(folios.paymentMethod)
-  const commissionByMethod = zeroByMethod()
-  for (const r of commissionRows) commissionByMethod[r.method] = Number(r.total ?? 0)
-  return {
-    cash: Number(cashRow?.total ?? 0),
-    commissionByMethod,
-  }
-}
+// US-LG04 — the TECH_DEBT §12a `sumCancellationReversal` hack is GONE. A cancellation now writes its
+// own negative reversal rows (refund + commission_reversal) dated at cancelled_at, so a post-
+// watermark cancellation of a pre-watermark folio is picked up by the ordinary "Σ events since the
+// watermark" window — no special-case, and the frozen balance_after is never rewritten.
 
 // The settlement watermark: the instant of the agent's most recent confirmed drop. Events at or
 // before it are SETTLED (folded into that drop's balance_after) and must not be mutated
@@ -390,18 +367,13 @@ const deriveBalance = async (db: Db, org: string, agentId: string) => {
     // US-AG29: the shift sums are grouped by payment method; the reconciling totals
     // (cash_collected / commission_total) are derived FROM the buckets so the sales
     // block and the balance breakdown can never show two different numbers.
+    // The ledger already carries any cancellation reversal as negative rows dated at cancelled_at,
+    // so a post-watermark cancellation of a pre-watermark folio is inside this `since` window with
+    // no special-casing — the §12a reversal step is gone (US-LG04).
     const salesByMethod = await sumSalesByMethod(db, org, agentId, since)
     const commissionByMethod = await sumCommissionsByMethod(db, org, agentId, since)
     const expenseTotal = await sumExpenses(db, org, agentId, since)
     const payoutsTotal = await sumPayouts(db, org, agentId, since)
-    // A settled folio cancelled this shift reverses its collected cash (and any clawed-back
-    // commission) into the current shift — keeping the watermark frozen (TECH_DEBT §12a).
-    // The reversal lands in the same buckets the totals are built from.
-    const reversal = await sumCancellationReversal(db, org, agentId, since)
-    salesByMethod.totals.cash -= reversal.cash
-    for (const m of Object.keys(commissionByMethod) as PaymentMethodKey[]) {
-      commissionByMethod[m] -= reversal.commissionByMethod[m]
-    }
     const sales = buildSalesBlock(salesByMethod)
     const commissions = buildCommissionsBlock(commissionByMethod)
     const cashCollected = sales.cash

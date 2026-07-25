@@ -307,12 +307,8 @@ export const folios = sqliteTable('folios', {
   status: text('status', { enum: ['paid', 'booking', 'cancelled'] })
     .notNull()
     .default('paid'),
-  // How the agent collected (US-AG25/AG29). Only 'cash' folios add to the agent's cash
-  // debt; every other method is electronic — it still earns commission (US-AG24) but the
-  // money goes to the company. App-level enum (the column is plain text, no CHECK).
-  paymentMethod: text('payment_method', { enum: ['cash', 'card', 'transfer', 'link'] })
-    .notNull()
-    .default('cash'),
+  // US-LG08 — there is no folio-level payment method. How money was collected lives per-movement in
+  // folio_payments; the display method (shared method or 'Mixto') is DERIVED via `displayMethodSql`.
   // US-AG41/US-A67 (docs/payment-verification/spec.md). paymentReference: the transfer's bank ref
   // (free text; null for cash; holds the most recent transfer awaiting verification). The RE-ARMABLE
   // paymentVerification axis gates QR: 'not_required' (all-cash) · 'pending' (a transfer payment
