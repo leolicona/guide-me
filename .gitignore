@@ -26,3 +26,4 @@ dist-ssr/
 app-turistear/e2e/.report/
 app-turistear/test-results/
 app-turistear/playwright-report/
+app-turistear/e2e/.auth/
