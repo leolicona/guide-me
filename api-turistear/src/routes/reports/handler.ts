@@ -1,7 +1,7 @@
 import type { Context } from 'hono'
 import { and, eq, gte, inArray, lt, ne, sql } from 'drizzle-orm'
 import { getDb, type Db } from '../../db/client'
-import { affiliateCompanies, cashDrops, folios, payouts, users } from '../../db/schema'
+import { affiliateCompanies, cashDrops, folioPayments, folios, payouts, users } from '../../db/schema'
 import type { AppVariables } from '../../types/context'
 import type { CommissionReportQuery } from './schema'
 
@@ -73,12 +73,25 @@ export const buildCommissionReport = async (
       agentId: folios.agentId,
       foliosSold: sql<number>`count(case when ${folios.status} != 'cancelled' then 1 end)`,
       salesTotal: sql<number>`coalesce(sum(case when ${folios.status} != 'cancelled' then ${folios.total} end), 0)`,
-      cashCollected: sql<number>`coalesce(sum(case when ${folios.status} != 'cancelled' and ${folios.paymentMethod} = 'cash' then ${folios.amountPaid} end), 0)`,
-      electronicTotal: sql<number>`coalesce(sum(case when ${folios.status} != 'cancelled' and ${folios.paymentMethod} != 'cash' then ${folios.amountPaid} end), 0)`,
       commission: sql<number>`coalesce(sum(case when (${folios.status} != 'cancelled' or ${folios.cancellationClawback} = 0) then ${folios.commissionAmount} end), 0)`,
     })
     .from(folios)
     .where(and(...folioFilters))
+    .groupBy(folios.agentId)
+
+  // US-LG08 — cash vs electronic collected come from the LEDGER (each payment/refund row's own
+  // method), so a MIXED folio splits correctly and a cancellation's reversal rows net it out. Joined
+  // to folios for the SAME range/scope filters (and grouped by seller), so the period semantics are
+  // unchanged — only the bucketing is now method-accurate.
+  const paymentAgg = await db
+    .select({
+      agentId: folios.agentId,
+      cashCollected: sql<number>`coalesce(sum(case when ${folioPayments.method} = 'cash' then ${folioPayments.amount} else 0 end), 0)`,
+      electronicTotal: sql<number>`coalesce(sum(case when ${folioPayments.method} != 'cash' then ${folioPayments.amount} else 0 end), 0)`,
+    })
+    .from(folioPayments)
+    .innerJoin(folios, eq(folios.id, folioPayments.folioId))
+    .where(and(inArray(folioPayments.entryType, ['payment', 'refund']), ...folioFilters))
     .groupBy(folios.agentId)
 
   const dropAgg = await db
@@ -115,6 +128,7 @@ export const buildCommissionReport = async (
   const dropBySeller = new Map(dropAgg.map((r) => [r.agentId, Number(r.total ?? 0)]))
   const payoutBySeller = new Map(payoutAgg.map((r) => [r.agentId, Number(r.total ?? 0)]))
   const folioBySeller = new Map(folioAgg.map((r) => [r.agentId, r]))
+  const paymentBySeller = new Map(paymentAgg.map((r) => [r.agentId, r]))
 
   // Every seller with ANY activity in range (folios, confirmed drops, or payouts). A
   // drop/payout-only seller — cash settled this period against prior sales — is real activity
@@ -151,7 +165,8 @@ export const buildCommissionReport = async (
     )
     .map((u) => {
       const f = folioBySeller.get(u.id)
-      const cashCollected = Number(f?.cashCollected ?? 0)
+      const p = paymentBySeller.get(u.id)
+      const cashCollected = Number(p?.cashCollected ?? 0)
       const commission = Number(f?.commission ?? 0)
       const confirmedDrops = dropBySeller.get(u.id) ?? 0
       const payoutsTotal = payoutBySeller.get(u.id) ?? 0
@@ -163,7 +178,7 @@ export const buildCommissionReport = async (
         folios_sold: Number(f?.foliosSold ?? 0),
         sales_total: Number(f?.salesTotal ?? 0),
         cash_collected: cashCollected,
-        electronic_total: Number(f?.electronicTotal ?? 0),
+        electronic_total: Number(p?.electronicTotal ?? 0),
         commission_earned: commission,
         confirmed_drops: confirmedDrops,
         payouts: payoutsTotal,

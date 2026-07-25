@@ -5,6 +5,7 @@ import {
   seedTwoOrgs,
   seedAffiliateCompany,
   clearAffiliateDb,
+  seedFolioLedgerRows,
 } from '../helpers/tenancy'
 import { buildFakeJwt } from '../helpers/jwt'
 
@@ -74,6 +75,10 @@ const seedFolio = async ({
       ts,
     )
     .run()
+  await seedFolioLedgerRows({
+    folioId: id, organizationId, agentId, status, paymentMethod, amountPaid,
+    commissionAmount, cancellationClawback, createdAt: ts,
+  })
   return id
 }
 

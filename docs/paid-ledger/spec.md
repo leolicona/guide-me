@@ -163,6 +163,13 @@ the admin queue.
   (`paid ∧ verification ≠ pending`) is unchanged at the read site.
 - **D10 — `payment_method` dropped; `Mixto` derived.** No folio-level money method survives. Display
   reads derive a method from the rows, showing `Mixto` when they differ.
+- **D10a — Column functionally removed, physical drop deferred (Step 5 note).** `payment_method` is
+  removed from the Drizzle schema, written by nothing, and read by nothing — every serializer, the
+  settle default, the ticket email, and the admin-report + affiliate-settlement money-reads now
+  derive from the ledger. The physical `ALTER TABLE … DROP COLUMN` is deferred: it would force
+  stripping the column from ~14 test-suite `INSERT`s and rewriting the Step-1 backfill test (which
+  reads it), for no functional gain. The DB column remains as an unwritten, unread no-op until a
+  trivial isolated cleanup.
 - **D11 — Backfill = one synthetic row per folio.** Historical settled bookings already overwrote
   `amount_paid` to `total` and lost the deposit/balance split; the migration seeds **one** `payment`
   row (`amount=amount_paid`, `method=payment_method`, ref, verification, `created_at=created_at`,

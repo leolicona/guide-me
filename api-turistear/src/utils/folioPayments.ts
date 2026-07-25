@@ -2,6 +2,25 @@ import { and, eq, inArray, sql } from 'drizzle-orm'
 import type { Db } from '../db/client'
 import { folioPayments } from '../db/schema'
 
+// US-LG08 — the folio's DISPLAY method, derived from its collection (payment) rows: the shared
+// method when all agree, else the literal 'Mixto'. A correlated subquery, so it drops into any
+// folios SELECT with no fan-out and no extra round-trip — the replacement for the dropped
+// folios.payment_method column. (A folio always has ≥1 payment row, so the else branch is a method.)
+// The correlation references the outer `folios.id` by its raw SQL name (every reader queries the
+// unaliased `folios` table), which renders as a stable column reference in the subquery.
+export const displayMethodSql = sql<string>`(
+  select case when count(distinct fp.method) > 1 then 'Mixto' else max(fp.method) end
+  from folio_payments fp
+  where fp.folio_id = folios.id and fp.entry_type = 'payment'
+)`
+
+// The deposit / first collection's own method — the settle default when the caller sends none.
+export const depositMethodSql = sql<string>`(
+  select fp.method from folio_payments fp
+  where fp.folio_id = folios.id and fp.entry_type = 'payment'
+  order by fp.created_at asc limit 1
+)`
+
 // US-LG (docs/paid-ledger/spec.md) — builders that RETURN a Drizzle insert statement for a
 // folio_payments row, so a caller can add it to its own `db.batch(...)` and persist the ledger row
 // ATOMICALLY with the folio-scalar mutation it shadows / the cancellation it records.
