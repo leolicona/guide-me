@@ -44,7 +44,7 @@ import {
 } from '../../utils/lodging'
 import { lodgingAvailableDays, lodgingTypeCards } from './lodging.handler'
 import { settleSchema, type ConfirmSaleInput, type SettleInput } from './schema'
-import { paymentRow, commissionRow } from '../../utils/folioPayments'
+import { paymentRow, commissionRow, buildCancellationReversal } from '../../utils/folioPayments'
 
 export type PosContext = Context<{
   Bindings: CloudflareBindings
@@ -1572,6 +1572,7 @@ export const confirmSale = async (c: PosContext) => {
         organizationId: org,
         folioId,
         amount: commissionAmount,
+        method,
         collectedBy: agent.userId,
       }),
     )
@@ -2097,6 +2098,7 @@ export const settleBooking = async (c: PosContext) => {
           organizationId: org,
           folioId: id,
           amount: commissionTopUp,
+          method: settleMethod,
           collectedBy: agent.userId,
         }),
       )
@@ -2505,6 +2507,17 @@ export const rejectPayment = async (c: PosContext) => {
         ),
       ),
   )
+  // US-LG — the void sale reverses out of the ledger (its electronic money leaves the sales bucket;
+  // the seller's commission is clawed back). Dated now (cancelled_at).
+  statements.push(
+    ...(await buildCancellationReversal(db, {
+      organizationId: org,
+      folioId: id,
+      collectedBy: folio.agentId,
+      at: now,
+      clawback: true,
+    })),
+  )
   await db.batch(statements as [BatchItem<'sqlite'>, ...BatchItem<'sqlite'>[]])
 
   const out = await readFolio(db, org, folio.agentId, id, c.env.QR_SECRET, c.env.API_BASE_URL)
@@ -2542,19 +2555,31 @@ export const cancelBooking = async (c: PosContext) => {
     .from(folioLines)
     .where(and(eq(folioLines.folioId, id), eq(folioLines.organizationId, org)))
 
+  const now = new Date()
   const statements: BatchItem<'sqlite'>[] = [
     db
       .update(folios)
       .set({
         status: 'cancelled',
-        cancelledAt: new Date(),
+        cancelledAt: now,
         cancelledBy: agent.userId,
         cancellationReason: body.reason ?? null,
         refundStatus: 'none', // deposit retained (D7)
-        updatedAt: new Date(),
+        updatedAt: now,
       })
       .where(and(eq(folios.id, id), eq(folios.organizationId, org))),
   ]
+  // US-LG — cancelling a booking drops it from the ledger's sales/cash buckets exactly as the
+  // status-exclusion did (clawback=false: the agent KEEPS the accrued commission, D7).
+  statements.push(
+    ...(await buildCancellationReversal(db, {
+      organizationId: org,
+      folioId: id,
+      collectedBy: agent.userId,
+      at: now,
+      clawback: false,
+    })),
+  )
   for (const line of lineRows) {
     if (!line.slotId) continue
     if (line.zoneId) {

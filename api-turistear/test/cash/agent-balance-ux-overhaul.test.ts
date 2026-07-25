@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { env, SELF } from 'cloudflare:test'
-import { seedUser, seedTwoOrgs, clearTenancyDb } from '../helpers/tenancy'
+import { seedUser, seedTwoOrgs, clearTenancyDb, seedFolioLedgerRows } from '../helpers/tenancy'
 import { buildFakeJwt } from '../helpers/jwt'
 
 // Agent Balance UX Overhaul — Cash vs Electronic (US-AG29).
@@ -64,6 +64,18 @@ const seedFolio = async (opts: {
       ts,
     )
     .run()
+  await seedFolioLedgerRows({
+    folioId: id,
+    organizationId: opts.organizationId,
+    agentId: opts.agentId,
+    status: opts.status ?? 'paid',
+    paymentMethod: opts.paymentMethod ?? 'cash',
+    amountPaid: opts.amountPaid,
+    commissionAmount: opts.commissionAmount ?? 0,
+    cancellationClawback: opts.cancellationClawback ?? false,
+    cancelledAt: opts.cancelledAt ?? undefined,
+    createdAt: ts,
+  })
   return id
 }
 
@@ -324,11 +336,22 @@ describe('Agent Balance UX Overhaul — cash vs electronic read model (US-AG29)'
       organizationId, agentId, amount: 180000,
       balanceBefore: 180000, balanceAfter: 0, reviewedAt: anchorAt,
     })
-    // The settled folio is cancelled AFTER the watermark, with clawback.
+    // The settled folio is cancelled AFTER the watermark, with clawback. The cancellation writes its
+    // reversal rows dated at cancelled_at (mirrors production) — the ledger analogue of §12a.
+    const cancelAt = nowSec()
     await env.DB.prepare(
       `UPDATE folios SET status = 'cancelled', cancellation_clawback = 1, cancelled_at = ? WHERE id = ?`,
     )
-      .bind(nowSec(), folioId)
+      .bind(cancelAt, folioId)
+      .run()
+    await env.DB.prepare(
+      `INSERT INTO folio_payments (id, organization_id, folio_id, entry_type, amount, method, verification, collected_by, created_at)
+       VALUES (?, ?, ?, 'refund', -200000, 'cash', 'not_required', ?, ?), (?, ?, ?, 'commission_reversal', -20000, 'cash', 'not_required', ?, ?)`,
+    )
+      .bind(
+        crypto.randomUUID(), organizationId, folioId, agentId, cancelAt,
+        crypto.randomUUID(), organizationId, folioId, agentId, cancelAt,
+      )
       .run()
 
     const me = await getMyBalance(AGENT_EMAIL)

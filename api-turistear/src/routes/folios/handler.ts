@@ -27,6 +27,7 @@ import {
   type CancellationEmailInput,
 } from '../../services/resend'
 import { generateRefundPin } from '../../utils/portal'
+import { buildCancellationReversal } from '../../utils/folioPayments'
 
 export type FoliosContext = Context<{
   Bindings: CloudflareBindings
@@ -378,6 +379,13 @@ const applyCancellation = async (
   now: Date,
   folioUpdate: Partial<typeof folios.$inferInsert>,
 ): Promise<boolean> => {
+  // The agent whose ledger the cancellation reversal (US-LG05/LG06) attributes to.
+  const [meta] = await db
+    .select({ agentId: folios.agentId })
+    .from(folios)
+    .where(and(eq(folios.id, folioId), eq(folios.organizationId, org)))
+    .limit(1)
+
   const won = await db
     .update(folios)
     .set({ ...folioUpdate, updatedAt: now })
@@ -402,6 +410,19 @@ const applyCancellation = async (
         })
         .where(and(eq(slots.id, line.slotId!), eq(slots.organizationId, org))),
     )
+
+  // US-LG — reverse the collected money per method + (on clawback) the commission, dated at the
+  // cancellation, so the folio drops out of the ledger buckets exactly as status-exclusion did.
+  if (meta) {
+    const reversal = await buildCancellationReversal(db, {
+      organizationId: org,
+      folioId,
+      collectedBy: meta.agentId,
+      at: now,
+      clawback: folioUpdate.cancellationClawback === true,
+    })
+    statements.push(...reversal)
+  }
   // Lodging: release any stay reservations on this folio (US-A21 / tourist-approved cancel).
   statements.push(
     db

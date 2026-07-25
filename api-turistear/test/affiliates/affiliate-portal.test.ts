@@ -285,9 +285,14 @@ describe('Admin Caja folds in affiliates (D5/D6)', () => {
     })
     const saleBody = (await sale.json()) as { folio: { id: string } }
     // Backdate the sale so it sits clearly before the collection watermark (avoids the
-    // same-second collision that would re-count it into the post-watermark shift).
+    // same-second collision that would re-count it into the post-watermark shift). The ledger rows
+    // (the cash engine's source of truth) must be backdated in lockstep with the folio.
+    const backdate = Math.floor(Date.now() / 1000) - 100
     await env.DB.prepare('UPDATE folios SET created_at = ? WHERE id = ?')
-      .bind(Math.floor(Date.now() / 1000) - 100, saleBody.folio.id)
+      .bind(backdate, saleBody.folio.id)
+      .run()
+    await env.DB.prepare('UPDATE folio_payments SET created_at = ? WHERE folio_id = ?')
+      .bind(backdate, saleBody.folio.id)
       .run()
     const aff = await affUserId()
 
