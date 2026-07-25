@@ -111,6 +111,18 @@ describe('US-LG03 — settle captures its own method', () => {
     expect(await verify(ADMIN, folioId)).toBe(200)
     expect(await folioVerification(folioId)).toBe('verified')
     expect((await balanceRow(folioId))!.verification).toBe('verified')
+
+    // US-LG08 — the folio detail exposes the per-payment breakdown: cash deposit + transfer balance,
+    // in order, each with its own method + amount.
+    const detail = await SELF.fetch(`${base}/folios/${folioId}`, { headers: auth(AGENT) })
+    const payments = ((await detail.json()) as any).folio.payments as Array<{
+      kind: string
+      method: string
+      amount: number
+    }>
+    expect(payments).toHaveLength(2)
+    expect(payments[0]).toMatchObject({ kind: 'payment', method: 'cash', amount: 45000 })
+    expect(payments[1]).toMatchObject({ kind: 'payment', method: 'transfer', amount: 255000 })
   })
 
   it('transfer balance requires a reference', async () => {

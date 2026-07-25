@@ -27,7 +27,7 @@ import {
   type CancellationEmailInput,
 } from '../../services/resend'
 import { generateRefundPin } from '../../utils/portal'
-import { buildCancellationReversal, displayMethodSql } from '../../utils/folioPayments'
+import { buildCancellationReversal, displayMethodSql, readFolioPayments } from '../../utils/folioPayments'
 
 export type FoliosContext = Context<{
   Bindings: CloudflareBindings
@@ -155,6 +155,9 @@ const readFolio = async (db: Db, org: string, folioId: string, apiBaseUrl?: stri
     extrasByLine.set(ex.folioLineId, list)
   }
 
+  // US-LG08 — the per-payment breakdown (deposit vs balance, each with its own method).
+  const payments = await readFolioPayments(db, org, folioId)
+
   return {
     id: folio.id,
     agent: { id: folio.agentId, name: folio.agentName },
@@ -194,6 +197,7 @@ const readFolio = async (db: Db, org: string, folioId: string, apiBaseUrl?: stri
     tickets_sent_at: tsOrNull(folio.ticketsSentAt),
     tickets_viewed_at: tsOrNull(folio.ticketsViewedAt),
     created_at: Math.floor(folio.createdAt.getTime() / 1000),
+    payments,
     lines: lineRows.map((line) => ({
       id: line.id,
       line_type: line.lineType,
