@@ -22,3 +22,7 @@ dist-ssr/
 .antigravitycli/
 .playwright-cli/
 .claude/
+# Playwright e2e artifacts
+app-turistear/e2e/.report/
+app-turistear/test-results/
+app-turistear/playwright-report/
