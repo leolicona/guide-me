@@ -5,6 +5,7 @@ import {
   seedTwoOrgs,
   seedAffiliateCompany,
   clearAffiliateDb,
+  seedFolioLedgerRows,
 } from '../helpers/tenancy'
 import { buildFakeJwt } from '../helpers/jwt'
 
@@ -327,12 +328,17 @@ describe('US-A53 — settlement report', () => {
     })
     const ts = Math.floor(Date.now() / 1000)
     // A cash sale: collected 100000, commission 15000.
+    const folioId = crypto.randomUUID()
     await env.DB.prepare(
       `INSERT INTO folios (id, organization_id, agent_id, affiliate_company_id, status, payment_method, subtotal, discount_total, total, amount_paid, commission_amount, created_at, updated_at)
        VALUES (?, ?, ?, ?, 'paid', 'cash', 100000, 0, 100000, 100000, 15000, ?, ?)`,
     )
-      .bind(crypto.randomUUID(), organizationId, userId, companyId, ts, ts)
+      .bind(folioId, organizationId, userId, companyId, ts, ts)
       .run()
+    await seedFolioLedgerRows({
+      folioId, organizationId, agentId: userId, status: 'paid', paymentMethod: 'cash',
+      amountPaid: 100000, commissionAmount: 15000, createdAt: ts,
+    })
     // A confirmed deposit of 50000 handed in by the affiliate user.
     await env.DB.prepare(
       `INSERT INTO cash_drops (id, organization_id, agent_id, amount, balance_before, status, source, created_at, updated_at)

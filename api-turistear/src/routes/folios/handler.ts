@@ -27,7 +27,7 @@ import {
   type CancellationEmailInput,
 } from '../../services/resend'
 import { generateRefundPin } from '../../utils/portal'
-import { buildCancellationReversal } from '../../utils/folioPayments'
+import { buildCancellationReversal, displayMethodSql } from '../../utils/folioPayments'
 
 export type FoliosContext = Context<{
   Bindings: CloudflareBindings
@@ -51,7 +51,7 @@ const readFolio = async (db: Db, org: string, folioId: string, apiBaseUrl?: stri
       status: folios.status,
       ticketsSentAt: folios.ticketsSentAt,
       ticketsViewedAt: folios.ticketsViewedAt,
-      paymentMethod: folios.paymentMethod,
+      paymentMethod: displayMethodSql,
       paymentReference: folios.paymentReference,
       paymentVerification: folios.paymentVerification,
       paymentVerifiedAt: folios.paymentVerifiedAt,
@@ -280,7 +280,7 @@ export const listFolios = async (c: FoliosContext) => {
       reminderSentBy: folios.reminderSentBy,
       ticketsSentAt: folios.ticketsSentAt,
       ticketsViewedAt: folios.ticketsViewedAt,
-      paymentMethod: folios.paymentMethod,
+      paymentMethod: displayMethodSql,
       paymentReference: folios.paymentReference,
       paymentVerification: folios.paymentVerification,
       operatorName: affiliateOperators.name,

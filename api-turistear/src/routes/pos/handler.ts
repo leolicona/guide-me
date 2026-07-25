@@ -44,7 +44,13 @@ import {
 } from '../../utils/lodging'
 import { lodgingAvailableDays, lodgingTypeCards } from './lodging.handler'
 import { settleSchema, type ConfirmSaleInput, type SettleInput } from './schema'
-import { paymentRow, commissionRow, buildCancellationReversal } from '../../utils/folioPayments'
+import {
+  paymentRow,
+  commissionRow,
+  buildCancellationReversal,
+  displayMethodSql,
+  depositMethodSql,
+} from '../../utils/folioPayments'
 
 export type PosContext = Context<{
   Bindings: CloudflareBindings
@@ -759,7 +765,8 @@ async function folioPortalLink(
 interface TicketEmailMeta {
   customerEmail: string | null
   customerName: string | null
-  paymentMethod: 'cash' | 'card' | 'transfer' | 'link'
+  // US-LG08 — the display method, which can be the literal 'Mixto' for a multi-method folio.
+  paymentMethod: string
   total: number
   createdAt: Date
 }
@@ -1298,7 +1305,8 @@ export const confirmSale = async (c: PosContext) => {
     customerEmail: input.customer_email ?? null,
     customerPhone: input.customer_phone ?? null,
     status,
-    paymentMethod: method,
+    // US-LG08 — the folio no longer stores a payment method; it is DERIVED from the ledger's
+    // collection rows (the payment row written below), shown as the shared method or 'Mixto'.
     // US-AG41/US-A67 — the transfer's reference + the verification gate (see `cleared` above).
     paymentReference: needsVerification ? (input.payment_reference ?? null) : null,
     paymentVerification,
@@ -1755,7 +1763,7 @@ const readFolio = async (
     .select({
       id: folios.id,
       status: folios.status,
-      paymentMethod: folios.paymentMethod,
+      paymentMethod: displayMethodSql,
       paymentReference: folios.paymentReference,
       paymentVerification: folios.paymentVerification,
       paymentVerifiedAt: folios.paymentVerifiedAt,
@@ -1990,7 +1998,8 @@ export const settleBooking = async (c: PosContext) => {
       bookingExpiresAt: folios.bookingExpiresAt,
       customerName: folios.customerName,
       customerEmail: folios.customerEmail,
-      paymentMethod: folios.paymentMethod,
+      // The deposit's method — the settle default when the caller sends none (US-LG08).
+      paymentMethod: depositMethodSql,
       // US-A67 — the deposit's verification state coming in: a still-`pending` transfer DEPOSIT must
       // keep the QR deferred even when the BALANCE is settled by cash (money not yet confirmed).
       paymentVerification: folios.paymentVerification,
@@ -2217,7 +2226,9 @@ export const settleBooking = async (c: PosContext) => {
     {
       customerEmail: folio.customerEmail,
       customerName: folio.customerName,
-      paymentMethod: folio.paymentMethod,
+      // US-LG08 — the folio is now paid: show its display method ('Mixto' when the deposit and the
+      // balance were collected differently), matching the folio detail the customer will open.
+      paymentMethod: folio.paymentMethod === settleMethod ? folio.paymentMethod : 'Mixto',
       total: folio.total,
       createdAt: new Date(),
     },
@@ -2261,7 +2272,7 @@ export const verifyPayment = async (c: PosContext) => {
       id: folios.id,
       agentId: folios.agentId,
       status: folios.status,
-      paymentMethod: folios.paymentMethod,
+      paymentMethod: displayMethodSql,
       paymentVerification: folios.paymentVerification,
       customerName: folios.customerName,
       customerEmail: folios.customerEmail,
@@ -2997,7 +3008,7 @@ export const listAgentFolios = async (c: PosContext) => {
       reminderSentBy: folios.reminderSentBy,
       ticketsSentAt: folios.ticketsSentAt,
       ticketsViewedAt: folios.ticketsViewedAt,
-      paymentMethod: folios.paymentMethod,
+      paymentMethod: displayMethodSql,
       paymentVerification: folios.paymentVerification,
       operatorName: affiliateOperators.name,
     })
