@@ -95,10 +95,12 @@ export const confirmSaleSchema = z
 
 export type ConfirmSaleInput = z.infer<typeof confirmSaleSchema>
 
-// US-AG41 — settle body: collecting a booking's balance. The settle re-uses the folio's own payment
-// method; when that method is 'transfer' the agent records the settling transfer's reference (the
-// handler enforces the required-when-transfer rule, since only it knows the folio's method).
+// US-LG03 — settle body: collecting a booking's balance by ITS OWN method (independent of the
+// deposit). `method` is optional and defaults, in the handler, to the deposit's method for a
+// body-less cash settle (backward compatible). When the balance method is 'transfer' the agent
+// records its bank reference (the handler enforces the required-when-transfer rule).
 export const settleSchema = z.object({
+  method: z.enum(['cash', 'card', 'transfer', 'link']).optional(),
   payment_reference: paymentReferenceSchema.optional(),
 })
 

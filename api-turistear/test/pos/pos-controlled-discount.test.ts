@@ -158,6 +158,7 @@ const clearPosDb = async () => {
   await env.DB.exec('DELETE FROM folio_lines')
   await env.DB.exec('DELETE FROM cancellation_requests')
   await env.DB.exec('DELETE FROM folio_access_tokens')
+  await env.DB.exec('DELETE FROM folio_payments')
   await env.DB.exec('DELETE FROM folios')
   await env.DB.exec('DELETE FROM slots')
   await env.DB.exec('DELETE FROM schedules')
@@ -318,16 +319,20 @@ describe('US-AG04 / AG05 / AG06 / AG08 — confirm sale', () => {
 
     expect(status).toBe(201)
     // line_total = 300000 → 15% = 45000.
-    expect(json.folio.payment_method).toBe('card')
+    expect(json.folio.payment_method).toBe('card') // derived from the ledger (US-LG08)
     expect(json.folio.commission_amount).toBe(45000)
 
+    // The method now lives per-movement in the ledger, not on folios.
     const row = await env.DB.prepare(
-      `SELECT payment_method, commission_amount FROM folios WHERE id = ?`,
+      `SELECT method FROM folio_payments WHERE folio_id = ? AND entry_type = 'payment'`,
     )
       .bind(json.folio.id)
-      .first<{ payment_method: string; commission_amount: number }>()
-    expect(row?.payment_method).toBe('card')
-    expect(row?.commission_amount).toBe(45000)
+      .first<{ method: string }>()
+    expect(row?.method).toBe('card')
+    const [{ commission_amount }] = (
+      await env.DB.prepare(`SELECT commission_amount FROM folios WHERE id = ?`).bind(json.folio.id).all()
+    ).results as Array<{ commission_amount: number }>
+    expect(commission_amount).toBe(45000)
   })
 
   it('US-AG25 — payment_method defaults to cash; zero-commission service → 0', async () => {

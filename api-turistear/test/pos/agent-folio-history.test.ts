@@ -54,10 +54,10 @@ const seedFolio = async ({
   await env.DB.prepare(
     `INSERT INTO folios
        (id, organization_id, agent_id, customer_name, customer_email, customer_phone,
-        status, payment_method, subtotal, discount_total, total, amount_paid,
+        status, subtotal, discount_total, total, amount_paid,
         commission_amount, cancelled_at, cancelled_by, cancellation_reason,
         cancellation_clawback, created_at, updated_at)
-     VALUES (?, ?, ?, ?, NULL, NULL, ?, 'cash', ?, 0, ?, ?, 0, ?, NULL, NULL, 0, ?, ?)`,
+     VALUES (?, ?, ?, ?, NULL, NULL, ?, ?, 0, ?, ?, 0, ?, NULL, NULL, 0, ?, ?)`,
   )
     .bind(folioId, organizationId, agentId, customerName, status, total, total, paid, cancelledAt, ts, ts)
     .run()
@@ -133,6 +133,7 @@ const clearPosDb = async () => {
   await env.DB.exec('DELETE FROM folio_lines')
   await env.DB.exec('DELETE FROM cancellation_requests')
   await env.DB.exec('DELETE FROM folio_access_tokens')
+  await env.DB.exec('DELETE FROM folio_payments')
   await env.DB.exec('DELETE FROM folios')
   await env.DB.exec('DELETE FROM slots')
   await env.DB.exec('DELETE FROM schedules')

@@ -11,7 +11,9 @@ import {
 } from '@mui/material'
 import EventBusyRounded from '@mui/icons-material/EventBusyRounded'
 import PaidRounded from '@mui/icons-material/PaidRounded'
-import { useSettleBooking, useCancelBooking, useReactivateBooking } from '../hooks/useBookingActions'
+import { useCancelBooking, useReactivateBooking } from '../hooks/useBookingActions'
+import { SettleSheet } from './SettleSheet'
+import type { DisplayMethod, PaymentMethod } from '../../pos/types'
 
 // Minimal shape the booking actions need — satisfied by both the agent (pos) folio detail and
 // the admin folio detail, so the banner + buttons serve every detail surface (D5/D9).
@@ -19,6 +21,11 @@ export interface BookingFolio {
   id: string
   status: 'paid' | 'booking' | 'cancelled'
   booking_expires_at?: number | null
+  /** US-LG03 — the settle sheet needs the balance + the deposit's method (to pre-select). */
+  total?: number
+  amount_paid?: number
+  pending_balance?: number
+  payment_method?: DisplayMethod
 }
 
 // A live apartado (spots held, balance pending).
@@ -45,13 +52,18 @@ export function ExpiredBookingBanner({ folio }: { folio: BookingFolio }) {
 // the existing folio detail: Liquidar/Cancelar for a live apartado, Reactivar for an expired
 // one. Returns null for ordinary paid/cancelled folios so the detail reads normally.
 export function BookingActions({ folio }: { folio: BookingFolio }) {
-  const settle = useSettleBooking()
   const cancel = useCancelBooking()
   const reactivate = useReactivateBooking()
   const [confirmOpen, setConfirmOpen] = useState(false)
-  const busy = settle.isPending || cancel.isPending || reactivate.isPending
+  const [settleOpen, setSettleOpen] = useState(false)
+  const busy = cancel.isPending || reactivate.isPending
 
   if (isLiveBooking(folio)) {
+    // The amount this settle collects, and the deposit's method to pre-select the picker. A live
+    // booking has a single collection, so its display method is a real method (never 'Mixto').
+    const balance = folio.pending_balance ?? (folio.total ?? 0) - (folio.amount_paid ?? 0)
+    const defaultMethod: PaymentMethod =
+      folio.payment_method && folio.payment_method !== 'Mixto' ? folio.payment_method : 'cash'
     return (
       <>
         <Stack spacing={1.5}>
@@ -61,14 +73,22 @@ export function BookingActions({ folio }: { folio: BookingFolio }) {
             disableElevation
             startIcon={<PaidRounded />}
             disabled={busy}
-            onClick={() => settle.mutate(folio.id)}
+            onClick={() => setSettleOpen(true)}
           >
-            {settle.isPending ? 'Liquidando…' : 'Liquidar saldo'}
+            Liquidar saldo
           </Button>
           <Button color="inherit" disabled={busy} onClick={() => setConfirmOpen(true)}>
             Cancelar apartado
           </Button>
         </Stack>
+
+        <SettleSheet
+          open={settleOpen}
+          onClose={() => setSettleOpen(false)}
+          folioId={folio.id}
+          balance={balance}
+          defaultMethod={defaultMethod}
+        />
 
         {/* US-AG07.4 — confirm cancel in an in-app dialog (no native window.confirm). */}
         <Dialog
