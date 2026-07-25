@@ -330,8 +330,8 @@ describe('US-A53 — settlement report', () => {
     // A cash sale: collected 100000, commission 15000.
     const folioId = crypto.randomUUID()
     await env.DB.prepare(
-      `INSERT INTO folios (id, organization_id, agent_id, affiliate_company_id, status, payment_method, subtotal, discount_total, total, amount_paid, commission_amount, created_at, updated_at)
-       VALUES (?, ?, ?, ?, 'paid', 'cash', 100000, 0, 100000, 100000, 15000, ?, ?)`,
+      `INSERT INTO folios (id, organization_id, agent_id, affiliate_company_id, status, subtotal, discount_total, total, amount_paid, commission_amount, created_at, updated_at)
+       VALUES (?, ?, ?, ?, 'paid', 100000, 0, 100000, 100000, 15000, ?, ?)`,
     )
       .bind(folioId, organizationId, userId, companyId, ts, ts)
       .run()

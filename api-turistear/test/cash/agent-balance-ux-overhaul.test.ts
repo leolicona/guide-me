@@ -43,17 +43,16 @@ const seedFolio = async (opts: {
   const ts = opts.createdAt ?? nowSec()
   await env.DB.prepare(
     `INSERT INTO folios
-       (id, organization_id, agent_id, customer_name, status, payment_method,
+       (id, organization_id, agent_id, customer_name, status,
         subtotal, discount_total, total, amount_paid, commission_amount,
         cancellation_clawback, cancelled_at, created_at, updated_at)
-     VALUES (?, ?, ?, 'John Diver', ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?)`,
+     VALUES (?, ?, ?, 'John Diver', ?, ?, 0, ?, ?, ?, ?, ?, ?, ?)`,
   )
     .bind(
       id,
       opts.organizationId,
       opts.agentId,
       opts.status ?? 'paid',
-      opts.paymentMethod ?? 'cash',
       opts.amountPaid,
       opts.amountPaid,
       opts.amountPaid,
