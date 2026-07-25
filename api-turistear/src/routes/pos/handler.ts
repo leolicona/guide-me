@@ -11,6 +11,7 @@ import {
   folioAccessTokens,
   folioLineExtras,
   folioLines,
+  folioPayments,
   folios,
   organizations,
   serviceExtras,
@@ -43,6 +44,7 @@ import {
 } from '../../utils/lodging'
 import { lodgingAvailableDays, lodgingTypeCards } from './lodging.handler'
 import { settleSchema, type ConfirmSaleInput, type SettleInput } from './schema'
+import { paymentRow, commissionRow } from '../../utils/folioPayments'
 
 export type PosContext = Context<{
   Bindings: CloudflareBindings
@@ -1548,6 +1550,33 @@ export const confirmSale = async (c: PosContext) => {
     }
   }
 
+  // US-LG02 (paid-ledger, step 2) — DUAL-WRITE the sale's money movement as a ledger row, atomically
+  // with the lines. The scalars above stay authoritative; this is a verified shadow (Σ payment rows
+  // == amount_paid; Σ commission rows == commission_amount). A booking writes the deposit; a paid
+  // sale the full amount. Verification/method/reference mirror the folio; a transfer row is `pending`.
+  statements.push(
+    paymentRow(db, {
+      organizationId: org,
+      folioId,
+      amount: amountPaid,
+      method,
+      reference: needsVerification ? (input.payment_reference ?? null) : null,
+      verification: paymentVerification,
+      collectedBy: agent.userId,
+      operatorId: c.get('operator')?.operatorId ?? null,
+    }),
+  )
+  if (commissionAmount > 0) {
+    statements.push(
+      commissionRow(db, {
+        organizationId: org,
+        folioId,
+        amount: commissionAmount,
+        collectedBy: agent.userId,
+      }),
+    )
+  }
+
   // The folio + its inventory holds were committed above (the folio must precede the reservation
   // FK). If persisting the lines fails, compensate everything (re-increment slots, drop the
   // reservations + the folio) so no orphaned folio is left behind — restoring the all-or-nothing
@@ -1961,6 +1990,10 @@ export const settleBooking = async (c: PosContext) => {
       customerName: folios.customerName,
       customerEmail: folios.customerEmail,
       paymentMethod: folios.paymentMethod,
+      // US-LG03 dual-write — the deposit already collected + commission already accrued, so the
+      // balance movement (total − deposit) and the commission top-up post as their own ledger rows.
+      amountPaid: folios.amountPaid,
+      commissionAmount: folios.commissionAmount,
     })
     .from(folios)
     .where(folioActionFilter(id, agent))
@@ -2026,23 +2059,64 @@ export const settleBooking = async (c: PosContext) => {
     0,
   )
 
+  // US-LG03 (paid-ledger, step 2) — the balance movement + commission top-up as ledger rows,
+  // shadowing the scalar update below (Σ payment rows == amount_paid; Σ commission rows ==
+  // commission_amount). The balance is what this settle collects on top of the deposit; the top-up
+  // is the commission that only accrues now the folio reaches `paid` (fixed + percent-on-balance).
+  // Step 2 still re-uses the deposit's method (folio.paymentMethod) — the settle-chosen method
+  // arrives in Step 3. A transfer settle's balance row is `pending` (mirrors the re-armed folio).
+  const balanceAmount = folio.total - folio.amountPaid
+  const commissionTopUp = commissionAmount - folio.commissionAmount
+  const settleLedgerRows = (): BatchItem<'sqlite'>[] => {
+    const rows: BatchItem<'sqlite'>[] = []
+    if (balanceAmount > 0) {
+      rows.push(
+        paymentRow(db, {
+          organizationId: org,
+          folioId: id,
+          amount: balanceAmount,
+          method: folio.paymentMethod,
+          reference: !cleared ? (body.payment_reference ?? null) : null,
+          verification: !cleared ? 'pending' : 'not_required',
+          collectedBy: agent.userId,
+          operatorId: c.get('operator')?.operatorId ?? null,
+        }),
+      )
+    }
+    if (commissionTopUp > 0) {
+      rows.push(
+        commissionRow(db, {
+          organizationId: org,
+          folioId: id,
+          amount: commissionTopUp,
+          collectedBy: agent.userId,
+        }),
+      )
+    }
+    return rows
+  }
+
   // US-A67 — a TRANSFER settle reaches `paid` but DEFERS the QR: record the settling transfer's
   // reference, re-arm verification to `pending`, and stop here. verifyPayment signs the QR + sends
   // the tickets once an admin confirms the money. (No QR token, no portal link, no email yet.)
   if (!cleared) {
-    await db
-      .update(folios)
-      .set({
-        status: 'paid',
-        amountPaid: folio.total,
-        commissionAmount,
-        settledAt: new Date(),
-        settledBy: agent.userId,
-        paymentReference: body.payment_reference ?? null,
-        paymentVerification: 'pending',
-        updatedAt: new Date(),
-      })
-      .where(and(eq(folios.id, id), eq(folios.organizationId, org)))
+    const transferStatements: BatchItem<'sqlite'>[] = [
+      db
+        .update(folios)
+        .set({
+          status: 'paid',
+          amountPaid: folio.total,
+          commissionAmount,
+          settledAt: new Date(),
+          settledBy: agent.userId,
+          paymentReference: body.payment_reference ?? null,
+          paymentVerification: 'pending',
+          updatedAt: new Date(),
+        })
+        .where(and(eq(folios.id, id), eq(folios.organizationId, org))),
+      ...settleLedgerRows(),
+    ]
+    await db.batch(transferStatements as [BatchItem<'sqlite'>, ...BatchItem<'sqlite'>[]])
     const pending = await readFolio(db, org, agent.userId, id, c.env.QR_SECRET, c.env.API_BASE_URL)
     return c.json({ folio: pending })
   }
@@ -2079,6 +2153,7 @@ export const settleBooking = async (c: PosContext) => {
         updatedAt: new Date(),
       })
       .where(and(eq(folios.id, id), eq(folios.organizationId, org))),
+    ...settleLedgerRows(),
   ]
   for (const line of slotLineRows) {
     statements.push(
@@ -2195,12 +2270,30 @@ export const verifyPayment = async (c: PosContext) => {
     updatedAt: now,
   }
 
+  // US-LG07 (paid-ledger, step 2) — keep the ledger shadow faithful: flip this folio's PENDING
+  // payment rows to verified alongside the folio rollup, so Step 4 (rows authoritative) inherits a
+  // correct per-row verification state. Money amounts are untouched (verify moves no money).
+  const verifyPaymentRows = db
+    .update(folioPayments)
+    .set({ verification: 'verified', verifiedAt: now, verifiedBy: admin.userId })
+    .where(
+      and(
+        eq(folioPayments.folioId, id),
+        eq(folioPayments.organizationId, org),
+        eq(folioPayments.entryType, 'payment'),
+        eq(folioPayments.verification, 'pending'),
+      ),
+    )
+
   // A booking (deposit) is confirmed but mints no QR — its tickets wait for settle.
   if (folio.status !== 'paid') {
-    await db
-      .update(folios)
-      .set(verifyFields)
-      .where(and(eq(folios.id, id), eq(folios.organizationId, org)))
+    await db.batch([
+      db
+        .update(folios)
+        .set(verifyFields)
+        .where(and(eq(folios.id, id), eq(folios.organizationId, org))),
+      verifyPaymentRows,
+    ])
     const out = await readFolio(db, org, folio.agentId, id, c.env.QR_SECRET, c.env.API_BASE_URL)
     return c.json({ folio: out })
   }
@@ -2245,6 +2338,7 @@ export const verifyPayment = async (c: PosContext) => {
       .update(folios)
       .set(verifyFields)
       .where(and(eq(folios.id, id), eq(folios.organizationId, org))),
+    verifyPaymentRows,
   ]
   for (const line of slotLineRows) {
     statements.push(

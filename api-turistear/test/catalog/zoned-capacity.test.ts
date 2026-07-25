@@ -176,6 +176,7 @@ const clearZoneDb = async () => {
     'folio_line_extras',
     'slot_zones',
     'folio_lines',
+    'folio_payments',
     'folios',
     'service_zones',
     'slots',
