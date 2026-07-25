@@ -850,6 +850,48 @@ export const affiliateOperators = sqliteTable('affiliate_operators', {
 export type AffiliateOperator = typeof affiliateOperators.$inferSelect
 export type NewAffiliateOperator = typeof affiliateOperators.$inferInsert
 
+// US-LG01 (docs/paid-ledger/spec.md) — per-payment money-movement ledger. One SIGNED row per
+// movement on a folio; the cash engine's source of truth (later steps re-home cash_collected /
+// by-method sales / commissions onto it). `entry_type` separates money movements (payment/refund,
+// which carry a `method`) from accruals (commission/commission_reversal, `method` null). `amount`
+// is signed: payment/commission > 0, refund/commission_reversal < 0. `created_at` is the money's
+// OWN date (deposit=confirm, balance=settle, refund=hand-back, clawback=cancel) — this is what lets
+// the drop watermark fast path absorb a post-watermark reversal as an ordinary current-shift event
+// (obsoleting the TECH_DEBT §12a hack).
+export const folioPayments = sqliteTable('folio_payments', {
+  id: text('id').primaryKey(),
+  organizationId: text('organization_id')
+    .notNull()
+    .references(() => organizations.id),
+  folioId: text('folio_id')
+    .notNull()
+    .references(() => folios.id),
+  entryType: text('entry_type', {
+    enum: ['payment', 'refund', 'commission', 'commission_reversal'],
+  }).notNull(),
+  amount: integer('amount').notNull(), // signed minor units
+  // Money movements carry a method; commission accruals do not (null).
+  method: text('method', { enum: ['cash', 'card', 'transfer', 'link'] }),
+  reference: text('reference'), // bank ref; only a transfer payment sets it
+  verification: text('verification', { enum: ['not_required', 'pending', 'verified'] })
+    .notNull()
+    .default('not_required'),
+  // Who took THIS money — a settle may differ from the original seller (D8).
+  collectedBy: text('collected_by')
+    .notNull()
+    .references(() => users.id),
+  // The PIN shift that took it (US-A68); null for an in-house (agent/admin) collection.
+  operatorId: text('operator_id').references((): any => affiliateOperators.id),
+  verifiedAt: integer('verified_at', { mode: 'timestamp' }),
+  verifiedBy: text('verified_by').references(() => users.id),
+  createdAt: integer('created_at', { mode: 'timestamp' })
+    .notNull()
+    .default(sql`(unixepoch())`),
+})
+
+export type FolioPayment = typeof folioPayments.$inferSelect
+export type NewFolioPayment = typeof folioPayments.$inferInsert
+
 export type AffiliateCompany = typeof affiliateCompanies.$inferSelect
 export type NewAffiliateCompany = typeof affiliateCompanies.$inferInsert
 export type AffiliateCommission = typeof affiliateCommissions.$inferSelect
