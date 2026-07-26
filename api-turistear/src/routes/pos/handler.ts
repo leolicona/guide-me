@@ -663,22 +663,23 @@ const isSlotSellable = (
 const slotEpoch = (date: string, time: string, tz: string): number =>
   naiveEpoch(date, time, tz)
 
-// US-AG07.1 AC1 — release timestamp = min(createdAt + holdDuration, slotStart − tourBuffer).
-// The buffer is chosen by TIME-DISTANCE, not calendar date: a slot WITHIN the org's pre-departure
-// buffer of departure uses the tighter grace offset (+ before / − after departure); a slot beyond
-// it uses the full pre-departure buffer as the settle-by deadline. This closes the born-expired
-// booking bug — a slot that was calendar-tomorrow but < buffer away previously took the flat 24h
-// buffer and landed its expiry in the past. A negative grace pushes expiry PAST departure.
+// US-AG07.1 AC1 — release timestamp is driven purely by the DEPARTURE: a booking must be settled a
+// configurable buffer before the tour starts. The buffer is chosen by TIME-DISTANCE, not calendar
+// date: a slot WITHIN the org's pre-departure buffer uses the tighter grace offset (+ before / −
+// after departure); a slot beyond it uses the full pre-departure buffer as the settle-by deadline.
+// This closes the born-expired booking bug — a slot that was calendar-tomorrow but < buffer away
+// previously took the flat 24h buffer and landed its expiry in the past. A negative grace pushes
+// expiry PAST departure. (The former createdAt + holdDays cap was removed — the hold now lasts until
+// the pre-departure buffer regardless of how far out the tour is; `holdDays` is retained inert.)
 function bookingExpiryDate(
   policy: BookingPolicy,
   nowSec: number,
   earliestSlotEpoch: number,
 ): Date {
-  const holdDuration = policy.holdDays * 86_400
   const bufferSeconds = policy.preDepartureBufferHours * 3_600
   const nearDeparture = earliestSlotEpoch - nowSec < bufferSeconds
   const tourBuffer = nearDeparture ? policy.bookingGraceOffsetMinutes * 60 : bufferSeconds
-  const expiry = Math.min(nowSec + holdDuration, earliestSlotEpoch - tourBuffer)
+  const expiry = earliestSlotEpoch - tourBuffer
   return new Date(expiry * 1000)
 }
 

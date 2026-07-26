@@ -148,7 +148,7 @@ describe('US-AG07 — booking creation', () => {
       amount_paid: 45000,
       pending_balance: 255000,
     })
-    // Non-same-day: expiry = slotStart − 24h (within the 7-day hold window).
+    // Beyond the pre-departure buffer: expiry = slotStart − 24h (the settle-by deadline).
     expect(json.folio.booking_expires_at).toBe(epoch(slotDate, '06:00') - 86_400)
     expect(json.folio.lines[0].qr_token).toBeNull()
     expect(json.folio.lines[0].qr).toBeNull()
