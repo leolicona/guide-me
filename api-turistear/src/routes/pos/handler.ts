@@ -11,6 +11,7 @@ import {
   folioAccessTokens,
   folioLineExtras,
   folioLines,
+  folioPayments,
   folios,
   organizations,
   serviceExtras,
@@ -43,6 +44,14 @@ import {
 } from '../../utils/lodging'
 import { lodgingAvailableDays, lodgingTypeCards } from './lodging.handler'
 import { settleSchema, type ConfirmSaleInput, type SettleInput } from './schema'
+import {
+  paymentRow,
+  commissionRow,
+  buildCancellationReversal,
+  displayMethodSql,
+  depositMethodSql,
+  readFolioPayments,
+} from '../../utils/folioPayments'
 
 export type PosContext = Context<{
   Bindings: CloudflareBindings
@@ -607,6 +616,7 @@ interface BookingPolicy {
   minDownPaymentPct: number
   holdDays: number
   bookingGraceOffsetMinutes: number
+  preDepartureBufferHours: number
 }
 
 // US-AG07.1 — cascade-ready policy resolver. A per-service override (later phase) would take
@@ -615,11 +625,13 @@ function resolveBookingPolicy(org: {
   bookingMinDownPaymentPct: number
   bookingHoldDays: number
   bookingGraceOffsetMinutes: number
+  bookingPreDepartureBufferHours: number
 }): BookingPolicy {
   return {
     minDownPaymentPct: org.bookingMinDownPaymentPct,
     holdDays: org.bookingHoldDays,
     bookingGraceOffsetMinutes: org.bookingGraceOffsetMinutes,
+    preDepartureBufferHours: org.bookingPreDepartureBufferHours,
   }
 }
 
@@ -651,19 +663,23 @@ const isSlotSellable = (
 const slotEpoch = (date: string, time: string, tz: string): number =>
   naiveEpoch(date, time, tz)
 
-// US-AG07.1 AC1 — release timestamp = min(createdAt + holdDuration, slotStart − tourBuffer).
-// Same-day tours use the org's tighter same-day buffer; otherwise a 24h pre-departure buffer.
+// US-AG07.1 AC1 — release timestamp is driven purely by the DEPARTURE: a booking must be settled a
+// configurable buffer before the tour starts. The buffer is chosen by TIME-DISTANCE, not calendar
+// date: a slot WITHIN the org's pre-departure buffer uses the tighter grace offset (+ before / −
+// after departure); a slot beyond it uses the full pre-departure buffer as the settle-by deadline.
+// This closes the born-expired booking bug — a slot that was calendar-tomorrow but < buffer away
+// previously took the flat 24h buffer and landed its expiry in the past. A negative grace pushes
+// expiry PAST departure. (The former createdAt + holdDays cap was removed — the hold now lasts until
+// the pre-departure buffer regardless of how far out the tour is; `holdDays` is retained inert.)
 function bookingExpiryDate(
   policy: BookingPolicy,
   nowSec: number,
   earliestSlotEpoch: number,
-  isSameDay: boolean,
 ): Date {
-  const holdDuration = policy.holdDays * 86_400
-  // Same-day: use the org's grace offset (+ before / − after departure). Otherwise a 24h
-  // pre-departure release. A negative grace pushes the expiry PAST departure (a grace window).
-  const tourBuffer = isSameDay ? policy.bookingGraceOffsetMinutes * 60 : 86_400
-  const expiry = Math.min(nowSec + holdDuration, earliestSlotEpoch - tourBuffer)
+  const bufferSeconds = policy.preDepartureBufferHours * 3_600
+  const nearDeparture = earliestSlotEpoch - nowSec < bufferSeconds
+  const tourBuffer = nearDeparture ? policy.bookingGraceOffsetMinutes * 60 : bufferSeconds
+  const expiry = earliestSlotEpoch - tourBuffer
   return new Date(expiry * 1000)
 }
 
@@ -757,7 +773,8 @@ async function folioPortalLink(
 interface TicketEmailMeta {
   customerEmail: string | null
   customerName: string | null
-  paymentMethod: 'cash' | 'card' | 'transfer' | 'link'
+  // US-LG08 — the display method, which can be the literal 'Mixto' for a multi-method folio.
+  paymentMethod: string
   total: number
   createdAt: Date
 }
@@ -858,6 +875,7 @@ export const confirmSale = async (c: PosContext) => {
       bookingHoldDays: organizations.bookingHoldDays,
       salesCutoffOffsetMinutes: organizations.salesCutoffOffsetMinutes,
       bookingGraceOffsetMinutes: organizations.bookingGraceOffsetMinutes,
+      bookingPreDepartureBufferHours: organizations.bookingPreDepartureBufferHours,
       lodgingWeekendDays: organizations.lodgingWeekendDays,
       timezone: organizations.timezone,
     })
@@ -1221,6 +1239,7 @@ export const confirmSale = async (c: PosContext) => {
     bookingMinDownPaymentPct: orgRow?.bookingMinDownPaymentPct ?? 0,
     bookingHoldDays: orgRow?.bookingHoldDays ?? 7,
     bookingGraceOffsetMinutes: orgRow?.bookingGraceOffsetMinutes ?? 15,
+    bookingPreDepartureBufferHours: orgRow?.bookingPreDepartureBufferHours ?? 24,
   })
   const isBooking = input.down_payment != null
   // US-AG41/US-A67 — an electronic (transfer) payment is not yet in hand: the folio is created
@@ -1277,7 +1296,6 @@ export const confirmSale = async (c: PosContext) => {
       policy,
       nowSec,
       earliest.epoch,
-      earliest.date === orgToday(tz),
     )
   }
 
@@ -1296,7 +1314,8 @@ export const confirmSale = async (c: PosContext) => {
     customerEmail: input.customer_email ?? null,
     customerPhone: input.customer_phone ?? null,
     status,
-    paymentMethod: method,
+    // US-LG08 — the folio no longer stores a payment method; it is DERIVED from the ledger's
+    // collection rows (the payment row written below), shown as the shared method or 'Mixto'.
     // US-AG41/US-A67 — the transfer's reference + the verification gate (see `cleared` above).
     paymentReference: needsVerification ? (input.payment_reference ?? null) : null,
     paymentVerification,
@@ -1548,6 +1567,34 @@ export const confirmSale = async (c: PosContext) => {
     }
   }
 
+  // US-LG02 (paid-ledger, step 2) — DUAL-WRITE the sale's money movement as a ledger row, atomically
+  // with the lines. The scalars above stay authoritative; this is a verified shadow (Σ payment rows
+  // == amount_paid; Σ commission rows == commission_amount). A booking writes the deposit; a paid
+  // sale the full amount. Verification/method/reference mirror the folio; a transfer row is `pending`.
+  statements.push(
+    paymentRow(db, {
+      organizationId: org,
+      folioId,
+      amount: amountPaid,
+      method,
+      reference: needsVerification ? (input.payment_reference ?? null) : null,
+      verification: paymentVerification,
+      collectedBy: agent.userId,
+      operatorId: c.get('operator')?.operatorId ?? null,
+    }),
+  )
+  if (commissionAmount > 0) {
+    statements.push(
+      commissionRow(db, {
+        organizationId: org,
+        folioId,
+        amount: commissionAmount,
+        method,
+        collectedBy: agent.userId,
+      }),
+    )
+  }
+
   // The folio + its inventory holds were committed above (the folio must precede the reservation
   // FK). If persisting the lines fails, compensate everything (re-increment slots, drop the
   // reservations + the folio) so no orphaned folio is left behind — restoring the all-or-nothing
@@ -1725,7 +1772,7 @@ const readFolio = async (
     .select({
       id: folios.id,
       status: folios.status,
-      paymentMethod: folios.paymentMethod,
+      paymentMethod: displayMethodSql,
       paymentReference: folios.paymentReference,
       paymentVerification: folios.paymentVerification,
       paymentVerifiedAt: folios.paymentVerifiedAt,
@@ -1852,6 +1899,8 @@ const readFolio = async (
   )
 
   const portalLink = await folioPortalLink(db, org, folioId, apiBaseUrl)
+  // US-LG08 — the per-payment breakdown (deposit vs balance, each with its own method).
+  const payments = await readFolioPayments(db, org, folioId)
 
   return {
     id: folio.id,
@@ -1884,6 +1933,7 @@ const readFolio = async (
       ? Math.floor(folio.ticketsViewedAt.getTime() / 1000)
       : null,
     created_at: Math.floor(folio.createdAt.getTime() / 1000),
+    payments,
     lines,
   }
 }
@@ -1960,7 +2010,15 @@ export const settleBooking = async (c: PosContext) => {
       bookingExpiresAt: folios.bookingExpiresAt,
       customerName: folios.customerName,
       customerEmail: folios.customerEmail,
-      paymentMethod: folios.paymentMethod,
+      // The deposit's method — the settle default when the caller sends none (US-LG08).
+      paymentMethod: depositMethodSql,
+      // US-A67 — the deposit's verification state coming in: a still-`pending` transfer DEPOSIT must
+      // keep the QR deferred even when the BALANCE is settled by cash (money not yet confirmed).
+      paymentVerification: folios.paymentVerification,
+      // US-LG03 dual-write — the deposit already collected + commission already accrued, so the
+      // balance movement (total − deposit) and the commission top-up post as their own ledger rows.
+      amountPaid: folios.amountPaid,
+      commissionAmount: folios.commissionAmount,
     })
     .from(folios)
     .where(folioActionFilter(id, agent))
@@ -1978,23 +2036,28 @@ export const settleBooking = async (c: PosContext) => {
     throw new ApiError('BOOKING_EXPIRED', 409, 'Booking has expired')
   }
 
-  // US-AG41/US-A67 — the settle re-uses the folio's own payment method. Settling a TRANSFER folio is
-  // a fresh electronic payment: it requires a reference, re-arms verification to `pending`, and
-  // DEFERS the QR/portal/email until an admin verifies (verifyPayment). A cash folio settles
-  // immediately, exactly as before. `cleared` = the balance is usable now.
+  // US-LG03 (paid-ledger, step 3) — the balance is collected by ITS OWN method, chosen at settle,
+  // independent of the deposit. `method` defaults to the deposit's method for a body-less cash
+  // settle (backward compatible). A TRANSFER balance is a fresh electronic payment: it requires a
+  // reference, re-arms verification to `pending`, and DEFERS the QR/portal/email until an admin
+  // verifies it. Any non-transfer balance settles immediately — UNLESS the deposit was itself a
+  // still-`pending` transfer, whose money is not yet confirmed, so the QR must keep waiting (US-A67).
   const parsed = settleSchema.safeParse(await c.req.json().catch(() => ({})))
   if (!parsed.success) {
     throw new ApiError('VALIDATION_ERROR', 400, 'Invalid settle payload')
   }
   const body: SettleInput = parsed.data
-  const cleared = folio.paymentMethod !== 'transfer'
-  if (!cleared && !body.payment_reference) {
+  const settleMethod = body.method ?? folio.paymentMethod
+  const balanceNeedsVerification = settleMethod === 'transfer'
+  if (balanceNeedsVerification && !body.payment_reference) {
     throw new ApiError(
       'VALIDATION_ERROR',
       400,
       'A payment reference is required to settle a bank transfer',
     )
   }
+  // The QR can mint now only if THIS balance clears AND no earlier payment is still awaiting an admin.
+  const cleared = !balanceNeedsVerification && folio.paymentVerification !== 'pending'
 
   const lineRows = await db
     .select({
@@ -2026,23 +2089,69 @@ export const settleBooking = async (c: PosContext) => {
     0,
   )
 
-  // US-A67 — a TRANSFER settle reaches `paid` but DEFERS the QR: record the settling transfer's
-  // reference, re-arm verification to `pending`, and stop here. verifyPayment signs the QR + sends
-  // the tickets once an admin confirms the money. (No QR token, no portal link, no email yet.)
+  // US-LG03 (paid-ledger, step 2) — the balance movement + commission top-up as ledger rows,
+  // shadowing the scalar update below (Σ payment rows == amount_paid; Σ commission rows ==
+  // commission_amount). The balance is what this settle collects on top of the deposit; the top-up
+  // is the commission that only accrues now the folio reaches `paid` (fixed + percent-on-balance).
+  // Step 2 still re-uses the deposit's method (folio.paymentMethod) — the settle-chosen method
+  // arrives in Step 3. A transfer settle's balance row is `pending` (mirrors the re-armed folio).
+  const balanceAmount = folio.total - folio.amountPaid
+  const commissionTopUp = commissionAmount - folio.commissionAmount
+  const settleLedgerRows = (): BatchItem<'sqlite'>[] => {
+    const rows: BatchItem<'sqlite'>[] = []
+    if (balanceAmount > 0) {
+      rows.push(
+        paymentRow(db, {
+          organizationId: org,
+          folioId: id,
+          amount: balanceAmount,
+          method: settleMethod,
+          reference: balanceNeedsVerification ? (body.payment_reference ?? null) : null,
+          verification: balanceNeedsVerification ? 'pending' : 'not_required',
+          collectedBy: agent.userId,
+          operatorId: c.get('operator')?.operatorId ?? null,
+        }),
+      )
+    }
+    if (commissionTopUp > 0) {
+      rows.push(
+        commissionRow(db, {
+          organizationId: org,
+          folioId: id,
+          amount: commissionTopUp,
+          method: settleMethod,
+          collectedBy: agent.userId,
+        }),
+      )
+    }
+    return rows
+  }
+
+  // US-A67 — the folio reaches `paid` but DEFERS the QR when it is not cleared. Two reasons land
+  // here: (a) the BALANCE is a transfer — record its reference + re-arm verification to `pending`;
+  // or (b) the balance cleared (cash/card/link) but the DEPOSIT was a still-`pending` transfer,
+  // whose money remains unconfirmed — leave that pending state (and its reference) untouched.
+  // verifyPayment signs the QR + sends the tickets once an admin confirms the money.
   if (!cleared) {
-    await db
-      .update(folios)
-      .set({
-        status: 'paid',
-        amountPaid: folio.total,
-        commissionAmount,
-        settledAt: new Date(),
-        settledBy: agent.userId,
-        paymentReference: body.payment_reference ?? null,
-        paymentVerification: 'pending',
-        updatedAt: new Date(),
-      })
-      .where(and(eq(folios.id, id), eq(folios.organizationId, org)))
+    const deferUpdate = balanceNeedsVerification
+      ? { paymentReference: body.payment_reference ?? null, paymentVerification: 'pending' as const }
+      : {}
+    const transferStatements: BatchItem<'sqlite'>[] = [
+      db
+        .update(folios)
+        .set({
+          status: 'paid',
+          amountPaid: folio.total,
+          commissionAmount,
+          settledAt: new Date(),
+          settledBy: agent.userId,
+          ...deferUpdate,
+          updatedAt: new Date(),
+        })
+        .where(and(eq(folios.id, id), eq(folios.organizationId, org))),
+      ...settleLedgerRows(),
+    ]
+    await db.batch(transferStatements as [BatchItem<'sqlite'>, ...BatchItem<'sqlite'>[]])
     const pending = await readFolio(db, org, agent.userId, id, c.env.QR_SECRET, c.env.API_BASE_URL)
     return c.json({ folio: pending })
   }
@@ -2079,6 +2188,7 @@ export const settleBooking = async (c: PosContext) => {
         updatedAt: new Date(),
       })
       .where(and(eq(folios.id, id), eq(folios.organizationId, org))),
+    ...settleLedgerRows(),
   ]
   for (const line of slotLineRows) {
     statements.push(
@@ -2128,7 +2238,9 @@ export const settleBooking = async (c: PosContext) => {
     {
       customerEmail: folio.customerEmail,
       customerName: folio.customerName,
-      paymentMethod: folio.paymentMethod,
+      // US-LG08 — the folio is now paid: show its display method ('Mixto' when the deposit and the
+      // balance were collected differently), matching the folio detail the customer will open.
+      paymentMethod: folio.paymentMethod === settleMethod ? folio.paymentMethod : 'Mixto',
       total: folio.total,
       createdAt: new Date(),
     },
@@ -2172,7 +2284,7 @@ export const verifyPayment = async (c: PosContext) => {
       id: folios.id,
       agentId: folios.agentId,
       status: folios.status,
-      paymentMethod: folios.paymentMethod,
+      paymentMethod: displayMethodSql,
       paymentVerification: folios.paymentVerification,
       customerName: folios.customerName,
       customerEmail: folios.customerEmail,
@@ -2195,12 +2307,30 @@ export const verifyPayment = async (c: PosContext) => {
     updatedAt: now,
   }
 
+  // US-LG07 (paid-ledger, step 2) — keep the ledger shadow faithful: flip this folio's PENDING
+  // payment rows to verified alongside the folio rollup, so Step 4 (rows authoritative) inherits a
+  // correct per-row verification state. Money amounts are untouched (verify moves no money).
+  const verifyPaymentRows = db
+    .update(folioPayments)
+    .set({ verification: 'verified', verifiedAt: now, verifiedBy: admin.userId })
+    .where(
+      and(
+        eq(folioPayments.folioId, id),
+        eq(folioPayments.organizationId, org),
+        eq(folioPayments.entryType, 'payment'),
+        eq(folioPayments.verification, 'pending'),
+      ),
+    )
+
   // A booking (deposit) is confirmed but mints no QR — its tickets wait for settle.
   if (folio.status !== 'paid') {
-    await db
-      .update(folios)
-      .set(verifyFields)
-      .where(and(eq(folios.id, id), eq(folios.organizationId, org)))
+    await db.batch([
+      db
+        .update(folios)
+        .set(verifyFields)
+        .where(and(eq(folios.id, id), eq(folios.organizationId, org))),
+      verifyPaymentRows,
+    ])
     const out = await readFolio(db, org, folio.agentId, id, c.env.QR_SECRET, c.env.API_BASE_URL)
     return c.json({ folio: out })
   }
@@ -2245,6 +2375,7 @@ export const verifyPayment = async (c: PosContext) => {
       .update(folios)
       .set(verifyFields)
       .where(and(eq(folios.id, id), eq(folios.organizationId, org))),
+    verifyPaymentRows,
   ]
   for (const line of slotLineRows) {
     statements.push(
@@ -2399,6 +2530,17 @@ export const rejectPayment = async (c: PosContext) => {
         ),
       ),
   )
+  // US-LG — the void sale reverses out of the ledger (its electronic money leaves the sales bucket;
+  // the seller's commission is clawed back). Dated now (cancelled_at).
+  statements.push(
+    ...(await buildCancellationReversal(db, {
+      organizationId: org,
+      folioId: id,
+      collectedBy: folio.agentId,
+      at: now,
+      clawback: true,
+    })),
+  )
   await db.batch(statements as [BatchItem<'sqlite'>, ...BatchItem<'sqlite'>[]])
 
   const out = await readFolio(db, org, folio.agentId, id, c.env.QR_SECRET, c.env.API_BASE_URL)
@@ -2436,19 +2578,31 @@ export const cancelBooking = async (c: PosContext) => {
     .from(folioLines)
     .where(and(eq(folioLines.folioId, id), eq(folioLines.organizationId, org)))
 
+  const now = new Date()
   const statements: BatchItem<'sqlite'>[] = [
     db
       .update(folios)
       .set({
         status: 'cancelled',
-        cancelledAt: new Date(),
+        cancelledAt: now,
         cancelledBy: agent.userId,
         cancellationReason: body.reason ?? null,
         refundStatus: 'none', // deposit retained (D7)
-        updatedAt: new Date(),
+        updatedAt: now,
       })
       .where(and(eq(folios.id, id), eq(folios.organizationId, org))),
   ]
+  // US-LG — cancelling a booking drops it from the ledger's sales/cash buckets exactly as the
+  // status-exclusion did (clawback=false: the agent KEEPS the accrued commission, D7).
+  statements.push(
+    ...(await buildCancellationReversal(db, {
+      organizationId: org,
+      folioId: id,
+      collectedBy: agent.userId,
+      at: now,
+      clawback: false,
+    })),
+  )
   for (const line of lineRows) {
     if (!line.slotId) continue
     if (line.zoneId) {
@@ -2601,6 +2755,7 @@ export const reactivateBooking = async (c: PosContext) => {
       bookingHoldDays: organizations.bookingHoldDays,
       salesCutoffOffsetMinutes: organizations.salesCutoffOffsetMinutes,
       bookingGraceOffsetMinutes: organizations.bookingGraceOffsetMinutes,
+      bookingPreDepartureBufferHours: organizations.bookingPreDepartureBufferHours,
       timezone: organizations.timezone,
     })
     .from(organizations)
@@ -2610,6 +2765,7 @@ export const reactivateBooking = async (c: PosContext) => {
     bookingMinDownPaymentPct: orgRows[0]?.bookingMinDownPaymentPct ?? 0,
     bookingHoldDays: orgRows[0]?.bookingHoldDays ?? 7,
     bookingGraceOffsetMinutes: orgRows[0]?.bookingGraceOffsetMinutes ?? 15,
+    bookingPreDepartureBufferHours: orgRows[0]?.bookingPreDepartureBufferHours ?? 24,
   })
   // US-A66 — the cutoff guard + fresh same-day expiry below resolve in the org's time zone.
   const tz = orgRows[0]?.timezone ?? 'America/Mexico_City'
@@ -2799,7 +2955,6 @@ export const reactivateBooking = async (c: PosContext) => {
     policy,
     reactivateNowSec,
     earliest.epoch,
-    earliest.date === orgToday(tz),
   )
 
   await db
@@ -2866,7 +3021,7 @@ export const listAgentFolios = async (c: PosContext) => {
       reminderSentBy: folios.reminderSentBy,
       ticketsSentAt: folios.ticketsSentAt,
       ticketsViewedAt: folios.ticketsViewedAt,
-      paymentMethod: folios.paymentMethod,
+      paymentMethod: displayMethodSql,
       paymentVerification: folios.paymentVerification,
       operatorName: affiliateOperators.name,
     })

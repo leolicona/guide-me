@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { env, SELF } from 'cloudflare:test'
-import { seedUser, seedTwoOrgs, clearTenancyDb } from '../helpers/tenancy'
+import { seedUser, seedTwoOrgs, clearTenancyDb, seedFolioLedgerRows } from '../helpers/tenancy'
 import { buildFakeJwt } from '../helpers/jwt'
 
 // Agent Continuous Cash Balance with Cash Drops — US-AG12, AG13, AG14, A19, AG23/24, A25/26.
@@ -53,17 +53,16 @@ const seedFolio = async ({
   const ts = createdAt ?? nowSec()
   await env.DB.prepare(
     `INSERT INTO folios
-       (id, organization_id, agent_id, customer_name, status, payment_method,
+       (id, organization_id, agent_id, customer_name, status,
         subtotal, discount_total, total, amount_paid, commission_amount,
         cancellation_clawback, cancelled_at, created_at, updated_at)
-     VALUES (?, ?, ?, 'John Diver', ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?)`,
+     VALUES (?, ?, ?, 'John Diver', ?, ?, 0, ?, ?, ?, ?, ?, ?, ?)`,
   )
     .bind(
       id,
       organizationId,
       agentId,
       status,
-      paymentMethod,
       amountPaid,
       amountPaid,
       amountPaid,
@@ -74,6 +73,10 @@ const seedFolio = async ({
       ts,
     )
     .run()
+  await seedFolioLedgerRows({
+    folioId: id, organizationId, agentId, status, paymentMethod, amountPaid,
+    commissionAmount, cancellationClawback, cancelledAt: cancelledAt ?? undefined, createdAt: ts,
+  })
   return id
 }
 
@@ -269,6 +272,7 @@ beforeEach(async () => {
   await env.DB.exec('DELETE FROM folio_lines')
   await env.DB.exec('DELETE FROM cancellation_requests')
   await env.DB.exec('DELETE FROM folio_access_tokens')
+  await env.DB.exec('DELETE FROM folio_payments')
   await env.DB.exec('DELETE FROM folios')
   await env.DB.exec('DELETE FROM slots')
   await env.DB.exec('DELETE FROM schedules')
@@ -379,11 +383,23 @@ describe('Agent Continuous Cash Balance with Cash Drops', () => {
       (await reviewDrop(ADMIN_EMAIL, drop.json.drop.id, { decision: 'confirmed' })).status,
     ).toBe(200)
 
-    // Now the settled folio is cancelled WITH clawback, dated after the watermark.
+    // Now the settled folio is cancelled WITH clawback, dated after the watermark. The reversal
+    // rows are dated at cancelled_at, so the "since the watermark" window picks them up (the ledger
+    // analogue of §12a — no frozen-snapshot rewrite).
+    const cancelAt = t + 500
     await env.DB.prepare(
       `UPDATE folios SET status='cancelled', cancellation_clawback=1, cancelled_at=? WHERE id=?`,
     )
-      .bind(t + 500, folioId)
+      .bind(cancelAt, folioId)
+      .run()
+    await env.DB.prepare(
+      `INSERT INTO folio_payments (id, organization_id, folio_id, entry_type, amount, method, verification, collected_by, created_at)
+       VALUES (?, ?, ?, 'refund', -600000, 'cash', 'not_required', ?, ?), (?, ?, ?, 'commission_reversal', -60000, 'cash', 'not_required', ?, ?)`,
+    )
+      .bind(
+        crypto.randomUUID(), organizationId, folioId, agentId, cancelAt,
+        crypto.randomUUID(), organizationId, folioId, agentId, cancelAt,
+      )
       .run()
 
     const me = await getMyBalance(AGENT_EMAIL)

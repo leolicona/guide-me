@@ -285,9 +285,14 @@ describe('Admin Caja folds in affiliates (D5/D6)', () => {
     })
     const saleBody = (await sale.json()) as { folio: { id: string } }
     // Backdate the sale so it sits clearly before the collection watermark (avoids the
-    // same-second collision that would re-count it into the post-watermark shift).
+    // same-second collision that would re-count it into the post-watermark shift). The ledger rows
+    // (the cash engine's source of truth) must be backdated in lockstep with the folio.
+    const backdate = Math.floor(Date.now() / 1000) - 100
     await env.DB.prepare('UPDATE folios SET created_at = ? WHERE id = ?')
-      .bind(Math.floor(Date.now() / 1000) - 100, saleBody.folio.id)
+      .bind(backdate, saleBody.folio.id)
+      .run()
+    await env.DB.prepare('UPDATE folio_payments SET created_at = ? WHERE folio_id = ?')
+      .bind(backdate, saleBody.folio.id)
       .run()
     const aff = await affUserId()
 
@@ -381,8 +386,8 @@ describe('Multitenancy + cross-affiliate isolation', () => {
     const adminRow = await env.DB.prepare('SELECT id FROM users WHERE email = ?').bind(ADMIN_EMAIL).first<{ id: string }>()
     const ts = Math.floor(Date.now() / 1000)
     await env.DB.prepare(
-      `INSERT INTO folios (id, organization_id, agent_id, status, payment_method, subtotal, discount_total, total, amount_paid, commission_amount, created_at, updated_at)
-       VALUES (?, ?, ?, 'paid', 'cash', 150000, 0, 150000, 150000, 0, ?, ?)`,
+      `INSERT INTO folios (id, organization_id, agent_id, status, subtotal, discount_total, total, amount_paid, commission_amount, created_at, updated_at)
+       VALUES (?, ?, ?, 'paid', 150000, 0, 150000, 150000, 0, ?, ?)`,
     )
       .bind(crypto.randomUUID(), organizationId, adminRow!.id, ts, ts)
       .run()

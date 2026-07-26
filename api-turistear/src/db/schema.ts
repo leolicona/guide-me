@@ -17,6 +17,11 @@ export const organizations = sqliteTable('organizations', {
   bookingHoldDays: integer('booking_hold_days').notNull().default(7),
   salesCutoffOffsetMinutes: integer('sales_cutoff_offset_minutes').notNull().default(0),
   bookingGraceOffsetMinutes: integer('booking_grace_offset_minutes').notNull().default(15),
+  // US-AG07.1 — pre-departure buffer (hours): a deposit-hold must be settled at least this long
+  // before departure. Applied by TIME-DISTANCE — within this window of departure the tighter
+  // `bookingGraceOffsetMinutes` grace applies (so a near-but-next-day slot is no longer treated as
+  // a full-24h-buffer booking that would be born expired). Default 24h.
+  bookingPreDepartureBufferHours: integer('booking_pre_departure_buffer_hours').notNull().default(24),
   // Accommodation/lodging settings (docs/lodging/accommodation-stays.spec.md §2.5). weekendDays:
   // CSV of ISO weekday ints (0=Sun … 6=Sat) — which nights use a unit's weekend_rate (default
   // Fri+Sat). A PAID stay cancels free until lodgingFreeCancelDays before check-in; inside that
@@ -307,12 +312,8 @@ export const folios = sqliteTable('folios', {
   status: text('status', { enum: ['paid', 'booking', 'cancelled'] })
     .notNull()
     .default('paid'),
-  // How the agent collected (US-AG25/AG29). Only 'cash' folios add to the agent's cash
-  // debt; every other method is electronic — it still earns commission (US-AG24) but the
-  // money goes to the company. App-level enum (the column is plain text, no CHECK).
-  paymentMethod: text('payment_method', { enum: ['cash', 'card', 'transfer', 'link'] })
-    .notNull()
-    .default('cash'),
+  // US-LG08 — there is no folio-level payment method. How money was collected lives per-movement in
+  // folio_payments; the display method (shared method or 'Mixto') is DERIVED via `displayMethodSql`.
   // US-AG41/US-A67 (docs/payment-verification/spec.md). paymentReference: the transfer's bank ref
   // (free text; null for cash; holds the most recent transfer awaiting verification). The RE-ARMABLE
   // paymentVerification axis gates QR: 'not_required' (all-cash) · 'pending' (a transfer payment
@@ -849,6 +850,48 @@ export const affiliateOperators = sqliteTable('affiliate_operators', {
 
 export type AffiliateOperator = typeof affiliateOperators.$inferSelect
 export type NewAffiliateOperator = typeof affiliateOperators.$inferInsert
+
+// US-LG01 (docs/paid-ledger/spec.md) — per-payment money-movement ledger. One SIGNED row per
+// movement on a folio; the cash engine's source of truth (later steps re-home cash_collected /
+// by-method sales / commissions onto it). `entry_type` separates money movements (payment/refund,
+// which carry a `method`) from accruals (commission/commission_reversal, `method` null). `amount`
+// is signed: payment/commission > 0, refund/commission_reversal < 0. `created_at` is the money's
+// OWN date (deposit=confirm, balance=settle, refund=hand-back, clawback=cancel) — this is what lets
+// the drop watermark fast path absorb a post-watermark reversal as an ordinary current-shift event
+// (obsoleting the TECH_DEBT §12a hack).
+export const folioPayments = sqliteTable('folio_payments', {
+  id: text('id').primaryKey(),
+  organizationId: text('organization_id')
+    .notNull()
+    .references(() => organizations.id),
+  folioId: text('folio_id')
+    .notNull()
+    .references(() => folios.id),
+  entryType: text('entry_type', {
+    enum: ['payment', 'refund', 'commission', 'commission_reversal'],
+  }).notNull(),
+  amount: integer('amount').notNull(), // signed minor units
+  // Money movements carry a method; commission accruals do not (null).
+  method: text('method', { enum: ['cash', 'card', 'transfer', 'link'] }),
+  reference: text('reference'), // bank ref; only a transfer payment sets it
+  verification: text('verification', { enum: ['not_required', 'pending', 'verified'] })
+    .notNull()
+    .default('not_required'),
+  // Who took THIS money — a settle may differ from the original seller (D8).
+  collectedBy: text('collected_by')
+    .notNull()
+    .references(() => users.id),
+  // The PIN shift that took it (US-A68); null for an in-house (agent/admin) collection.
+  operatorId: text('operator_id').references((): any => affiliateOperators.id),
+  verifiedAt: integer('verified_at', { mode: 'timestamp' }),
+  verifiedBy: text('verified_by').references(() => users.id),
+  createdAt: integer('created_at', { mode: 'timestamp' })
+    .notNull()
+    .default(sql`(unixepoch())`),
+})
+
+export type FolioPayment = typeof folioPayments.$inferSelect
+export type NewFolioPayment = typeof folioPayments.$inferInsert
 
 export type AffiliateCompany = typeof affiliateCompanies.$inferSelect
 export type NewAffiliateCompany = typeof affiliateCompanies.$inferInsert

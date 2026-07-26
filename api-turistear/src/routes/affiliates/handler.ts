@@ -7,6 +7,7 @@ import {
   affiliateCompanies,
   affiliateInvitations,
   cashDrops,
+  folioPayments,
   folios,
   organizations,
   services,
@@ -536,14 +537,23 @@ export const getAffiliateReport = async (c: AffiliatesContext) => {
     .select({
       sales: sql<number>`coalesce(sum(${folios.amountPaid}), 0)`,
       commission: sql<number>`coalesce(sum(${folios.commissionAmount}), 0)`,
-      cashCollected: sql<number>`coalesce(sum(case when ${folios.paymentMethod} = 'cash' then ${folios.amountPaid} else 0 end), 0)`,
     })
     .from(folios)
     .where(and(...folioRange))
 
+  // US-LG08 — cash collected comes from the LEDGER (each payment row's own method), so a MIXED
+  // affiliate folio counts only its cash portion. Joined to folios for the same non-cancelled range.
+  const cashTotals = await db
+    .select({
+      cashCollected: sql<number>`coalesce(sum(case when ${folioPayments.method} = 'cash' then ${folioPayments.amount} else 0 end), 0)`,
+    })
+    .from(folioPayments)
+    .innerJoin(folios, eq(folios.id, folioPayments.folioId))
+    .where(and(eq(folioPayments.entryType, 'payment'), ...folioRange))
+
   const sales = Number(totals[0]?.sales ?? 0)
   const commission = Number(totals[0]?.commission ?? 0)
-  const cashCollected = Number(totals[0]?.cashCollected ?? 0)
+  const cashCollected = Number(cashTotals[0]?.cashCollected ?? 0)
 
   // Confirmed deposits handed in by THIS company's affiliate users over the range.
   const affiliateUsers = await db

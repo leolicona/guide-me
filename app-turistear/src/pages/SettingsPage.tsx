@@ -24,6 +24,7 @@ import StorefrontRounded from '@mui/icons-material/StorefrontRounded'
 import HotelRounded from '@mui/icons-material/HotelRounded'
 import WhatsAppIcon from '@mui/icons-material/WhatsApp'
 import { useMyOrganization, useUpdateOrganization } from '../features/organization'
+import { InfoPopover } from '../components'
 import {
   DEFAULT_TICKET_TEMPLATE,
   DEFAULT_REMINDER_TEMPLATE,
@@ -117,7 +118,7 @@ export default function SettingsPage() {
 
   const [timezone, setTimezone] = useState('')
   const [minPct, setMinPct] = useState('')
-  const [holdDays, setHoldDays] = useState('')
+  const [bufferHours, setBufferHours] = useState('')
   const [cutoffMag, setCutoffMag] = useState('')
   const [cutoffDir, setCutoffDir] = useState<OffsetDir>('before')
   const [graceMag, setGraceMag] = useState('')
@@ -137,14 +138,14 @@ export default function SettingsPage() {
   // Seed the form from the org's saved values (render-phase, no effect). Re-seeds whenever the
   // saved values change — i.e. on first load and after a successful save — resetting the dirty flag.
   const savedSig = org
-    ? `${org.timezone}|${org.booking_min_down_payment_pct}|${org.booking_hold_days}|${org.sales_cutoff_offset_minutes}|${org.booking_grace_offset_minutes}|${org.lodging_weekend_days.join(',')}|${org.lodging_free_cancel_days}|${org.lodging_cancel_penalty_pct}|${org.wa_ticket_template ?? ''}|${org.wa_reminder_template ?? ''}`
+    ? `${org.timezone}|${org.booking_min_down_payment_pct}|${org.booking_pre_departure_buffer_hours}|${org.sales_cutoff_offset_minutes}|${org.booking_grace_offset_minutes}|${org.lodging_weekend_days.join(',')}|${org.lodging_free_cancel_days}|${org.lodging_cancel_penalty_pct}|${org.wa_ticket_template ?? ''}|${org.wa_reminder_template ?? ''}`
     : null
   const [seededSig, setSeededSig] = useState<string | null>(null)
   if (org && savedSig !== seededSig) {
     setSeededSig(savedSig)
     setTimezone(org.timezone)
     setMinPct(String(org.booking_min_down_payment_pct))
-    setHoldDays(String(org.booking_hold_days))
+    setBufferHours(String(org.booking_pre_departure_buffer_hours))
     const c = splitOffset(org.sales_cutoff_offset_minutes)
     setCutoffMag(String(c.mag))
     setCutoffDir(c.dir)
@@ -159,17 +160,18 @@ export default function SettingsPage() {
   }
 
   const pctNum = Number(minPct)
-  const holdNum = Number(holdDays)
+  const bufferNum = Number(bufferHours)
   const cutoffMagNum = Number(cutoffMag)
   const graceMagNum = Number(graceMag)
 
   const pctInvalid = minPct === '' || !Number.isInteger(pctNum) || pctNum < 0 || pctNum > 100
-  const holdInvalid = holdDays === '' || !Number.isInteger(holdNum) || holdNum < 1
+  const bufferInvalid =
+    bufferHours === '' || !Number.isInteger(bufferNum) || bufferNum < 0 || bufferNum > 168
   const magInvalid = (m: string, n: number) =>
     m === '' || !Number.isInteger(n) || n < 0 || n > OFFSET_MAX
   const cutoffInvalid = magInvalid(cutoffMag, cutoffMagNum)
   const graceInvalid = magInvalid(graceMag, graceMagNum)
-  const invalid = pctInvalid || holdInvalid || cutoffInvalid || graceInvalid
+  const invalid = pctInvalid || bufferInvalid || cutoffInvalid || graceInvalid
 
   const cutoffSigned = joinOffset(cutoffMagNum, cutoffDir)
   const graceSigned = joinOffset(graceMagNum, graceDir)
@@ -178,7 +180,7 @@ export default function SettingsPage() {
     !!org &&
     (timezone !== org.timezone ||
       pctNum !== org.booking_min_down_payment_pct ||
-      holdNum !== org.booking_hold_days ||
+      bufferNum !== org.booking_pre_departure_buffer_hours ||
       cutoffSigned !== org.sales_cutoff_offset_minutes ||
       graceSigned !== org.booking_grace_offset_minutes)
 
@@ -187,7 +189,7 @@ export default function SettingsPage() {
       {
         timezone,
         booking_min_down_payment_pct: pctNum,
-        booking_hold_days: holdNum,
+        booking_pre_departure_buffer_hours: bufferNum,
         sales_cutoff_offset_minutes: cutoffSigned,
         booking_grace_offset_minutes: graceSigned,
       },
@@ -303,22 +305,47 @@ export default function SettingsPage() {
                   }}
                 />
 
+                {/* US-AG07.1 — the apartado deadline: the balance must be settled at least this long
+                    before the tour departs, or the held spot is released. Within this window of
+                    departure the tighter grace applies, so the deadline is never born in the past. */}
                 <TextField
-                  label="Vigencia del apartado"
+                  label="Plazo para pagar el saldo"
                   type="number"
-                  value={holdDays}
-                  onChange={(e) => setHoldDays(e.target.value)}
-                  error={holdDays !== '' && holdInvalid}
+                  value={bufferHours}
+                  onChange={(e) => setBufferHours(e.target.value)}
+                  error={bufferHours !== '' && bufferInvalid}
                   helperText={
-                    holdDays !== '' && holdInvalid
-                      ? 'Captura al menos 1 día.'
-                      : 'Días que se mantienen apartados los lugares antes de liberarse.'
+                    bufferHours !== '' && bufferInvalid
+                      ? 'Captura entre 0 y 168 horas.'
+                      : 'Horas antes de la salida en que hay que pagar el saldo del apartado, o el lugar se libera. Ej.: 24 = a más tardar un día antes.'
                   }
                   slotProps={{
                     input: {
-                      endAdornment: <InputAdornment position="end">días</InputAdornment>,
+                      endAdornment: (
+                        <InputAdornment position="end">
+                          horas
+                          <InfoPopover label="¿Cómo funciona el plazo para pagar el saldo?">
+                            <Stack spacing={1}>
+                              <Box>
+                                El cliente debe pagar el <b>saldo restante</b> del apartado al menos
+                                este tiempo antes de que salga el tour. Si no lo hace, el lugar se{' '}
+                                <b>libera</b> solo.
+                              </Box>
+                              <Box>
+                                Si faltan <b>menos</b> horas que este plazo para la salida (una
+                                reserva de último momento), el apartado se conserva hasta unos minutos
+                                antes de salir, para que el plazo <b>nunca quede en el pasado</b>.
+                              </Box>
+                              <Box color="text.secondary">
+                                Ejemplo con 24: un tour dentro de 3 días se paga a más tardar 24 h
+                                antes; un tour de mañana temprano se conserva casi hasta la salida.
+                              </Box>
+                            </Stack>
+                          </InfoPopover>
+                        </InputAdornment>
+                      ),
                     },
-                    htmlInput: { min: 1, step: 1, inputMode: 'numeric' },
+                    htmlInput: { min: 0, max: 168, step: 1, inputMode: 'numeric' },
                   }}
                 />
 
@@ -335,10 +362,11 @@ export default function SettingsPage() {
                   invalid={cutoffInvalid}
                 />
 
-                {/* US-A47 — booking grace: when an unsettled same-day apartado auto-cancels. */}
+                {/* US-A47 / US-AG07.1 — grace window: when an unsettled apartado close to departure
+                    auto-cancels. Applies to ANY near-departure tour now (not just same calendar day). */}
                 <OffsetField
-                  label="Liberación de apartado (mismo día)"
-                  helper="Un apartado del mismo día sin liquidar se cancela en este momento. «Después» da un margen de cortesía tras la salida."
+                  label="Liberación de apartado (cerca de la salida)"
+                  helper="Cuando el tour ya está por salir, un apartado sin pagar se libera en este momento. «Después» da un margen de cortesía tras la salida."
                   mag={graceMag}
                   setMag={setGraceMag}
                   dir={graceDir}

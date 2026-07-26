@@ -114,6 +114,7 @@ const clearPosDb = async () => {
   await env.DB.exec('DELETE FROM folio_line_extras')
   await env.DB.exec('DELETE FROM folio_lines')
   await env.DB.exec('DELETE FROM folio_access_tokens')
+  await env.DB.exec('DELETE FROM folio_payments')
   await env.DB.exec('DELETE FROM folios')
   await env.DB.exec('DELETE FROM slots')
   await env.DB.exec('DELETE FROM services')
@@ -147,7 +148,7 @@ describe('US-AG07 — booking creation', () => {
       amount_paid: 45000,
       pending_balance: 255000,
     })
-    // Non-same-day: expiry = slotStart − 24h (within the 7-day hold window).
+    // Beyond the pre-departure buffer: expiry = slotStart − 24h (the settle-by deadline).
     expect(json.folio.booking_expires_at).toBe(epoch(slotDate, '06:00') - 86_400)
     expect(json.folio.lines[0].qr_token).toBeNull()
     expect(json.folio.lines[0].qr).toBeNull()
@@ -155,6 +156,34 @@ describe('US-AG07 — booking creation', () => {
 
     const row = await getFolio(json.folio.id)
     expect(row).toMatchObject({ status: 'booking', amount_paid: 45000 })
+  })
+
+  // US-AG07.1 fix — a slot that is calendar-TOMORROW but LESS than the pre-departure buffer away
+  // used to be treated as "not same-day" and got the flat 24h buffer, so slotStart − 24h landed in
+  // the PAST and confirmSale minted a BORN-EXPIRED booking. The buffer is now time-distance based:
+  // within the buffer → the tighter grace window applies, so the expiry stays in the future.
+  it('Sc.1b — a next-day slot within the buffer uses the grace window, not a born-expired 24h buffer', async () => {
+    const { organizationId } = await seedUser({ email: AGENT_EMAIL, role: 'agent' })
+    // grace 15 min; pre-departure buffer defaults to 24h.
+    await setOrgPolicy(organizationId, { minPct: 0, holdDays: 7, bufferMin: 15 })
+    const { serviceId } = await seedService({ organizationId, basePrice: 150000 })
+    // Frozen now is 2026-06-14T12:00Z; this slot (tomorrow 06:00) is ~18h out — calendar-tomorrow
+    // yet < 24h away. Old logic → expiry 2026-06-14T06:00Z (before now → born expired).
+    const slotDate = addDays(todayStr(), 1)
+    const { slotId } = await seedSlot({ organizationId, serviceId, date: slotDate, startTime: '06:00' })
+
+    const { status, json } = await post(AGENT_EMAIL, {
+      customer_phone: PHONE,
+      down_payment: 45000,
+      lines: [{ slot_id: slotId, quantity: 1, unit_price: 150000 }],
+    })
+
+    expect(status).toBe(201)
+    const now = Math.floor(Date.now() / 1000)
+    // Grace window (slot − 15min), NOT slot − 24h.
+    expect(json.folio.booking_expires_at).toBe(epoch(slotDate, '06:00') - 15 * 60)
+    // The whole point: it is NOT born expired.
+    expect(json.folio.booking_expires_at).toBeGreaterThan(now)
   })
 
   // D2 (whatsapp-qr-delivery) — a dialable phone is now required for EVERY sale (WhatsApp is the

@@ -18,6 +18,7 @@ import EventBusyRounded from '@mui/icons-material/EventBusyRounded'
 import WarningAmberRounded from '@mui/icons-material/WarningAmberRounded'
 import HourglassTopRounded from '@mui/icons-material/HourglassTopRounded'
 import { useFolio } from '../features/pos/hooks'
+import { PaymentBreakdown } from '../features/pos/components/PaymentBreakdown'
 import { TicketQr } from '../features/pos/components/TicketQr'
 import {
   BookingActions,
@@ -30,13 +31,14 @@ import { formatMoney } from '../features/catalog/types'
 import { folioLineMeta } from '../features/folios/folioLineLabel'
 import { SectionCard } from '../components'
 import { ROUTES } from '../config/routes'
-import type { PaymentMethod } from '../features/pos/types'
+import type { DisplayMethod } from '../features/pos/types'
 
-const PAYMENT_METHOD_LABEL: Record<PaymentMethod, string> = {
+const PAYMENT_METHOD_LABEL: Record<DisplayMethod, string> = {
   cash: 'Efectivo',
   transfer: 'Transferencia',
   card: 'Tarjeta',
   link: 'Link de pago',
+  Mixto: 'Mixto', // US-LG08 — a folio collected by more than one method
 }
 
 export default function FolioReceiptPage() {
@@ -232,6 +234,15 @@ export default function FolioReceiptPage() {
                     </Stack>
                   )}
                 </Stack>
+
+                {/* US-LG08 — the per-payment breakdown (deposit vs balance, each method), when the
+                    folio was collected in more than one movement. */}
+                {folio.payments && folio.payments.length > 1 && (
+                  <>
+                    <Divider sx={{ my: 2 }} />
+                    <PaymentBreakdown payments={folio.payments} />
+                  </>
+                )}
               </CardContent>
             </Card>
 
