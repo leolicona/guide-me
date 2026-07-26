@@ -309,7 +309,7 @@ export default function SettingsPage() {
                     before the tour departs, or the held spot is released. Within this window of
                     departure the tighter grace applies, so the deadline is never born in the past. */}
                 <TextField
-                  label="Liquidación antes de la salida"
+                  label="Plazo para pagar el saldo"
                   type="number"
                   value={bufferHours}
                   onChange={(e) => setBufferHours(e.target.value)}
@@ -317,24 +317,28 @@ export default function SettingsPage() {
                   helperText={
                     bufferHours !== '' && bufferInvalid
                       ? 'Captura entre 0 y 168 horas.'
-                      : 'Horas antes de la salida en que se debe pagar el saldo del apartado.'
+                      : 'Horas antes de la salida en que hay que pagar el saldo del apartado, o el lugar se libera. Ej.: 24 = a más tardar un día antes.'
                   }
                   slotProps={{
                     input: {
                       endAdornment: (
                         <InputAdornment position="end">
                           horas
-                          <InfoPopover label="Cómo funciona la liquidación antes de la salida">
+                          <InfoPopover label="¿Cómo funciona el plazo para pagar el saldo?">
                             <Stack spacing={1}>
                               <Box>
-                                El cliente debe pagar el <b>saldo restante</b> al menos este tiempo
-                                antes de que salga el tour. Si no lo hace, el lugar apartado se{' '}
-                                <b>libera</b> automáticamente.
+                                El cliente debe pagar el <b>saldo restante</b> del apartado al menos
+                                este tiempo antes de que salga el tour. Si no lo hace, el lugar se{' '}
+                                <b>libera</b> solo.
                               </Box>
                               <Box>
-                                Si el tour está <b>más cerca</b> que este margen, el apartado se
-                                conserva hasta unos minutos antes de la salida (ventana de gracia),
-                                para que el plazo <b>nunca quede en el pasado</b>.
+                                Si faltan <b>menos</b> horas que este plazo para la salida (una
+                                reserva de último momento), el apartado se conserva hasta unos minutos
+                                antes de salir, para que el plazo <b>nunca quede en el pasado</b>.
+                              </Box>
+                              <Box color="text.secondary">
+                                Ejemplo con 24: un tour dentro de 3 días se paga a más tardar 24 h
+                                antes; un tour de mañana temprano se conserva casi hasta la salida.
                               </Box>
                             </Stack>
                           </InfoPopover>
@@ -358,10 +362,11 @@ export default function SettingsPage() {
                   invalid={cutoffInvalid}
                 />
 
-                {/* US-A47 — booking grace: when an unsettled same-day apartado auto-cancels. */}
+                {/* US-A47 / US-AG07.1 — grace window: when an unsettled apartado close to departure
+                    auto-cancels. Applies to ANY near-departure tour now (not just same calendar day). */}
                 <OffsetField
-                  label="Liberación de apartado (mismo día)"
-                  helper="Un apartado del mismo día sin liquidar se cancela en este momento. «Después» da un margen de cortesía tras la salida."
+                  label="Liberación de apartado (cerca de la salida)"
+                  helper="Cuando el tour ya está por salir, un apartado sin pagar se libera en este momento. «Después» da un margen de cortesía tras la salida."
                   mag={graceMag}
                   setMag={setGraceMag}
                   dir={graceDir}
