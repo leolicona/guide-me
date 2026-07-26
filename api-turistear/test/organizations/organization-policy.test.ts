@@ -36,6 +36,8 @@ describe('US-A46 — org booking policy', () => {
       // booking grace (renamed same-day buffer; default 15 = cancel 15 min before departure).
       sales_cutoff_offset_minutes: 0,
       booking_grace_offset_minutes: 15,
+      // US-AG07.1 — pre-departure buffer default 24h.
+      booking_pre_departure_buffer_hours: 24,
     })
   })
 
@@ -48,6 +50,7 @@ describe('US-A46 — org booking policy', () => {
       // departure — the "After" direction the UI translates to a negative integer).
       sales_cutoff_offset_minutes: 5,
       booking_grace_offset_minutes: -10,
+      booking_pre_departure_buffer_hours: 12,
     })
     expect(status).toBe(200)
     expect(json.organization).toMatchObject({
@@ -55,6 +58,7 @@ describe('US-A46 — org booking policy', () => {
       booking_hold_days: 3,
       sales_cutoff_offset_minutes: 5,
       booking_grace_offset_minutes: -10,
+      booking_pre_departure_buffer_hours: 12,
     })
     const after = await get('admin@empresa.com')
     expect(after.json.organization.booking_min_down_payment_pct).toBe(50)
@@ -68,6 +72,10 @@ describe('US-A46 — org booking policy', () => {
     expect((await put('admin@empresa.com', { booking_grace_offset_minutes: -30 })).status).toBe(200)
     expect((await put('admin@empresa.com', { sales_cutoff_offset_minutes: 999 })).status).toBe(400)
     expect((await put('admin@empresa.com', { booking_grace_offset_minutes: -999 })).status).toBe(400)
+    // Pre-departure buffer: 0–168h valid, out of bounds → 400.
+    expect((await put('admin@empresa.com', { booking_pre_departure_buffer_hours: 0 })).status).toBe(200)
+    expect((await put('admin@empresa.com', { booking_pre_departure_buffer_hours: 169 })).status).toBe(400)
+    expect((await put('admin@empresa.com', { booking_pre_departure_buffer_hours: -1 })).status).toBe(400)
   })
 
   it('an agent may not edit the policy → 403', async () => {

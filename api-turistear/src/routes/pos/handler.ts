@@ -616,6 +616,7 @@ interface BookingPolicy {
   minDownPaymentPct: number
   holdDays: number
   bookingGraceOffsetMinutes: number
+  preDepartureBufferHours: number
 }
 
 // US-AG07.1 — cascade-ready policy resolver. A per-service override (later phase) would take
@@ -624,11 +625,13 @@ function resolveBookingPolicy(org: {
   bookingMinDownPaymentPct: number
   bookingHoldDays: number
   bookingGraceOffsetMinutes: number
+  bookingPreDepartureBufferHours: number
 }): BookingPolicy {
   return {
     minDownPaymentPct: org.bookingMinDownPaymentPct,
     holdDays: org.bookingHoldDays,
     bookingGraceOffsetMinutes: org.bookingGraceOffsetMinutes,
+    preDepartureBufferHours: org.bookingPreDepartureBufferHours,
   }
 }
 
@@ -661,17 +664,20 @@ const slotEpoch = (date: string, time: string, tz: string): number =>
   naiveEpoch(date, time, tz)
 
 // US-AG07.1 AC1 — release timestamp = min(createdAt + holdDuration, slotStart − tourBuffer).
-// Same-day tours use the org's tighter same-day buffer; otherwise a 24h pre-departure buffer.
+// The buffer is chosen by TIME-DISTANCE, not calendar date: a slot WITHIN the org's pre-departure
+// buffer of departure uses the tighter grace offset (+ before / − after departure); a slot beyond
+// it uses the full pre-departure buffer as the settle-by deadline. This closes the born-expired
+// booking bug — a slot that was calendar-tomorrow but < buffer away previously took the flat 24h
+// buffer and landed its expiry in the past. A negative grace pushes expiry PAST departure.
 function bookingExpiryDate(
   policy: BookingPolicy,
   nowSec: number,
   earliestSlotEpoch: number,
-  isSameDay: boolean,
 ): Date {
   const holdDuration = policy.holdDays * 86_400
-  // Same-day: use the org's grace offset (+ before / − after departure). Otherwise a 24h
-  // pre-departure release. A negative grace pushes the expiry PAST departure (a grace window).
-  const tourBuffer = isSameDay ? policy.bookingGraceOffsetMinutes * 60 : 86_400
+  const bufferSeconds = policy.preDepartureBufferHours * 3_600
+  const nearDeparture = earliestSlotEpoch - nowSec < bufferSeconds
+  const tourBuffer = nearDeparture ? policy.bookingGraceOffsetMinutes * 60 : bufferSeconds
   const expiry = Math.min(nowSec + holdDuration, earliestSlotEpoch - tourBuffer)
   return new Date(expiry * 1000)
 }
@@ -868,6 +874,7 @@ export const confirmSale = async (c: PosContext) => {
       bookingHoldDays: organizations.bookingHoldDays,
       salesCutoffOffsetMinutes: organizations.salesCutoffOffsetMinutes,
       bookingGraceOffsetMinutes: organizations.bookingGraceOffsetMinutes,
+      bookingPreDepartureBufferHours: organizations.bookingPreDepartureBufferHours,
       lodgingWeekendDays: organizations.lodgingWeekendDays,
       timezone: organizations.timezone,
     })
@@ -1231,6 +1238,7 @@ export const confirmSale = async (c: PosContext) => {
     bookingMinDownPaymentPct: orgRow?.bookingMinDownPaymentPct ?? 0,
     bookingHoldDays: orgRow?.bookingHoldDays ?? 7,
     bookingGraceOffsetMinutes: orgRow?.bookingGraceOffsetMinutes ?? 15,
+    bookingPreDepartureBufferHours: orgRow?.bookingPreDepartureBufferHours ?? 24,
   })
   const isBooking = input.down_payment != null
   // US-AG41/US-A67 — an electronic (transfer) payment is not yet in hand: the folio is created
@@ -1287,7 +1295,6 @@ export const confirmSale = async (c: PosContext) => {
       policy,
       nowSec,
       earliest.epoch,
-      earliest.date === orgToday(tz),
     )
   }
 
@@ -2747,6 +2754,7 @@ export const reactivateBooking = async (c: PosContext) => {
       bookingHoldDays: organizations.bookingHoldDays,
       salesCutoffOffsetMinutes: organizations.salesCutoffOffsetMinutes,
       bookingGraceOffsetMinutes: organizations.bookingGraceOffsetMinutes,
+      bookingPreDepartureBufferHours: organizations.bookingPreDepartureBufferHours,
       timezone: organizations.timezone,
     })
     .from(organizations)
@@ -2756,6 +2764,7 @@ export const reactivateBooking = async (c: PosContext) => {
     bookingMinDownPaymentPct: orgRows[0]?.bookingMinDownPaymentPct ?? 0,
     bookingHoldDays: orgRows[0]?.bookingHoldDays ?? 7,
     bookingGraceOffsetMinutes: orgRows[0]?.bookingGraceOffsetMinutes ?? 15,
+    bookingPreDepartureBufferHours: orgRows[0]?.bookingPreDepartureBufferHours ?? 24,
   })
   // US-A66 — the cutoff guard + fresh same-day expiry below resolve in the org's time zone.
   const tz = orgRows[0]?.timezone ?? 'America/Mexico_City'
@@ -2945,7 +2954,6 @@ export const reactivateBooking = async (c: PosContext) => {
     policy,
     reactivateNowSec,
     earliest.epoch,
-    earliest.date === orgToday(tz),
   )
 
   await db
