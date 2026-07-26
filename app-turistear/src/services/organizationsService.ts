@@ -11,6 +11,9 @@ export interface MyOrganization {
   // salesCutoff closes new walk-in sales; bookingGrace times the unsettled same-day auto-cancel.
   sales_cutoff_offset_minutes: number
   booking_grace_offset_minutes: number
+  // US-AG07.1 — pre-departure buffer (hours): a deposit-hold must be settled at least this long
+  // before departure; within this window the tighter grace applies (fixes born-expired bookings).
+  booking_pre_departure_buffer_hours: number
   // US-A60/A63 — lodging org settings. weekend days as ISO weekday ints (0=Sun…6=Sat; default
   // [5,6] = Fri+Sat); free-cancel window (days) + penalty (%) for paid-stay cancellations.
   lodging_weekend_days: number[]
@@ -34,6 +37,7 @@ export interface UpdateOrganizationInput {
   booking_hold_days?: number
   sales_cutoff_offset_minutes?: number
   booking_grace_offset_minutes?: number
+  booking_pre_departure_buffer_hours?: number
   lodging_weekend_days?: number[]
   lodging_free_cancel_days?: number
   lodging_cancel_penalty_pct?: number

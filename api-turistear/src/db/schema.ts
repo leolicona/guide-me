@@ -17,6 +17,11 @@ export const organizations = sqliteTable('organizations', {
   bookingHoldDays: integer('booking_hold_days').notNull().default(7),
   salesCutoffOffsetMinutes: integer('sales_cutoff_offset_minutes').notNull().default(0),
   bookingGraceOffsetMinutes: integer('booking_grace_offset_minutes').notNull().default(15),
+  // US-AG07.1 — pre-departure buffer (hours): a deposit-hold must be settled at least this long
+  // before departure. Applied by TIME-DISTANCE — within this window of departure the tighter
+  // `bookingGraceOffsetMinutes` grace applies (so a near-but-next-day slot is no longer treated as
+  // a full-24h-buffer booking that would be born expired). Default 24h.
+  bookingPreDepartureBufferHours: integer('booking_pre_departure_buffer_hours').notNull().default(24),
   // Accommodation/lodging settings (docs/lodging/accommodation-stays.spec.md §2.5). weekendDays:
   // CSV of ISO weekday ints (0=Sun … 6=Sat) — which nights use a unit's weekend_rate (default
   // Fri+Sat). A PAID stay cancels free until lodgingFreeCancelDays before check-in; inside that

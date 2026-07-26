@@ -24,6 +24,9 @@ export const updateOrganizationSchema = z.object({
   // salesCutoff closes new walk-in sales; bookingGrace times the unsettled same-day auto-cancel.
   sales_cutoff_offset_minutes: z.number().int().min(-240).max(240).optional(),
   booking_grace_offset_minutes: z.number().int().min(-240).max(240).optional(),
+  // US-AG07.1 — pre-departure buffer (hours): a deposit-hold must be settled at least this long
+  // before departure; within this window of departure the tighter grace applies. 0–168h (0–7 days).
+  booking_pre_departure_buffer_hours: z.number().int().min(0).max(168).optional(),
   // Lodging settings (docs/lodging/accommodation-stays.spec.md §2.5). Weekend days as ISO
   // weekday ints (0=Sun … 6=Sat), distinct; free-cancel window in days; penalty percent.
   lodging_weekend_days: z
