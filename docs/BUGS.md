@@ -6,6 +6,65 @@ Tracks confirmed bugs, root causes, and fixes. Each entry is immutable once clos
 
 ---
 
+## BUG-016 — Manual Cancellation Never Releases Zoned Seats (Zone Counter Permanently Inflated) — ✅ FIXED
+
+**Discovered:** 2026-07-27
+**Fixed:** 2026-07-27
+**Reporter:** Claude Code (found while specifying the Cancellation Policy Engine)
+**Affected component:** `api-turistear/src/routes/folios/handler.ts` (`applyCancellation`)
+**Severity:** High — silent, permanent inventory loss on zoned services. No error, no log; the
+seats simply stop existing.
+
+### Symptom
+
+Cancelling a folio for a **zoned** service (US-A64 — e.g. a Turibus with *Bajo* / *Alto* decks)
+appears to work: the folio flips to `cancelled` and `slots.booked` drops. But the seats are never
+resold. The zone shows as fuller than it is, and the next time anything reconciles the slot, the
+slot total snaps back up too.
+
+### Root Cause
+
+For a zoned service the authoritative counter is `slot_zones.booked`; `slots.capacity` / `booked`
+are **derived** from the zone sums by `reconcileSlotTotals` (`services/zones.reconcile.ts`), so
+every existing availability read keeps working unchanged.
+
+`applyCancellation` — the shared commit for the admin cancel and the tourist-request approval —
+decremented `slots.booked` directly for every line and **never looked at `zone_id`**:
+
+```ts
+const statements = lines.filter((l) => l.slotId).map((line) =>
+  db.update(slots).set({ booked: sql`MAX(0, ${slots.booked} - ${line.quantity})` })…)
+```
+
+So on a zoned line: the zone row kept its seats (inflated forever → unsellable), and the write to
+the derived `slots.booked` was itself doomed — the next reconcile recomputed it from the still-
+inflated zone sums and undid it.
+
+Every **other** release site already branched on `zone_id` — `cancelBooking`
+(`pos/handler.ts:2613`), `rejectPayment` (`:2502`), and `sweepExpiredBookings`
+(`pos/sweep.ts:62`), each pairing a `slot_zones` decrement with `reconcileSlotTotals` in the same
+batch. The manual cancellation path was the one that was missed when zoned capacity shipped.
+
+### Fix
+
+`applyCancellation` now branches per line exactly like its three siblings: a zoned line decrements
+`slot_zones.booked` and composes `reconcileSlotTotals` into the **same** D1 batch; an unzoned line
+keeps the old slot decrement. Both keep the `MAX(0, …)` clamp this path has always had, so a
+hand-edited counter can never go negative. Both call sites now select `folio_lines.zone_id`.
+
+Deliberately not changed: the race-safe two-step order (guarded folio flip first, seats only for
+the winner — BUG-013) is untouched.
+
+### Test Coverage
+
+`test/folios/folio-cancellation.test.ts` → `describe('Zoned cancellation releases zone seats
+(regression)')` — 5 cases: the zone counter is released; the release **survives a later
+reconcile** (the part that made the loss permanent); an unzoned line still works; a mixed
+zoned + unzoned folio releases both; the zone counter clamps at zero. All 4 zoned cases were
+verified to **fail** against the pre-fix handler and pass after.
+
+---
+
 ## BUG-015 — Blank Page After Login Until Manual Refresh (Failed Lazy Chunk + No ErrorBoundary) — ✅ FIXED
 
 **Discovered:** 2026-06-12
