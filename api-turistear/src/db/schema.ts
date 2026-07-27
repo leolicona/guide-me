@@ -40,6 +40,16 @@ export const organizations = sqliteTable('organizations', {
   // BUG-007), and audit-timestamp display. Stored slot strings stay naive wall-clock — this fixes
   // only the "now" they compare against. Curated Mexican-zone picker in Settings (D5).
   timezone: text('timezone').notNull().default('America/Mexico_City'),
+  // Cancellation Policy Engine (docs/cancellation/cancellation-policy-engine.spec.md). The refund
+  // ladder as a JSON document — see `utils/cancellationPolicy` for the shape and its Zod schema.
+  // NULL is load-bearing (D1): no policy configured ⇒ every cancellation path runs its pre-feature
+  // code, so no existing org changes behaviour. Clearing it back to NULL is the rollback.
+  cancellationPolicy: text('cancellation_policy'),
+  // US-A73 (D14) — may an agent cancel their OWN sale, bounded by their current shift (everything
+  // up to their next confirmed cash drop)? Off by default: admin-only, as it has always been.
+  agentCancellationEnabled: integer('agent_cancellation_enabled', { mode: 'boolean' })
+    .notNull()
+    .default(false),
   createdAt: integer('created_at', { mode: 'timestamp' })
     .notNull()
     .default(sql`(unixepoch())`),
@@ -353,6 +363,16 @@ export const folios = sqliteTable('folios', {
   cancellationClawback: integer('cancellation_clawback', { mode: 'boolean' })
     .notNull()
     .default(false),
+  // Cancellation Policy Engine (D6) — the refund ladder in force when this sale was CONFIRMED.
+  // Read in preference to the org's live policy so editing the policy never re-prices a sale
+  // already made. NULL ⇒ fall back to the org's live policy (which is NULL too for a folio sold
+  // before the feature, so it takes the legacy path).
+  cancellationPolicySnapshot: text('cancellation_policy_snapshot'),
+  // WHO cancelled, as a type rather than prose — so a report never has to parse
+  // `cancellation_reason`. NULL = cancelled before the policy engine shipped.
+  cancellationSource: text('cancellation_source', {
+    enum: ['admin', 'agent', 'tourist_request', 'company', 'system_expiry'],
+  }),
   // Cash refund tracking (US-A23 / US-T05). `pending` is set when a PAID folio is cancelled
   // via an approved tourist cancellation request; `refunded` once the admin confirms the
   // physical hand-back (PIN or override). `none` = no refund obligation.
