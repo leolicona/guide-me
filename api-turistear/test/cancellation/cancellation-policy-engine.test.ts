@@ -8,6 +8,7 @@ import {
   type PolicyLine,
 } from '../../src/utils/cancellationPolicy'
 import { naiveEpoch } from '../../src/utils/tz'
+import { prorateAcrossBuckets } from '../../src/utils/folioPayments'
 
 // Cancellation Policy Engine — the PURE core.
 // Spec: docs/cancellation/cancellation-policy-engine.spec.md (§ The computation).
@@ -506,5 +507,80 @@ describe('parse and resolve', () => {
 
   it('resolves to null when neither exists — the D1 gate', () => {
     expect(resolvePolicy(null, null)).toBeNull()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// The ledger split (spec Rule 8) — how a PARTIAL refund is spread across the methods the
+// customer actually paid with. Pure: the DB-level assertions live with the handler tests.
+//
+// The invariant that matters is exactness. The ledger is the cash engine's source of truth, so a
+// stray minor unit here is a corte that does not reconcile.
+// ---------------------------------------------------------------------------
+describe('prorateAcrossBuckets', () => {
+  const buckets = (...pairs: Array<[string, number]>) =>
+    pairs.map(([method, amount]) => ({ method: method as never, amount }))
+
+  it('splits in proportion to what each method collected', () => {
+    const out = prorateAcrossBuckets(buckets(['cash', 300], ['transfer', 700]), 500)
+    expect(out).toEqual([
+      { method: 'cash', amount: 150 },
+      { method: 'transfer', amount: 350 },
+    ])
+  })
+
+  it('sums to the target EXACTLY, remainder to the largest bucket', () => {
+    const out = prorateAcrossBuckets(buckets(['cash', 333], ['transfer', 667]), 500)
+    expect(out.reduce((s, r) => s + r.amount, 0)).toBe(500)
+    // 333×500/1000 = 166.5 → floor 166; 667×500/1000 = 333.5 → floor 333; remainder 1 → transfer.
+    expect(out).toEqual([
+      { method: 'cash', amount: 166 },
+      { method: 'transfer', amount: 334 },
+    ])
+  })
+
+  it('is exact across many awkward splits', () => {
+    for (const target of [1, 7, 99, 101, 500, 999]) {
+      const out = prorateAcrossBuckets(buckets(['cash', 333], ['transfer', 667]), target)
+      expect(out.reduce((s, r) => s + r.amount, 0)).toBe(target)
+    }
+  })
+
+  it('never pushes a bucket negative — no share exceeds what that method holds', () => {
+    const out = prorateAcrossBuckets(buckets(['cash', 100], ['transfer', 900]), 950)
+    const cash = out.find((r) => r.method === 'cash')!
+    expect(cash.amount).toBeLessThanOrEqual(100)
+    expect(out.reduce((s, r) => s + r.amount, 0)).toBe(950)
+  })
+
+  it('clamps a target larger than the total instead of inventing money', () => {
+    const out = prorateAcrossBuckets(buckets(['cash', 300]), 5_000)
+    expect(out).toEqual([{ method: 'cash', amount: 300 }])
+  })
+
+  it('reverses everything when the target IS the total', () => {
+    const out = prorateAcrossBuckets(buckets(['cash', 300], ['transfer', 700]), 1000)
+    expect(out).toEqual([
+      { method: 'cash', amount: 300 },
+      { method: 'transfer', amount: 700 },
+    ])
+  })
+
+  it('emits nothing for a zero target, and skips zero and negative buckets', () => {
+    expect(prorateAcrossBuckets(buckets(['cash', 300]), 0)).toEqual([])
+    expect(prorateAcrossBuckets(buckets(['cash', 0], ['transfer', 700]), 700)).toEqual([
+      { method: 'transfer', amount: 700 },
+    ])
+    // An already fully-refunded bucket is net-negative and must not receive a share.
+    expect(prorateAcrossBuckets(buckets(['cash', -100], ['transfer', 700]), 350)).toEqual([
+      { method: 'transfer', amount: 350 },
+    ])
+  })
+
+  it('is deterministic when buckets tie', () => {
+    const a = prorateAcrossBuckets(buckets(['cash', 500], ['transfer', 500]), 999)
+    const b = prorateAcrossBuckets(buckets(['cash', 500], ['transfer', 500]), 999)
+    expect(a).toEqual(b)
+    expect(a.reduce((s, r) => s + r.amount, 0)).toBe(999)
   })
 })
