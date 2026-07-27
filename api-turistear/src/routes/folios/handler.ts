@@ -30,6 +30,11 @@ import {
 } from '../../services/resend'
 import { generateRefundPin } from '../../utils/portal'
 import { buildCancellationReversal, displayMethodSql, readFolioPayments } from '../../utils/folioPayments'
+import {
+  computeCancellationRefund,
+  resolvePolicy,
+  type CancellationOutcome,
+} from '../../utils/cancellationPolicy'
 
 export type FoliosContext = Context<{
   Bindings: CloudflareBindings
@@ -340,8 +345,32 @@ export const getFolioDetail = async (c: FoliosContext) => {
     throw new ApiError('NOT_FOUND', 404, 'Folio not found')
   }
 
-  return c.json({ folio })
+  // What cancelling RIGHT NOW would cost — so the confirm sheet states the refund before the admin
+  // commits, instead of discovering it afterwards. Pure read: it persists nothing, and it is
+  // computed by the same function the cancel endpoint uses, so the number shown is the number
+  // written. `null` for an already-cancelled folio (nothing to quote) or an org with no policy.
+  const quote =
+    folio.status === 'cancelled'
+      ? null
+      : await quoteCancellation(db, admin.organizationId, id, new Date())
+
+  return c.json({ folio, cancellation_quote: quote ? serializeQuote(quote) : null })
 }
+
+const serializeQuote = (o: CancellationOutcome) => ({
+  refund: o.refund,
+  retention: o.retention,
+  kept_commission: o.keptCommission,
+  reversed_commission: o.reversedCommission,
+  lines: o.lines.map((l) => ({
+    line_id: l.lineId,
+    // Rounded for display; the decision itself used the exact value.
+    hours_out: Number.isFinite(l.hoursOut) ? Math.round(l.hoursOut) : null,
+    refund_pct: l.refundPct,
+    retention: l.retention,
+    redeemed: l.redeemed,
+  })),
+})
 
 // POST /folios/:id/ticket-delivery — the admin records the tickets were sent over WhatsApp
 // (whatsapp-qr-delivery D4/D13). Org-scoped (any folio in the org, no agent filter). Last-write-wins.
@@ -390,6 +419,9 @@ const applyCancellation = async (
   lines: Array<{ slotId: string | null; quantity: number; zoneId: string | null }>,
   now: Date,
   folioUpdate: Partial<typeof folios.$inferInsert>,
+  // Cancellation Policy Engine — how much of the collected money and commission to reverse. OMITTED
+  // (no policy configured) means "reverse everything", the pre-feature behaviour (D1).
+  reversal?: { refundAmount: number; reversedCommission: number },
 ): Promise<boolean> => {
   // The agent whose ledger the cancellation reversal (US-LG05/LG06) attributes to.
   const [meta] = await db
@@ -449,14 +481,20 @@ const applyCancellation = async (
   // US-LG — reverse the collected money per method + (on clawback) the commission, dated at the
   // cancellation, so the folio drops out of the ledger buckets exactly as status-exclusion did.
   if (meta) {
-    const reversal = await buildCancellationReversal(db, {
+    const reversalRows = await buildCancellationReversal(db, {
       organizationId: org,
       folioId,
       collectedBy: meta.agentId,
       at: now,
       clawback: folioUpdate.cancellationClawback === true,
+      ...(reversal
+        ? {
+            refundAmount: reversal.refundAmount,
+            reversedCommission: reversal.reversedCommission,
+          }
+        : {}),
     })
-    statements.push(...reversal)
+    statements.push(...reversalRows)
   }
   // Lodging: release any stay reservations on this folio (US-A21 / tourist-approved cancel).
   statements.push(
@@ -474,6 +512,100 @@ const applyCancellation = async (
   await db.batch(statements as [BatchItem<'sqlite'>, ...BatchItem<'sqlite'>[]])
   return true
 }
+
+// Cancellation Policy Engine — price a cancellation, or decide there is no policy to price it with.
+// Spec: docs/cancellation/cancellation-policy-engine.spec.md
+//
+// THE single place a policy is resolved and applied, shared by the admin cancel, the tourist-request
+// approval, and the read-only quote on folio detail. Before this existed the two cancellation paths
+// disagreed about the same folio — the admin one recorded no refund for a tour while the tourist one
+// refunded everything. Routing both through here is what makes that impossible rather than merely
+// fixed.
+//
+// Returns `null` when no policy resolves. That is the D1 gate: callers then run their pre-feature
+// code untouched, which is why no existing org changes behaviour and no existing test needed edits.
+export const quoteCancellation = async (
+  db: Db,
+  org: string,
+  folioId: string,
+  now: Date,
+): Promise<CancellationOutcome | null> => {
+  const [folio] = await db
+    .select({
+      status: folios.status,
+      amountPaid: folios.amountPaid,
+      snapshot: folios.cancellationPolicySnapshot,
+      affiliateCompanyId: folios.affiliateCompanyId,
+    })
+    .from(folios)
+    .where(and(eq(folios.id, folioId), eq(folios.organizationId, org)))
+    .limit(1)
+  if (!folio) return null
+
+  const [orgRow] = await db
+    .select({ policy: organizations.cancellationPolicy, timezone: organizations.timezone })
+    .from(organizations)
+    .where(eq(organizations.id, org))
+    .limit(1)
+
+  // D6 — the folio's own snapshot wins; the org's live ladder is only a fallback for folios that
+  // carry none (sold before the feature, or while the org had no policy).
+  const policy = resolvePolicy(folio.snapshot, orgRow?.policy)
+  if (!policy) return null
+
+  const lines = await db
+    .select({
+      id: folioLines.id,
+      lineTotal: folioLines.lineTotal,
+      quantity: folioLines.quantity,
+      redeemedCount: folioLines.redeemedCount,
+      commissionType: folioLines.commissionType,
+      commissionValue: folioLines.commissionValue,
+      lineType: folioLines.lineType,
+      slotDate: folioLines.slotDate,
+      slotStartTime: folioLines.slotStartTime,
+      checkIn: folioLines.checkIn,
+    })
+    .from(folioLines)
+    .where(and(eq(folioLines.folioId, folioId), eq(folioLines.organizationId, org)))
+
+  return computeCancellationRefund({
+    policy,
+    lines,
+    amountPaid: folio.amountPaid,
+    folioStatus: folio.status,
+    nowEpoch: Math.floor(now.getTime() / 1000),
+    timezone: orgRow?.timezone ?? 'America/Mexico_City',
+    // D12 — an affiliate sale is already stamped on the folio (US-A51), so which of the tier's two
+    // commission percentages applies needs no join.
+    sellerKind: folio.affiliateCompanyId ? 'affiliate' : 'agent',
+  })
+}
+
+// US-A71 — a cancellation the COMPANY caused (weather, a broken boat) skips the ladder entirely:
+// the customer is made whole and the seller keeps what they earned. Expressed as an override of the
+// computed outcome rather than a branch inside the engine, so the engine stays a pure function of
+// the policy and the quote endpoint can still show what the ladder *would* have done.
+const asCompanyCancellation = (outcome: CancellationOutcome): CancellationOutcome => ({
+  ...outcome,
+  refund: outcome.refund + outcome.retention, // = amountPaid
+  retention: 0,
+  keptCommission: outcome.totalCommission,
+  reversedCommission: 0,
+})
+
+// The folio fields a priced cancellation writes. Refund obligation and PIN follow the MONEY, not
+// the path that produced it (spec Rules 3–4): any cancellation that owes the customer something
+// mints a PIN, because a tourist owed money must be able to prove they were present to receive it
+// regardless of who pressed cancel.
+const refundFieldsFor = (outcome: CancellationOutcome): Partial<typeof folios.$inferInsert> =>
+  outcome.refund > 0
+    ? {
+        refundStatus: 'pending' as const,
+        refundAmount: outcome.refund,
+        refundPin: generateRefundPin(),
+      }
+    : { refundStatus: 'none' as const, refundAmount: 0 }
 
 // Fire-and-forget cancellation email — a Resend failure must never fail a committed
 // cancellation. waitUntil guarantees the send completes after the response returns (a bare
@@ -556,6 +688,52 @@ export const cancelFolio = async (c: FoliosContext) => {
 
   const now = new Date()
 
+  // Cancellation Policy Engine — when the org has a ladder, IT prices the cancellation and the
+  // legacy branch below is skipped entirely. `null` means no policy (D1) → the pre-feature code runs
+  // verbatim.
+  const quoted = await quoteCancellation(db, org, id, now)
+  if (quoted) {
+    const outcome = input.cancelled_by_company ? asCompanyCancellation(quoted) : quoted
+    const won = await applyCancellation(
+      db,
+      org,
+      id,
+      lines,
+      now,
+      {
+        status: 'cancelled',
+        cancelledAt: now,
+        cancelledBy: admin.userId,
+        // A company-caused cancellation is marked in the reason so a report can tell a policy
+        // outcome from an operational one without reading the source column alone.
+        cancellationReason: input.cancelled_by_company
+          ? `[EMPRESA] ${input.reason ?? 'Cancelado por la empresa'}`
+          : (input.reason ?? null),
+        // The ladder decides, not the caller: the body's `clawback` is IGNORED here (D10). The flag
+        // keeps its meaning for every existing reader — "was any commission taken back".
+        cancellationClawback: outcome.reversedCommission > 0,
+        cancellationSource: input.cancelled_by_company ? 'company' : 'admin',
+        ...refundFieldsFor(outcome),
+      },
+      { refundAmount: outcome.refund, reversedCommission: outcome.reversedCommission },
+    )
+    if (!won) throw new ApiError('CONFLICT', 409, 'This folio is already cancelled')
+
+    const folioOut = await readFolio(db, org, id)
+    if (folioOut) await queueCancellationEmail(c, db, org, id, folioOut)
+    return c.json({
+      folio: folioOut,
+      cancellation: {
+        refund: outcome.refund,
+        retention: outcome.retention,
+        kept_commission: outcome.keptCommission,
+        reversed_commission: outcome.reversedCommission,
+      },
+    })
+  }
+
+  // --- No policy configured: everything below is the pre-feature path, unchanged. ---
+
   // D9 — a PAID stay cancellation computes a structured refund (free-window then penalty %) on the
   // stay portion; a booking-status deposit stays non-refundable (handled on the POS cancel path,
   // US-AG07.4). Org settings drive the policy; tour-only or booking folios keep the default (none).
@@ -593,6 +771,9 @@ export const cancelFolio = async (c: FoliosContext) => {
     cancelledBy: admin.userId,
     cancellationReason: input.reason ?? null,
     cancellationClawback: input.clawback ?? false,
+    // Recorded even on the legacy path: it only writes a new audit column, so reports can rely on
+    // the source being present from this release forward regardless of policy.
+    cancellationSource: 'admin',
     ...refundUpdate,
   })
   if (!won) {
@@ -748,22 +929,41 @@ export const approveCancellationRequest = async (c: FoliosContext) => {
     )
 
   const now = new Date()
+  // Cancellation Policy Engine — the SAME pricing the admin path uses. This is the fix for the
+  // defect the spec opens with: approving a tourist's request used to refund `amount_paid` in full
+  // while an admin cancelling the identical folio recorded no refund at all. `null` = no policy
+  // (D1) → the pre-feature full-refund behaviour below, unchanged.
+  const quoted = await quoteCancellation(db, org, folio.id, now)
   // Refund obligation only when money actually changed hands (S9: unpaid → no PIN).
   const owesRefund = folio.amountPaid > 0
-  const won = await applyCancellation(db, org, folio.id, lines, now, {
-    status: 'cancelled',
-    cancelledAt: now,
-    cancelledBy: admin.userId,
-    cancellationReason: request.reason ?? 'Solicitud de cancelación del cliente',
-    cancellationClawback: input.clawback === true,
-    ...(owesRefund
-      ? {
-          refundStatus: 'pending' as const,
-          refundAmount: folio.amountPaid,
-          refundPin: generateRefundPin(),
-        }
-      : {}),
-  })
+  const won = await applyCancellation(
+    db,
+    org,
+    folio.id,
+    lines,
+    now,
+    {
+      status: 'cancelled',
+      cancelledAt: now,
+      cancelledBy: admin.userId,
+      cancellationReason: request.reason ?? 'Solicitud de cancelación del cliente',
+      // With a policy the ladder decides; without one the admin's flag still does (US-A26).
+      cancellationClawback: quoted ? quoted.reversedCommission > 0 : input.clawback === true,
+      cancellationSource: 'tourist_request',
+      ...(quoted
+        ? refundFieldsFor(quoted)
+        : owesRefund
+          ? {
+              refundStatus: 'pending' as const,
+              refundAmount: folio.amountPaid,
+              refundPin: generateRefundPin(),
+            }
+          : {}),
+    },
+    quoted
+      ? { refundAmount: quoted.refund, reversedCommission: quoted.reversedCommission }
+      : undefined,
+  )
   if (!won) {
     // A concurrent cancellation won the guarded flip after our pre-check. The request
     // stays pending — the admin resolves it explicitly (same recovery as approving a
