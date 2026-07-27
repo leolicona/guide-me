@@ -23,7 +23,9 @@ import {
 } from '@mui/material'
 import ArrowBackRounded from '@mui/icons-material/ArrowBackRounded'
 import { useFolio, useCancelFolio, useConfirmRefund, FolioStatusChip } from '../features/folios'
+import type { FolioDetail } from '../features/folios/types'
 import { useOrgDateFormatter } from '../features/organization'
+import type { CancellationQuote } from '../features/organization/types'
 import WarningAmberRounded from '@mui/icons-material/WarningAmberRounded'
 import {
   BookingActions,
@@ -50,12 +52,18 @@ const DATE_FMT: Intl.DateTimeFormatOptions = {
 export default function FolioDetailPage() {
   const formatDate = useOrgDateFormatter(DATE_FMT) // US-A66 — org-local audit timestamps
   const { id } = useParams<{ id: string }>()
-  const { data: folio, isLoading, isError } = useFolio(id)
+  const { data, isLoading, isError } = useFolio(id)
+  const folio = data?.folio
+  // US-A69 — what cancelling right now would cost, priced by the org's ladder. Null when the org
+  // has no policy (cancellations then behave as they always did) or the folio is already cancelled.
+  const quote = data?.quote ?? null
   const cancel = useCancelFolio()
   const refund = useConfirmRefund()
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [reason, setReason] = useState('')
   const [clawback, setClawback] = useState(false)
+  // US-A71 — the company caused it (weather, a broken boat): full refund, commission untouched.
+  const [byCompany, setByCompany] = useState(false)
   // US-A23 / US-T05 — refund confirmation dialog: PIN (primary) or no-PIN override + note.
   const [refundOpen, setRefundOpen] = useState(false)
   const [pin, setPin] = useState('')
@@ -70,12 +78,20 @@ export default function FolioDetailPage() {
     setConfirmOpen(false)
     setReason('')
     setClawback(false)
+    setByCompany(false)
   }
 
   const handleCancel = () => {
     if (!id) return
     cancel.mutate(
-      { id, reason: reason.trim() || undefined, clawback },
+      {
+        id,
+        reason: reason.trim() || undefined,
+        // Only one of these is meaningful at a time: with a policy the ladder decides the
+        // commission and the server ignores `clawback`, so we do not send a value that will be
+        // discarded. Without a policy there is no company-cancellation concept to send.
+        ...(quote ? { cancelledByCompany: byCompany } : { clawback }),
+      },
       { onSuccess: closeDialog },
     )
   }
@@ -322,13 +338,18 @@ export default function FolioDetailPage() {
           </Stack>
         )}
 
-        <Dialog open={confirmOpen} onClose={closeDialog}>
+        <Dialog open={confirmOpen} onClose={closeDialog} fullWidth maxWidth="xs">
           <DialogTitle>¿Cancelar este folio?</DialogTitle>
           <DialogContent>
             <DialogContentText sx={{ mb: 2 }}>
               Esto libera todos los lugares de cada servicio en el folio y no se puede deshacer.
               Los boletos de acceso del cliente dejarán de ser válidos.
             </DialogContentText>
+
+            {/* US-A69 — the money, before committing. Computed server-side by the same function
+                the cancel endpoint uses, so what is shown here is what gets written. */}
+            {quote && <RefundQuote quote={quote} byCompany={byCompany} folio={folio} />}
+
             <TextField
               label="Motivo (opcional)"
               size="small"
@@ -337,27 +358,55 @@ export default function FolioDetailPage() {
               minRows={2}
               value={reason}
               onChange={(e) => setReason(e.target.value)}
+              sx={{ mt: quote ? 2 : 0 }}
             />
-            <FormControlLabel
-              sx={{ mt: 1, alignItems: 'flex-start' }}
-              control={
-                <Switch
-                  checked={clawback}
-                  onChange={(e) => setClawback(e.target.checked)}
-                  color="error"
-                />
-              }
-              label={
-                <Box sx={{ pt: 0.75 }}>
-                  <Typography variant="body2">Recuperar comisión del agente</Typography>
-                  <Typography variant="caption" color="text.secondary">
-                    {clawback
-                      ? 'El agente pierde la comisión generada en esta venta.'
-                      : 'Desactivado: la empresa absorbe la pérdida y el agente conserva la comisión.'}
-                  </Typography>
-                </Box>
-              }
-            />
+
+            {quote ? (
+              // US-A71 — the only way to depart from the ladder. The clawback switch is NOT shown
+              // here: with a policy configured the server ignores it, so offering it would let an
+              // admin believe they made a decision that never took effect.
+              <FormControlLabel
+                sx={{ mt: 1, alignItems: 'flex-start' }}
+                control={
+                  <Switch
+                    checked={byCompany}
+                    onChange={(e) => setByCompany(e.target.checked)}
+                    color="warning"
+                  />
+                }
+                label={
+                  <Box sx={{ pt: 0.75 }}>
+                    <Typography variant="body2">Cancelado por la empresa</Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      {byCompany
+                        ? 'Mal clima, falla del operador: se devuelve todo y el agente conserva su comisión.'
+                        : 'Desactivado: aplica la política de cancelación de la empresa.'}
+                    </Typography>
+                  </Box>
+                }
+              />
+            ) : (
+              <FormControlLabel
+                sx={{ mt: 1, alignItems: 'flex-start' }}
+                control={
+                  <Switch
+                    checked={clawback}
+                    onChange={(e) => setClawback(e.target.checked)}
+                    color="error"
+                  />
+                }
+                label={
+                  <Box sx={{ pt: 0.75 }}>
+                    <Typography variant="body2">Recuperar comisión del agente</Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      {clawback
+                        ? 'El agente pierde la comisión generada en esta venta.'
+                        : 'Desactivado: la empresa absorbe la pérdida y el agente conserva la comisión.'}
+                    </Typography>
+                  </Box>
+                }
+              />
+            )}
           </DialogContent>
           <DialogActions>
             <Button onClick={closeDialog}>Conservar folio</Button>
@@ -434,5 +483,99 @@ export default function FolioDetailPage() {
         </Dialog>
       </Box>
     </Fade>
+  )
+}
+
+// US-A69 — the refund the policy computes, shown BEFORE the admin commits. The server calculates
+// it with the same function the cancel endpoint uses, so this is a preview of a decision already
+// made rather than a client-side re-implementation that could drift from it.
+//
+// The per-line breakdown only appears when it explains something: on a single-line folio the
+// headline number already says everything, and repeating it adds noise to a confirmation dialog.
+function RefundQuote({
+  quote,
+  byCompany,
+  folio,
+}: {
+  quote: CancellationQuote
+  byCompany: boolean
+  folio?: FolioDetail
+}) {
+  // The company-cancellation override skips the ladder entirely (US-A71), so the preview has to
+  // follow the switch — otherwise the admin reads a number that will not be written.
+  const refund = byCompany ? quote.refund + quote.retention : quote.refund
+  const retention = byCompany ? 0 : quote.retention
+  const keptCommission = byCompany
+    ? quote.kept_commission + quote.reversed_commission
+    : quote.kept_commission
+  const reversedCommission = byCompany ? 0 : quote.reversed_commission
+
+  const lineName = (lineId: string) =>
+    folio?.lines.find((l) => l.id === lineId)?.service_name ?? 'Servicio'
+
+  return (
+    <Box sx={{ border: 1, borderColor: 'grey.200', borderRadius: 2, p: 2, bgcolor: 'grey.50' }}>
+      <Stack direction="row" sx={{ justifyContent: 'space-between', alignItems: 'baseline' }}>
+        <Typography variant="body2" color="text.secondary">
+          Se devuelve al cliente
+        </Typography>
+        <MoneyText cents={refund} variant="h6" srLabel="Se devuelve al cliente" />
+      </Stack>
+
+      {retention > 0 && (
+        <Stack
+          direction="row"
+          sx={{ justifyContent: 'space-between', alignItems: 'baseline', mt: 0.5 }}
+        >
+          <Typography variant="caption" color="text.secondary">
+            La empresa retiene
+          </Typography>
+          <Typography variant="caption" color="text.secondary" className="numeric">
+            {formatMoney(retention)}
+          </Typography>
+        </Stack>
+      )}
+
+      {(keptCommission > 0 || reversedCommission > 0) && (
+        <Stack
+          direction="row"
+          sx={{ justifyContent: 'space-between', alignItems: 'baseline', mt: 0.5 }}
+        >
+          <Typography variant="caption" color="text.secondary">
+            {reversedCommission > 0 ? 'El agente pierde de comisión' : 'El agente conserva su comisión'}
+          </Typography>
+          <Typography variant="caption" color="text.secondary" className="numeric">
+            {formatMoney(reversedCommission > 0 ? reversedCommission : keptCommission)}
+          </Typography>
+        </Stack>
+      )}
+
+      {!byCompany && quote.lines.length > 1 && (
+        <>
+          <Divider sx={{ my: 1.5 }} />
+          <Stack spacing={0.5}>
+            {quote.lines.map((l) => (
+              <Stack
+                key={l.line_id}
+                direction="row"
+                sx={{ justifyContent: 'space-between', alignItems: 'baseline', gap: 2 }}
+              >
+                <Typography variant="caption" color="text.secondary" sx={{ minWidth: 0 }} noWrap>
+                  {lineName(l.line_id)}
+                  {l.redeemed
+                    ? ' · ya utilizado'
+                    : l.hours_out !== null && l.hours_out >= 0
+                      ? ` · faltan ${l.hours_out} h`
+                      : ' · ya salió'}
+                </Typography>
+                <Typography variant="caption" color="text.secondary" className="numeric">
+                  {l.refund_pct}%
+                </Typography>
+              </Stack>
+            ))}
+          </Stack>
+        </>
+      )}
+    </Box>
   )
 }

@@ -23,7 +23,11 @@ import SavingsRounded from '@mui/icons-material/SavingsRounded'
 import StorefrontRounded from '@mui/icons-material/StorefrontRounded'
 import HotelRounded from '@mui/icons-material/HotelRounded'
 import WhatsAppIcon from '@mui/icons-material/WhatsApp'
-import { useMyOrganization, useUpdateOrganization } from '../features/organization'
+import {
+  CancellationPolicyCard,
+  useMyOrganization,
+  useUpdateOrganization,
+} from '../features/organization'
 import { InfoPopover } from '../components'
 import {
   DEFAULT_TICKET_TEMPLATE,
@@ -472,6 +476,16 @@ export default function SettingsPage() {
               </Stack>
             </CardContent>
           </Card>
+        )}
+
+        {/* US-A69/A70/A72 — the cancellation refund ladder. Sits after Hospedaje because it
+            SUPERSEDES the two lodging cancellation fields above once configured: with a policy, the
+            ladder prices stays too. Keyed on the stored policy so a save resets the draft cleanly. */}
+        {org && (
+          <CancellationPolicyCard
+            key={JSON.stringify(org.cancellation_policy)}
+            policy={org.cancellation_policy}
+          />
         )}
 
         {/* whatsapp-qr-delivery D10 — admin-edited message templates (read-only for sellers, who
