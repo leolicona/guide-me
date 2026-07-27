@@ -878,6 +878,7 @@ export const confirmSale = async (c: PosContext) => {
       bookingPreDepartureBufferHours: organizations.bookingPreDepartureBufferHours,
       lodgingWeekendDays: organizations.lodgingWeekendDays,
       timezone: organizations.timezone,
+      cancellationPolicy: organizations.cancellationPolicy,
     })
     .from(organizations)
     .where(eq(organizations.id, org))
@@ -1325,6 +1326,12 @@ export const confirmSale = async (c: PosContext) => {
     amountPaid,
     commissionAmount,
     bookingExpiresAt,
+    // Cancellation Policy Engine (D6) — freeze the refund ladder in force RIGHT NOW. The customer
+    // agreed to the terms they were shown, so a later edit to the org's policy must never re-price
+    // this sale. Copied verbatim (it was validated on the way into the column) and never rewritten
+    // — not on settle, not on edit. NULL when the org has no policy, which leaves this folio on the
+    // pre-feature cancellation path (D1).
+    cancellationPolicySnapshot: orgRow?.cancellationPolicy ?? null,
   })
 
   // 2. RESERVE INVENTORY — per line, conditionally & atomically, tracking successes so a later

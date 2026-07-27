@@ -7,7 +7,13 @@ export const cancelFolioSchema = z.object({
   reason: z.string().trim().min(1).nullable().optional(),
   // US-A26 — true → claw back the agent's commission (agent loses it); false (default) →
   // the company absorbs the loss and the agent keeps the commission earned on this folio.
+  // IGNORED once the org configures a cancellation policy: the ladder decides (D10). Kept so
+  // pre-policy orgs and older clients keep working exactly as they do today.
   clawback: z.boolean().optional().default(false),
+  // US-A71 — the cancellation was caused by the COMPANY (weather, a broken boat), not the customer.
+  // Skips the ladder: full refund, seller keeps their commission. Admin-only and typed, rather than
+  // a free-form amount field, so the ladder stays meaningful and the exception stays auditable.
+  cancelled_by_company: z.boolean().optional().default(false),
 })
 
 export type CancelFolioInput = z.infer<typeof cancelFolioSchema>
