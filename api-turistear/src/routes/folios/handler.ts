@@ -11,9 +11,11 @@ import {
   folioLines,
   folios,
   organizations,
+  slotZones,
   slots,
   users,
 } from '../../db/schema'
+import { reconcileSlotTotals } from '../services/zones.reconcile'
 import { nightsBetween } from '../../utils/lodging'
 import { ApiError } from '../../types/errors'
 import type { AppVariables } from '../../types/context'
@@ -368,18 +370,24 @@ export const markTicketsSentAdmin = async (c: FoliosContext) => {
 // race-safe order (BUG-013):
 //   1. Flip the FOLIO first with a guarded UPDATE (`status != 'cancelled'`); RETURNING
 //      tells us whether WE won. A concurrent cancellation loses here and releases nothing.
-//   2. Only the winner releases the seats, per line `slots.booked = MAX(0, booked −
-//      quantity)` (clamped so a manually edited slot can never go negative), in one batch.
+//   2. Only the winner releases the seats, per line `booked = MAX(0, booked − quantity)`
+//      (clamped so a manually edited counter can never go negative), in one batch.
 // The reversed order (seats in the same batch as the guarded flip) double-released seats
 // when two cancellations raced: a 0-row guarded UPDATE does not abort a D1 batch, so the
 // loser's seat decrements still applied. Residual: a crash between 1 and 2 leaves seats
 // booked on a cancelled folio — conservative (no oversell), same compensate-style
 // trade-off as POS confirm.
+//
+// BUG — a ZONED line (US-A64) releases its seats on `slot_zones`, then reconciles the slot
+// totals from the zone sums; decrementing `slots.booked` directly would be overwritten by the
+// next reconcile and leave the zone counter permanently inflated (its seats unsellable
+// forever). Every other release site already branched on `zone_id` (`cancelBooking`,
+// `rejectPayment`, `sweepExpiredBookings`); this one — the MANUAL cancellation path — did not.
 const applyCancellation = async (
   db: Db,
   org: string,
   folioId: string,
-  lines: Array<{ slotId: string | null; quantity: number }>,
+  lines: Array<{ slotId: string | null; quantity: number; zoneId: string | null }>,
   now: Date,
   folioUpdate: Partial<typeof folios.$inferInsert>,
 ): Promise<boolean> => {
@@ -403,17 +411,40 @@ const applyCancellation = async (
     .returning({ id: folios.id })
   if (won.length === 0) return false
 
-  const statements: BatchItem<'sqlite'>[] = lines
-    .filter((line) => line.slotId)
-    .map((line) =>
-      db
-        .update(slots)
-        .set({
-          booked: sql`MAX(0, ${slots.booked} - ${line.quantity})`,
-          updatedAt: now,
-        })
-        .where(and(eq(slots.id, line.slotId!), eq(slots.organizationId, org))),
-    )
+  const statements: BatchItem<'sqlite'>[] = []
+  for (const line of lines) {
+    if (!line.slotId) continue // a lodging stay line has no slot (released via reservations below)
+    if (line.zoneId) {
+      // Zoned: the zone counter is authoritative; `slots.booked` is re-derived from the zone
+      // sums by the reconcile, which must run in the SAME batch (US-A64, zones.reconcile).
+      statements.push(
+        db
+          .update(slotZones)
+          .set({
+            booked: sql`MAX(0, ${slotZones.booked} - ${line.quantity})`,
+            updatedAt: now,
+          })
+          .where(
+            and(
+              eq(slotZones.slotId, line.slotId),
+              eq(slotZones.zoneId, line.zoneId),
+              eq(slotZones.organizationId, org),
+            ),
+          ),
+        reconcileSlotTotals(db, line.slotId),
+      )
+    } else {
+      statements.push(
+        db
+          .update(slots)
+          .set({
+            booked: sql`MAX(0, ${slots.booked} - ${line.quantity})`,
+            updatedAt: now,
+          })
+          .where(and(eq(slots.id, line.slotId), eq(slots.organizationId, org))),
+      )
+    }
+  }
 
   // US-LG — reverse the collected money per method + (on clawback) the commission, dated at the
   // cancellation, so the folio drops out of the ledger buckets exactly as status-exclusion did.
@@ -515,6 +546,7 @@ export const cancelFolio = async (c: FoliosContext) => {
     .select({
       slotId: folioLines.slotId,
       quantity: folioLines.quantity,
+      zoneId: folioLines.zoneId,
       lineType: folioLines.lineType,
       lineTotal: folioLines.lineTotal,
       checkIn: folioLines.checkIn,
@@ -705,7 +737,11 @@ export const approveCancellationRequest = async (c: FoliosContext) => {
   }
 
   const lines = await db
-    .select({ slotId: folioLines.slotId, quantity: folioLines.quantity })
+    .select({
+      slotId: folioLines.slotId,
+      quantity: folioLines.quantity,
+      zoneId: folioLines.zoneId,
+    })
     .from(folioLines)
     .where(
       and(eq(folioLines.folioId, folio.id), eq(folioLines.organizationId, org)),

@@ -138,6 +138,9 @@ const clearFoliosDb = async () => {
   await env.DB.exec('DELETE FROM folio_access_tokens')
   await env.DB.exec('DELETE FROM folio_payments')
   await env.DB.exec('DELETE FROM folios')
+  // FK-safe: slot_zones and folio_lines both reference service_zones, which references services.
+  await env.DB.exec('DELETE FROM slot_zones')
+  await env.DB.exec('DELETE FROM service_zones')
   await env.DB.exec('DELETE FROM slots')
   await env.DB.exec('DELETE FROM schedules')
   await env.DB.exec('DELETE FROM service_extras')
@@ -510,5 +513,168 @@ describe('Total Folio Cancellation', () => {
     const row = await getFolioRow(folioA)
     expect(row?.organization_id).toBe(orgA.organizationId)
     expect(row?.cancelled_by).toBe(orgA.adminUserId)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// BUG — zoned seats were never released by the MANUAL cancellation path.
+//
+// For a zoned service (US-A64) `slot_zones.booked` is authoritative and `slots.booked` is
+// DERIVED from it by `reconcileSlotTotals`. `applyCancellation` decremented `slots.booked`
+// directly and never touched the zone row, so:
+//   - the zone counter stayed inflated → those seats were unsellable FOREVER, and
+//   - the slot total looked correct only until the next reconcile overwrote it from the
+//     (still inflated) zone sums.
+// Every other release site already branched on `zone_id` (cancelBooking, rejectPayment,
+// sweepExpiredBookings); this one did not.
+// ---------------------------------------------------------------------------
+describe('Zoned cancellation releases zone seats (regression)', () => {
+  const seedZonedService = async (organizationId: string): Promise<string> => {
+    const id = await seedService(organizationId)
+    await env.DB.prepare(`UPDATE services SET zones_enabled = 1 WHERE id = ?`).bind(id).run()
+    return id
+  }
+
+  const seedZone = async (organizationId: string, serviceId: string, name: string, capacity: number) => {
+    const id = crypto.randomUUID()
+    const t = Math.floor(Date.now() / 1000)
+    await env.DB.prepare(
+      `INSERT INTO service_zones (id, organization_id, service_id, name, capacity, sort_order, status, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, 0, 'active', ?, ?)`,
+    )
+      .bind(id, organizationId, serviceId, name, capacity, t, t)
+      .run()
+    return id
+  }
+
+  const seedSlotZone = async (
+    organizationId: string,
+    slotId: string,
+    zoneId: string,
+    capacity: number,
+    booked: number,
+  ) => {
+    const t = Math.floor(Date.now() / 1000)
+    await env.DB.prepare(
+      `INSERT INTO slot_zones (id, organization_id, slot_id, zone_id, capacity, booked, status, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?)`,
+    )
+      .bind(crypto.randomUUID(), organizationId, slotId, zoneId, capacity, booked, t, t)
+      .run()
+  }
+
+  const tagLineToZone = (folioId: string, zoneId: string) =>
+    env.DB.prepare(`UPDATE folio_lines SET zone_id = ?, zone_name = 'Zona' WHERE folio_id = ?`)
+      .bind(zoneId, folioId)
+      .run()
+
+  const getZoneBooked = async (slotId: string, zoneId: string) => {
+    const r = await env.DB.prepare(
+      `SELECT booked FROM slot_zones WHERE slot_id = ? AND zone_id = ?`,
+    )
+      .bind(slotId, zoneId)
+      .first<{ booked: number }>()
+    return r?.booked ?? null
+  }
+
+  it('releases the ZONE counter, not just the slot total', async () => {
+    const { organizationId, agentId } = await seedOrgWithStaff()
+    const serviceId = await seedZonedService(organizationId)
+    // Two zones, 20 + 30 seats. Three seats sold in "Bajo": slot totals derive to 50/3.
+    const slotId = await seedSlot(organizationId, serviceId, { booked: 3, capacity: 50 })
+    const bajo = await seedZone(organizationId, serviceId, 'Bajo', 20)
+    const alto = await seedZone(organizationId, serviceId, 'Alto', 30)
+    await seedSlotZone(organizationId, slotId, bajo, 20, 3)
+    await seedSlotZone(organizationId, slotId, alto, 30, 0)
+
+    const folioId = await seedFolio({ organizationId, agentId })
+    await seedFolioLine({ organizationId, folioId, serviceId, slotId, quantity: 3 })
+    await tagLineToZone(folioId, bajo)
+
+    const { status } = await cancelFolio(ADMIN_EMAIL, folioId)
+    expect(status).toBe(200)
+
+    // The zone the seats were sold from is released — this is what was broken.
+    expect(await getZoneBooked(slotId, bajo)).toBe(0)
+    // The untouched zone is left alone.
+    expect(await getZoneBooked(slotId, alto)).toBe(0)
+    // And the slot total is re-derived from the zone sums (not decremented independently).
+    expect(await getSlotBooked(slotId)).toBe(0)
+  })
+
+  it('the released zone seats survive a later reconcile (they are really re-sellable)', async () => {
+    const { organizationId, agentId } = await seedOrgWithStaff()
+    const serviceId = await seedZonedService(organizationId)
+    const slotId = await seedSlot(organizationId, serviceId, { booked: 5, capacity: 20 })
+    const bajo = await seedZone(organizationId, serviceId, 'Bajo', 20)
+    await seedSlotZone(organizationId, slotId, bajo, 20, 5)
+
+    const folioId = await seedFolio({ organizationId, agentId })
+    await seedFolioLine({ organizationId, folioId, serviceId, slotId, quantity: 5 })
+    await tagLineToZone(folioId, bajo)
+
+    await cancelFolio(ADMIN_EMAIL, folioId)
+
+    // Re-derive the slot from the zone sums, exactly as any later zone write would. Before the
+    // fix `slots.booked` snapped back to 5 here — the seats were lost for good.
+    await env.DB.prepare(
+      `UPDATE slots SET booked = (SELECT COALESCE(SUM(booked), 0) FROM slot_zones
+                                   WHERE slot_id = ? AND status = 'active')
+        WHERE id = ?`,
+    )
+      .bind(slotId, slotId)
+      .run()
+    expect(await getSlotBooked(slotId)).toBe(0)
+  })
+
+  it('an UNZONED line still releases the slot total (no regression)', async () => {
+    const { organizationId, agentId } = await seedOrgWithStaff()
+    const serviceId = await seedService(organizationId)
+    const slotId = await seedSlot(organizationId, serviceId, { booked: 4 })
+    const folioId = await seedFolio({ organizationId, agentId })
+    await seedFolioLine({ organizationId, folioId, serviceId, slotId, quantity: 4 })
+
+    expect((await cancelFolio(ADMIN_EMAIL, folioId)).status).toBe(200)
+    expect(await getSlotBooked(slotId)).toBe(0)
+  })
+
+  it('a MIXED folio releases the zoned line and the unzoned line correctly', async () => {
+    const { organizationId, agentId } = await seedOrgWithStaff()
+    const zonedService = await seedZonedService(organizationId)
+    const plainService = await seedService(organizationId)
+    const zonedSlot = await seedSlot(organizationId, zonedService, { booked: 2, capacity: 10, date: '2026-06-15' })
+    const plainSlot = await seedSlot(organizationId, plainService, { booked: 6, date: '2026-06-16' })
+    const bajo = await seedZone(organizationId, zonedService, 'Bajo', 10)
+    await seedSlotZone(organizationId, zonedSlot, bajo, 10, 2)
+
+    const folioId = await seedFolio({ organizationId, agentId })
+    await seedFolioLine({ organizationId, folioId, serviceId: zonedService, slotId: zonedSlot, quantity: 2 })
+    await env.DB.prepare(
+      `UPDATE folio_lines SET zone_id = ?, zone_name = 'Bajo' WHERE folio_id = ? AND slot_id = ?`,
+    )
+      .bind(bajo, folioId, zonedSlot)
+      .run()
+    await seedFolioLine({ organizationId, folioId, serviceId: plainService, slotId: plainSlot, quantity: 6 })
+
+    expect((await cancelFolio(ADMIN_EMAIL, folioId)).status).toBe(200)
+    expect(await getZoneBooked(zonedSlot, bajo)).toBe(0)
+    expect(await getSlotBooked(zonedSlot)).toBe(0)
+    expect(await getSlotBooked(plainSlot)).toBe(0)
+  })
+
+  it('the zone counter is clamped at zero, never negative', async () => {
+    const { organizationId, agentId } = await seedOrgWithStaff()
+    const serviceId = await seedZonedService(organizationId)
+    // A hand-edited zone holding FEWER seats than the folio claims.
+    const slotId = await seedSlot(organizationId, serviceId, { booked: 1, capacity: 10 })
+    const bajo = await seedZone(organizationId, serviceId, 'Bajo', 10)
+    await seedSlotZone(organizationId, slotId, bajo, 10, 1)
+
+    const folioId = await seedFolio({ organizationId, agentId })
+    await seedFolioLine({ organizationId, folioId, serviceId, slotId, quantity: 3 })
+    await tagLineToZone(folioId, bajo)
+
+    expect((await cancelFolio(ADMIN_EMAIL, folioId)).status).toBe(200)
+    expect(await getZoneBooked(slotId, bajo)).toBe(0)
   })
 })
