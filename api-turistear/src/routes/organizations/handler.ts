@@ -5,6 +5,7 @@ import { organizations } from '../../db/schema'
 import { ApiError } from '../../types/errors'
 import type { AppVariables } from '../../types/context'
 import type { UpdateOrganizationInput } from './schema'
+import { parseCancellationPolicy } from '../../utils/cancellationPolicy'
 
 type OrganizationsContext = Context<{
   Bindings: CloudflareBindings
@@ -27,6 +28,8 @@ const orgColumns = {
   waTicketTemplate: organizations.waTicketTemplate,
   waReminderTemplate: organizations.waReminderTemplate,
   timezone: organizations.timezone,
+  cancellationPolicy: organizations.cancellationPolicy,
+  agentCancellationEnabled: organizations.agentCancellationEnabled,
 } as const
 
 const serializeOrg = (o: {
@@ -43,6 +46,8 @@ const serializeOrg = (o: {
   waTicketTemplate: string | null
   waReminderTemplate: string | null
   timezone: string
+  cancellationPolicy: string | null
+  agentCancellationEnabled: boolean
 }) => ({
   id: o.id,
   name: o.name,
@@ -61,6 +66,12 @@ const serializeOrg = (o: {
   wa_reminder_template: o.waReminderTemplate,
   // US-A66 — the org's IANA time zone (the client anchors "today" + audit-time display to it).
   timezone: o.timezone,
+  // The cancellation ladder as an OBJECT (it is stored as a JSON string). `null` means no policy
+  // is configured, which is what puts every cancellation path on its pre-feature behaviour (D1) —
+  // the settings screen reads this to decide between "configure a policy" and "edit the ladder".
+  // Parsed rather than passed through raw so a corrupted row can never reach the client as junk.
+  cancellation_policy: parseCancellationPolicy(o.cancellationPolicy),
+  agent_cancellation_enabled: o.agentCancellationEnabled,
 })
 
 export const getMyOrganization = async (c: OrganizationsContext) => {
@@ -115,6 +126,15 @@ export const updateMyOrganization = async (c: OrganizationsContext) => {
     updates.waReminderTemplate = input.wa_reminder_template
   // US-A66 — the org's IANA time zone (Zod-validated against the curated allow-list).
   if (input.timezone !== undefined) updates.timezone = input.timezone
+  // US-A69/A70/A72 — the cancellation ladder, stored as JSON. Zod has already validated the whole
+  // document, so what lands in the column is always evaluable. `null` clears it and returns every
+  // cancellation path to its pre-feature behaviour (D1).
+  if (input.cancellation_policy !== undefined)
+    updates.cancellationPolicy = input.cancellation_policy
+      ? JSON.stringify(input.cancellation_policy)
+      : null
+  if (input.agent_cancellation_enabled !== undefined)
+    updates.agentCancellationEnabled = input.agent_cancellation_enabled
 
   await db
     .update(organizations)

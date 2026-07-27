@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { cancellationPolicySchema } from '../../utils/cancellationPolicy'
 
 // US-A66 (docs/timezone/spec.md — D3/D5) — the curated set of IANA zones an admin may pick, one
 // human label per mainland-Mexico offset. IANA (not a raw offset) so DST + multi-zone resolve
@@ -47,6 +48,14 @@ export const updateOrganizationSchema = z.object({
   wa_reminder_template: z.string().trim().max(2000).nullable().optional(),
   // US-A66 — the org's IANA time zone; must be one of the curated allow-list.
   timezone: z.enum(ORG_TIMEZONES).optional(),
+  // US-A69/A70/A72 — the cancellation refund ladder
+  // (docs/cancellation/cancellation-policy-engine.spec.md). Validated as a whole document, so a
+  // stored policy is always evaluable. `null` CLEARS it, which returns the org to the pre-feature
+  // cancellation behaviour (D1) — that is the rollback, and the only way back.
+  cancellation_policy: cancellationPolicySchema.nullable().optional(),
+  // US-A73 (D14) — may an agent cancel their own current-shift sale? A single org-level switch;
+  // per-agent grants are a permissions system, not this.
+  agent_cancellation_enabled: z.boolean().optional(),
 })
 
 export type UpdateOrganizationInput = z.infer<typeof updateOrganizationSchema>
