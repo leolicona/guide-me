@@ -105,6 +105,7 @@ property worth keeping intact rather than punching a hole through.
 | **D12** | **A tier carries two commission percentages: `agent_commission_pct` and `affiliate_commission_pct`.** Which one applies is decided by the seller's role, not by the folio. | An affiliate is a reseller, not staff — a company may well forgive its own agent a same-day cancellation while clawing back the reseller's cut. Both default to the same value in the settings UI, so a company that doesn't care never sees the distinction. Cheap now; expensive after policies exist in production with a one-percentage shape. |
 | **D13** | **The agent's cancellation window is their current shift — everything up to their next confirmed cash drop.** Not a configurable number of hours. | The money is the boundary. While the cash is still in the agent's pocket, they can hand it back and their own balance absorbs it. Once the drop is confirmed the money is the company's and the balance is frozen (`balance_after` must never be rewritten — TECH_DEBT §12a). It needs no parameter, it can't be misconfigured, and it is *already* the line the cash engine draws. |
 | **D14** | **The agent permission is a single org-level on/off switch, default OFF.** | US-A73 asks whether agents *may*, not which ones. Per-agent grants are a permissions system, and this feature is not that. Default OFF preserves today's admin-only behaviour under D1's guarantee. |
+| **D16** | **The admin enters HOURS. There is no days field, and no days↔hours conversion in the UI.** A tier boundary is exactly `min_hours` before the departure instant. | "5 días" and "120 horas" are not the same promise, and the gap is where disputes live: a Friday 08:00 departure cancelled Sunday 18:00 IS five calendar days ahead but only 110 hours, so a days-labelled field would promise a full refund the engine would not give. One unit, entered and stored identically, means the number the admin typed is the number that decides — nothing is converted, so nothing can drift. It also makes near-departure tiers expressible at all ("6 horas antes"), which days cannot say. The cost is arithmetic at configuration time: a full-refund window of five days is entered as `120`. |
 | **D15** | **The auto-expiry sweep calls the same engine.** | Today `sweepExpiredBookings` hardcodes "retain the deposit, write nothing to the ledger" — so an agent silently keeps full commission on a booking that never happened. Nobody decided that; it is what fell out. Routing the sweep through the engine makes it a stated policy. With no policy configured the outcome is byte-identical (deposit floor 100% → refund 0 → no rows). |
 
 ---
@@ -751,6 +752,8 @@ strips the unknown keys before the handler sees them.
       care never sees it, and the **agent cancellation** switch); the computed refund shown in the
       cancel `ConfirmSheet` with its per-line breakdown and the `cancelled_by_company` toggle;
       a **Cancelar venta** action in the POS receipt, rendered only when `can_cancel`
+- [ ] **The editor takes HOURS, and only hours (D16).** No days field, and no days→hours
+      conversion anywhere in the UI. The field is the stored value.
 - [ ] `pnpm --filter api-turistear test` green; `pnpm build:app` clean
 - [ ] `docs/SPEC.md` updated with US-A69–A74 and US-AG44
 
