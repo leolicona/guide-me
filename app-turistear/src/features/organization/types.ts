@@ -53,7 +53,20 @@ export interface CancellationQuote {
 // A sensible starting ladder for an org configuring one for the first time: full refund with five
 // days' notice, half inside that, nothing after departure. Commission mirrors it — nothing earned
 // on an early cancellation, kept once the company retained something.
+//
+// This MUST mirror `DEFAULT_CANCELLATION_POLICY` in the API (`utils/cancellationPolicy.ts`): it is
+// what migration 0054 wrote into every organization and what a new one is created with. The client
+// copy exists so "restablecer" can write the same document the server would, rather than clearing
+// the field and hoping the fallback matches.
 export const DEFAULT_CANCELLATION_POLICY: CancellationPolicy = {
+  version: 1,
+  tiers: [{ min_hours: null, refund_pct: 100, agent_commission_pct: 0 }],
+  booking_deposit_retained_pct: 100,
+}
+
+// A worked example an admin can start from — the spec's ladder. Offered as a suggestion, never
+// applied silently: an inherited policy is the flat 100% above, not this.
+export const EXAMPLE_CANCELLATION_LADDER: CancellationPolicy = {
   version: 1,
   tiers: [
     { min_hours: 120, refund_pct: 100, agent_commission_pct: 0 },
