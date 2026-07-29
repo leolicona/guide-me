@@ -83,14 +83,35 @@ export const parseCancellationPolicy = (raw: string | null | undefined): Cancell
   }
 }
 
-// D6 — a folio is priced by the ladder that was in force when it was SOLD. The org's live policy is
-// only a fallback for folios that carry no snapshot (sold before the feature, or while the org had
-// no policy). This is the ONLY place resolution happens; a per-service override (deferred) would
-// slot in here and nowhere else.
+// D18 — the ladder every organization inherits unless it configures its own: refund everything,
+// always. It is the reading a customer would assume of unstated terms, and it never refunds less
+// than the most generous path that existed before the engine.
+//
+// This is written into every org by migration 0054 and at organization creation, so it is normally
+// read from the database like any other policy. The constant exists so the two writers agree on one
+// definition — and as the last line of `resolvePolicy` below.
+export const DEFAULT_CANCELLATION_POLICY: CancellationPolicy = Object.freeze({
+  version: 1 as const,
+  tiers: [{ min_hours: null, refund_pct: 100, agent_commission_pct: 0 }],
+  booking_deposit_retained_pct: 100,
+})
+
+// D6 — a folio is priced by the ladder that was in force when it was SOLD; the org's live policy is
+// the fallback for folios sold before the feature. This is the ONLY place resolution happens; a
+// per-service override (deferred) would slot in here and nowhere else.
+//
+// D17 — it NEVER returns null. Phase 1 had a null branch that put the caller on a second, legacy
+// pricing path; that path is gone, so there is nothing to fall back TO. Reaching the constant means
+// a row escaped migration 0054 and organization creation both, which should be impossible — the
+// point is that even then a folio stays priceable, with a defined, generous outcome, instead of
+// failing to cancel.
 export const resolvePolicy = (
   snapshot: string | null | undefined,
   orgPolicy: string | null | undefined,
-): CancellationPolicy | null => parseCancellationPolicy(snapshot) ?? parseCancellationPolicy(orgPolicy)
+): CancellationPolicy =>
+  parseCancellationPolicy(snapshot) ??
+  parseCancellationPolicy(orgPolicy) ??
+  DEFAULT_CANCELLATION_POLICY
 
 // --- Inputs ----------------------------------------------------------------
 
@@ -118,6 +139,16 @@ export interface ComputeRefundInput {
   timezone: string
   /** D12 — decides which of the tier's two commission percentages applies. */
   sellerKind: 'agent' | 'affiliate'
+  /**
+   * `folios.commission_amount` — the commission actually booked on the sale, which is what the cash
+   * engine and the commission report read. Normally it equals the sum re-derived from the lines.
+   *
+   * It does NOT for folios sold before migration `0028` added `folio_lines.commission_type/value`:
+   * those lines default to `0` while the folio still carries its real commission. Without this,
+   * cancelling such a folio would silently reverse nothing and the seller would keep commission on
+   * a sale that was undone. See `lineCommissions` below for how the shortfall is distributed.
+   */
+  bookedCommission?: number
 }
 
 export interface LineOutcome {
@@ -177,6 +208,39 @@ const lineCommission = (line: PolicyLine): number =>
     ? Math.round((line.lineTotal * line.commissionValue) / 10000)
     : line.commissionValue * line.quantity
 
+// Each line's commission, reconciled against what the folio actually booked.
+//
+// Normally the per-line values sum to `bookedCommission` and this returns them untouched. When the
+// lines carry NOTHING but the folio booked something — a folio sold before `0028` snapshotted
+// commission onto lines — the booked amount is distributed across lines in proportion to
+// `line_total`, which is exactly what a percent commission would have produced. Each line then
+// matches its own tier as usual, so a pre-`0028` folio is priced by the same rules as any other
+// instead of quietly forfeiting nothing.
+//
+// The lines are NOT trusted over the folio the other way round: if they sum to more than the folio
+// booked, they win, because a per-line total that exceeds the snapshot means the snapshot is the
+// stale one. The reversal is clamped against the ledger's real commission rows regardless
+// (`prorateAcrossBuckets`), so neither direction can reverse money that was never accrued.
+const lineCommissions = (lines: PolicyLine[], bookedCommission?: number): number[] => {
+  const perLine = lines.map(lineCommission)
+  const summed = perLine.reduce((a, b) => a + b, 0)
+  if (summed > 0 || !bookedCommission || bookedCommission <= 0) return perLine
+
+  const totalValue = lines.reduce((sum, l) => sum + l.lineTotal, 0)
+  if (totalValue <= 0) return perLine
+  const shares = lines.map((l) => Math.floor((bookedCommission * l.lineTotal) / totalValue))
+  // Give the flooring remainder to the largest line, so the shares sum to the booked amount exactly.
+  const remainder = bookedCommission - shares.reduce((a, b) => a + b, 0)
+  if (remainder > 0) {
+    let biggest = 0
+    lines.forEach((l, i) => {
+      if (l.lineTotal > lines[biggest]!.lineTotal) biggest = i
+    })
+    shares[biggest] = shares[biggest]! + remainder
+  }
+  return shares
+}
+
 const commissionPctOf = (tier: CancellationTier, sellerKind: 'agent' | 'affiliate'): number =>
   sellerKind === 'affiliate'
     ? (tier.affiliate_commission_pct ?? tier.agent_commission_pct)
@@ -190,13 +254,15 @@ export const computeCancellationRefund = ({
   nowEpoch,
   timezone,
   sellerKind,
+  bookedCommission,
 }: ComputeRefundInput): CancellationOutcome => {
+  const commissions = lineCommissions(lines, bookedCommission)
   const lineOutcomes: LineOutcome[] = []
   let grossRetention = 0
   let totalCommission = 0
   let keptCommission = 0
 
-  for (const line of lines) {
+  for (const [index, line] of lines.entries()) {
     const departure = departureEpoch(line, timezone)
     // A line with no departure we can read is treated as already departed — the terminal tier. That
     // is the conservative direction: it retains the most, and it cannot silently hand back money on
@@ -210,7 +276,7 @@ export const computeCancellationRefund = ({
       ? line.lineTotal
       : Math.floor((line.lineTotal * (100 - tier.refund_pct)) / 100)
 
-    const commission = lineCommission(line)
+    const commission = commissions[index]!
     // D8 — never let the seller keep more than the company retained on that line, or a full-refund
     // tier that also pays commission would end the cancellation with the company out of pocket.
     const kept = Math.min(

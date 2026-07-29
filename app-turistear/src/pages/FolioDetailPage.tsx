@@ -54,16 +54,13 @@ export default function FolioDetailPage() {
   const { id } = useParams<{ id: string }>()
   const { data, isLoading, isError } = useFolio(id)
   const folio = data?.folio
-  // US-A69 — what cancelling right now would cost, priced by the org's ladder. Null when the org
-  // has no policy (cancellations then behave as they always did) or the folio is already cancelled.
+  // US-A69 — what cancelling right now would cost, priced by the org's ladder. Every org has one
+  // (D17), so this is null only for a folio that is already cancelled: nothing left to quote.
   const quote = data?.quote ?? null
   const cancel = useCancelFolio()
   const refund = useConfirmRefund()
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [reason, setReason] = useState('')
-  const [clawback, setClawback] = useState(false)
-  // US-A71 — the company caused it (weather, a broken boat): full refund, commission untouched.
-  const [byCompany, setByCompany] = useState(false)
   // US-A23 / US-T05 — refund confirmation dialog: PIN (primary) or no-PIN override + note.
   const [refundOpen, setRefundOpen] = useState(false)
   const [pin, setPin] = useState('')
@@ -77,23 +74,13 @@ export default function FolioDetailPage() {
   const closeDialog = () => {
     setConfirmOpen(false)
     setReason('')
-    setClawback(false)
-    setByCompany(false)
   }
 
   const handleCancel = () => {
     if (!id) return
-    cancel.mutate(
-      {
-        id,
-        reason: reason.trim() || undefined,
-        // Only one of these is meaningful at a time: with a policy the ladder decides the
-        // commission and the server ignores `clawback`, so we do not send a value that will be
-        // discarded. Without a policy there is no company-cancellation concept to send.
-        ...(quote ? { cancelledByCompany: byCompany } : { clawback }),
-      },
-      { onSuccess: closeDialog },
-    )
+    // D10 — nothing else to send. The refund and the commission outcome are the ladder's, so the
+    // dialog collects a note and confirms a number it did not compute.
+    cancel.mutate({ id, reason: reason.trim() || undefined }, { onSuccess: closeDialog })
   }
 
   const openRefundDialog = () => {
@@ -347,8 +334,14 @@ export default function FolioDetailPage() {
             </DialogContentText>
 
             {/* US-A69 — the money, before committing. Computed server-side by the same function
-                the cancel endpoint uses, so what is shown here is what gets written. */}
-            {quote && <RefundQuote quote={quote} byCompany={byCompany} folio={folio} />}
+                the cancel endpoint uses, so what is shown here is what gets written.
+
+                D10 — there are no switches in this dialog any more. The clawback choice (US-A26)
+                and the company-cancellation override (US-A71) are both withdrawn: a cancellation
+                is priced by the company's ladder and by nothing the person cancelling decides. An
+                admin who wants a different outcome changes the policy, where the terms are visible
+                and apply to everyone — not this one folio, silently. */}
+            {quote && <RefundQuote quote={quote} folio={folio} />}
 
             <TextField
               label="Motivo (opcional)"
@@ -360,53 +353,6 @@ export default function FolioDetailPage() {
               onChange={(e) => setReason(e.target.value)}
               sx={{ mt: quote ? 2 : 0 }}
             />
-
-            {quote ? (
-              // US-A71 — the only way to depart from the ladder. The clawback switch is NOT shown
-              // here: with a policy configured the server ignores it, so offering it would let an
-              // admin believe they made a decision that never took effect.
-              <FormControlLabel
-                sx={{ mt: 1, alignItems: 'flex-start' }}
-                control={
-                  <Switch
-                    checked={byCompany}
-                    onChange={(e) => setByCompany(e.target.checked)}
-                    color="warning"
-                  />
-                }
-                label={
-                  <Box sx={{ pt: 0.75 }}>
-                    <Typography variant="body2">Cancelado por la empresa</Typography>
-                    <Typography variant="caption" color="text.secondary">
-                      {byCompany
-                        ? 'Mal clima, falla del operador: se devuelve todo y el agente conserva su comisión.'
-                        : 'Desactivado: aplica la política de cancelación de la empresa.'}
-                    </Typography>
-                  </Box>
-                }
-              />
-            ) : (
-              <FormControlLabel
-                sx={{ mt: 1, alignItems: 'flex-start' }}
-                control={
-                  <Switch
-                    checked={clawback}
-                    onChange={(e) => setClawback(e.target.checked)}
-                    color="error"
-                  />
-                }
-                label={
-                  <Box sx={{ pt: 0.75 }}>
-                    <Typography variant="body2">Recuperar comisión del agente</Typography>
-                    <Typography variant="caption" color="text.secondary">
-                      {clawback
-                        ? 'El agente pierde la comisión generada en esta venta.'
-                        : 'Desactivado: la empresa absorbe la pérdida y el agente conserva la comisión.'}
-                    </Typography>
-                  </Box>
-                }
-              />
-            )}
           </DialogContent>
           <DialogActions>
             <Button onClick={closeDialog}>Conservar folio</Button>
@@ -492,23 +438,11 @@ export default function FolioDetailPage() {
 //
 // The per-line breakdown only appears when it explains something: on a single-line folio the
 // headline number already says everything, and repeating it adds noise to a confirmation dialog.
-function RefundQuote({
-  quote,
-  byCompany,
-  folio,
-}: {
-  quote: CancellationQuote
-  byCompany: boolean
-  folio?: FolioDetail
-}) {
-  // The company-cancellation override skips the ladder entirely (US-A71), so the preview has to
-  // follow the switch — otherwise the admin reads a number that will not be written.
-  const refund = byCompany ? quote.refund + quote.retention : quote.refund
-  const retention = byCompany ? 0 : quote.retention
-  const keptCommission = byCompany
-    ? quote.kept_commission + quote.reversed_commission
-    : quote.kept_commission
-  const reversedCommission = byCompany ? 0 : quote.reversed_commission
+function RefundQuote({ quote, folio }: { quote: CancellationQuote; folio?: FolioDetail }) {
+  // Straight from the server — nothing in this dialog can change it any more (D10), so there is no
+  // client-side re-derivation that could drift from what gets written.
+  const { refund, retention, kept_commission: keptCommission } = quote
+  const reversedCommission = quote.reversed_commission
 
   const lineName = (lineId: string) =>
     folio?.lines.find((l) => l.id === lineId)?.service_name ?? 'Servicio'
@@ -550,7 +484,7 @@ function RefundQuote({
         </Stack>
       )}
 
-      {!byCompany && quote.lines.length > 1 && (
+      {quote.lines.length > 1 && (
         <>
           <Divider sx={{ my: 1.5 }} />
           <Stack spacing={0.5}>

@@ -208,9 +208,17 @@ Drizzle schema (`src/db/schema.ts`) must add the two tables + six columns and ex
 5. **Admin approves (US-T04 → US-A21).** `POST /api/folios/cancellation-requests/:requestId/approve`
    (admin): re-checks the request is `pending`, calls the **existing `cancelFolio`** path
    (atomic inventory release + status flip + cancellation email — unchanged), marks the request
-   `approved` (`resolved_by`/`resolved_at`), and **if `amount_paid > 0`** sets
-   `refund_status='pending'`, `refund_amount = amount_paid`, and generates `refund_pin`. **404**
+   `approved` (`resolved_by`/`resolved_at`), and opens the refund obligation. **404**
    unknown/cross-org; **409** if not `pending` or the folio is already cancelled.
+
+   > **Superseded (Cancellation Policy Engine).** This used to refund `amount_paid` **in full,
+   > always** — while an admin cancelling the identical folio from the admin screen recorded no
+   > refund at all. That divergence was the defect the policy engine was built to remove.
+   > The refund is now computed from the org's **cancellation ladder**, the same computation the
+   > admin path uses, and the approve endpoint takes **no body fields** — approving is an
+   > authorisation, not a pricing decision. `refund_status`/`refund_pin` still follow the money:
+   > a refund of 0 opens no obligation and mints no PIN. Under the default ladder every org
+   > inherits (refund 100%), the outcome is identical to the old behaviour.
 6. **Admin rejects (US-T04).** `POST /api/folios/cancellation-requests/:requestId/reject`
    `{ note }` (note **required**) flips `pending → rejected`, stores `resolution_note`, sets
    `resolved_by`/`resolved_at`. Folio **unchanged**. **400** empty note; **404**

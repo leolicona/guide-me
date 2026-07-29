@@ -99,9 +99,12 @@ describe('US-LG04 — the cash engine buckets by the ledger', () => {
     await post(AGENT, `/folios/${folioId}/settle`, { method: 'transfer', payment_reference: 'BAL-9' })
     await post(ADMIN, `/folios/${folioId}/verify`)
 
-    // Admin cancels the whole folio WITH clawback → reversal rows net every bucket + the commission.
+    // Admin cancels the whole folio → reversal rows net every bucket + the commission.
+    // (The `clawback: true` this used to send is withdrawn — Cancellation Policy Engine D10. Under
+    // the inherited default the folio refunds in full, so the reversal is still total and this
+    // scenario's premise is unchanged: what the ledger writes here did not move.)
     expect((await SELF.fetch(`http://api.local/api/folios/${folioId}/cancel`, {
-      method: 'POST', headers: jsonAuth(ADMIN), body: JSON.stringify({ clawback: true }),
+      method: 'POST', headers: jsonAuth(ADMIN), body: JSON.stringify({}),
     })).status).toBe(200)
 
     const b = (await myBalance(AGENT)).balance

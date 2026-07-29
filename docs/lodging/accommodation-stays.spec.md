@@ -58,7 +58,7 @@ service still never uses slots/schedules.
 | D6 | **Admin scope** | Block-out calendar (now quantity-based, D11), minimum stay, check-in/out times, and amenity tags all ship (plus inventory count + nightly rates + extra-person). |
 | D7 | **Sale path** | Reuse the existing **cart → folio** flow; a stay is one folio line spanning the range (`quantity` = rooms). **Deposit/apartado supported** (`docs/bookings/bookings-down-payments.spec.md`). |
 | D8 | **Agent entry points** | **Both** range-first (pick dates → see available types) **and** type-first (tap a type card → pick the range on its remaining-count calendar). |
-| D9 | **Cancellation** | **Split by folio status.** A `booking`-status stay cancelled keeps the **non-refundable-deposit** rule (US-AG07.4). A fully-`paid` stay cancelled uses the **structured free-window + penalty %** refund. |
+| D9 | **Cancellation** | ~~Split by folio status: free-window + penalty % for a paid stay.~~ **SUPERSEDED** by the *Cancellation Policy Engine* (`docs/cancellation/cancellation-policy-engine.spec.md`). A stay is now priced by the org's **refund ladder**, exactly like a tour: its check-in (00:00 org-local) is its departure. The non-refundable-deposit rule for a `booking`-status stay survives as the ladder's `booking_deposit_retained_pct` (default `100`, US-AG07.4 preserved). |
 | D10 | **Availability guard** | **Per-night atomic count guard** (RFC §3.2). ∀ night of the stay: `reserved(night) + blocked(night) + requested ≤ inventory_count`, enforced as one conditional `INSERT` (D1 has no interactive transactions). Insufficient → `409 INSUFFICIENT_INVENTORY`. *(A naive SUM over overlapping reservations over-counts and produces false 409s — forbidden.)* |
 | D11 | **Block-outs** | **Type-level quantity block-outs** (RFC §3.3): a block-out removes `quantity` rooms of the type from the pool for `[start, end)`. Overlapping block-outs sum. `quantity = inventory_count` closes the type; for a count-1 boutique it equals the v1 behavior. |
 | D12 | **Multi-room pricing** | **Total-guests fast path** (RFC §3.4): the agent enters total `guests` + `quantity`; capacity check `1 ≤ guests ≤ max_capacity × quantity`; guests split across rooms as evenly as possible and each room is quoted by the D3 engine; line total = sum. *(Per-room guest entry rejected — too many taps for a POS.)* |
@@ -253,12 +253,20 @@ releases — the lodging equivalent of `slots.booked`.
 | Column | Type | Notes |
 |---|---|---|
 | `lodging_weekend_days` | `text NOT NULL DEFAULT '5,6'` | CSV of ISO weekday ints (`0`=Sun … `6`=Sat); default Fri+Sat. Defines which nights use `weekend_rate`. |
-| `lodging_free_cancel_days` | `integer NOT NULL DEFAULT 0` | A **paid** stay may be cancelled free until this many days before `check_in`; `0` = no free window. |
-| `lodging_cancel_penalty_pct` | `integer NOT NULL DEFAULT 0` | Penalty (% of stay total) retained when a paid stay is cancelled **inside** the free window cut-off. `0–100`. |
+| ~~`lodging_free_cancel_days`~~ | `integer NOT NULL DEFAULT 0` | **RETIRED.** Was: a paid stay cancels free until this many days before `check_in`. |
+| ~~`lodging_cancel_penalty_pct`~~ | `integer NOT NULL DEFAULT 0` | **RETIRED.** Was: penalty (% of stay total) retained inside that window. |
 
-> Org-scoped, mirroring `ack_window_hours` / booking policy. Per-service overrides are a later
-> cascade. The structured policy governs **paid** stays only; `booking`-status deposits stay
-> non-refundable (D9, US-AG07.4).
+> **The two cancel columns are retired** by the *Cancellation Policy Engine*. Nothing reads them,
+> and their inputs are gone from Settings — a control that changes no behaviour is worse than a
+> missing one. The columns remain in the table for now; dropping them is a separate migration
+> (the `0051` lesson: CI migrates before it deploys, so a drop briefly outruns the old worker).
+>
+> They were **not** auto-translated into a ladder. A stay policy expressed as an org-wide ladder
+> would also govern that org's **tours**, which those fields were never written for — so lodging
+> orgs inherit the standard default and are shown a banner asking them to configure a ladder.
+> Measuring in **hours from check-in** rather than calendar days is deliberate (engine D5/D16).
+>
+> `lodging_weekend_days` is untouched — it is a pricing input, not a cancellation one.
 
 ### 2.6 Amenity tags — closed enum (frontend label map, unchanged)
 
@@ -357,8 +365,8 @@ unknown ids → `404 NOT_FOUND`. Amenities validated against the §2.6 enum and 
 Lowering `inventory_count` below currently-reserved levels is allowed (it affects **future**
 availability only; existing reservations stand) — the admin sees a warning client-side.
 
-**Org settings** (unchanged): `GET`/`PUT /api/organizations/...` include `lodging_weekend_days`,
-`lodging_free_cancel_days`, `lodging_cancel_penalty_pct`.
+**Org settings**: `GET`/`PUT /api/organizations/...` include `lodging_weekend_days`. The two
+cancel fields are **retired** (see §2.5) — cancellation is priced by the org's refund ladder.
 
 > The **Service Creation Wizard** lodging branch (Step-1 *Category* = `Hospedaje`) captures unit
 > **types** — name, inventory count, rates, occupancy, amenities, commission override — instead of

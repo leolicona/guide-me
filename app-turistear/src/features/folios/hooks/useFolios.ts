@@ -47,23 +47,12 @@ export const useFolio = (id: string | undefined) =>
     enabled: !!id,
   })
 
-// US-A21 / US-A26 / US-A71 — cancel the whole folio; refresh both the list and the open detail.
-// `clawback` is only honoured when the org has NO cancellation policy — with one, the ladder
-// decides and the server ignores it (which is why the UI hides that control).
+// US-A21 — cancel the whole folio; refresh both the list and the open detail. The refund is priced
+// by the org's ladder (D10): there is nothing for the caller to decide beyond an optional note.
 export const useCancelFolio = () => {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: ({
-      id,
-      reason,
-      clawback,
-      cancelledByCompany,
-    }: {
-      id: string
-      reason?: string
-      clawback?: boolean
-      cancelledByCompany?: boolean
-    }) => cancelFolio(id, { reason, clawback, cancelledByCompany }),
+    mutationFn: ({ id, reason }: { id: string; reason?: string }) => cancelFolio(id, { reason }),
     onSuccess: () => qc.invalidateQueries({ queryKey: FOLIOS_KEY }),
   })
 }
