@@ -393,29 +393,50 @@ describe('Scenario 7 — commission follows the tier (US-A70)', () => {
   })
 })
 
-describe('Scenario 9 — cancelled by the company (US-A71)', () => {
-  it('overrides the ladder: full refund, commission intact, marked in the reason', async () => {
+// D10 — replaces the Phase-1 "Scenario 9: cancelled by the company (US-A71)". That override is
+// WITHDRAWN: the system no longer asks who caused a cancellation, because it cannot verify the
+// answer and every such flag quietly re-creates the ad-hoc pricing the engine replaced. A company
+// that wants generous terms for its own failures writes them into its ladder, where they are
+// visible and apply to everyone equally.
+describe('Scenario 9 — nothing a caller sends can move money (D10)', () => {
+  it('rejects the withdrawn override flags instead of ignoring them', async () => {
     const { folioId } = await scenario({ hours: 3 }) // a 50% tier
-    const { json } = await cancel(ADMIN, folioId, {
-      cancelled_by_company: true,
-      reason: 'Mal clima',
-    })
-    expect(json.cancellation).toMatchObject({ refund: 100_000, retention: 0, reversed_commission: 0 })
-    const row = await folioRow(folioId)
-    expect(row?.cancellation_source).toBe('company')
-    expect(row?.cancellation_reason).toMatch(/^\[EMPRESA\]/)
-    expect(row?.cancellation_clawback).toBe(0)
-    expect(await netCommission(folioId)).toBe(10_000)
-    expect(await netMoney(folioId)).toBe(0)
+    for (const body of [
+      { cancelled_by_company: true, reason: 'Mal clima' },
+      { clawback: false },
+      { clawback: true },
+    ]) {
+      expect((await cancel(ADMIN, folioId, body)).status).toBe(400)
+    }
+    // Rejected, not "accepted with the flag dropped" — the folio is untouched.
+    expect((await folioRow(folioId))?.status).toBe('paid')
+  })
+
+  it('a plain cancellation with only a reason is priced by the ladder', async () => {
+    const { folioId } = await scenario({ hours: 3 })
+    const { status, json } = await cancel(ADMIN, folioId, { reason: 'Mal clima' })
+    expect(status).toBe(200)
+    // The 50% tier applies even though the company caused it — there is no longer a way to say so.
+    expect(json.cancellation).toMatchObject({ refund: 50_000, retention: 50_000 })
+    expect((await folioRow(folioId))?.cancellation_source).toBe('admin')
   })
 })
 
-describe('Rule 6 — the ladder is binding (D10)', () => {
-  it('ignores the body clawback flag once a policy is configured', async () => {
-    const { folioId } = await scenario({ hours: 144 }) // tier says agent keeps 0%
-    await cancel(ADMIN, folioId, { clawback: false }) // the admin asks to absorb it
+describe('Rule 5 — the clawback flag is derived, never chosen', () => {
+  it('sets cancellation_clawback from the ladder, preserving what the column means', async () => {
+    const { folioId } = await scenario({ hours: 144 }) // tier says the agent keeps 0%
+    await cancel(ADMIN, folioId, { reason: 'x' })
+    // The column still answers "was any commission taken back" — every downstream reader (the cash
+    // engine, the commission report) is untouched. Only WHO decides it moved.
     expect(await folioRow(folioId)).toMatchObject({ cancellation_clawback: 1 })
     expect(await netCommission(folioId)).toBe(0)
+  })
+
+  it('leaves it unset when the tier lets the seller keep their commission', async () => {
+    const { folioId } = await scenario({ hours: 3 }) // 50% tier, agent keeps 100%
+    await cancel(ADMIN, folioId, { reason: 'x' })
+    expect(await folioRow(folioId)).toMatchObject({ cancellation_clawback: 0 })
+    expect(await netCommission(folioId)).toBe(10_000)
   })
 })
 
@@ -445,24 +466,31 @@ describe('Scenario 14/15 — proportional ledger reversal across methods', () =>
   })
 })
 
-describe('Scenario 10 — NO policy: the pre-feature path, untouched (D1)', () => {
-  it('records no refund for a tour and reverses the ledger in full', async () => {
-    const { folioId } = await scenario({ hours: 3, policy: null })
-    const { status, json } = await cancel(ADMIN, folioId, { clawback: true })
+// D17/D18 — replaces the Phase-1 "Scenario 10: NO policy → the pre-feature path, untouched". That
+// scenario asserted the data gate, which is exactly what let the original defect survive for
+// unconfigured orgs. This is the Phase-2 counterpart, and it IS the point of the change.
+describe('Scenario 10 — an unconfigured org still prices coherently', () => {
+  it('both cancellation paths refund the SAME amount', async () => {
+    // `policy: null` here means the ORG row carries no ladder — the state migration 0054 removes.
+    // The fallback still prices it, so this doubles as the Scenario-13 "missed row" case.
+    const admin = await scenario({ hours: 3, policy: null })
+    const { status, json } = await cancel(ADMIN, admin.folioId, { reason: 'x' })
     expect(status).toBe(200)
-    // No `cancellation` block — the legacy response shape is unchanged.
-    expect(json.cancellation).toBeUndefined()
-    const row = await folioRow(folioId)
-    expect(row?.refund_status).toBe('none')
-    expect(row?.cancellation_clawback).toBe(1) // the body flag still decides
-    expect(await netMoney(folioId)).toBe(0) // reversed in full
-    expect(await netCommission(folioId)).toBe(0)
-  })
+    expect(json.cancellation).toMatchObject({ refund: 100_000, retention: 0 })
 
-  it('honours clawback:false the old way', async () => {
-    const { folioId } = await scenario({ hours: 3, policy: null })
-    await cancel(ADMIN, folioId, { clawback: false })
-    expect(await netCommission(folioId)).toBe(10_000)
+    const row = await folioRow(admin.folioId)
+    // Phase 1 left this at 'none' for a tour — the admin path recorded no refund at all, while the
+    // tourist path refunded everything. Both now agree.
+    expect(row?.refund_status).toBe('pending')
+    expect(row?.refund_amount).toBe(100_000)
+    expect(row?.refund_pin).not.toBeNull()
+    // The ledger reversal is UNCHANGED by the default: a 100% refund reverses everything, exactly
+    // as the pre-engine code did. What moved is the refund obligation and the commission.
+    expect(await netMoney(admin.folioId)).toBe(0)
+    // D19 — with nothing retained, the seller forfeits the commission. Previously an admin could
+    // absorb it with `clawback: false`; that choice is gone.
+    expect(await netCommission(admin.folioId)).toBe(0)
+    expect(row?.cancellation_clawback).toBe(1)
   })
 })
 
@@ -541,9 +569,14 @@ describe('cancellation_quote on folio detail', () => {
     expect((await folioRow(folioId))?.status).toBe('paid')
   })
 
-  it('is null when the org has no policy', async () => {
+  // D17 — was "is null when the org has no policy". Every live folio quotes now, because there is
+  // always a policy to quote against; a null quote means only "already cancelled".
+  it('quotes even for an org that configured nothing', async () => {
     const { folioId } = await scenario({ hours: 3, policy: null })
-    expect((await getFolio(ADMIN, folioId)).json.cancellation_quote).toBeNull()
+    expect((await getFolio(ADMIN, folioId)).json.cancellation_quote).toMatchObject({
+      refund: 100_000,
+      retention: 0,
+    })
   })
 
   it('is null once the folio is cancelled — there is nothing left to quote', async () => {
@@ -572,10 +605,12 @@ describe('Scenario 31/32 — multitenancy', () => {
 
     // org_a cannot even see it.
     expect((await cancel(orgA.adminEmail, folioB)).status).toBe(404)
-    // org_b cancels its own with NO policy — org_a's ladder is never consulted.
-    const { json } = await cancel(orgB.adminEmail, folioB)
-    expect(json.cancellation).toBeUndefined()
-    expect((await folioRow(folioB))?.refund_status).toBe('none')
+
+    // org_b cancels its own folio. Its departure is 3h out, which under org_a's ladder would be a
+    // 50% tier — org_b gets 100%, so its own (default) policy applied and org_a's never leaked.
+    const { json } = await cancel(orgB.adminEmail, folioB, { reason: 'x' })
+    expect(json.cancellation).toMatchObject({ refund: 100_000, retention: 0 })
+    expect((await folioRow(folioB))?.refund_amount).toBe(100_000)
   })
 
   it('injected money fields are ignored — the computed refund wins', async () => {

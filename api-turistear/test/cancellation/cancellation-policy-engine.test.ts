@@ -4,6 +4,7 @@ import {
   computeCancellationRefund,
   parseCancellationPolicy,
   resolvePolicy,
+  DEFAULT_CANCELLATION_POLICY,
   type CancellationPolicy,
   type PolicyLine,
 } from '../../src/utils/cancellationPolicy'
@@ -505,8 +506,37 @@ describe('parse and resolve', () => {
     expect(resolvePolicy('{ broken', serialized)?.tiers).toHaveLength(3)
   })
 
-  it('resolves to null when neither exists — the D1 gate', () => {
-    expect(resolvePolicy(null, null)).toBeNull()
+  // D17 — replaces the Phase-1 assertion that this returned null (the data gate). There is no
+  // legacy path left to fall back to, so a folio must always be priceable; reaching this constant
+  // means a row escaped both the 0054 backfill and organization creation.
+  it('falls back to the module default when neither exists — never null', () => {
+    const resolved = resolvePolicy(null, null)
+    expect(resolved).toEqual(DEFAULT_CANCELLATION_POLICY)
+    expect(resolved.tiers).toEqual([
+      { min_hours: null, refund_pct: 100, agent_commission_pct: 0 },
+    ])
+  })
+
+  it('the default refunds everything, whatever the folio looks like', () => {
+    // Whichever tier a line would have matched, there is only one — and it refunds in full.
+    for (const hours of [500, 120, 20, 0, -50]) {
+      const out = compute({ policy: DEFAULT_CANCELLATION_POLICY, nowEpoch: hoursBefore(hours) })
+      expect(out.refund).toBe(100_000)
+      expect(out.retention).toBe(0)
+      // D19 — and with nothing retained, the D8 cap necessarily zeroes the kept commission.
+      expect(out.keptCommission).toBe(0)
+      expect(out.reversedCommission).toBe(10_000)
+    }
+  })
+
+  it('the default still honours the booking deposit floor (US-AG07.4)', () => {
+    const out = compute({
+      policy: DEFAULT_CANCELLATION_POLICY,
+      folioStatus: 'booking',
+      amountPaid: 30_000,
+      nowEpoch: hoursBefore(200),
+    })
+    expect(out.refund).toBe(0)
   })
 })
 

@@ -240,6 +240,39 @@ const seedOrgWithStaff = async () => {
   return { organizationId, adminId, agentId }
 }
 
+// Most of this suite seeds bare folios — it only cares about the money scalars the cash engine
+// reads. The two scenarios that drive the real cancellation endpoint need a LINE, because the
+// cancellation policy engine prices per line; a folio without one cannot exist in production
+// (`confirmSale` always writes them) and would derive a commission of zero.
+const seedLineFor = async (folioId: string, organizationId: string) => {
+  const serviceId = crypto.randomUUID()
+  const slotId = crypto.randomUUID()
+  const t = nowSec()
+  await env.DB.prepare(
+    `INSERT INTO services (id, organization_id, name, base_price, minimum_price, default_capacity,
+        status, commission_type, commission_value, created_at, updated_at)
+     VALUES (?, ?, 'Tour', 100000, 50000, 20, 'active', 'percent', 2000, ?, ?)`,
+  )
+    .bind(serviceId, organizationId, t, t)
+    .run()
+  await env.DB.prepare(
+    `INSERT INTO slots (id, organization_id, service_id, schedule_id, date, start_time, capacity,
+        booked, status, created_at, updated_at)
+     VALUES (?, ?, ?, NULL, '2026-12-31', '08:00', 20, 1, 'active', ?, ?)`,
+  )
+    .bind(slotId, organizationId, serviceId, t, t)
+    .run()
+  await env.DB.prepare(
+    `INSERT INTO folio_lines (id, organization_id, folio_id, service_id, slot_id, service_name,
+        slot_date, slot_start_time, quantity, base_price, minimum_price, unit_price, line_total,
+        commission_type, commission_value, redeemed_count, line_type, created_at)
+     VALUES (?, ?, ?, ?, ?, 'Tour', '2026-12-31', '08:00', 1, 100000, 50000, 100000, 100000,
+             'percent', 2000, 0, 'slot', ?)`,
+  )
+    .bind(crypto.randomUUID(), organizationId, folioId, serviceId, slotId, t)
+    .run()
+}
+
 // A standard "current shift" fixture: a prior shift settled by a confirmed anchor drop that
 // left `carry_forward` behind, then fresh activity since. Returns the anchor's id.
 //   pre-drop cash 513000 → balance 513000 at the drop → drop 500000 confirmed → carry 13000
@@ -1254,8 +1287,11 @@ describe('Agent Continuous Cash Balance with Cash Drops', () => {
     expect(me.json.balance.balance).toBe(-30000)
   })
 
-  it('Scenario 21 — admin cancels with clawback via the API → commission excluded (US-A26)', async () => {
-    // Drive the real cancellation handler to assert the clawback flag is persisted and read.
+  // US-A26 SUPERSEDED (Cancellation Policy Engine, D10/D19). The admin no longer chooses the
+  // clawback — it is derived from the org's refund ladder. What this scenario guards is unchanged
+  // and is the part that matters here: the cash engine reads `cancellation_clawback` and excludes
+  // the commission. Only how the flag got its value moved.
+  it('Scenario 21 — admin cancels via the API → commission excluded by the derived clawback', async () => {
     const { organizationId, agentId } = await seedOrgWithStaff()
     const folioId = await seedFolio({
       organizationId,
@@ -1263,6 +1299,10 @@ describe('Agent Continuous Cash Balance with Cash Drops', () => {
       amountPaid: 100000,
       commissionAmount: 20000,
     })
+    // A line, because the cancellation engine prices per line. The rest of this suite seeds bare
+    // folios (it only needs the money scalars), but a folio with no lines cannot exist in
+    // production — `confirmSale` always writes them — and the clawback it derives depends on them.
+    await seedLineFor(folioId, organizationId)
 
     const before = await getMyBalance(AGENT_EMAIL)
     expect(before.json.balance.balance).toBe(80000) // 100000 − 20000
@@ -1270,7 +1310,9 @@ describe('Agent Continuous Cash Balance with Cash Drops', () => {
     const res = await SELF.fetch(`http://api.local/api/folios/${folioId}/cancel`, {
       method: 'POST',
       headers: jsonAuth(ADMIN_EMAIL),
-      body: JSON.stringify({ reason: 'No-show', clawback: true }),
+      // No `clawback` — sending it is now a 400. Under the inherited default the folio refunds in
+      // full, so nothing is retained and the D8 cap leaves the agent no commission to keep.
+      body: JSON.stringify({ reason: 'No-show' }),
     })
     expect(res.status).toBe(200)
     const body = (await res.json()) as any
@@ -1281,6 +1323,41 @@ describe('Agent Continuous Cash Balance with Cash Drops', () => {
     expect(after.json.balance.cash_collected).toBe(0)
     expect(after.json.balance.commission_total).toBe(0)
     expect(after.json.balance.balance).toBe(0)
+  })
+
+  it('Scenario 21b — a retaining ladder lets the agent KEEP the commission', async () => {
+    // The counterpart the derived flag makes possible: with money retained there is something to
+    // pay commission from, so the same cancellation leaves the agent's commission intact. This is
+    // the mitigation for D19 — a company that does not want to strip agents configures retention.
+    const { organizationId, agentId } = await seedOrgWithStaff()
+    await env.DB.prepare(`UPDATE organizations SET cancellation_policy = ? WHERE id = ?`)
+      .bind(
+        JSON.stringify({
+          version: 1,
+          tiers: [{ min_hours: null, refund_pct: 0, agent_commission_pct: 100 }],
+          booking_deposit_retained_pct: 100,
+        }),
+        organizationId,
+      )
+      .run()
+    const folioId = await seedFolio({
+      organizationId,
+      agentId,
+      amountPaid: 100000,
+      commissionAmount: 20000,
+    })
+    await seedLineFor(folioId, organizationId)
+
+    const res = await SELF.fetch(`http://api.local/api/folios/${folioId}/cancel`, {
+      method: 'POST',
+      headers: jsonAuth(ADMIN_EMAIL),
+      body: JSON.stringify({ reason: 'No-show' }),
+    })
+    expect(res.status).toBe(200)
+    expect((await res.json() as any).folio.cancellation_clawback).toBe(false)
+
+    const after = await getMyBalance(AGENT_EMAIL)
+    expect(after.json.balance.commission_total).toBe(20000)
   })
 
   // -------------------------------------------------------------------------

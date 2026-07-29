@@ -353,28 +353,39 @@ describe('Total Folio Cancellation', () => {
     expect(await collected()).toBe(0)
   })
 
-  it('Scenario 6b — cancel records the clawback flag (US-A26)', async () => {
+  // US-A26 SUPERSEDED (Cancellation Policy Engine, D10). This used to assert that the admin's
+  // `clawback` body flag was persisted as they chose it. The flag is withdrawn: the clawback is
+  // derived from the org's ladder, so the only thing left to assert here is that sending it fails
+  // loudly rather than being silently dropped. The derived value is covered in
+  // test/cancellation/cancellation-policy-handlers.test.ts ("the clawback flag is derived").
+  it('Scenario 6b — the withdrawn clawback flag is rejected, not ignored (US-A26 superseded)', async () => {
     const { organizationId, agentId } = await seedOrgWithStaff()
     const serviceId = await seedService(organizationId)
     const slotId = await seedSlot(organizationId, serviceId, { booked: 2 })
 
-    // clawback: true → persisted as true (the agent forfeits this folio's commission).
-    const clawed = await seedFolio({ organizationId, agentId })
-    await seedFolioLine({ organizationId, folioId: clawed, serviceId, slotId, quantity: 1 })
-    const a = await cancelFolio(ADMIN_EMAIL, clawed, { clawback: true })
-    expect(a.status).toBe(200)
-    expect(a.json.folio.cancellation_clawback).toBe(true)
+    const folioId = await seedFolio({ organizationId, agentId })
+    await seedFolioLine({ organizationId, folioId, serviceId, slotId, quantity: 1 })
 
-    // Omitted flag → defaults to false (the company absorbs the loss).
-    const absorbed = await seedFolio({ organizationId, agentId })
-    await seedFolioLine({ organizationId, folioId: absorbed, serviceId, slotId, quantity: 1 })
-    const b = await cancelFolio(ADMIN_EMAIL, absorbed, { reason: 'goodwill' })
-    expect(b.status).toBe(200)
-    expect(b.json.folio.cancellation_clawback).toBe(false)
+    expect((await cancelFolio(ADMIN_EMAIL, folioId, { clawback: true })).status).toBe(400)
+    expect((await cancelFolio(ADMIN_EMAIL, folioId, { clawback: false })).status).toBe(400)
+    // Rejected means untouched — not "cancelled with the flag dropped".
+    expect((await getFolioRow(folioId))?.status).toBe('paid')
 
-    // Persisted at the row level (SQLite stores the boolean as 0/1).
-    expect((await getFolioRow(clawed))?.cancellation_clawback).toBe(1)
-    expect((await getFolioRow(absorbed))?.cancellation_clawback).toBe(0)
+    // Give the line a commission so the derivation has something to decide about — the shared
+    // seeder books none, and "nothing was clawed back" is not evidence the rule works.
+    await env.DB.prepare(
+      `UPDATE folio_lines SET commission_type = 'percent', commission_value = 1000
+        WHERE folio_id = ?`,
+    )
+      .bind(folioId)
+      .run()
+
+    // Without the flag the cancellation succeeds, and the clawback is derived: the inherited
+    // default refunds in full, so nothing is retained, so by the D8 cap the seller keeps nothing.
+    const ok = await cancelFolio(ADMIN_EMAIL, folioId, { reason: 'goodwill' })
+    expect(ok.status).toBe(200)
+    expect(ok.json.folio.cancellation_clawback).toBe(true)
+    expect((await getFolioRow(folioId))?.cancellation_clawback).toBe(1)
   })
 
   it('Scenario 7 — a cancelled folio\'s QR ticket is rejected by the scanner', async () => {
