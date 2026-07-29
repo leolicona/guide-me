@@ -38,19 +38,15 @@ export const getFolio = async (
   return { folio: res.folio, quote: res.cancellation_quote ?? null }
 }
 
+// D10 — `reason` is the ONLY thing a caller may send. The `clawback` (US-A26) and
+// `cancelled_by_company` (US-A71) flags are withdrawn: a cancellation is priced by the org's
+// ladder and nothing else, and the server now REJECTS either with a 400 rather than dropping it.
 export interface CancelFolioOptions {
   reason?: string
-  // US-A26 — true → claw back the agent's commission; omitted/false → company absorbs it.
-  // IGNORED by the server once the org has a policy: the ladder decides. The UI hides the control
-  // in that case rather than sending a value that will not be honoured.
-  clawback?: boolean
-  // US-A71 — the COMPANY caused this cancellation (weather, a broken boat). Skips the ladder:
-  // full refund, seller keeps their commission.
-  cancelledByCompany?: boolean
 }
 
-// The realised numbers a policy-priced cancellation returns. Absent when the org has no policy —
-// the response shape is unchanged for those orgs.
+// The realised numbers every cancellation returns — every org has a ladder now (D17), so this is
+// always present. Typed nullable only so an older API build cannot break the page.
 export interface CancellationOutcome {
   refund: number
   retention: number
@@ -58,16 +54,14 @@ export interface CancellationOutcome {
   reversed_commission: number
 }
 
-// US-A21 / US-A26 / US-A71 — cancel the whole folio: releases every line's spots, records the
-// cancellation, and prices the refund from the org's ladder when one is configured.
+// US-A21 — cancel the whole folio: releases every line's spots, records the cancellation, and
+// prices the refund from the org's ladder.
 export const cancelFolio = async (
   id: string,
   options: CancelFolioOptions = {},
 ): Promise<{ folio: FolioDetail; cancellation: CancellationOutcome | null }> => {
   const body: Record<string, unknown> = {}
   if (options.reason) body.reason = options.reason
-  if (options.clawback) body.clawback = true
-  if (options.cancelledByCompany) body.cancelled_by_company = true
   const res = await request<{
     folio: FolioDetail
     cancellation?: CancellationOutcome | null

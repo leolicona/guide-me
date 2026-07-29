@@ -131,8 +131,6 @@ export default function SettingsPage() {
 
   // US-A60/A63 — lodging org policy: weekend days, free-cancel window, penalty %.
   const [weekendDays, setWeekendDays] = useState<number[]>([])
-  const [freeCancelDays, setFreeCancelDays] = useState('')
-  const [penaltyPct, setPenaltyPct] = useState('')
 
   // whatsapp-qr-delivery D10 — the two admin-edited templates (seeded from the shipped default
   // when the org hasn't customized them).
@@ -157,8 +155,6 @@ export default function SettingsPage() {
     setGraceMag(String(g.mag))
     setGraceDir(g.dir)
     setWeekendDays(org.lodging_weekend_days)
-    setFreeCancelDays(String(org.lodging_free_cancel_days))
-    setPenaltyPct(String(org.lodging_cancel_penalty_pct))
     setWaTicket(org.wa_ticket_template ?? DEFAULT_TICKET_TEMPLATE)
     setWaReminder(org.wa_reminder_template ?? DEFAULT_REMINDER_TEMPLATE)
   }
@@ -202,28 +198,22 @@ export default function SettingsPage() {
   }
 
   // --- Lodging (Hospedaje) settings ---
-  const freeCancelNum = Number(freeCancelDays)
-  const penaltyNum = Number(penaltyPct)
-  const freeCancelInvalid =
-    freeCancelDays === '' || !Number.isInteger(freeCancelNum) || freeCancelNum < 0
-  const penaltyInvalid =
-    penaltyPct === '' || !Number.isInteger(penaltyNum) || penaltyNum < 0 || penaltyNum > 100
-  const lodgingInvalid = freeCancelInvalid || penaltyInvalid || weekendDays.length === 0
+  // The free-cancel window and penalty % that used to live here are RETIRED: a stay is priced by
+  // the cancellation ladder now, like everything else. Their inputs are gone rather than disabled —
+  // a control that changes no behaviour is worse than a missing one. Weekend days stay: that is a
+  // PRICING input (which nights bill at weekend_rate), not a cancellation one.
+  const lodgingInvalid = weekendDays.length === 0
   const lodgingDirty =
     !!org &&
-    ([...weekendDays].sort().join(',') !== [...org.lodging_weekend_days].sort().join(',') ||
-      freeCancelNum !== org.lodging_free_cancel_days ||
-      penaltyNum !== org.lodging_cancel_penalty_pct)
+    [...weekendDays].sort().join(',') !== [...org.lodging_weekend_days].sort().join(',')
+
+  // An org that had configured a penalty lost it when the ladder took over. Say so where they
+  // would look for it, once, instead of letting them find out from a refund.
+  const hadLodgingCancelPolicy =
+    !!org && (org.lodging_free_cancel_days > 0 || org.lodging_cancel_penalty_pct > 0)
 
   const handleSaveLodging = () => {
-    update.mutate(
-      {
-        lodging_weekend_days: weekendDays,
-        lodging_free_cancel_days: freeCancelNum,
-        lodging_cancel_penalty_pct: penaltyNum,
-      },
-      { onSuccess: () => setSaved(true) },
-    )
+    update.mutate({ lodging_weekend_days: weekendDays }, { onSuccess: () => setSaved(true) })
   }
 
   // --- WhatsApp message templates (whatsapp-qr-delivery D10) ---
@@ -430,39 +420,23 @@ export default function SettingsPage() {
                   </Typography>
                 </Box>
 
-                <TextField
-                  label="Cancelación gratuita"
-                  type="number"
-                  value={freeCancelDays}
-                  onChange={(e) => setFreeCancelDays(e.target.value)}
-                  error={freeCancelDays !== '' && freeCancelInvalid}
-                  helperText={
-                    freeCancelDays !== '' && freeCancelInvalid
-                      ? 'Captura un número de días válido (0 o más).'
-                      : 'Días antes del check-in en que la cancelación de una estancia pagada se reembolsa al 100%.'
-                  }
-                  slotProps={{
-                    input: { endAdornment: <InputAdornment position="end">días</InputAdornment> },
-                    htmlInput: { min: 0, step: 1, inputMode: 'numeric' },
-                  }}
-                />
-
-                <TextField
-                  label="Penalización"
-                  type="number"
-                  value={penaltyPct}
-                  onChange={(e) => setPenaltyPct(e.target.value)}
-                  error={penaltyPct !== '' && penaltyInvalid}
-                  helperText={
-                    penaltyPct !== '' && penaltyInvalid
-                      ? 'Captura un porcentaje entre 0 y 100.'
-                      : 'Porcentaje del total que se retiene si la cancelación cae dentro de la ventana.'
-                  }
-                  slotProps={{
-                    input: { endAdornment: <InputAdornment position="end">%</InputAdornment> },
-                    htmlInput: { min: 0, max: 100, step: 1, inputMode: 'numeric' },
-                  }}
-                />
+                {/* The free-cancel window and penalty % used to be edited here. They are retired:
+                    a stay is priced by the cancellation ladder now. Orgs that had configured them
+                    are told once, here, where they would go looking for them. */}
+                {hadLodgingCancelPolicy && (
+                  <Alert severity="warning">
+                    Tu política de cancelación de hospedaje (
+                    {org.lodging_free_cancel_days > 0
+                      ? `${org.lodging_free_cancel_days} días libres`
+                      : 'sin ventana libre'}
+                    {org.lodging_cancel_penalty_pct > 0
+                      ? `, ${org.lodging_cancel_penalty_pct}% de penalización`
+                      : ''}
+                    ) <strong>ya no se aplica</strong>. Ahora las estancias se cancelan con la{' '}
+                    <strong>política de cancelación</strong> de abajo, igual que los tours —
+                    mientras no la configures, se reembolsan al 100%.
+                  </Alert>
+                )}
 
                 <Button
                   variant="contained"
