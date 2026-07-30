@@ -1031,9 +1031,13 @@ describe('POS lodging sale path', () => {
     // The reservation is released on cancel.
     expect((await reservationsForFolio(freeId))[0].status).toBe('cancelled')
 
-    // Check-in 2026-06-16 is 2 days out — the OLD rule withheld 50% here. It no longer applies:
-    // the inherited default refunds in full regardless of how close check-in is.
-    const late = await sellStay(typeId, '2026-06-16', '2026-06-18', 2)
+    // Check-in 2026-06-20 is 6 days out, and that date is chosen to make the two rules DISAGREE —
+    // otherwise this assertion proves nothing. The retired rule (free until 7 days before, then a
+    // 50% penalty) would withhold half here. The ladder's top tier starts at 120h = 5 days, so 6
+    // days out refunds in full. A 2-days-out check-in used to be the discriminator, but under the
+    // inherited ladder (D18 revised) 48h also lands on 50% and the two rules would agree by
+    // coincidence.
+    const late = await sellStay(typeId, '2026-06-20', '2026-06-22', 2)
     const lateId = ((await late.json()) as SaleResponse).folio.id
     await SELF.fetch(`http://api.local/api/folios/${lateId}/cancel`, {
       method: 'POST',
@@ -1043,7 +1047,7 @@ describe('POS lodging sale path', () => {
     const lateRow = await env.DB.prepare('SELECT refund_amount FROM folios WHERE id = ?')
       .bind(lateId)
       .first<{ refund_amount: number }>()
-    expect(lateRow!.refund_amount).toBe(200000) // full — the penalty field is inert
+    expect(lateRow!.refund_amount).toBe(200000) // full — the 50% penalty field is inert
   })
 
   it('Sc12b — a ladder DOES withhold on a near check-in (what replaces the retired fields)', async () => {

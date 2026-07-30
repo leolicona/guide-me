@@ -28,13 +28,17 @@ const seedService = async (organizationId: string) => {
   ).bind(serviceId, organizationId, ts, ts).run()
   return serviceId
 }
-const seedSlot = async (organizationId: string, serviceId: string) => {
+// `daysOut` decides which tier of the inherited cancellation ladder a cancellation lands in, which
+// is what makes a reversal total or partial. These tests are about the LEDGER's arithmetic, not the
+// ladder's, so the cancellation case pins the departure beyond 120h to keep the reversal total —
+// otherwise the buckets net to a retention and the scenario stops testing what it is named for.
+const seedSlot = async (organizationId: string, serviceId: string, daysOut = 3) => {
   const slotId = crypto.randomUUID()
   const ts = Math.floor(Date.now() / 1000)
   await env.DB.prepare(
     `INSERT INTO slots (id, organization_id, service_id, schedule_id, date, start_time, capacity, booked, status, created_at, updated_at)
      VALUES (?, ?, ?, NULL, ?, '06:00', 12, 0, 'active', ?, ?)`,
-  ).bind(slotId, organizationId, serviceId, addDays(todayStr(), 3), ts, ts).run()
+  ).bind(slotId, organizationId, serviceId, addDays(todayStr(), daysOut), ts, ts).run()
   return slotId
 }
 const post = (email: string, path: string, body?: unknown) =>
@@ -89,7 +93,7 @@ describe('US-LG04 — the cash engine buckets by the ledger', () => {
   it('cancelling the mixed folio nets both buckets back to zero (ledger reversal, no §12a)', async () => {
     const { organizationId } = await seedUser({ email: AGENT, role: 'agent' })
     await seedUser({ email: ADMIN, role: 'admin', organizationId })
-    const slot = await seedSlot(organizationId, await seedService(organizationId))
+    const slot = await seedSlot(organizationId, await seedService(organizationId), 7)
 
     const booked = await post(AGENT, '/folios', {
       customer_name: 'Cliente', customer_phone: PHONE, down_payment: 45000, payment_method: 'cash',
@@ -100,9 +104,10 @@ describe('US-LG04 — the cash engine buckets by the ledger', () => {
     await post(ADMIN, `/folios/${folioId}/verify`)
 
     // Admin cancels the whole folio → reversal rows net every bucket + the commission.
-    // (The `clawback: true` this used to send is withdrawn — Cancellation Policy Engine D10. Under
-    // the inherited default the folio refunds in full, so the reversal is still total and this
-    // scenario's premise is unchanged: what the ledger writes here did not move.)
+    // (The `clawback: true` this used to send is withdrawn — Cancellation Policy Engine D10. The
+    // departure is 7 days out, which is the inherited ladder's full-refund tier, so the reversal is
+    // still total and this scenario's premise is unchanged: what the ledger writes here did not
+    // move. A partial reversal is covered by the engine's own tests.)
     expect((await SELF.fetch(`http://api.local/api/folios/${folioId}/cancel`, {
       method: 'POST', headers: jsonAuth(ADMIN), body: JSON.stringify({}),
     })).status).toBe(200)

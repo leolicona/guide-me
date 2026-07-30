@@ -150,7 +150,6 @@ describe('US-A69 — cancellation policy ladder', () => {
       { min_hours: 0, refund_pct: 50, agent_commission_pct: 100, affiliate_commission_pct: 50 },
       { min_hours: null, refund_pct: 0, agent_commission_pct: 100 },
     ],
-    booking_deposit_retained_pct: 100,
   }
 
   it('defaults to NO policy — which is what keeps every org on the pre-feature path (D1)', async () => {
@@ -164,21 +163,27 @@ describe('US-A69 — cancellation policy ladder', () => {
     await seedUser({ email: 'admin@empresa.com', role: 'admin' })
     const { status, json } = await put('admin@empresa.com', { cancellation_policy: LADDER })
     expect(status).toBe(200)
-    expect(json.organization.cancellation_policy).toMatchObject({
-      version: 1,
-      booking_deposit_retained_pct: 100,
-    })
+    expect(json.organization.cancellation_policy).toMatchObject({ version: 1 })
     expect(json.organization.cancellation_policy.tiers).toHaveLength(3)
     // Round-trips through the column, not just the response.
     const reread = (await get('admin@empresa.com')).json.organization.cancellation_policy
     expect(reread.tiers[1]).toMatchObject({ refund_pct: 50, affiliate_commission_pct: 50 })
   })
 
-  it('defaults the deposit floor to 100 when omitted (US-AG07.4 preserved)', async () => {
+  // D20 — an admin (or an older client build) may still send the retired deposit floor. The endpoint
+  // must accept the document and drop the key rather than 400, so a stale tab cannot lock someone
+  // out of editing their own ladder.
+  it('accepts a legacy ladder carrying the retired deposit floor, and stores it without', async () => {
     await seedUser({ email: 'admin@empresa.com', role: 'admin' })
-    const { booking_deposit_retained_pct: _drop, ...noFloor } = LADDER
-    const { json } = await put('admin@empresa.com', { cancellation_policy: noFloor })
-    expect(json.organization.cancellation_policy.booking_deposit_retained_pct).toBe(100)
+    const legacy = { ...LADDER, booking_deposit_retained_pct: 100 }
+    const { status, json } = await put('admin@empresa.com', { cancellation_policy: legacy })
+    expect(status).toBe(200)
+    expect(json.organization.cancellation_policy).not.toHaveProperty(
+      'booking_deposit_retained_pct',
+    )
+    const reread = (await get('admin@empresa.com')).json.organization.cancellation_policy
+    expect(reread).not.toHaveProperty('booking_deposit_retained_pct')
+    expect(reread.tiers).toHaveLength(3)
   })
 
   it('null CLEARS the policy — the rollback (D1)', async () => {
@@ -220,7 +225,6 @@ describe('US-A69 — cancellation policy ladder', () => {
       },
       // out-of-range percentages
       { ...LADDER, tiers: [{ min_hours: null, refund_pct: 101, agent_commission_pct: 0 }] },
-      { ...LADDER, booking_deposit_retained_pct: 101 },
       // wrong version
       { ...LADDER, version: 2 },
     ]

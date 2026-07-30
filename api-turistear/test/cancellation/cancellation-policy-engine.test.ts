@@ -29,7 +29,6 @@ const LADDER: CancellationPolicy = cancellationPolicySchema.parse({
     { min_hours: 0, refund_pct: 50, agent_commission_pct: 100 },
     { min_hours: null, refund_pct: 0, agent_commission_pct: 100 },
   ],
-  booking_deposit_retained_pct: 100,
 })
 
 // 2026-06-15 08:00 org-local, as an absolute instant.
@@ -56,7 +55,6 @@ const compute = (over: Partial<Parameters<typeof computeCancellationRefund>[0]> 
     policy: LADDER,
     lines: [tourLine()],
     amountPaid: 100_000,
-    folioStatus: 'paid',
     nowEpoch: hoursBefore(200),
     timezone: TZ,
     sellerKind: 'agent',
@@ -211,50 +209,44 @@ describe('retention over the total, refund from what was paid (D3)', () => {
 })
 
 // ---------------------------------------------------------------------------
-// The booking deposit floor (US-AG07.4 preserved)
+// D20 — an apartado is priced by the ladder, exactly like a paid sale
+//
+// There used to be a `booking_deposit_retained_pct` floor here that pinned an apartado's refund to
+// 0 whatever the ladder said. It is gone, and so is the engine's knowledge that apartados exist:
+// `amountPaid` is the only thing that distinguishes one. These cases pin that down — most of them
+// pass a deposit of 300 against a 1000 sale and let the arithmetic decide.
 // ---------------------------------------------------------------------------
-describe('booking deposit floor', () => {
-  it('at 100 (default) a booking refunds nothing, even under a full-refund tier', () => {
-    const out = compute({
-      folioStatus: 'booking',
-      amountPaid: 300,
-      lines: [tourLine({ lineTotal: 1000 })],
-      nowEpoch: hoursBefore(200),
-    })
+describe('apartados follow the ladder (D20)', () => {
+  const apartado = (over: Parameters<typeof compute>[0] = {}) =>
+    compute({ amountPaid: 300, lines: [tourLine({ lineTotal: 1000 })], ...over })
+
+  it('refunds the whole deposit under a full-refund tier', () => {
+    const out = apartado({ nowEpoch: hoursBefore(200) })
+    expect(out.refund).toBe(300) // retention is 0, so every peso collected goes back
+    expect(out.retention).toBe(0)
+  })
+
+  it('refunds nothing when the retention exceeds the deposit — with no rule about deposits', () => {
+    // 50% of a 1000 sale is 500; the customer only ever paid 300, so there is nothing left over.
+    const out = apartado({ nowEpoch: hoursBefore(20) })
+    expect(out.grossRetention).toBe(500)
+    expect(out.refund).toBe(0)
+    expect(out.retention).toBe(300) // capped by what was actually collected, never 500
+  })
+
+  it('never pursues the customer for the shortfall', () => {
+    const out = apartado({ nowEpoch: departureEpoch + 3600 }) // no-show: the ladder retains 1000
     expect(out.refund).toBe(0)
     expect(out.retention).toBe(300)
   })
 
-  it('at 0 the deposit follows the ladder', () => {
-    const policy = cancellationPolicySchema.parse({
-      ...LADDER,
-      booking_deposit_retained_pct: 0,
-    })
-    const out = compute({
-      policy,
-      folioStatus: 'booking',
-      amountPaid: 300,
-      lines: [tourLine({ lineTotal: 1000 })],
-      nowEpoch: hoursBefore(200),
-    })
-    expect(out.refund).toBe(300)
-  })
-
-  it('the floor only bounds — it never refunds MORE than the ladder allows', () => {
-    const policy = cancellationPolicySchema.parse({ ...LADDER, booking_deposit_retained_pct: 0 })
-    const out = compute({
-      policy,
-      folioStatus: 'booking',
-      amountPaid: 300,
-      lines: [tourLine({ lineTotal: 1000 })],
-      nowEpoch: departureEpoch + 3600, // no-show: ladder retains everything
-    })
-    expect(out.refund).toBe(0)
-  })
-
-  it('does not apply to a paid folio', () => {
-    const out = compute({ folioStatus: 'paid', nowEpoch: hoursBefore(200) })
-    expect(out.refund).toBe(100_000)
+  it('prices a deposit and a full payment by the SAME rule at the same tier', () => {
+    // The identity D20 asserts: one ladder, one arithmetic. The 50% tier retains 500 of the sale in
+    // both cases — what differs is only how much money there was to take it from.
+    const at = (amountPaid: number) =>
+      compute({ amountPaid, lines: [tourLine({ lineTotal: 1000 })], nowEpoch: hoursBefore(20) })
+    expect(at(1000)).toMatchObject({ grossRetention: 500, retention: 500, refund: 500 })
+    expect(at(300)).toMatchObject({ grossRetention: 500, retention: 300, refund: 0 })
   })
 })
 
@@ -400,9 +392,17 @@ describe('policy validation', () => {
     ],
   }
 
-  it('accepts a well-formed ladder and defaults the deposit floor to 100', () => {
-    const parsed = cancellationPolicySchema.parse(base)
-    expect(parsed.booking_deposit_retained_pct).toBe(100)
+  it('accepts a well-formed ladder', () => {
+    expect(cancellationPolicySchema.parse(base).tiers).toHaveLength(2)
+  })
+
+  // D20 — a document written before the deposit floor was removed must still parse. Zod strips the
+  // unknown key on a non-strict object, which is what lets stored org policies and folio snapshots
+  // survive the change with no version bump and no rewrite.
+  it('parses a legacy document carrying booking_deposit_retained_pct, ignoring it', () => {
+    const parsed = cancellationPolicySchema.parse({ ...base, booking_deposit_retained_pct: 100 })
+    expect(parsed).not.toHaveProperty('booking_deposit_retained_pct')
+    expect(parsed.tiers).toHaveLength(2)
   })
 
   it('rejects a ladder with no terminal tier', () => {
@@ -458,7 +458,6 @@ describe('policy validation', () => {
       { ...base, tiers: [{ min_hours: null, refund_pct: 101, agent_commission_pct: 0 }] },
       { ...base, tiers: [{ min_hours: null, refund_pct: 0, agent_commission_pct: -1 }] },
       { ...base, tiers: [] },
-      { ...base, booking_deposit_retained_pct: 101 },
       {
         ...base,
         tiers: Array.from({ length: 11 }, (_, i) => ({
@@ -513,30 +512,44 @@ describe('parse and resolve', () => {
     const resolved = resolvePolicy(null, null)
     expect(resolved).toEqual(DEFAULT_CANCELLATION_POLICY)
     expect(resolved.tiers).toEqual([
-      { min_hours: null, refund_pct: 100, agent_commission_pct: 0 },
+      { min_hours: 120, refund_pct: 100, agent_commission_pct: 0 },
+      { min_hours: 24, refund_pct: 50, agent_commission_pct: 100 },
+      { min_hours: null, refund_pct: 0, agent_commission_pct: 100 },
     ])
   })
 
-  it('the default refunds everything, whatever the folio looks like', () => {
-    // Whichever tier a line would have matched, there is only one — and it refunds in full.
-    for (const hours of [500, 120, 20, 0, -50]) {
-      const out = compute({ policy: DEFAULT_CANCELLATION_POLICY, nowEpoch: hoursBefore(hours) })
-      expect(out.refund).toBe(100_000)
-      expect(out.retention).toBe(0)
-      // D19 — and with nothing retained, the D8 cap necessarily zeroes the kept commission.
-      expect(out.keptCommission).toBe(0)
-      expect(out.reversedCommission).toBe(10_000)
-    }
+  // D18 revised — the inherited ladder is no longer a flat 100%. It used to be, on the reasoning
+  // that unstated terms should be read the customer's way; that stopped being safe once the same
+  // ladder started pricing apartados (D20), because it handed back every deposit to every no-show.
+  it('the inherited default steps down as the departure approaches', () => {
+    const at = (hours: number) =>
+      compute({ policy: DEFAULT_CANCELLATION_POLICY, nowEpoch: hoursBefore(hours) })
+
+    // Five days or more out: everything back, and the seller earns nothing on a sale that is undone
+    // (D19 — with nothing retained, the D8 cap necessarily zeroes the kept commission).
+    expect(at(500)).toMatchObject({ refund: 100_000, retention: 0, keptCommission: 0 })
+    expect(at(120)).toMatchObject({ refund: 100_000, keptCommission: 0 }) // inclusive boundary
+    expect(at(120).reversedCommission).toBe(10_000)
+
+    // Inside five days: half. The seller keeps their commission, capped by what was retained.
+    expect(at(119)).toMatchObject({ refund: 50_000, retention: 50_000, keptCommission: 10_000 })
+    expect(at(24)).toMatchObject({ refund: 50_000 }) // inclusive boundary
+
+    // Departed — a no-show recovers nothing.
+    expect(at(-50)).toMatchObject({ refund: 0, retention: 100_000, keptCommission: 10_000 })
   })
 
-  it('the default still honours the booking deposit floor (US-AG07.4)', () => {
-    const out = compute({
-      policy: DEFAULT_CANCELLATION_POLICY,
-      folioStatus: 'booking',
-      amountPaid: 30_000,
-      nowEpoch: hoursBefore(200),
-    })
-    expect(out.refund).toBe(0)
+  it('the default prices an apartado by those same tiers (D20)', () => {
+    const apartado = (hours: number) =>
+      compute({
+        policy: DEFAULT_CANCELLATION_POLICY,
+        amountPaid: 30_000,
+        nowEpoch: hoursBefore(hours),
+      })
+    // Far out the deposit comes back in full; inside the 50% tier the retention (50,000) already
+    // exceeds it, so nothing is left. No deposit clause is involved in either answer.
+    expect(apartado(200).refund).toBe(30_000)
+    expect(apartado(20).refund).toBe(0)
   })
 })
 

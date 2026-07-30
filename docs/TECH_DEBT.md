@@ -33,7 +33,30 @@ check passes. **Takeaway for future table rebuilds: never rely on `defer_foreign
 FK.** Verified by the full suite via `applyD1Migrations` (the PRAGMA is kept as a harmless no-op
 safety net for engines that do defer).
 
-## 17. Cash Drawer — Retained Booking-Deposit Carve-Out — ⚠️ OPEN (cross-feature follow-up)
+## 17. Cash Drawer — Retained Booking-Deposit Carve-Out — ✅ RESOLVED
+
+**Resolved by the paid ledger (US-LG) + Cancellation Policy Engine Phase 3 (D20).** No carve-out was
+ever needed; the premise below stopped being true in two steps.
+
+1. **The paid ledger replaced status-exclusion with signed movement rows.** `cash/handler.ts` now
+   sums `folio_payments` filtered by `entry_type` and `collected_by` — there is **no**
+   `folios.status` predicate left. A cancelled folio contributes whatever its rows net to, so
+   "cancelled folios are excluded from collected cash" no longer describes the system.
+2. **The reversal became proportional.** That alone was not enough: the agent's apartado cancel
+   still reversed the collected money *in full*, so a retained deposit netted to zero and vanished
+   from the drawer anyway — the same under-count, arriving by a different route. Phase 3 routed that
+   path through `cancelFolioPriced`, so the reversal now matches the refund and the retained
+   portion stays on the books as money the company is owed.
+
+An **expired** apartado (D21) writes no reversal rows at all, so its payment row stands untouched
+and is likewise counted.
+
+Regression coverage: `test/pos/pos-bookings-cancel.test.ts` — *"a retained deposit stays on the
+books — the reversal is proportional, not total"*, which asserts the ledger nets to `+45,000` after
+the cancellation. `docs/bookings/…` O3 and D7 are closed by the same change.
+
+<details>
+<summary>Original entry (kept for the record)</summary>
 
 **Status:** Bookings/down-payments (`docs/bookings/bookings-down-payments.spec.md`, decision D7 /
 open decision O3) ship with a **non-refundable retained deposit**: when a booking is cancelled
@@ -58,6 +81,8 @@ the bookings PR would reach into another feature's derivation and tests.
   Mirror the existing watermark-reversal logic (TECH_DEBT §12a) so a deposit retained pre-watermark
   isn't double-counted.
 - **Reference:** `docs/bookings/bookings-down-payments.spec.md` §6 (cash-drawer row) + O3.
+
+</details>
 
 ## 16. Tourist Portal — Deferred Notifications & Electronic Refund Movement — ⚠️ OPEN (by design)
 

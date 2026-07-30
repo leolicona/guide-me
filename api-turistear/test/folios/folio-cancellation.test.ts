@@ -361,7 +361,12 @@ describe('Total Folio Cancellation', () => {
   it('Scenario 6b — the withdrawn clawback flag is rejected, not ignored (US-A26 superseded)', async () => {
     const { organizationId, agentId } = await seedOrgWithStaff()
     const serviceId = await seedService(organizationId)
-    const slotId = await seedSlot(organizationId, serviceId, { booked: 2 })
+    // The departure must be ≥120h AWAY for the derivation to have teeth: that is the tier where the
+    // ladder retains nothing, so the D8 cap forces the seller to keep nothing and the clawback is
+    // true. Computed from now rather than hardcoded — the file's default slot date (2026-06-15) is
+    // already in the past, which silently turns any folio using it into a no-show.
+    const farOut = new Date(Date.now() + 10 * 86_400_000).toISOString().slice(0, 10)
+    const slotId = await seedSlot(organizationId, serviceId, { booked: 2, date: farOut })
 
     const folioId = await seedFolio({ organizationId, agentId })
     await seedFolioLine({ organizationId, folioId, serviceId, slotId, quantity: 1 })
@@ -371,17 +376,27 @@ describe('Total Folio Cancellation', () => {
     // Rejected means untouched — not "cancelled with the flag dropped".
     expect((await getFolioRow(folioId))?.status).toBe('paid')
 
-    // Give the line a commission so the derivation has something to decide about — the shared
-    // seeder books none, and "nothing was clawed back" is not evidence the rule works.
+    // Give the sale a commission so the derivation has something to decide about — the shared seeder
+    // books none, and "nothing was clawed back" is not evidence the rule works. BOTH the line and
+    // the folio: `folios.commission_amount` is the authoritative figure the engine reconciles to
+    // (it is what the cash engine and the commission report read), so a line-only fixture describes
+    // a sale that booked no commission at all.
+    //
+    // The departure moves on the LINE, not the slot: the engine reads each line's snapshotted
+    // `slot_date`/`slot_start_time` (a folio must price by the departure it was sold for, even if
+    // the slot is later rescheduled), and this file's seeder hardcodes 2026-06-15 there.
     await env.DB.prepare(
-      `UPDATE folio_lines SET commission_type = 'percent', commission_value = 1000
+      `UPDATE folio_lines SET commission_type = 'percent', commission_value = 1000, slot_date = ?
         WHERE folio_id = ?`,
     )
+      .bind(farOut, folioId)
+      .run()
+    await env.DB.prepare(`UPDATE folios SET commission_amount = 15000 WHERE id = ?`)
       .bind(folioId)
       .run()
 
-    // Without the flag the cancellation succeeds, and the clawback is derived: the inherited
-    // default refunds in full, so nothing is retained, so by the D8 cap the seller keeps nothing.
+    // Without the flag the cancellation succeeds and the clawback is derived: 10+ days out the
+    // ladder refunds in full, so nothing is retained, so by the D8 cap the seller keeps nothing.
     const ok = await cancelFolio(ADMIN_EMAIL, folioId, { reason: 'goodwill' })
     expect(ok.status).toBe(200)
     expect(ok.json.folio.cancellation_clawback).toBe(true)

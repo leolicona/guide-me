@@ -17,7 +17,7 @@ import EventAvailableRounded from '@mui/icons-material/EventAvailableRounded'
 import EventBusyRounded from '@mui/icons-material/EventBusyRounded'
 import WarningAmberRounded from '@mui/icons-material/WarningAmberRounded'
 import HourglassTopRounded from '@mui/icons-material/HourglassTopRounded'
-import { useFolio } from '../features/pos/hooks'
+import { useFolio, useFolioCancellationQuote } from '../features/pos/hooks'
 import { PaymentBreakdown } from '../features/pos/components/PaymentBreakdown'
 import { TicketQr } from '../features/pos/components/TicketQr'
 import {
@@ -44,6 +44,8 @@ const PAYMENT_METHOD_LABEL: Record<DisplayMethod, string> = {
 export default function FolioReceiptPage() {
   const { id } = useParams<{ id: string }>()
   const { data: folio, isLoading, isError } = useFolio(id)
+  // Same request as above (shared query key) — US-A76: what cancelling now would cost.
+  const { data: quote, isLoading: quoteLoading } = useFolioCancellationQuote(id)
 
   const isBooking = folio?.status === 'booking'
   // A cancelled folio that carries a booking expiry was an apartado (US-AG07.5 late arrival).
@@ -269,7 +271,7 @@ export default function FolioReceiptPage() {
 
             {/* US-AG07/07.4/07.5 — Liquidar/Cancelar (live) or Reactivar (expired). Shared with
                 the Ventas folio detail so both stay in sync. */}
-            <BookingActions folio={folio} />
+            <BookingActions folio={folio} quote={quote} quoteLoading={quoteLoading} />
 
             <Button
               variant={isBooking || isExpiredBooking ? 'text' : 'contained'}

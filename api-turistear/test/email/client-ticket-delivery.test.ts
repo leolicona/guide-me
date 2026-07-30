@@ -239,6 +239,66 @@ describe('US-C03 — Cancellation Email', () => {
     expect(resendCalls[0].html).not.toContain('Motivo:')
   })
 
+  // US-A76 (#20) — the AGENT's apartado cancel emails too. It never did: tolerable while that path
+  // could not owe anybody money, and not once it can open a refund obligation the customer has to
+  // come and collect. Before this, the only thing telling them was whatever the agent said at the
+  // counter.
+  it('the agent apartado cancel emails the customer, like the admin path', async () => {
+    const { organizationId } = await seedUser({ email: AGENT_EMAIL, role: 'agent' })
+    const svc = await seedService(organizationId, 'Tour Apartado')
+    const slot = await seedSlot(organizationId, svc.id)
+
+    const saleRes = await confirmSale(AGENT_EMAIL, {
+      customer_email: 'juan@example.com',
+      customer_phone: '5512345678',
+      down_payment: 45000,
+      lines: [{ slot_id: slot.id, quantity: 1, unit_price: 150000 }],
+    })
+    expect(saleRes.status).toBe(201)
+    const folioId = ((await saleRes.json()) as any).folio.id
+    resendCalls = []
+
+    const res = await SELF.fetch(`http://api.local/api/pos/folios/${folioId}/cancel`, {
+      method: 'POST',
+      headers: jsonAuth(AGENT_EMAIL),
+      body: JSON.stringify({ reason: 'El cliente desistió' }),
+    })
+    expect(res.status).toBe(200)
+
+    expect(resendCalls).toHaveLength(1)
+    expect(resendCalls[0].to).toBe('juan@example.com')
+    expect(resendCalls[0].html).toContain('Tour Apartado')
+    expect(resendCalls[0].html).toContain('El cliente desistió')
+  })
+
+  // The renderer used to require a slot date and time, and the callers passed the folio's nullable
+  // columns straight through — so cancelling a LODGING stay, which has a check-in instead of a
+  // slot, emailed the customer "Hotel X — null null (×1)".
+  it('omits the departure line rather than printing "null null" (a stay has no slot)', async () => {
+    const { organizationId } = await seedUser({ email: ADMIN_EMAIL, role: 'admin' })
+    await seedUser({ email: AGENT_EMAIL, role: 'agent', organizationId })
+    const svc = await seedService(organizationId, 'Cabaña del Lago')
+    const slot = await seedSlot(organizationId, svc.id)
+
+    const saleRes = await confirmSale(AGENT_EMAIL, {
+      customer_email: 'juan@example.com',
+      lines: [{ slot_id: slot.id, quantity: 1, unit_price: 150000 }],
+    })
+    const folioId = ((await saleRes.json()) as any).folio.id
+    // Blank the snapshotted departure, which is what a stay line looks like to the engine.
+    await env.DB.prepare(
+      `UPDATE folio_lines SET slot_date = NULL, slot_start_time = NULL WHERE folio_id = ?`,
+    )
+      .bind(folioId)
+      .run()
+    resendCalls = []
+
+    await cancelFolio(ADMIN_EMAIL, folioId, { reason: 'cambio de planes' })
+    expect(resendCalls).toHaveLength(1)
+    expect(resendCalls[0].html).toContain('Cabaña del Lago')
+    expect(resendCalls[0].html).not.toContain('null')
+  })
+
   it('Scenario 7 — No Resend call on cancel when customer_email absent (defensive)', async () => {
     // POS now guarantees an email on every folio, so an emailless folio only arises
     // from legacy/direct data. Simulate it by nulling the column, then cancel: the

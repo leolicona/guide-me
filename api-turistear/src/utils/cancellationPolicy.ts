@@ -28,13 +28,19 @@ const tierSchema = z.object({
   affiliate_commission_pct: z.number().int().min(0).max(100).optional(),
 })
 
+// D20 — the ladder is the WHOLE document. There is no deposit clause, because an apartado is not a
+// different kind of sale: it is the same sale with less money collected against it, and D3 already
+// prices that correctly. `booking_deposit_retained_pct` used to live here as a floor that pinned an
+// apartado's refund to 0 no matter what the ladder said; it is removed, not defaulted to 0, so the
+// contradiction cannot be re-introduced by configuration.
+//
+// Stored documents written before this still carry the key. Zod strips unknown keys on a non-strict
+// object, so an org policy or a folio snapshot from the old shape parses cleanly and the stale value
+// is simply ignored — no version bump, no snapshot rewrite.
 export const cancellationPolicySchema = z
   .object({
     version: z.literal(1),
     tiers: z.array(tierSchema).min(1).max(10),
-    // Floor for an unsettled `booking` folio. 100 (the default) reproduces "a deposit is never
-    // refunded" (US-AG07.4); 0 lets the deposit follow the ladder.
-    booking_deposit_retained_pct: z.number().int().min(0).max(100).default(100),
   })
   .superRefine((policy, ctx) => {
     const terminals = policy.tiers.filter((t) => t.min_hours === null)
@@ -83,17 +89,26 @@ export const parseCancellationPolicy = (raw: string | null | undefined): Cancell
   }
 }
 
-// D18 — the ladder every organization inherits unless it configures its own: refund everything,
-// always. It is the reading a customer would assume of unstated terms, and it never refunds less
-// than the most generous path that existed before the engine.
+// D18 (revised) — the ladder every organization inherits unless it configures its own: full refund
+// with five days' notice, half inside that, nothing once the departure has passed.
 //
-// This is written into every org by migration 0054 and at organization creation, so it is normally
-// read from the database like any other policy. The constant exists so the two writers agree on one
+// The first version of this constant refunded 100% unconditionally, on the reasoning that unstated
+// terms should be read the way a customer would. That held only while the engine priced fully-paid
+// folios — sales an admin was already refunding by hand. Now that it prices apartados too (D20), an
+// unconfigured org would hand back every deposit on every cancellation, including to a customer who
+// simply never showed up. A default nobody would run is not a safe default; it is a trap that
+// happens to be generous. This ladder is the one the spec has always used as its worked example.
+//
+// Written into every org by migrations 0054/0055 and at organization creation, so it is normally
+// read from the database like any other policy. The constant exists so the writers agree on one
 // definition — and as the last line of `resolvePolicy` below.
 export const DEFAULT_CANCELLATION_POLICY: CancellationPolicy = Object.freeze({
   version: 1 as const,
-  tiers: [{ min_hours: null, refund_pct: 100, agent_commission_pct: 0 }],
-  booking_deposit_retained_pct: 100,
+  tiers: [
+    { min_hours: 120, refund_pct: 100, agent_commission_pct: 0 },
+    { min_hours: 24, refund_pct: 50, agent_commission_pct: 100 },
+    { min_hours: null, refund_pct: 0, agent_commission_pct: 100 },
+  ],
 })
 
 // D6 — a folio is priced by the ladder that was in force when it was SOLD; the org's live policy is
@@ -132,8 +147,6 @@ export interface ComputeRefundInput {
   policy: CancellationPolicy
   lines: PolicyLine[]
   amountPaid: number
-  /** An unsettled `booking` folio is subject to the deposit floor. */
-  folioStatus: 'paid' | 'booking' | 'cancelled'
   /** Seconds since epoch. Injected so the engine has no clock of its own. */
   nowEpoch: number
   timezone: string
@@ -208,33 +221,45 @@ const lineCommission = (line: PolicyLine): number =>
     ? Math.round((line.lineTotal * line.commissionValue) / 10000)
     : line.commissionValue * line.quantity
 
-// Each line's commission, reconciled against what the folio actually booked.
+// Each line's commission, reconciled so the per-line values sum to what the folio ACTUALLY booked.
 //
-// Normally the per-line values sum to `bookedCommission` and this returns them untouched. When the
-// lines carry NOTHING but the folio booked something — a folio sold before `0028` snapshotted
-// commission onto lines — the booked amount is distributed across lines in proportion to
-// `line_total`, which is exactly what a percent commission would have produced. Each line then
-// matches its own tier as usual, so a pre-`0028` folio is priced by the same rules as any other
-// instead of quietly forfeiting nothing.
+// `folios.commission_amount` is authoritative — it is what the cash engine and the commission report
+// read — so when it is supplied the lines are redistributed to match it, in either direction:
 //
-// The lines are NOT trusted over the folio the other way round: if they sum to more than the folio
-// booked, they win, because a per-line total that exceeds the snapshot means the snapshot is the
-// stale one. The reversal is clamped against the ledger's real commission rows regardless
-// (`prorateAcrossBuckets`), so neither direction can reverse money that was never accrued.
+//   * lines carry nothing, folio booked something (a folio sold before `0028` snapshotted commission
+//     onto lines): the booked amount is spread in proportion to `line_total`, which is exactly what
+//     a percent commission would have produced.
+//   * lines carry MORE than the folio booked: an APARTADO. Commission accrues on the amount actually
+//     collected (US-AG07), so a 10% commission on a 300,000 sale with a 45,000 deposit booked 4,500
+//     — while the lines, which describe the whole sale, still say 30,000. Deriving from the lines
+//     reported that the agent forfeited 30,000 of commission they had never earned.
+//
+// The ledger was never at risk of paying that out (`prorateAcrossBuckets` clamps a reversal to the
+// commission rows that exist), but the OUTCOME is shown to a human — "esto es lo que pierdes" on the
+// POS — and a figure that is 6× reality is not a rounding concern. Scaling here fixes the number at
+// its source, so every reader agrees.
+//
+// Omitting `bookedCommission` means "no authoritative figure": the lines are used as-is.
 const lineCommissions = (lines: PolicyLine[], bookedCommission?: number): number[] => {
   const perLine = lines.map(lineCommission)
   const summed = perLine.reduce((a, b) => a + b, 0)
-  if (summed > 0 || !bookedCommission || bookedCommission <= 0) return perLine
+  if (bookedCommission === undefined || bookedCommission < 0 || summed === bookedCommission) {
+    return perLine
+  }
 
-  const totalValue = lines.reduce((sum, l) => sum + l.lineTotal, 0)
-  if (totalValue <= 0) return perLine
-  const shares = lines.map((l) => Math.floor((bookedCommission * l.lineTotal) / totalValue))
-  // Give the flooring remainder to the largest line, so the shares sum to the booked amount exactly.
+  // Spread by whatever signal we have: the per-line commissions when the lines carry any, the line
+  // totals when they carry none. Both are proportional to what each line contributed to the sale.
+  const weights = summed > 0 ? perLine : lines.map((l) => l.lineTotal)
+  const totalWeight = weights.reduce((a, b) => a + b, 0)
+  if (totalWeight <= 0) return perLine
+
+  const shares = weights.map((w) => Math.floor((bookedCommission * w) / totalWeight))
+  // Give the flooring remainder to the heaviest line, so the shares sum to the booked amount exactly.
   const remainder = bookedCommission - shares.reduce((a, b) => a + b, 0)
   if (remainder > 0) {
     let biggest = 0
-    lines.forEach((l, i) => {
-      if (l.lineTotal > lines[biggest]!.lineTotal) biggest = i
+    weights.forEach((w, i) => {
+      if (w > weights[biggest]!) biggest = i
     })
     shares[biggest] = shares[biggest]! + remainder
   }
@@ -246,11 +271,12 @@ const commissionPctOf = (tier: CancellationTier, sellerKind: 'agent' | 'affiliat
     ? (tier.affiliate_commission_pct ?? tier.agent_commission_pct)
     : tier.agent_commission_pct
 
+// D20 — note what is NOT a parameter: the folio's status. The engine cannot tell an apartado from a
+// fully-paid sale, and that is the point. `amountPaid` is the only thing that differs between them.
 export const computeCancellationRefund = ({
   policy,
   lines,
   amountPaid,
-  folioStatus,
   nowEpoch,
   timezone,
   sellerKind,
@@ -298,20 +324,12 @@ export const computeCancellationRefund = ({
     })
   }
 
-  // D3 — the inversion that makes deposits work. The ladder says what the company keeps of the
-  // SALE; the customer gets back whatever of their payment is left over. A 30% deposit against a
-  // 50% retention refunds nothing, with no rule about deposits — and the customer is never pursued
-  // for the shortfall, because the floor is zero.
-  let refund = Math.max(0, amountPaid - grossRetention)
-
-  // An unsettled booking additionally honours the deposit floor. At 100 (the default) this pins the
-  // refund to 0, reproducing US-AG07.4 exactly.
-  if (folioStatus === 'booking') {
-    refund = Math.min(
-      refund,
-      Math.floor((amountPaid * (100 - policy.booking_deposit_retained_pct)) / 100),
-    )
-  }
+  // D3 — the inversion that makes deposits work, and the whole of D20's implementation. The ladder
+  // says what the company keeps of the SALE; the customer gets back whatever of their payment is
+  // left over. A 30% deposit against a 50% retention refunds nothing — not because deposits have a
+  // rule, but because there is nothing left. And the customer is never pursued for the shortfall,
+  // because the floor is zero.
+  const refund = Math.max(0, amountPaid - grossRetention)
 
   // What the company can actually keep is bounded by what it actually collected — the ladder may
   // retain 500 on paper while only 300 was ever paid. Deriving it as `paid − refund` keeps the two

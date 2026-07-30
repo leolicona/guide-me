@@ -577,7 +577,6 @@ export const quoteCancellation = async (
     policy,
     lines,
     amountPaid: folio.amountPaid,
-    folioStatus: folio.status,
     nowEpoch: Math.floor(now.getTime() / 1000),
     timezone: orgRow?.timezone ?? 'America/Mexico_City',
     // D12 — an affiliate sale is already stamped on the folio (US-A51), so which of the tier's two
@@ -612,15 +611,82 @@ const refundFieldsFor = (outcome: CancellationOutcome): Partial<typeof folios.$i
       }
     : { refundStatus: 'none' as const, refundAmount: 0 }
 
-// Fire-and-forget cancellation email — a Resend failure must never fail a committed
-// cancellation. waitUntil guarantees the send completes after the response returns (a bare
-// floating promise can be cancelled when the Worker returns, silently dropping the email).
-const queueCancellationEmail = async (
-  c: FoliosContext,
+// Cancel a folio at the ladder's price: quote it, flip it, release its inventory, reverse its money.
+//
+// The entrances differ ONLY in who is recorded as having cancelled and why:
+//   * admin (US-A21)                    — the admin cancels a folio outright
+//   * tourist_request (US-T04)          — an admin approves a tourist's request
+//   * agent (US-AG07.4)                 — an agent cancels an apartado from the POS
+//
+// Everything that touches money — the price, the refund obligation, the PIN, the clawback flag, the
+// proportional ledger reversal — is derived HERE, so no entrance can express a different opinion
+// about the same folio. That is the whole point of the engine: the original defect was two paths
+// answering differently, and the agent path was a third answering differently again (it retained the
+// deposit unconditionally and reversed the collected money in full, which left cash in a drawer that
+// no report accounted for). Adding a fourth entrance means passing a different `source`, nothing else.
+//
+// Returns `won: false` when a concurrent cancellation won the guarded flip; the caller decides what
+// that means for its own bookkeeping.
+export const cancelFolioPriced = async (
   db: Db,
   org: string,
   folioId: string,
-  folioOut: NonNullable<Awaited<ReturnType<typeof readFolio>>>,
+  lines: Array<{ slotId: string | null; quantity: number; zoneId: string | null }>,
+  now: Date,
+  by: {
+    cancelledBy: string | null
+    reason: string | null
+    source: 'admin' | 'agent' | 'tourist_request'
+  },
+): Promise<{ won: boolean; outcome: CancellationOutcome }> => {
+  const outcome = await quoteCancellation(db, org, folioId, now)
+  const won = await applyCancellation(
+    db,
+    org,
+    folioId,
+    lines,
+    now,
+    {
+      status: 'cancelled',
+      cancelledAt: now,
+      cancelledBy: by.cancelledBy,
+      cancellationReason: by.reason,
+      // Derived, never chosen (D10). The flag keeps its meaning for every existing reader — the
+      // cash engine and the commission report both ask "was any commission taken back".
+      cancellationClawback: outcome.reversedCommission > 0,
+      cancellationSource: by.source,
+      ...refundFieldsFor(outcome),
+    },
+    { refundAmount: outcome.refund, reversedCommission: outcome.reversedCommission },
+  )
+  return { won, outcome }
+}
+
+// Fire-and-forget cancellation email — a Resend failure must never fail a committed
+// cancellation. waitUntil guarantees the send completes after the response returns (a bare
+// floating promise can be cancelled when the Worker returns, silently dropping the email).
+//
+// The context and folio are STRUCTURAL rather than the admin's concrete types, so the agent's
+// apartado cancel can send the same email. That path never sent one — tolerable while it never
+// owed anybody money, and not tolerable now that it can open a refund obligation (US-A76): a
+// customer owed cash has to learn about it from something other than a phone call that may not
+// happen. Both POS and admin contexts satisfy `{ env, executionCtx }`.
+export const queueCancellationEmail = async (
+  c: { env: CloudflareBindings; executionCtx: ExecutionContext },
+  db: Db,
+  org: string,
+  folioId: string,
+  folioOut: {
+    customer_email: string | null
+    customer_name: string | null
+    cancellation_reason?: string | null
+    lines: Array<{
+      service_name: string
+      slot_date: string | null
+      slot_start_time: string | null
+      quantity: number
+    }>
+  },
 ) => {
   if (!folioOut.customer_email || !c.env.RESEND_API_KEY) return
 
@@ -637,7 +703,7 @@ const queueCancellationEmail = async (
     orgName,
     folioId,
     cancelledAt: new Date(),
-    cancellationReason: folioOut.cancellation_reason,
+    cancellationReason: folioOut.cancellation_reason ?? null,
     lines: folioOut.lines.map((l) => ({
       serviceName: l.service_name,
       slotDate: l.slot_date,
@@ -696,26 +762,11 @@ export const cancelFolio = async (c: FoliosContext) => {
   // D17 — the ladder prices every cancellation. There is no second path: the legacy branch (a
   // lodging-only refund for stays, nothing at all for tours) was deleted in Phase 2, and
   // `quoteCancellation` always returns an outcome because `resolvePolicy` always resolves.
-  const outcome = await quoteCancellation(db, org, id, now)
-  const won = await applyCancellation(
-    db,
-    org,
-    id,
-    lines,
-    now,
-    {
-      status: 'cancelled',
-      cancelledAt: now,
-      cancelledBy: admin.userId,
-      cancellationReason: input.reason ?? null,
-      // Derived, never chosen (D10). The flag keeps its meaning for every existing reader — the
-      // cash engine and the commission report both ask "was any commission taken back".
-      cancellationClawback: outcome.reversedCommission > 0,
-      cancellationSource: 'admin',
-      ...refundFieldsFor(outcome),
-    },
-    { refundAmount: outcome.refund, reversedCommission: outcome.reversedCommission },
-  )
+  const { won, outcome } = await cancelFolioPriced(db, org, id, lines, now, {
+    cancelledBy: admin.userId,
+    reason: input.reason ?? null,
+    source: 'admin',
+  })
   if (!won) {
     // A concurrent cancellation won the guarded flip after our pre-check.
     throw new ApiError('CONFLICT', 409, 'This folio is already cancelled')
@@ -875,24 +926,11 @@ export const approveCancellationRequest = async (c: FoliosContext) => {
   // than merely corrected. Approving is an authorisation, not a pricing decision, so this endpoint
   // takes no body fields (D10). `refundFieldsFor` still opens no obligation when the refund is 0,
   // which covers the unpaid-folio case the old `owesRefund` guard handled.
-  const outcome = await quoteCancellation(db, org, folio.id, now)
-  const won = await applyCancellation(
-    db,
-    org,
-    folio.id,
-    lines,
-    now,
-    {
-      status: 'cancelled',
-      cancelledAt: now,
-      cancelledBy: admin.userId,
-      cancellationReason: request.reason ?? 'Solicitud de cancelación del cliente',
-      cancellationClawback: outcome.reversedCommission > 0,
-      cancellationSource: 'tourist_request',
-      ...refundFieldsFor(outcome),
-    },
-    { refundAmount: outcome.refund, reversedCommission: outcome.reversedCommission },
-  )
+  const { won, outcome } = await cancelFolioPriced(db, org, folio.id, lines, now, {
+    cancelledBy: admin.userId,
+    reason: request.reason ?? 'Solicitud de cancelación del cliente',
+    source: 'tourist_request',
+  })
   if (!won) {
     // A concurrent cancellation won the guarded flip after our pre-check. The request
     // stays pending — the admin resolves it explicitly (same recovery as approving a

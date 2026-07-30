@@ -12,7 +12,7 @@ import {
   Divider,
 } from '@mui/material'
 import ArrowBackRounded from '@mui/icons-material/ArrowBackRounded'
-import { useFolio } from '../features/pos/hooks'
+import { useFolio, useFolioCancellationQuote } from '../features/pos/hooks'
 import { useOrgDateFormatter } from '../features/organization'
 import { TicketQr } from '../features/pos/components/TicketQr'
 import WarningAmberRounded from '@mui/icons-material/WarningAmberRounded'
@@ -45,6 +45,8 @@ export default function FolioHistoryDetailPage() {
   const formatDate = useOrgDateFormatter(DATE_FMT) // US-A66 — org-local audit timestamps
   const { id } = useParams<{ id: string }>()
   const { data: folio, isLoading, isError } = useFolio(id)
+  // Same request as above (shared query key) — US-A76: what cancelling now would cost.
+  const { data: quote, isLoading: quoteLoading } = useFolioCancellationQuote(id)
 
   const isBooking = folio?.status === 'booking'
 
@@ -233,7 +235,7 @@ export default function FolioHistoryDetailPage() {
 
             {/* US-AG07/07.4/07.5 — Liquidar/Cancelar (live) or Reactivar (expired), dynamically
                 incorporated into this existing detail. Renders nothing for paid/plain folios. */}
-            <BookingActions folio={folio} />
+            <BookingActions folio={folio} quote={quote} quoteLoading={quoteLoading} />
           </Stack>
         )}
       </Box>
