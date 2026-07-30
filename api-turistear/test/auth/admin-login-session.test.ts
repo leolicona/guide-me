@@ -133,8 +133,10 @@ describe('Admin Login — POST /api/auth/login', () => {
     expect(cookieHeader).toMatch(/HttpOnly/i)
     expect(cookieHeader).toMatch(/Secure/i)
     expect(cookieHeader).toMatch(/SameSite=Lax/i)
-    expect(cookieHeader).toMatch(/Max-Age=900/)
-    expect(cookieHeader).toMatch(/Max-Age=5184000/)
+    // BOTH cookies carry the idle-session window. gm_access used to expire in 15 min, which only
+    // ever deleted it mid-session and forced a re-login; the JWT's own `exp` is the real gate.
+    expect(cookieHeader).not.toMatch(/Max-Age=900/)
+    expect(setCookies.filter((s: string) => /Max-Age=5184000/.test(s))).toHaveLength(2)
     // A real login SUPERSEDES any operator shift — it must clear gm_op (which authMiddleware
     // checks first), else a stale operator cookie hijacks the session with its manager's identity.
     expect(cookieHeader).toMatch(/gm_op=;/)
@@ -288,8 +290,41 @@ describe('Auth Middleware — protected routes', () => {
     const cookieHeader = setCookies.join('\n')
     expect(cookieHeader).toMatch(/gm_access=/)
     expect(cookieHeader).toMatch(/gm_refresh=/)
-    expect(cookieHeader).toMatch(/Max-Age=900/)
-    expect(cookieHeader).toMatch(/Max-Age=5184000/)
+    expect(setCookies.filter((s: string) => /Max-Age=5184000/.test(s))).toHaveLength(2)
+  })
+
+  // The access cookie holds a 10-minute token but outlives it, so it is routinely present-but-stale.
+  // It is also routinely ABSENT — cleared by the browser, a privacy sweep, or a cookie jar that
+  // dropped it — while gm_refresh survives. That case used to 401 outright without even looking at
+  // the refresh token, so any idle gap cost the user their password. A lone refresh token IS a
+  // session and must renew like any other stale one.
+  it('Scenario 7b: renews from a lone gm_refresh when the access cookie is gone', async () => {
+    await seedUser()
+    const newJwt = buildFakeJwt(USER_EMAIL)
+
+    const calls = mockAgnosticAuth({
+      '/auth/refresh': () =>
+        new Response(
+          JSON.stringify({
+            success: true,
+            data: { jwt: newJwt, refreshToken: 'refresh_new' },
+          }),
+          { status: 200 },
+        ),
+    })
+
+    const res = await SELF.fetch('http://api.local/api/me', {
+      headers: { Cookie: 'gm_refresh=old_refresh' },
+    })
+
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { user: { email: string } }
+    expect(body.user.email).toBe(USER_EMAIL)
+    expect(calls.filter((c) => c.pathname === '/auth/refresh')).toHaveLength(1)
+
+    const cookieHeader = (res.headers.getSetCookie?.() ?? []).join('\n')
+    expect(cookieHeader).toMatch(/gm_access=/)
+    expect(cookieHeader).toMatch(/gm_refresh=/)
   })
 
   it('Scenario 8: returns 401 UNAUTHORIZED — and does NOT clear cookies — when refresh fails (BUG-014)', async () => {
@@ -319,7 +354,7 @@ describe('Auth Middleware — protected routes', () => {
     expect(setCookies).toEqual([])
   })
 
-  it('Scenario 9: returns 401 UNAUTHORIZED without attempting refresh when no access cookie', async () => {
+  it('Scenario 9: returns 401 UNAUTHORIZED without attempting refresh when NO session cookie at all', async () => {
     await seedUser()
     const refreshSpy = vi.fn()
     mockAgnosticAuth({

@@ -491,8 +491,10 @@ describe('Complete Invitation — POST /api/auth/invite/complete', () => {
     expect(cookieHeader).toMatch(/HttpOnly/i)
     expect(cookieHeader).toMatch(/Secure/i)
     expect(cookieHeader).toMatch(/SameSite=Lax/i)
-    expect(cookieHeader).toMatch(/Max-Age=900/)
-    expect(cookieHeader).toMatch(/Max-Age=5184000/)
+    // Both session cookies carry the idle-session window — the access cookie no longer expires
+    // in 15 min, which only ever deleted it mid-session and cost the user a re-login.
+    expect(cookieHeader).not.toMatch(/Max-Age=900/)
+    expect(setCookies.filter((s: string) => /Max-Age=5184000/.test(s))).toHaveLength(2)
   })
 
   it('Scenario 10: returns 400 INVALID_TOKEN when invitation has already been accepted', async () => {

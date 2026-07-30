@@ -6,6 +6,50 @@ Tracks confirmed bugs, root causes, and fixes. Each entry is immutable once clos
 
 ---
 
+## BUG-017 — Any Idle Gap Longer Than 15 Minutes Forces a Full Re-Login — ✅ FIXED
+
+**Discovered:** 2026-07-30
+**Fixed:** 2026-07-30
+**Reporter:** Leo Licona (field report: "as admin I have to enter the password a lot of times during the day")
+**Affected component:** `api-turistear/src/middleware/auth.ts:127-131`, `api-turistear/src/utils/cookies.ts:9`
+**Severity:** High — the single largest source of forced logins; worst on the smartphones agents use in the field.
+
+### Symptom
+
+An admin or agent types their email and password several times a day, despite a 60-day sliding
+refresh token. Reliably reproducible: leave the app idle for more than 15 minutes (screen lock,
+backgrounded PWA, a bus ride), return, and land on `/login`.
+
+### Root Cause
+
+Two decisions that are each defensible alone and fatal together:
+
+1. `ACCESS_MAX_AGE = 60 * 15` (`cookies.ts:9`) gave the `gm_access` cookie a 15-minute `Max-Age`,
+   even though the JWT it carries lives 10 minutes. The browser therefore *deletes* the cookie
+   during any idle gap.
+2. `authMiddleware` bailed out the moment `gm_access` was absent (`auth.ts:127-131`), throwing 401
+   **without ever reading `gm_refresh`** — which was sitting in the very same request, valid for
+   another 60 days.
+
+So transparent renewal only worked inside the narrow window `[T+10min, T+15min]`. Outside it the
+401 was unrecoverable, and `authService.ts` turned it into `window.location.replace('/login')`.
+
+The behaviour was codified as intentional in `docs/auth/admin-login-session.spec.md` Scenario 9
+("No refresh is attempted") and pinned by a test asserting `refreshSpy` was never called. The spec
+conflated "no access token" with "no session" — but possession of a valid refresh token *is* a
+session. Distinct from BUG-014's rotation stampede, which is narrower and still open.
+
+### Fix
+
+Both cookies now carry the idle-session window (`SESSION_REFRESH_TTL_SECONDS`); the access cookie
+deliberately outlives the token it holds, since the JWT's own `exp` is the real gate and
+`auth.ts:136` validates it on every request — the short `Max-Age` bought no security. And
+`authMiddleware` now refuses only when **both** cookies are absent; a lone `gm_refresh` falls
+through to the existing renewal path. Scenario 9 was re-scoped to "no session cookie at all" and a
+new Scenario 7b covers renewal from a lone refresh cookie.
+
+---
+
 ## BUG-016 — Manual Cancellation Never Releases Zoned Seats (Zone Counter Permanently Inflated) — ✅ FIXED
 
 **Discovered:** 2026-07-27
