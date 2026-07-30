@@ -621,6 +621,8 @@ interface BookingPolicy {
   holdDays: number
   bookingGraceOffsetMinutes: number
   preDepartureBufferHours: number
+  /** US-A77 — hours before departure past which an apartado may no longer be CREATED. 0 = off. */
+  creationCutoffHours: number
 }
 
 // US-AG07.1 — cascade-ready policy resolver. A per-service override (later phase) would take
@@ -630,12 +632,14 @@ function resolveBookingPolicy(org: {
   bookingHoldDays: number
   bookingGraceOffsetMinutes: number
   bookingPreDepartureBufferHours: number
+  bookingCreationCutoffHours?: number
 }): BookingPolicy {
   return {
     minDownPaymentPct: org.bookingMinDownPaymentPct,
     holdDays: org.bookingHoldDays,
     bookingGraceOffsetMinutes: org.bookingGraceOffsetMinutes,
     preDepartureBufferHours: org.bookingPreDepartureBufferHours,
+    creationCutoffHours: org.bookingCreationCutoffHours ?? 0,
   }
 }
 
@@ -880,6 +884,7 @@ export const confirmSale = async (c: PosContext) => {
       salesCutoffOffsetMinutes: organizations.salesCutoffOffsetMinutes,
       bookingGraceOffsetMinutes: organizations.bookingGraceOffsetMinutes,
       bookingPreDepartureBufferHours: organizations.bookingPreDepartureBufferHours,
+      bookingCreationCutoffHours: organizations.bookingCreationCutoffHours,
       lodgingWeekendDays: organizations.lodgingWeekendDays,
       timezone: organizations.timezone,
       cancellationPolicy: organizations.cancellationPolicy,
@@ -1245,6 +1250,7 @@ export const confirmSale = async (c: PosContext) => {
     bookingHoldDays: orgRow?.bookingHoldDays ?? 7,
     bookingGraceOffsetMinutes: orgRow?.bookingGraceOffsetMinutes ?? 15,
     bookingPreDepartureBufferHours: orgRow?.bookingPreDepartureBufferHours ?? 24,
+    bookingCreationCutoffHours: orgRow?.bookingCreationCutoffHours ?? 0,
   })
   const isBooking = input.down_payment != null
   // US-AG41/US-A67 — an electronic (transfer) payment is not yet in hand: the folio is created
@@ -1297,6 +1303,22 @@ export const confirmSale = async (c: PosContext) => {
       },
       { epoch: Infinity, date: '' },
     )
+    // US-A77 (S1) — an apartado may not be opened this close to departure. Distinct from the sales
+    // cutoff, which gates every folio and stays at 0 so a cash walk-in sells until the last minute:
+    // a completed sale near departure is fine, a promise to come back and pay is not. Without this
+    // an agent could open an apartado twenty minutes out that expires fifteen minutes out — five
+    // minutes of hold, and a customer who never had a chance to settle.
+    if (policy.creationCutoffHours > 0) {
+      const hoursOut = (earliest.epoch - nowSec) / 3600
+      if (hoursOut < policy.creationCutoffHours) {
+        throw new ApiError(
+          'BOOKING_TOO_LATE',
+          422,
+          `Los apartados cierran ${policy.creationCutoffHours} h antes de la salida. Cobra el total para vender este servicio.`,
+        )
+      }
+    }
+
     bookingExpiresAt = bookingExpiryDate(
       policy,
       nowSec,
@@ -2767,6 +2789,7 @@ export const reactivateBooking = async (c: PosContext) => {
       salesCutoffOffsetMinutes: organizations.salesCutoffOffsetMinutes,
       bookingGraceOffsetMinutes: organizations.bookingGraceOffsetMinutes,
       bookingPreDepartureBufferHours: organizations.bookingPreDepartureBufferHours,
+      bookingCreationCutoffHours: organizations.bookingCreationCutoffHours,
       timezone: organizations.timezone,
     })
     .from(organizations)
@@ -2777,6 +2800,7 @@ export const reactivateBooking = async (c: PosContext) => {
     bookingHoldDays: orgRows[0]?.bookingHoldDays ?? 7,
     bookingGraceOffsetMinutes: orgRows[0]?.bookingGraceOffsetMinutes ?? 15,
     bookingPreDepartureBufferHours: orgRows[0]?.bookingPreDepartureBufferHours ?? 24,
+    bookingCreationCutoffHours: orgRows[0]?.bookingCreationCutoffHours ?? 0,
   })
   // US-A66 — the cutoff guard + fresh same-day expiry below resolve in the org's time zone.
   const tz = orgRows[0]?.timezone ?? 'America/Mexico_City'

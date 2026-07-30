@@ -1,8 +1,7 @@
 # Feature: Apartados as stages — notify before releasing
 
-> **Status: DESIGNED, NOT BUILT.** The decisions below are settled; no code implements them yet.
-> Everything described here is a change to `docs/bookings/bookings-down-payments.spec.md`
-> (US-AG07/AG07.1) and interacts with `docs/cancellation/cancellation-policy-engine.spec.md`.
+> **Status: BUILT**, except S6 (see § Open). Changes `docs/bookings/bookings-down-payments.spec.md`
+> (US-AG07/AG07.1) and supersedes `docs/cancellation/cancellation-policy-engine.spec.md` D21.
 
 ## Context
 
@@ -85,7 +84,8 @@ follows the ladder") resolved cleanly. **D21 is superseded by this document.**
 | **S4** | **The notification is email when the customer left one; WhatsApp, tapped by the agent, otherwise.** | Forced, not preferred: a Worker on a cron can call Resend but **cannot send WhatsApp** — `wa.me` is a deep link a human opens. A phone is mandatory on every apartado (US-AG07 D4), so there is no dead end. |
 | **S5** | **`reminder_status` records the notification, with `reminder_sent_by = null` for a system send.** | The column already exists (`none` \| `sent`) with a nullable sender. No migration for this part. |
 | **S6** | **Per-folio extension of the FINAL deadline, with an audit trail** (`booking_extended_by` / `booking_extended_at`). | *(Reinterpretation of a user decision — see § Open.)* Under S2 "move to stage ②" is not an action, because advancement is automatic. What remains uncovered is the late arrival: a customer stuck in traffic five minutes out. Today that is only expressible org-wide via a negative grace offset. Requiring proof of a phone call was rejected — nobody verifies it, and it turns an honest record into a checkbox. |
-| **S7** | **Stage is DERIVED from timestamps, not stored.** `now < booking_expires_at` ⇒ ①, otherwise ②. | A stored stage needs a writer, and a cron that writes state drifts from the clock that defines it. The existing `booking_expires_at` already carries the ① boundary; ② ends at the grace instant, computable from the departure. |
+| **S7** | **Stage is DERIVED from timestamps, not stored.** `now < booking_expires_at` ⇒ ①; past it, ② until `salida − gracia`. | A stored stage needs a writer, and a cron that writes state drifts from the clock that defines it. The existing `booking_expires_at` already carries the ① boundary; ② ends at the grace instant, computed from the **line's own snapshotted departure** — a folio prices by the departure it was sold for, even if the slot is later moved. Nothing is rewritten on advance, so there is no state to disagree with the clock. |
+| **S8** *(added in build)* | **A failed reminder email is not a failed folio.** The send has its own guard, separate from the per-folio one, and does not mark `reminder_status`. | Counting a Resend outage under `failed` would make an email provider's bad afternoon read as apartados breaking. The apartado is fine — it advanced by the clock alone and nothing about it is stuck. Writing the flag only after a successful send means the one notification a customer gets is never silently consumed; it simply retries next run. |
 
 ---
 
@@ -95,8 +95,12 @@ follows the ladder") resolved cleanly. **D21 is superseded by this document.**
    than the creation cutoff (S1) → `422 BOOKING_TOO_LATE`. A full-payment sale is unaffected and
    remains governed by `sales_cutoff_offset_minutes` alone.
 2. **The settle deadline no longer cancels.** At `booking_expires_at` the sweep sends the
-   notification and advances the folio to stage ② by recomputing its release instant — the same
-   call `reactivate` already makes (`pos/handler.ts`, `bookingExpiryDate` with the current clock).
+   notification, and the folio is in stage ② from that instant on. *(Design change made in the
+   build: the folio's release instant is **not** recomputed and nothing is written. The original
+   plan was to rewrite `booking_expires_at` the way `reactivate` does, which would have made the
+   two stages indistinguishable afterwards — a rewritten deadline looks exactly like a folio that
+   was always in ②, so a re-run could not tell them apart. Deriving both boundaries instead keeps
+   `booking_expires_at` meaning one thing, and honours S7 properly.)*
 3. **One notification per folio.** Guarded by `reminder_status`, so a re-run of the cron cannot
    re-send. An agent's manual WhatsApp claim and a system email are the same flag: whichever
    happened first, the customer was told.
@@ -133,11 +137,15 @@ When the sweep runs
 Then the folio is `cancelled`, `cancellation_source = 'system_expiry'`, the seats and zones are
 released, and the refund is the ladder's terminal tier — 0% under the inherited ladder.
 
-**S-4 — A late sale enters at ② directly**
-Given the creation cutoff is 48h and the settle deadline 24h
-When an agent tries to open an apartado 30h before departure
-Then `422 BOOKING_TOO_LATE`. *(With S1 in force, a sale can no longer be born inside stage ②; the
-`nearDeparture` branch survives only for `reactivate`.)*
+**S-4 — A late apartado is refused, but the service still sells**
+Given the creation cutoff is 96h
+When an agent tries to open an apartado on a slot 72h out
+Then `422 BOOKING_TOO_LATE` — **and the same slot sells immediately at full payment**, because the
+sales cutoff governs that and is still 0. The rule refuses the *deposit*, not the service.
+
+*(This replaces the originally-specified S-4, which only asserted the rejection. Asserting the
+rejection alone would pass just as well if the cutoff had accidentally blocked every sale on that
+slot, which is the failure mode worth catching.)*
 
 **S-5 — The boundary cliff is gone**
 Given the creation cutoff is 48h and the settle deadline 24h
@@ -153,21 +161,23 @@ Then the healthy one is processed and the run reports one failure.
 
 ## Definition of Done
 
-- [ ] New org setting: apartado creation cutoff (hours), with `límite ≥ plazo` validated **in the
-      form and at the endpoint** — a rule enforced only in the UI is not a rule
-- [ ] `confirmSale` rejects a too-late apartado with `422 BOOKING_TOO_LATE`; a full-payment sale is
-      untouched
-- [ ] The sweep splits into two passes: **notify + advance** at `booking_expires_at`, **cancel** at
-      the grace instant. Cancelling goes through `cancelFolioPriced`
-- [ ] Per-folio `try/catch` in the sweep (Rule 5) — closes the gap between
-      `cancellation-policy-engine.spec.md` Rule 24 and the code
-- [ ] A balance-reminder email template in `services/resend.ts`
-- [ ] `booking_extended_by` / `booking_extended_at` + the agent action (S6) — **confirm scope with
-      the user first**, see § Open
-- [ ] Settings copy: the creation cutoff explained next to the settle deadline, since the two are
-      now a pair
-- [ ] `cancellation-policy-engine.spec.md` D21 marked superseded; US-A74 restored in `SPEC.md`
-- [ ] Scenarios S-1…S-6 covered
+- [x] New org setting `booking_creation_cutoff_hours` (migration `0056`, default `0` = off), with
+      `límite ≥ plazo` validated **at the endpoint against the STORED values** — so a PATCH that
+      raises the settle deadline past an existing cutoff fails too, not only one that lowers the
+      cutoff. The form mirrors it for fast feedback; a rule enforced only in the UI is not a rule
+- [x] `confirmSale` rejects a too-late apartado with `422 BOOKING_TOO_LATE`; the same slot still
+      sells at full payment, governed by the sales cutoff alone
+- [x] The sweep splits into two passes — **notify + advance** past `booking_expires_at`, **cancel**
+      at the grace instant, the latter through `cancelFolioPriced` with `source: 'system_expiry'`
+- [x] Per-folio `try/catch` in the sweep (Rule 5) — closes the gap between
+      `cancellation-policy-engine.spec.md` Rule 24 and the code, which had a single `.catch` on the
+      scheduled handler, so one bad folio aborted the run and every apartado behind it kept its seats
+- [x] `sendBookingReminderEmail` in `services/resend.ts`
+- [x] Settings: the creation cutoff sits directly under the settle deadline, since the two are a pair
+- [x] `cancellation-policy-engine.spec.md` D21 marked superseded; US-A74 restored in `SPEC.md`
+- [x] Scenarios S-1…S-3, S-5, S-6 covered (`pos-bookings-sweep`, `pos-zoned-release`,
+      `organization-policy`). **S-4 was rewritten in the build** — see below
+- [ ] `booking_extended_by` / `booking_extended_at` + the agent action (S6) — **not built**, see § Open
 
 ---
 

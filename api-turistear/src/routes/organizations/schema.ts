@@ -28,6 +28,10 @@ export const updateOrganizationSchema = z.object({
   // US-AG07.1 — pre-departure buffer (hours): a deposit-hold must be settled at least this long
   // before departure; within this window of departure the tighter grace applies. 0–168h (0–7 days).
   booking_pre_departure_buffer_hours: z.number().int().min(0).max(168).optional(),
+  // US-A77 — how close to departure an APARTADO may still be created, in hours. 0 = no restriction.
+  // The coherence rule (`>= booking_pre_departure_buffer_hours` when set) is enforced below, where
+  // both values are in scope.
+  booking_creation_cutoff_hours: z.number().int().min(0).max(720).optional(),
   // Lodging settings (docs/lodging/accommodation-stays.spec.md §2.5). Weekend days as ISO
   // weekday ints (0=Sun … 6=Sat), distinct; free-cancel window in days; penalty percent.
   lodging_weekend_days: z

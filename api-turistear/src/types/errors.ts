@@ -14,6 +14,10 @@ export type ErrorCode =
   | 'SLOT_UNAVAILABLE'
   | 'SLOT_CLOSED'
   | 'DOWN_PAYMENT_BELOW_MINIMUM'
+  // US-A77 — an apartado opened too close to departure. Distinct from SLOT_CLOSED, which is the
+  // sales cutoff and applies to every folio: this one rejects only the DEPOSIT path, so the agent
+  // can still sell the same slot by collecting the full amount.
+  | 'BOOKING_TOO_LATE'
   | 'SERVICE_INACTIVE'
   | 'SERVICE_NOT_ALLOWED'
   | 'SERVICE_HAS_FOLIOS'

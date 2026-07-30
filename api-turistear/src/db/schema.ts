@@ -22,6 +22,12 @@ export const organizations = sqliteTable('organizations', {
   // `bookingGraceOffsetMinutes` grace applies (so a near-but-next-day slot is no longer treated as
   // a full-24h-buffer booking that would be born expired). Default 24h.
   bookingPreDepartureBufferHours: integer('booking_pre_departure_buffer_hours').notNull().default(24),
+  // US-A77 — how close to departure an APARTADO may still be created, in hours. Distinct from
+  // `salesCutoffOffsetMinutes`, which gates every folio and must stay at 0 so cash walk-ins sell
+  // until the last minute. `0` = no restriction (today's behaviour); when set it must be at least
+  // `bookingPreDepartureBufferHours`, so an apartado is never born inside the window it is supposed
+  // to be settled in.
+  bookingCreationCutoffHours: integer('booking_creation_cutoff_hours').notNull().default(0),
   // Accommodation/lodging settings (docs/lodging/accommodation-stays.spec.md §2.5). weekendDays:
   // CSV of ISO weekday ints (0=Sun … 6=Sat) — which nights use a unit's weekend_rate (default
   // Fri+Sat). A PAID stay cancels free until lodgingFreeCancelDays before check-in; inside that
