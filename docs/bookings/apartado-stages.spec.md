@@ -1,14 +1,16 @@
 # Feature: Apartados as stages — notify before releasing
 
-> **Status: BUILT**, except S6 (see § Open). Changes `docs/bookings/bookings-down-payments.spec.md`
+> **Status: BUILT.** Changes `docs/bookings/bookings-down-payments.spec.md`
 > (US-AG07/AG07.1) and supersedes `docs/cancellation/cancellation-policy-engine.spec.md` D21.
 
 ## Context
 
-Today the settle deadline is an **event**: `booking_expires_at` arrives, the cron cancels the folio,
-the seats go back. The customer finds out by finding out.
+*(What follows describes the behaviour this feature replaced.)*
 
-That model has three defects, and they are not independent.
+The settle deadline was an **event**: `booking_expires_at` arrived, the cron cancelled the folio,
+the seats went back. The customer found out by finding out.
+
+That model had three defects, and they were not independent.
 
 **1. Nobody is told.** A customer who forgot to pay loses their deposit without a single message.
 The WhatsApp reminder (US-AG07.3) exists but is manual — it depends on an agent noticing the folio
@@ -83,7 +85,7 @@ follows the ladder") resolved cleanly. **D21 is superseded by this document.**
 | **S3** | **Stage ② reuses `booking_grace_offset_minutes`** (signed, ±240, default +15). | "Pay at the booth before boarding" is exactly its semantics, and it already supports negative values for courtesy past departure. A second field would add configuration for a distinction that does not change the number. |
 | **S4** | **The notification is email when the customer left one; WhatsApp, tapped by the agent, otherwise.** | Forced, not preferred: a Worker on a cron can call Resend but **cannot send WhatsApp** — `wa.me` is a deep link a human opens. A phone is mandatory on every apartado (US-AG07 D4), so there is no dead end. |
 | **S5** | **`reminder_status` records the notification, with `reminder_sent_by = null` for a system send.** | The column already exists (`none` \| `sent`) with a nullable sender. No migration for this part. |
-| **S6** | **Per-folio extension of the FINAL deadline, with an audit trail** (`booking_extended_by` / `booking_extended_at`). | *(Reinterpretation of a user decision — see § Open.)* Under S2 "move to stage ②" is not an action, because advancement is automatic. What remains uncovered is the late arrival: a customer stuck in traffic five minutes out. Today that is only expressible org-wide via a negative grace offset. Requiring proof of a phone call was rejected — nobody verifies it, and it turns an honest record into a checkbox. |
+| **S6** *(withdrawn)* | ~~**Per-folio extension of the final deadline, with an audit trail.**~~ **Not built — `reactivate` already covers it.** | It began as an orphan: the decision "the agent may move a folio to ② whenever, with a record" was answered alongside S2, which made advancement automatic and so removed the action being decided about. Reinterpreted as the late arrival — a customer minutes away when the hold ends — it turned out to be covered already: **US-AG07.5's *Reactivar y Liquidar*** re-blocks the freed spots and settles, disabling itself only if the tour filled in the meantime. The extension would have added two columns, an endpoint, a button and an audit trail to win the narrow window where someone else bought those seats in the final minutes. |
 | **S7** | **Stage is DERIVED from timestamps, not stored.** `now < booking_expires_at` ⇒ ①; past it, ② until `salida − gracia`. | A stored stage needs a writer, and a cron that writes state drifts from the clock that defines it. The existing `booking_expires_at` already carries the ① boundary; ② ends at the grace instant, computed from the **line's own snapshotted departure** — a folio prices by the departure it was sold for, even if the slot is later moved. Nothing is rewritten on advance, so there is no state to disagree with the clock. |
 | **S8** *(added in build)* | **A failed reminder email is not a failed folio.** The send has its own guard, separate from the per-folio one, and does not mark `reminder_status`. | Counting a Resend outage under `failed` would make an email provider's bad afternoon read as apartados breaking. The apartado is fine — it advanced by the clock alone and nothing about it is stuck. Writing the flag only after a successful send means the one notification a customer gets is never silently consumed; it simply retries next run. |
 
@@ -107,12 +109,13 @@ follows the ladder") resolved cleanly. **D21 is superseded by this document.**
 4. **Stage ② ends by cancelling**, priced by the ladder like every other cancellation
    (`cancelFolioPriced`, `cancellation_source = 'system_expiry'`). At the grace instant that is the
    terminal tier, so the customer recovers nothing unless the org configured otherwise.
-5. **The sweep is fail-soft per folio.** One folio that throws must not abort the run. *(Today it
-   is not: there is a single `.catch` in the `scheduled` handler and no per-folio guard, although
-   `cancellation-policy-engine.spec.md` Rule 24 already claims otherwise. Fix here.)*
-6. **Extension (S6) is bounded** by nothing but the org's grace offset semantics — an agent may push
-   a folio's release past departure, which is what the negative-offset direction already means.
-   Every extension records who and when.
+5. **The sweep is fail-soft per folio.** One folio that throws must not abort the run. *(It was
+   not, before this: a single `.catch` on the `scheduled` handler and no per-folio guard, although
+   `cancellation-policy-engine.spec.md` Rule 24 had claimed otherwise since the engine landed. One
+   throw aborted the run and every apartado behind it silently kept its seats.)*
+6. **A customer who arrives after the hold ends is handled by reactivation**, not by extending the
+   hold (US-AG07.5). If the spots are still free they are re-blocked and settled; if the tour filled,
+   the action is disabled — which is the honest answer, because the seats are genuinely gone.
 
 ---
 
@@ -177,18 +180,11 @@ Then the healthy one is processed and the run reports one failure.
 - [x] `cancellation-policy-engine.spec.md` D21 marked superseded; US-A74 restored in `SPEC.md`
 - [x] Scenarios S-1…S-3, S-5, S-6 covered (`pos-bookings-sweep`, `pos-zoned-release`,
       `organization-policy`). **S-4 was rewritten in the build** — see below
-- [ ] `booking_extended_by` / `booking_extended_at` + the agent action (S6) — **not built**, see § Open
+- [x] S6 (per-folio extension) **withdrawn** — `reactivate` covers the case it was for
 
 ---
 
 ## Open
-
-**S6 needs confirming.** The user answered "(a) — the agent can move it whenever, with an audit
-trail" to a question about *moving a folio to stage ②*. Their answer to S2 then made that action
-impossible: advancement is automatic, so there is nothing to move. S6 reinterprets the answer as
-applying to the late-arrival extension instead, which is the nearest real need. **Confirm before
-building it** — the alternative is dropping it entirely, since the org-wide negative grace offset
-already covers the common case.
 
 **The capacity cost of S2 has no mitigation in this design.** Seats are held until minutes before
 departure and the booth cannot resell them. The compensation is the retained deposit. If that turns
