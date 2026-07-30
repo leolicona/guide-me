@@ -154,10 +154,27 @@ export function CancellationPolicyCard({ policy }: Props) {
     const t = initial.tiers.find((x) => x.min_hours === null)
     return t ? toDraft(t) : TERMINAL_FALLBACK
   })
-  const [depositPct, setDepositPct] = useState(String(initial.booking_deposit_retained_pct))
   const [showAffiliate, setShowAffiliate] = useState(() =>
     initial.tiers.some((t) => t.affiliate_commission_pct !== undefined),
   )
+
+  // What the last tier actually covers: everything closer to the departure than the LOWEST
+  // threshold configured above it. `matchTier` walks the bounded tiers and falls through to this
+  // one when none are cleared, so with a lowest tier at 24h this block governs the final day —
+  // including, but not limited to, a no-show.
+  const terminalTitle = useMemo(() => {
+    const lowest = bounded
+      .map(hoursOf)
+      .filter((h) => Number.isFinite(h) && h >= 0)
+      .sort((a, b) => a - b)[0]
+    if (lowest === undefined) return 'Cualquier cancelación'
+    if (lowest === 0) return 'Después de la salida'
+    const label =
+      lowest >= 24 && lowest % 24 === 0
+        ? `${lowest / 24} día${lowest === 24 ? '' : 's'}`
+        : `${trimNum(lowest)} h`
+    return `Menos de ${label} antes de la salida`
+  }, [bounded])
 
   const patch = (i: number, field: keyof DraftTier, value: string) =>
     setBounded((rows) => rows.map((r, idx) => (idx === i ? { ...r, [field]: value } : r)))
@@ -199,7 +216,6 @@ export function CancellationPolicyCard({ policy }: Props) {
     errors.push('El porcentaje de afiliado va de 0 a 100.')
   if (!pctValid(terminal.refundPct) || !pctValid(terminal.agentPct))
     errors.push('Revisa los porcentajes del tramo posterior a la salida.')
-  if (!pctValid(depositPct)) errors.push('La retención del anticipo va de 0 a 100.')
   // Duplicates are still an error — two tiers at the same threshold is genuinely ambiguous and the
   // machine cannot pick for you. ORDER is not: the server wants them descending, and sorting a list
   // is work software should do rather than send an admin back to retype four fields on a phone.
@@ -225,9 +241,8 @@ export function CancellationPolicyCard({ policy }: Props) {
       version: 1,
       // Whatever unit was typed, hours are what leaves this component (D16 revised).
       tiers: [...sorted.map((r) => mk(r, hoursOf(r))), mk(terminal, null)],
-      booking_deposit_retained_pct: num(depositPct),
     }
-  }, [valid, bounded, terminal, depositPct, showAffiliate])
+  }, [valid, bounded, terminal, showAffiliate])
 
   const handleSave = () => {
     if (built) update.mutate({ cancellation_policy: built })
@@ -314,12 +329,20 @@ export function CancellationPolicyCard({ policy }: Props) {
             Agregar tramo
           </Button>
 
-          {/* The terminal tier always exists and cannot be removed — every cancellation after
-              departure has to land somewhere. Same block shape as the others so the eye reads them
-              as one list, minus the threshold it does not have. */}
+          {/* The terminal tier always exists and cannot be removed — every cancellation has to land
+              somewhere. Same block shape as the others so the eye reads them as one list, minus the
+              threshold it does not have.
+
+              Its title is DERIVED, and that is a correction rather than a polish. It used to read
+              "Después de la salida" / "Cuando el cliente no se presentó", which is false: this tier
+              is the catch-all for everything BELOW the lowest threshold above it, not just for a
+              departure already past. With the inherited ladder that is a whole day — an admin
+              reading the old label concluded there was an unruled gap between 0 and 24 hours and
+              went looking for a setting to fill it. There is no gap; the label was hiding this
+              tier's real reach. */}
           <TierBlock
-            title="Después de la salida"
-            subtitle="Cuando el cliente no se presentó."
+            title={terminalTitle}
+            subtitle="Incluye también a quien no se presentó."
             refundPct={num(terminal.refundPct)}
           >
             {pctField('Se devuelve al cliente', terminal.refundPct, (v) =>
@@ -339,22 +362,21 @@ export function CancellationPolicyCard({ policy }: Props) {
 
           <Divider />
 
-          <TextField
-            label="Del anticipo de un apartado se retiene"
-            type="number"
-            fullWidth
-            value={depositPct}
-            onChange={(e) => setDepositPct(e.target.value)}
-            helperText={
-              num(depositPct) === 100
-                ? 'El anticipo de un apartado no se devuelve, sin importar el tramo.'
-                : 'Tope adicional: el reembolso de un apartado nunca supera este límite.'
-            }
-            slotProps={{
-              input: { endAdornment: <InputAdornment position="end">%</InputAdornment> },
-              htmlInput: { min: 0, max: 100, step: 1, inputMode: 'numeric' },
-            }}
-          />
+          {/* D20 — this replaced a "del anticipo se retiene __%" field. That field was a separate
+              rule for apartados, and it silently overrode every tier above it: an admin could write
+              "se devuelve 100%" and still have the customer receive nothing. There is one ladder
+              now. This note is here because the arithmetic below IS surprising the first time —
+              not as a warning, just as the rule stated where it applies. */}
+          <Box>
+            <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 0.5 }}>
+              Apartados
+            </Typography>
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+              Un apartado sigue esta misma escalera. Los porcentajes se calculan sobre el total de la
+              venta, así que si lo retenido supera el anticipo, no queda nada por devolver — y nunca
+              se le cobra la diferencia al cliente.
+            </Typography>
+          </Box>
 
           {/* US-A72 — hidden until asked for, so a company that treats resellers and staff the same
               never has to think about the distinction. */}
@@ -411,11 +433,12 @@ export function CancellationPolicyCard({ policy }: Props) {
               disabled={update.isPending}
               sx={{ px: 0 }}
             >
-              Restablecer al 100%
+              Restablecer a la política estándar
             </Button>
             <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
-              Vuelve a la política que traen todas las empresas: se devuelve todo, sin importar la
-              anticipación. Las ventas ya hechas conservan la política con la que se vendieron.
+              Vuelve a la que traen todas las empresas: 5 días o más antes, se devuelve todo; entre 5
+              días y 24 horas, la mitad; después de la salida, nada. Las ventas ya hechas conservan
+              la política con la que se vendieron.
             </Typography>
           </Box>
         </Stack>

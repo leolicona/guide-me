@@ -13,10 +13,10 @@ two cancellation paths answered the same question differently:
 
 The same folio refunded 0 or 100% depending on *who initiated* the cancellation.
 
-### Two phases — read this before anything else
+### Three phases — read this before anything else
 
-The engine shipped in **two deliberate phases**, and the second one reverses a promise the first
-one made. Both are documented here because the reasoning matters more than the outcome.
+The engine shipped in **three deliberate phases**, and each one reverses a promise the previous
+made. All three are documented here because the reasoning matters more than the outcome.
 
 **Phase 1 (`#33`, `#34` — shipped).** The engine was **data-gated**: an org with
 `cancellation_policy IS NULL` ran the pre-feature code verbatim, so no existing org changed
@@ -46,6 +46,38 @@ deleted, and "no policy configured" ceases to be a reachable state.
 
 This **changes behaviour for every existing organization on day one**. That is the point, not a
 side effect. See § Rollout for what changes and what to warn about.
+
+**Phase 3 (this revision — the apartado).** Phase 2 claimed "one computation, every path". It was
+not true, and the gap was in the place hardest to see: an **apartado** (`status: 'booking'`) had two
+buttons and two answers.
+
+| Path | Phase-2 behaviour |
+|---|---|
+| Admin cancels the folio | priced by the ladder — then the deposit floor pinned the refund to 0 anyway |
+| **Agent taps "Cancelar apartado"** (`pos/handler.ts`) | never reached the engine: `refund_status: 'none'` hard-coded, agent keeps every peso of commission, and the collected money reversed **in full** |
+| It expires by itself (sweep) | never reached the engine: retains everything, writes no ledger rows |
+
+Two things fell out of that, both fixed here:
+
+1. **The ladder did not apply to apartados at all.** `booking_deposit_retained_pct` defaulted to
+   100, which overrode every tier above it. An admin could write "se devuelve 100%" and the customer
+   would still receive nothing. Combined with the Phase-2 default (refund everything, always), it
+   produced a split nobody chose: a fully-paid no-show got **100% back**, while an apartado
+   cancelled a month ahead got **0%**.
+2. **A retained deposit vanished from the books.** The agent path reversed the collected money in
+   full regardless of what was retained, so the ledger netted to zero while the cash sat physically
+   in an agent's drawer and no cash-drop report ever asked for it — the exact defect the paid-ledger
+   proportional reversal fixed on the admin path.
+
+Phase 3 deletes the deposit clause rather than defaulting it to 0 (**D20**), routes the agent path
+through the same commit the admin path uses, and replaces the flat inherited default with a real
+ladder (**D18 revised**), because a default that refunds every deposit to every no-show is not
+conservative — it is a trap that happens to look generous.
+
+> **Governing constraint (extends Phase 2's):**
+> **The engine cannot tell an apartado from a fully-paid sale.** `folioStatus` is not an input to
+> `computeCancellationRefund`; `amountPaid` is the only thing that differs between them. A rule that
+> cannot be expressed cannot drift.
 
 **User Stories:**
 - **US-A69** — *As an admin, I want to configure a refund ladder for my company (how much is
@@ -98,9 +130,11 @@ side effect. See § Rollout for what changes and what to warn about.
 | Proportional ledger reversal when a policy retains money | **This feature** (contained change to `buildCancellationReversal`) |
 | Per-tier agent-commission retention, split in-house vs affiliate | **This feature** |
 | A universal inherited default, so "no policy" is unreachable (US-A75) | **This feature** (Phase 2) |
+| **Apartados priced by that same ladder; the deposit clause deleted** | **This feature** (Phase 3 — D20) |
+| **The agent's *Cancelar apartado* routed through the same commit** | **This feature** (Phase 3) |
 | ~~"Cancelled by the company" override~~ | **Withdrawn** — D10 |
-| Who may cancel: the agent same-shift permission (US-A73 / US-AG44) | **This feature** |
-| Auto-expired bookings routed through the same engine (US-A74) | **This feature** |
+| Who may cancel: the agent same-shift permission for PAID sales (US-A73 / US-AG44) | **Deferred** — the existing apartado route is not gated by it |
+| ~~Auto-expired bookings routed through the same engine (US-A74)~~ | **Withdrawn** — D21: expiry retains, by decision |
 | Releasing seats / flipping status / the cancellation audit columns | *Total folio cancellation* — unchanged |
 | Refund PIN, `confirmRefund`, the physical hand-back | *Tourist portal* — unchanged, still audit-only |
 | Per-service or per-category policy override | **Deferred** (§ Deferred) |
@@ -108,12 +142,17 @@ side effect. See § Rollout for what changes and what to warn about.
 | Bulk-cancelling a whole slot (weather) | **Deferred** (§ Deferred) |
 | Partial / per-line cancellation | **WON'T HAVE** (SPEC) — a cancellation is still total |
 
-**One new endpoint.** The ladder rides the existing `PATCH /api/organizations/current`
+**No new endpoint.** The ladder rides the existing `PATCH /api/organizations/current`
 (`updateOrganizationSchema`, `organizations/schema.ts:18`) and the admin cancellation endpoints
-keep their paths and gain fields. US-AG44 adds `POST /api/pos/folios/:id/cancel` — **agent-scoped,
-under `/api/pos`**, because `/api/folios/*` is admin-only by construction
-(`foliosRouter.use('*', authMiddleware, requireRole('admin'))`) and that guard is a safety
-property worth keeping intact rather than punching a hole through.
+keep their paths and gain fields.
+
+`POST /api/pos/folios/:id/cancel` **already exists** — it is US-AG07.4's *"Cancelar apartado"*,
+agent-scoped under `/api/pos` because `/api/folios/*` is admin-only by construction
+(`foliosRouter.use('*', authMiddleware, requireRole('admin'))`) and that guard is a safety property
+worth keeping intact rather than punching a hole through. Earlier revisions of this spec described
+it as new, which was wrong and hid the fact that it was pricing cancellations on its own; Phase 3
+routes it through the engine. **US-AG44 does not add the route** — it widens it, from booking-only
+to any sale inside the agent's shift, behind the `agent_cancellation_enabled` gate. Still deferred.
 
 ---
 
@@ -123,7 +162,8 @@ property worth keeping intact rather than punching a hole through.
 |---|---|---|
 | **D1** *(Phase 1 — superseded by D17)* | ~~**Data gate.** `cancellation_policy IS NULL` bypasses the engine and runs the pre-feature code verbatim.~~ | Kept in the record because it was the right call for landing the engine: it let a change to money handling ship without rewriting the reconciliation suite. It was scaffolding, not architecture — and holding it any longer would have preserved the very defect the engine exists to fix. |
 | **D17** | **Every org has a policy; "no policy" is not a reachable state.** A migration backfills every existing org, the org-creation path writes the default for new ones, and `resolvePolicy` keeps a code-level constant so the engine can never fail to price a cancellation. The legacy branches are DELETED, not merely bypassed. | Three pricing implementations coexisting is not a design, it is an accident that survived. Deleting them is the only way the "one computation, every path" property is real rather than conditional. The constant fallback is belt-and-braces: a folio must always be priceable, even if a row is somehow missed. |
-| **D18** | **The inherited default refunds 100%, always, and absorbs no commission.** A single terminal tier. Orgs that had lodging cancel settings get the SAME default — those fields are NOT translated into a ladder. | The default has to be defensible for a company that never asked for it. "Cancelling returns the money unless you say otherwise" is the reading a customer would assume and the one least likely to shortchange them: it never refunds less than today's most generous path. Translating the lodging fields was rejected because a stay policy would then silently govern that org's TOURS too — terms nobody chose, applied to services they were never written for. Those orgs get a banner telling them to reconfigure. |
+| **D18** *(Phase 2 — superseded by D18a)* | ~~**The inherited default refunds 100%, always, and absorbs no commission.** A single terminal tier.~~ | The reasoning was: a default has to be defensible for a company that never asked for it, and "cancelling returns the money unless you say otherwise" is the reading a customer would assume. That held only while the engine priced fully-paid folios — sales an admin was already refunding by hand. It stopped holding the moment the same ladder started pricing apartados (D20). |
+| **D18a** | **The inherited default is the spec's worked ladder:** ≥120h → 100% refund, agent keeps no commission · ≥24h → 50% refund, agent keeps its commission · departed → 0% refund, agent keeps its commission. Orgs that had lodging cancel settings get this SAME default — those fields are still NOT translated into a ladder. | A default that refunds every deposit to every no-show is not conservative; it is a trap that happens to look generous, and under D20 it costs real money in the field on day one. This ladder is the one the spec has used as its worked example throughout, so it is the terms the product has always described. Translating the lodging fields is still rejected for the original reason: a stay policy would silently govern that org's TOURS too — terms nobody chose, applied to services they were never written for. **No nag or "unconfigured" banner** is shown: the inherited ladder is a real, readable, editable policy, not a placeholder, and treating it as one would be theatre. |
 | **D2** | **A JSON column on `organizations`, not a `cancellation_policies` table.** | Policy is org-level only for now. A column needs no CRUD routes — it slots into the settings PATCH that already exists — and the snapshot is a string copy. A table becomes worth it when per-service overrides land; migrating JSON → table later is additive. |
 | **D3** | **The tier states what is REFUNDED; the engine works in RETENTION.** `retention = line_total × (100 − refund_pct)/100`, then `refund = max(0, amount_paid − Σ retention)`. | Retention-first makes deposits fall out for free: a 30% deposit against a 50% retention refunds 0 with no special rule, and the company never chases the customer for the shortfall. Refund-percent-of-paid would hand back most of a small deposit even though the seat was lost. |
 | **D4** | **Evaluated per line, retentions summed.** Each line matches its own tier by its own departure. | A folio can hold tomorrow's tour and next week's. Anything else charges the far line the near line's penalty (or vice-versa). It is also the only reading consistent with `line_total` being the base. |
@@ -133,13 +173,17 @@ property worth keeping intact rather than punching a hole through.
 | **D8** | **The agent's kept commission is capped by what the company retained.** | Otherwise a full-refund tier that also lets the agent keep commission makes the company *lose* money on a cancellation — paying for a sale that was undone. |
 | **D9** | **Paid-ledger D6 (reversal written at cancellation) is preserved.** | Moving the reversal to the physical hand-back is more accurate but reopens the drop-watermark premise of the cash engine. Deferred deliberately; see § Deferred. |
 | **D10** | **The engine is binding, with NO escape at all.** Neither `cancelled_by_company` (withdrawn) nor the `clawback` request flag survives; a cancellation is priced by the ladder and by nothing else. | Phase 1 shipped a typed exception for company-caused cancellations. It is withdrawn because the moment the system asks *who caused this*, it needs an answer it cannot verify and a policy for adjudicating it — and every such flag is a lever that quietly re-creates the ad-hoc pricing the engine replaced. A company that wants generous terms for its own failures expresses that in its ladder, where the terms are visible and apply to everyone equally. The cost is real and stated: there is no in-system way to make a weather cancellation whole beyond what the ladder says. |
-| **D19** | **Consequence of D10 + D18 worth stating on its own: under the inherited default the selling agent forfeits their commission on every cancellation.** With a 100% refund, retention is zero, so the D8 cap necessarily zeroes the kept commission. | Previously an admin could choose to absorb it (`clawback: false`). Removing that choice is a policy change toward agents, and it lands on day one for every org that has not configured a ladder. The mitigation is the ladder itself: any tier that retains money can pay commission from it. This is called out here so it is a decision on the record rather than something an agent discovers in their corte. |
+| **D19** *(revised with D18a)* | **Consequence of D10 + D18a + D20 worth stating on its own: the selling agent forfeits their commission on an EARLY cancellation, and now does so on apartados too.** Beyond 120h the ladder refunds in full, retention is zero, and the D8 cap necessarily zeroes the kept commission. Inside 120h the agent keeps it. | Under the old flat default this applied to *every* cancellation; the graded ladder narrows it to the case where the company kept nothing either, which is the defensible version. What is new is the reach: the agent path used to hand over commission unconditionally (`clawback: false`, hard-coded), so an agent cancelling an apartado 5+ days out now **returns the deposit in full and keeps no commission**, where before they kept both. That is a change to what someone earns. It is on the record here so it is communicated to operations before release rather than discovered in a corte. |
 | **D12** | **A tier carries two commission percentages: `agent_commission_pct` and `affiliate_commission_pct`.** Which one applies is decided by the seller's role, not by the folio. | An affiliate is a reseller, not staff — a company may well forgive its own agent a same-day cancellation while clawing back the reseller's cut. Both default to the same value in the settings UI, so a company that doesn't care never sees the distinction. Cheap now; expensive after policies exist in production with a one-percentage shape. |
 | **D13** | **The agent's cancellation window is their current shift — everything up to their next confirmed cash drop.** Not a configurable number of hours. | The money is the boundary. While the cash is still in the agent's pocket, they can hand it back and their own balance absorbs it. Once the drop is confirmed the money is the company's and the balance is frozen (`balance_after` must never be rewritten — TECH_DEBT §12a). It needs no parameter, it can't be misconfigured, and it is *already* the line the cash engine draws. |
 | **D14** | **The agent permission is a single org-level on/off switch, default OFF.** | US-A73 asks whether agents *may*, not which ones. Per-agent grants are a permissions system, and this feature is not that. Default OFF preserves the admin-only behaviour that has always applied. |
 | **D16** *(original — superseded by D16a)* | ~~**The admin enters HOURS. There is no days field, and no days↔hours conversion in the UI.**~~ | The reasoning stands and is why D16a is conditional: "5 días" and "120 horas" are not the same promise, and the gap is where disputes live — a Friday 08:00 departure cancelled Sunday 18:00 IS five calendar days ahead but only 110 hours, so a days-labelled field can promise a refund the engine will not give. Where this went too far was the remedy: it banned the *input* to protect the *expectation*, and paid for it with mental arithmetic at configuration time (a five-day window entered as `120`). |
 | **D16a** | **Hours remain the only STORED unit. The editor lets a tier be typed in hours or days, per tier, via a toggle — on three conditions:** (1) the exact hours are printed under the field in **both** modes, so the number the engine matches on is never hidden behind a friendlier unit; (2) toggling the unit is **value-preserving**, so inspecting a tier can never rewrite it; (3) a day amount that does not land on a whole hour is **rejected**, never silently rounded. | The expectation gap D16 guarded against is a *labelling* problem, not an arithmetic one — and it is fully closed by keeping the hours visible, which costs one line of read-back. Banning the input as well only moved the cost onto the admin: dividing by 24 in their head, every time, on a phone. A tier boundary is still exactly `min_hours` before the departure instant, and near-departure tiers are still expressible ("6 horas antes") because hours never stop being available. The rejection rule matters more than it looks: `1.3 días` is `31.2 h`, and quietly storing `31` would move a money boundary by an amount the admin never saw. |
-| **D15** | **The auto-expiry sweep calls the same engine.** | Today `sweepExpiredBookings` hardcodes "retain the deposit, write nothing to the ledger" — so an agent silently keeps full commission on a booking that never happened. Nobody decided that; it is what fell out. Routing the sweep through the engine makes it a stated policy. Under the inherited default the deposit floor (100%) still pins the refund to 0, so a swept booking still refunds nothing — what changes is that the commission outcome becomes a stated rule instead of an accident. |
+| **D15** *(Phase 2 — superseded by D21)* | ~~**The auto-expiry sweep calls the same engine.**~~ | Written when the deposit floor still existed, so routing the sweep through the engine changed nothing about the money and only made the commission outcome explicit. With the floor gone (D20) it would change the money — it would refund deposits to customers who never came back to pay — so the decision is revisited rather than inherited. See D21. |
+| **D20** | **An apartado is priced by the ladder, exactly like a fully-paid sale. The `booking_deposit_retained_pct` clause is DELETED, not defaulted to 0, and `folioStatus` is removed from the engine's inputs.** | The clause was a second rule for the same event, and it silently overrode the first: a ladder saying "se devuelve 100%" still returned nothing. Deleting it rather than zeroing it means no configuration can put the two back into contradiction. D3 already prices a partial payment correctly with no special case — retention is a share of the SALE, so a 30% deposit against a 50% retention leaves nothing to refund, and the customer is never pursued for the shortfall. Dropping `folioStatus` is the structural half: the engine literally cannot express a different answer for an apartado, so it cannot drift into one. |
+| **D21** *(SUPERSEDED — `docs/bookings/apartado-stages.spec.md`)* | ~~**An apartado that EXPIRES refunds nothing, and the sweep deliberately does not call the engine.**~~ **The sweep WILL call the engine.** What changed is not the reasoning below but the instant it applies to: under the stage redesign the settle deadline stops cancelling — it notifies — and auto-cancellation moves to `salida − gracia` (15 min). At fifteen minutes out the ladder is always in its terminal tier, so the cron can no longer fire in a generous one whatever the admin configures. Routing the sweep through the engine becomes safe *by construction* rather than by coincidence of defaults, which is what both D21 and its rejected alternative were groping for. **Designed, not built** — the decision is settled, the code still does what D21 describes. |
+| **D21 (original reasoning, kept)** | An apartado that expires refunds nothing. | Expiring is not cancelling with notice — the customer chose not to complete the deal, and the deposit is what a deposit is for. Two things make this concrete rather than convenient. First, `booking_expires_at` is now `departure − buffer` (the `createdAt + holdDays` cap was removed in `#30`; `holdDays` is retained inert), so an expiring apartado is always ~24h from departure, where the inherited ladder retains 50% of the sale — more than a typical deposit — and routing it through the engine would refund **$0 in nearly every case anyway**. The decision costs almost nothing today; it is written down so it stops being an accident. Second, refunding on expiry would make an apartado a free option on capacity, and would have a cron job minting refund obligations overnight for customers who ghosted. Residual, accepted: an org whose deposits exceed ~50% of the sale price gets a genuinely different answer from expiry than from a manual cancel at the same moment. |
+| **D22** | **A REJECTED electronic payment (`rejectPayment`) also stays off the engine: full reversal, full clawback, no refund.** | The money never arrived. There is nothing to price and nothing to hand back, so a ladder has no opinion to offer — reversing the whole accrual and taking back the commission is the only coherent outcome. Recorded here only so that "it does not call the engine" reads as a decision rather than as the third thing somebody forgot. |
 
 ---
 
@@ -205,6 +249,37 @@ SET cancellation_policy = json_object(
 WHERE cancellation_policy IS NULL;
 ```
 
+### Migration `0055_cancellation_policy_apartado.sql` *(Phase 3 — D18a/D20)*
+
+Two data-only statements, no schema change.
+
+1. **The inherited ladder is rewritten** from the flat 100% to the graded default (D18a) — but
+   **only for orgs still carrying it**. The test is semantic, not textual, so it holds whether the
+   document was written by `0054`'s `json_object()` or by the API's `JSON.stringify()` at
+   organization creation:
+
+   ```sql
+   WHERE cancellation_policy IS NULL
+      OR (json_array_length(cancellation_policy, '$.tiers') = 1
+          AND json_extract(cancellation_policy, '$.tiers[0].min_hours') IS NULL
+          AND json_extract(cancellation_policy, '$.tiers[0].refund_pct') = 100)
+   ```
+
+   An org that deliberately configured that same single tier is indistinguishable from the default
+   — it is the same document — and is rewritten too. There is no way to tell those apart and no
+   meaning in trying.
+
+2. **`booking_deposit_retained_pct` is stripped** from every remaining document via `json_remove`.
+   This is housekeeping, not a behaviour change: the Zod schema is a non-strict object, so a
+   document still carrying the key already parses with the value ignored. It only stops the stored
+   data from disagreeing with the schema when someone inspects it.
+
+**Folio snapshots are deliberately not touched.** D6 — a folio is priced by the ladder in force when
+it was sold, and rewriting a snapshot would retroactively change the terms of a completed sale.
+Snapshots that still carry the deposit key simply stop honouring it, which *does* change how such a
+folio prices; that is accepted because the engine never reached production, so no real folio was
+ever sold under the floor.
+
 The backfill alone is not enough — an org registered tomorrow would be born NULL. Two more
 guards, both in code (D17):
 
@@ -222,10 +297,13 @@ guards, both in code (D17):
     { "min_hours": 120,  "refund_pct": 100, "agent_commission_pct": 0,   "affiliate_commission_pct": 0   },
     { "min_hours": 0,    "refund_pct": 50,  "agent_commission_pct": 100, "affiliate_commission_pct": 50  },
     { "min_hours": null, "refund_pct": 0,   "agent_commission_pct": 100, "affiliate_commission_pct": 100 }
-  ],
-  "booking_deposit_retained_pct": 100
+  ]
 }
 ```
+
+The ladder is the **whole** document. There is no deposit clause and no `folioStatus` input (D20):
+an apartado is the same sale with less money collected against it, and the retention arithmetic
+below already prices that.
 
 | Field | Meaning |
 |---|---|
@@ -233,7 +311,7 @@ guards, both in code (D17):
 | `tiers[].refund_pct` | 0–100. Share of that **line's total** the customer is entitled to. Retention is the complement. |
 | `tiers[].agent_commission_pct` | 0–100. Share of that **line's commission** an **in-house agent** keeps, before the D8 cap. `0` = full clawback. |
 | `tiers[].affiliate_commission_pct` | 0–100, **optional — defaults to `agent_commission_pct`** when omitted (US-A72, D12). Same meaning for a sale made by an affiliate reseller. |
-| `booking_deposit_retained_pct` | 0–100, default `100`. Floor applied to an unsettled `booking` folio. `100` reproduces today's "the deposit is never refunded" (US-AG07.4); `0` lets the deposit follow the ladder. |
+| ~~`booking_deposit_retained_pct`~~ | **Removed in Phase 3 (D20).** It floored an unsettled `booking` folio's refund and, at its default of `100`, overrode every tier above it. A stored document may still carry the key; it is stripped on parse and ignored. |
 
 The example above reads: *cancel with 5 days' notice and nobody earns anything; cancel same-day
 and my own agent keeps their full commission while the reseller keeps half; a no-show pays
@@ -294,11 +372,10 @@ totalRetention  = Σ retention
 totalCommission = Σ commission
 keptCommission  = Σ kept
 
-refund = max(0, amountPaid − totalRetention)                          # D3
-if folioStatus = 'booking':                                           # deposit floor
-    refund = min(refund, floor(amountPaid × (100 − booking_deposit_retained_pct) / 100))
+refund    = max(0, amountPaid − totalRetention)                       # D3 — and all of D20
+retention = amountPaid − refund      # what was really kept, never more than was collected
 
-Outputs: refund, totalRetention, keptCommission, reversedCommission = totalCommission − keptCommission,
+Outputs: refund, retention, keptCommission, reversedCommission = totalCommission − keptCommission,
          and a per-line breakdown (line id, hoursOut, tier matched, retention) for the UI and audit.
 ```
 
@@ -308,6 +385,20 @@ check-in hour today, and midnight is the conservative reading: the whole check-i
 
 **Rounding** is `floor` on retention (favours the customer) and `round` on commission (matches
 `pos/handler.ts:1226`, so a cancellation never disagrees with the sale about what was earned).
+
+**Commission is reconciled to `folios.commission_amount`, in both directions.** The per-line figures
+above are derived from the line, but `folios.commission_amount` is what the cash engine and the
+commission report actually read, so it wins:
+
+- *lines carry nothing, folio booked something* — a folio sold before `0028` snapshotted commission
+  onto lines. The booked amount is spread in proportion to `line_total`.
+- *lines carry MORE than the folio booked* — **an apartado.** Commission accrues on the amount
+  actually collected (US-AG07), so a 10% commission on a 300,000 sale with a 45,000 deposit booked
+  4,500 while the lines, which describe the whole sale, still say 30,000.
+
+Without this, an apartado's outcome reported 30,000 of forfeited commission — 6.7× reality. The
+ledger was never at risk of paying it (`prorateAcrossBuckets` clamps a reversal to the commission
+rows that exist), but the figure is shown to a human on the POS as *"esto es lo que pierdes"*.
 `refund + totalRetention = amountPaid` holds by construction whenever `totalRetention ≤ amountPaid`.
 
 ### Worked example (the ladder above)
@@ -427,21 +518,22 @@ after paying has to find an admin.
 21. **A cancelled folio is not re-cancellable and not re-openable.** Unchanged: `409 CONFLICT`.
     An agent who cancels by mistake needs an admin — there is no un-cancel in this system.
 
-### US-A74 — the system's own cancellations
+### US-A74 — the system's own cancellations *(D21 — the sweep deliberately does NOT run the engine)*
 
-22. **The sweep runs the engine (D15).** `sweepExpiredBookings` (`routes/pos/sweep.ts`, cron
-    `*/15 * * * *`) resolves the folio's policy exactly like any other caller and writes
-    `cancellation_source = 'system_expiry'`, `cancelled_by = null` (unchanged — there is no user).
-    - **No policy → byte-identical to today**: deposit retained, no ledger rows, agent keeps the
-      commission.
-    - **With a policy**, the tier matched is the one in force **at the moment of expiry**, and
-      `booking_deposit_retained_pct` still floors the refund — so the default configuration also
-      refunds 0. What changes is that the *commission* is now a stated decision instead of an
-      accident: a company can make an expired booking pay no commission.
-23. **The sweep must not become slow or unbounded.** It already loops folio-by-folio with a batch
-    each. The engine adds one policy parse per folio and, when a commission is reversed, one more
-    row in the same batch. No new query per folio: the policy comes from the snapshot the folio
-    already carries.
+22. **An expired apartado refunds nothing, by decision.** `sweepExpiredBookings`
+    (`routes/pos/sweep.ts`, cron `*/15 * * * *`) cancels the folio, releases the seats and zones,
+    writes `cancellation_source = 'system_expiry'` / `cancelled_by = null`, retains the deposit, and
+    writes **no** `folio_payments` rows. Expiring is not cancelling with notice: the customer chose
+    not to complete the deal, and the deposit is what a deposit is for. See D21 for why routing it
+    through the engine was rejected — chiefly that `booking_expires_at` is now `departure − buffer`,
+    so an expiring apartado is always ~24h out where the ladder retains more than a typical deposit
+    anyway, and that refunding on expiry would make an apartado a free option on capacity.
+22b. **The residual is accepted and stated.** An org whose deposits exceed ~50% of the sale price
+    gets a different answer from expiry than from a manual cancel at the same moment. Revisit if a
+    company actually runs deposits that large.
+23. **The sweep must not become slow or unbounded.** It loops folio-by-folio with a batch each and
+    adds no per-folio query. Unchanged by Phase 3 — this is one reason keeping it off the engine is
+    cheap.
 24. **The sweep stays fail-soft.** It runs under `waitUntil` with a `.catch`. A folio whose policy
     fails to parse is **skipped and logged**, never left half-cancelled, and never aborts the
     sweep for the other folios.
@@ -452,8 +544,9 @@ after paying has to find an admin.
 
 ### `PATCH /api/organizations/current` — configure the ladder (US-A69, A70, A72, A73)
 
-Existing endpoint, two new optional fields. `cancellation_policy: null` clears the policy and
-returns the org to the legacy path (D1 — this is the rollback).
+Existing endpoint, two new optional fields. `cancellation_policy: null` clears the column; there is
+no legacy path left to return to (D17), so the org simply falls back to the inherited ladder —
+which is why the Settings card writes the default explicitly instead of clearing.
 
 ```json
 {
@@ -463,12 +556,14 @@ returns the org to the legacy path (D1 — this is the rollback).
       { "min_hours": 120,  "refund_pct": 100, "agent_commission_pct": 0,   "affiliate_commission_pct": 0   },
       { "min_hours": 0,    "refund_pct": 50,  "agent_commission_pct": 100, "affiliate_commission_pct": 50  },
       { "min_hours": null, "refund_pct": 0,   "agent_commission_pct": 100, "affiliate_commission_pct": 100 }
-    ],
-    "booking_deposit_retained_pct": 100
+    ]
   },
   "agent_cancellation_enabled": true
 }
 ```
+
+A body still carrying `booking_deposit_retained_pct` — a stale client build — is **accepted**, with
+the key stripped. Rejecting it would lock someone out of editing their own ladder from an open tab.
 
 ### `GET /api/folios/:id` — folio detail
 
@@ -504,10 +599,16 @@ are rejected with `400 VALIDATION_ERROR` (Rule 6) — not stripped, not ignored.
 `cancellation_source = 'admin'`. Response adds the realised numbers alongside the folio payload:
 `refund`, `retention`, `kept_commission`, `reversed_commission`.
 
-### `POST /api/pos/folios/:id/cancel` — **NEW** — agent cancels their own shift sale (US-AG44)
+### `POST /api/pos/folios/:id/cancel` — agent cancels an apartado (US-AG07.4, priced since Phase 3)
 
 Agent-scoped, mounted on the POS router alongside the existing agent receipt read
 (`GET /api/pos/folios/:id`) so the admin-only guard on `/api/folios/*` stays intact.
+
+**This route already existed.** Today it is **booking-only** (`409 NOT_A_BOOKING` for anything
+else), owner-or-admin scoped, and **not** gated by `agent_cancellation_enabled` — that gate and the
+shift rules below (15–21) belong to **US-AG44**, which widens this route to paid sales and is still
+deferred. What Phase 3 changed is that the route no longer prices cancellations itself: it calls
+`cancelFolioPriced`, the same commit the admin path uses, and returns the realised outcome.
 
 ```json
 { "reason": "El cliente cambió de opinión" }
@@ -578,12 +679,22 @@ departing in 20 hours, 1000 paid, ladder as above
 **When** the admin cancels
 **Then** retention = 500 (line A, full) + 250 (line B, 50%) = 750; `refund_amount = 250`.
 
-#### Scenario 4 — Deposit floor on a booking (US-AG07.4 preserved)
-**Given** `booking_deposit_retained_pct = 100`, a `booking` folio of 1000 with a 300 deposit paid,
-departing in 6 days (a 100%-refund tier)
-**When** the admin cancels
-**Then** `refund_amount = 0` — the deposit is retained, exactly as today.
-**And** with `booking_deposit_retained_pct = 0` the same cancellation refunds 300.
+#### Scenario 4 — An apartado is priced by the ladder (D20)
+*Replaces "Deposit floor on a booking (US-AG07.4 preserved)", which asserted the opposite: a floor
+pinned the refund to 0 whatever the ladder said.*
+
+**Given** a `booking` folio of 1000 with a 300 deposit paid, departing in 6 days (a 100%-refund
+tier)
+**When** the admin — or the selling agent, from the POS — cancels
+**Then** `refund_amount = 300`: retention is 0, so every peso collected goes back.
+**And** `refund_status = 'pending'` with a PIN minted, because money is owed and the customer must
+be able to prove they were present to collect it (Rules 3 & 4 — the obligation follows the money,
+not the path).
+
+**And given** the same folio departing in 20 hours instead (a 50% tier)
+**Then** `refund_amount = 0` — the ladder retains 500 of the 1000 sale and only 300 was ever
+collected, so nothing is left over. **No deposit rule is involved in either answer**, and the
+customer is never pursued for the 200 shortfall.
 
 #### Scenario 5 — Retention above what was collected never goes negative (D3)
 **Given** a `paid` folio, total 1000, only 300 collected, cancelled same-day (50% retention = 500)
@@ -759,28 +870,28 @@ and refunds 500 — the ladder, not Ana.
 **When** the `org_a` agent cancels an `org_b` folio by id
 **Then** `404 NOT_FOUND` — never `403`, which would confirm the folio exists somewhere.
 
-### US-A74 — auto-expired bookings (D15)
+### US-A74 — auto-expired bookings (D21)
 
-#### Scenario 29 — No policy → the sweep behaves exactly as today
-**Given** an org with `cancellation_policy = NULL` and a booking past `booking_expires_at` with a
-300 deposit and 30 commission
+#### Scenario 29 — An expired apartado refunds nothing, whatever the ladder says
+**Given** an org with any ladder — including one whose top tier refunds 100% — and a booking past
+`booking_expires_at` with a 300 deposit and 30 commission
 **When** the cron sweep runs
-**Then** the folio is `cancelled` with `cancelled_by = null`, reason *"Apartado vencido"*, the
-seats and zones are released, **no** `folio_payments` rows are written, and the agent keeps the 30.
+**Then** the folio is `cancelled` with `cancelled_by = null`, reason *"Apartado vencido"*, the seats
+and zones are released, **no** `folio_payments` rows are written, the agent keeps the 30, and
 `cancellation_source = 'system_expiry'`.
 
-#### Scenario 30 — With a policy, the deposit floor still holds
-**Given** the same booking in an org with a ladder and `booking_deposit_retained_pct: 100`
-**When** the sweep runs
-**Then** `refund_amount = 0` and `refund_status = 'none'` — no refund row, no PIN. The customer is
-owed nothing, exactly as before.
+#### Scenario 30 — Expiry and a manual cancel agree in practice
+**Given** an apartado whose deposit is ≤50% of the sale, expiring at `departure − 24h`
+**When** the sweep runs, and separately when an agent cancels it by hand at that same moment
+**Then** both produce `refund_amount = 0` — the sweep by D21, the manual path because the ladder's
+24h tier retains 50% of the sale, which already exceeds the deposit. *(This is why D21 costs almost
+nothing; the paths only diverge for deposits above the retained share.)*
 
-#### Scenario 31 — An expired booking can be made to pay no commission
-**Given** the same booking, and the tier in force at expiry has `agent_commission_pct: 0`
-**When** the sweep runs
-**Then** `commission_reversal −30` is written and `cancellation_clawback = true` — the agent does
-not earn on a booking that never happened. *(This is the behaviour change US-A74 exists to make
-choosable; it requires an explicit policy.)*
+#### Scenario 31 — A rejected electronic payment is not a priced cancellation (D22)
+**Given** a folio awaiting transfer verification, which the admin rejects
+**When** `rejectPayment` runs
+**Then** the folio is `cancelled` with `refund_status = 'none'`, the accrual is reversed in full and
+`cancellation_clawback = true` — the money never arrived, so there is nothing for a ladder to price.
 
 #### Scenario 32 — A broken policy skips one folio, not the sweep
 **Given** two expired bookings, one whose snapshot fails to parse
@@ -840,8 +951,8 @@ strips the unknown keys before the handler sees them.
       `agent_cancellation_enabled`, enforcing Rules 15–21; strict body (Rule 19)
 - [ ] `GET /api/folios/:id` and `GET /api/pos/folios/:id` return `cancellation_quote`;
       the POS read also returns `can_cancel`, computed from the same predicate the endpoint uses
-- [ ] `sweepExpiredBookings` routed through the engine with `cancellation_source =
-      'system_expiry'`, fail-soft per folio (Rules 22–24)
+- [ ] ~~`sweepExpiredBookings` routed through the engine~~ — **withdrawn in Phase 3 (D21).** The
+      sweep keeps its own behaviour, now as a written rule rather than an accident
 - [ ] Scenarios 1–34 covered by the `test/cancellation/` suites (+ agent-permission and sweep
       cases), with the ledger assertions alongside the paid-ledger suite
 - [ ] **`folio-cancellation.test.ts` and `agent-balance-cash-drops.test.ts` are UPDATED, not
@@ -861,6 +972,32 @@ strips the unknown keys before the handler sees them.
       a fractional-hour day amount is rejected rather than rounded.
 - [ ] `pnpm --filter api-turistear test` green; `pnpm build:app` clean
 - [ ] `docs/SPEC.md` updated with US-A69–A74 and US-AG44
+
+### Phase 3 — the apartado (D18a/D20/D21/D22)
+
+- [x] `booking_deposit_retained_pct` removed from the Zod schema; a stored document still carrying
+      it parses with the key stripped (no version bump, no snapshot rewrite)
+- [x] `folioStatus` removed from `ComputeRefundInput` — the engine cannot distinguish an apartado
+- [x] `DEFAULT_CANCELLATION_POLICY` is the graded ladder (D18a), in the API **and** the client copy
+- [x] Migration `0055_cancellation_policy_apartado.sql` — rewrites only orgs still on the 0054
+      default (semantic match, verified against the three cases: old default → rewritten,
+      configured → untouched, `NULL` → rewritten), then strips the retired key from the rest
+- [x] `cancelFolioPriced` extracted; **all three** entrances call it — admin, tourist-request
+      approval, and the agent apartado cancel. The agent path's hard-coded `refund_status: 'none'`,
+      `clawback: false` and full ledger reversal are gone, along with its missing race guard and
+      its unclamped seat decrement
+- [x] `lineCommissions` reconciles to `folios.commission_amount` in both directions, so an
+      apartado's reported forfeited commission is what actually accrued, not what the whole sale
+      would have earned
+- [x] `POST /api/pos/folios/:id/cancel` returns the realised `cancellation` outcome so the POS can
+      state the refund instead of asserting *"no es reembolsable"*
+- [x] Suite green — **652 tests, 50 files**. Every edited assertion justified by a rule here;
+      three (`accommodation-stays` Sc12, `cash-engine-ledger`, `folio-cancellation` Sc6b) were
+      **rebuilt rather than renumbered**, because the new default would otherwise have made them
+      pass while no longer discriminating
+- [ ] POS: the cancellation quote on the folio detail and in the confirm dialog (#12/#13)
+- [ ] Operations told about D19's reach before release — an agent cancelling an apartado 5+ days
+      out now returns the deposit in full and keeps no commission, where before they kept both
 
 ---
 
@@ -893,11 +1030,23 @@ be discovered in production; all of it should be in the release note.
 | **Lodging cancel terms stop applying.** `lodging_free_cancel_days` / `lodging_cancel_penalty_pct` are no longer read | Lodging orgs | D18 — those fields are not translated, because a stay policy would then govern tours too. They get a Settings banner and must configure a ladder to restore penalties |
 | The `clawback` and `cancelled_by_company` request fields now **400** instead of being accepted | API clients | Rule 6. A silently-dropped money flag is worse than a rejected one |
 
-**Money reversal is unchanged on day one.** Under the inherited default the refund is the whole
-amount, so `buildCancellationReversal` writes exactly the rows it wrote before. The cash a folio
-contributes to a corte does not move. What moves is the *commission* reversal and the refund
-obligation — which is why the cash and cancellation suites need updating even though the ledger
-arithmetic did not change.
+> ⚠️ **The two claims above about the inherited default no longer hold — see Phase 3 below.** They
+> were written when that default refunded 100% unconditionally. Under D18a it is a graded ladder, so
+> a cancellation inside 120h retains money, and money reversal is *not* unchanged on day one.
+
+### Phase 3 — the apartado (D18a/D20/D21)
+
+| What changes | Who feels it | Why |
+|---|---|---|
+| **An agent cancelling an apartado 5+ days out now returns the deposit in full and keeps no commission** | Agents, immediately | D19 + D20. Before, that button retained the deposit and paid full commission, both hard-coded. This is a change to what someone earns and is the single item that must reach operations **before** release, not after |
+| A cancellation inside 120h now **retains money**, so the ledger reversal is partial | Cortes, daily | The retained amount stays on the books as money the company is owed. Under the old flat default everything reversed to zero — which, on the agent apartado path, meant a retained deposit vanished from the books entirely while the cash sat in a drawer |
+| A no-show no longer gets a full refund | Tourists | The inherited ladder's terminal tier refunds 0% |
+| An expired apartado still refunds nothing | Nobody — unchanged | D21, now a written rule rather than handler behaviour |
+
+**Production exposure is one organization**, and the graded default matches the terms it already
+operates under — which is what makes shipping the default change (rather than a per-org migration
+with a grace period) proportionate. The engine has never reached `main`, so **no real folio carries
+a snapshot** and no customer was ever promised the flat 100%.
 
 ### The lodging under-clamp, now fixed for everyone
 
@@ -915,11 +1064,14 @@ the deposit. Lodging orgs that want a penalty must configure one.
 
 ### Suggested sequence
 
-1. Deploy to **dev**; verify a cancellation in each shape (tour, stay, booking, tourist request).
-2. Notify lodging orgs before prod — they are the only ones losing a configured behaviour.
-3. Deploy to prod off-peak. `0054` is a data-only `UPDATE`; there is no column drop and no
-   ordering hazard with the worker (unlike `0051`).
-4. Rollback is **not** "clear the policy" any more — that state no longer exists. A true rollback
+1. Deploy to **dev**; verify a cancellation in each shape (tour, stay, apartado from BOTH the admin
+   folio detail and the agent's POS button, tourist request).
+2. **Tell operations about the agent commission change** (D19) — the one item that lands on a
+   person's pay rather than on a report.
+3. Notify lodging orgs before prod — they are the only ones losing a configured behaviour.
+4. Deploy to prod off-peak. `0054` and `0055` are data-only `UPDATE`s; there is no column drop and
+   no ordering hazard with the worker (unlike `0051`).
+5. Rollback is **not** "clear the policy" any more — that state no longer exists. A true rollback
    is a revert of the PR plus a migration restoring `NULL`. This is worth knowing before, not
    during, an incident.
 

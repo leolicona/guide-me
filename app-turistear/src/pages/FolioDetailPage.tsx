@@ -307,10 +307,10 @@ export default function FolioDetailPage() {
               </SectionCard>
             )}
 
-            {/* US-AG07/07.4/07.5 — a live apartado settles/cancels (non-refundable) or, once
-                expired, reactivates here. The US-A21 refundable cancel below is hidden for
-                bookings so the two flows never overlap (per the confirmed decision). */}
-            <BookingActions folio={folio} />
+            {/* US-AG07/07.4/07.5 — a live apartado settles or cancels here (priced by the ladder
+                since US-A76 — it is no longer a non-refundable flow), or once expired, reactivates.
+                The US-A21 cancel below is hidden for bookings so the two never overlap. */}
+            <BookingActions folio={folio} quote={quote} quoteLoading={isLoading} />
 
             {!isCancelled && !isBooking && (
               <Button

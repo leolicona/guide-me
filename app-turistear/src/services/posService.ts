@@ -126,10 +126,28 @@ export const confirmSale = async (data: ConfirmSaleInput): Promise<Folio> => {
   return res.folio
 }
 
+// What cancelling this folio RIGHT NOW would cost. The server computes it with the same function
+// the cancel endpoint uses, so the figure shown before confirming is the figure that gets written.
+// `null` once the folio is cancelled — there is nothing left to quote.
+export interface PosCancellationQuote {
+  refund: number
+  retention: number
+  kept_commission: number
+  reversed_commission: number
+}
+
 // US-AG08 / AG21 — read back one of the caller agent's own folios (receipt + history detail).
-export const getFolio = async (id: string): Promise<Folio> => {
-  const res = await request<{ folio: Folio }>(`/api/pos/folios/${id}`)
-  return res.folio
+// Returns the quote alongside the folio so the cancel dialog can state the refund instead of
+// asserting one (it used to say "el anticipo no es reembolsable" unconditionally, which stopped
+// being true when apartados started following the ladder — engine D20).
+export const getFolio = async (
+  id: string,
+): Promise<{ folio: Folio; quote: PosCancellationQuote | null }> => {
+  const res = await request<{
+    folio: Folio
+    cancellation_quote?: PosCancellationQuote | null
+  }>(`/api/pos/folios/${id}`)
+  return { folio: res.folio, quote: res.cancellation_quote ?? null }
 }
 
 

@@ -397,8 +397,12 @@ export interface CancellationEmailInput {
   cancellationReason: string | null
   lines: Array<{
     serviceName: string
-    slotDate: string
-    slotStartTime: string
+    // NULLABLE on purpose: a lodging stay line has no slot date or time (it carries a check-in
+    // instead). The type used to require both, which the callers could not satisfy — they passed
+    // the folio's nullable fields straight through, so a cancelled stay emailed the customer
+    // "Hotel X — null null (×1)". The renderer now omits what is absent.
+    slotDate: string | null
+    slotStartTime: string | null
     quantity: number
   }>
 }
@@ -410,10 +414,11 @@ export const sendCancellationEmail = async (
   const orgName = escapeHtml(data.orgName)
   const greeting = data.customerName ? `Hola ${escapeHtml(data.customerName)},` : 'Hola,'
   const servicesHtml = data.lines
-    .map(
-      (l) =>
-        `<li>${escapeHtml(l.serviceName)} — ${l.slotDate} ${l.slotStartTime} (×${l.quantity})</li>`,
-    )
+    .map((l) => {
+      const when = [l.slotDate, l.slotStartTime].filter(Boolean).join(' ')
+      const detail = when ? ` — ${escapeHtml(when)}` : ''
+      return `<li>${escapeHtml(l.serviceName)}${detail} (×${l.quantity})</li>`
+    })
     .join('')
   const reasonHtml = data.cancellationReason
     ? `<p><strong>Motivo:</strong> ${escapeHtml(data.cancellationReason)}</p>`

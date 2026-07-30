@@ -27,7 +27,7 @@ This specification unifies two workflows:
 | D4 | **Booking phone** | **Required + dialable** for a booking (so WhatsApp recovery always works). Full/instant sales keep phone optional. |
 | D5 | **Recovery dashboard visibility** | **Caller-scoped for agents** (own bookings); **admins see the whole org**. Two agents never share a booking, so the cross-agent collision in US-AG07.3 Sc.3 reduces to **agent ↔ admin**; the reminder flag records the last contact and dims the icon. |
 | D6 | **Reminder sync** | **Persisted flag + pre-flight atomic claim** (no realtime infra). `POST /reminder` is an **atomic conditional claim** (`… WHERE reminder_status='none'`): the tap runs it **before** opening WhatsApp and opens **only if it won**; a loser gets `claimed:false` + who/when and a non-blocking *¿Reenviar?* (`?force=true` re-claims). The dashboard refetch keeps the list fresh but is **not** the collision guard — the server-side claim is. Replaces the earlier passive-refetch design (which only converged after a poll, leaving a double-send window). |
-| D7 | **Deposit on cancel/expiry** | **Non-refundable, retained in the agent's cash drawer** (US-AG07.4). Same treatment for manual cancel and auto-expiry. **Resolves O1.** |
+| D7 | **Deposit on cancel/expiry** | ~~**Non-refundable, retained in the agent's cash drawer**, same treatment for manual cancel and auto-expiry.~~ **PARTIALLY SUPERSEDED — Cancellation Policy Engine D20/D21** (`docs/cancellation/cancellation-policy-engine.spec.md`). The two cases have split: a **manual cancel** is priced by the org's refund ladder like any other sale (the deposit comes back in full 5+ days out; it is retained only to the extent the ladder retains), while an **expired** apartado still retains everything — now as a written rule (D21) rather than as handler behaviour. "Non-refundable deposit" is no longer a rule anywhere in the system. |
 | D8 | **Commission** | **Percent on the amount collected**; **fixed only on reaching `paid`** (reserved by the commissions spec). A retained deposit keeps its percent commission. |
 | D9 | **No new screens — integrate into existing flow** (revises the standalone surfaces in US-AG07.3/07.5) | "Less is more": apartado management has **no dedicated dashboard or route**. The **existing Ventas list** (`FolioHistoryPage`, which already has a *Reservas* filter) gains an **urgency accent + countdown + one-tap WhatsApp** on booking cards; the **existing folio detail** (`FolioHistoryDetailPage`, and the post-sale `FolioReceiptPage`) **dynamically** grows the **expiry banner + Liquidar/Cancelar/Reactivar**. Agents manage everything on screens they already know — no new navigation to learn. The banner/actions and WhatsApp claim are **shared components** (`BookingActions`, `ExpiredBookingBanner`, `BookingWhatsAppButton`) in a dedicated **`features/bookings`** module (with `bookingUrgency` + the action hooks) reused by every detail surface; both the `pos` and `folios` features depend on it one-way, neither imports the other (see plan § "Module boundary"). |
 | D9-admin | **Same affordances on the admin org-wide surface** (D5) | The **admin `/folios`** list (`FoliosListPage`) and detail (`FolioDetailPage`) get the **identical** decorations (urgency, pending balance, WhatsApp, expiry banner, Liquidar/Reactivar) — reusing the same shared components. This required extending the admin serializers (`listFolios`, `readFolio`) with `booking_expires_at`/`pending_balance`/`customer_phone`/`reminder_status`/`reminder_sent_*`. On a **`booking`-status** folio the admin detail shows the **non-refundable** Liquidar/Cancelar (US-AG07.4) and **hides** the US-A21 refundable *Cancelar folio*; that refundable flow stays for `paid` folios. The booking-action mutations also invalidate the admin `['folios']` query key so the list/detail refetch. |
@@ -182,7 +182,14 @@ Escenario 3: Prevención de colisiones operativas en taquilla
 > To: Release capacity immediately back into the pool for last-minute walk-ins.
 
 #### Reglas de Negocio Contables
-* **Retención de Anticipo (Non-refundable):** Al realizar una cancelación manual por desistimiento del cliente, el anticipo ya cobrado (`amount_paid`) **no es reembolsable** y se queda en el corte de caja del agente.
+* ~~**Retención de Anticipo (Non-refundable):** el anticipo ya cobrado no es reembolsable.~~
+  **SUPERSEDIDA — motor de políticas de cancelación, D20.** Una cancelación manual se cotiza con la
+  escalera de la empresa, igual que cualquier otra venta: el anticipo se retiene solo en la medida
+  en que la escalera retiene. Con la escalera heredada, cancelar con 5+ días de anticipación
+  **devuelve el anticipo completo**; dentro de ese plazo la retención sobre el total de la venta
+  suele superar al anticipo, así que no queda nada por devolver — y al cliente nunca se le cobra la
+  diferencia. Un apartado **vencido** sí retiene todo (D21). Ver
+  `docs/cancellation/cancellation-policy-engine.spec.md`.
 * **Extinción de Adeudo:** El estatus pasa a `CANCELLED`, y la deuda pendiente (`total - amount_paid`) se cancela contablemente para cerrar el folio.
 
 #### Gherkin Scenarios
@@ -419,8 +426,8 @@ Functional minimalism — reduce cognitive load, stay elegant. No B2B switch thi
 | Booking create / settle / cancel / reactivate / reminder, org policy, expiry sweep, adaptive checkout; apartado affordances **integrated into the existing Ventas list + folio detail** (D9, no dedicated dashboard) | **This feature** |
 | Cart pricing, atomic decrement, controlled discount, extras, QR signing, ticket email, portal token | *POS / QR / Email* — reused (QR+email **invoked at settle**) |
 | Commission snapshot storage + running-balance derivation | *Commissions* — this feature only sets the snapshot per D8 |
-| **Cash drawer** | *Cash drawer* — **REQUIRES A FOLLOW-UP**: today it *excludes* `cancelled` folios from collected cash, but a **non-refundable retained deposit stays in the drawer** (D7). The drawer must count `amount_paid` of a `cancelled` **booking** (deposit retained) as collected cash — a "cancelled-but-retained" carve-out. Tracked as an Open Decision + a note to the cash-drawer owner. |
-| Admin total cancellation **with refund** (US-A21) | *Cancellation* — unchanged; the new agent `/cancel` is **booking-only, non-refundable** and distinct |
+| **Cash drawer** | *Cash drawer* — ~~requires a carve-out for the retained deposit~~ **RESOLVED**: the paid ledger buckets by `folio_payments`, with no `folios.status` predicate, and Phase 3's proportional reversal leaves the retained portion on the books. `docs/TECH_DEBT.md` §17 |
+| Admin total cancellation **with refund** (US-A21) | *Cancellation* — the agent `/cancel` is still **booking-only**, but no longer prices differently: since Cancellation Policy Engine D20 both call `cancelFolioPriced` |
 | B2B unpaid scanning, per-service overrides, reschedule, coupon/credit-note | **Deferred** (§1.2) |
 
 ---
@@ -470,9 +477,9 @@ Functional minimalism — reduce cognitive load, stay elegant. No B2B switch thi
 
 | # | Question | Recommended default |
 |---|---|---|
-| O1 | ~~Forfeited-deposit accounting~~ | **Resolved (D7)** — non-refundable, retained in the agent's drawer. |
+| O1 | ~~Forfeited-deposit accounting~~ | **Resolved, then revised.** D7 said "non-refundable, retained in the drawer"; the Cancellation Policy Engine (D20) prices a manual cancel by the ladder instead, and only an *expired* apartado retains unconditionally (D21). |
 | O2 | ~~Dashboard scope~~ | **Resolved (D5)** — caller-scoped agents + org-wide admin. |
-| O3 | **Cash-drawer carve-out** for a cancelled-but-retained booking deposit (the agent holds that cash). | Count a `cancelled` **booking's** `amount_paid` as collected cash; coordinate with the cash-drawer owner. |
+| O3 | ~~**Cash-drawer carve-out** for a cancelled-but-retained booking deposit.~~ | **Resolved — no carve-out needed.** The paid ledger dropped the `status != 'cancelled'` predicate entirely, and Phase 3's proportional reversal keeps the retained portion on the books. See `docs/TECH_DEBT.md` §17. |
 | O4 | **Launch policy values** (`min %`, `hold_days`, `same_day_buffer`). | `0% / 7d / 15min` defaults; product tunes per-org. |
 | O5 | **Sweep cadence** | 15-min cron (snappier spot release for last-minute walk-ins). |
 | O6 | **WhatsApp template** copy + i18n | Hardcoded ES template this phase; i18n with the bilingual feature (US-L0x). |

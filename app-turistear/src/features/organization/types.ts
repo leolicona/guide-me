@@ -21,12 +21,14 @@ export interface CancellationTier {
   affiliate_commission_pct?: number
 }
 
+// D20 — the ladder is the whole document. There is no deposit clause: an apartado is the same sale
+// with less money collected against it, and the retention arithmetic already prices that. The old
+// `booking_deposit_retained_pct` floor is removed rather than defaulted to 0, so no configuration
+// can put a ladder and a deposit rule in contradiction again.
 export interface CancellationPolicy {
   version: 1
   /** Ordered highest `min_hours` first, with exactly one terminal (`null`) tier last. */
   tiers: CancellationTier[]
-  /** 0–100. Floor for an unsettled booking; 100 (default) = the deposit is never refunded. */
-  booking_deposit_retained_pct: number
 }
 
 // What cancelling a folio RIGHT NOW would cost. Read-only: the server computes it with the same
@@ -50,28 +52,23 @@ export interface CancellationQuote {
   lines: CancellationQuoteLine[]
 }
 
-// A sensible starting ladder for an org configuring one for the first time: full refund with five
-// days' notice, half inside that, nothing after departure. Commission mirrors it — nothing earned
-// on an early cancellation, kept once the company retained something.
+// The ladder every organization inherits: full refund with five days' notice, half inside that,
+// nothing once the departure has passed. Commission mirrors it — nothing earned on an early
+// cancellation, kept once the company retained something.
 //
 // This MUST mirror `DEFAULT_CANCELLATION_POLICY` in the API (`utils/cancellationPolicy.ts`): it is
-// what migration 0054 wrote into every organization and what a new one is created with. The client
-// copy exists so "restablecer" can write the same document the server would, rather than clearing
-// the field and hoping the fallback matches.
+// what migration 0055 wrote into every organization still on the old default, and what a new one is
+// created with. The client copy exists so "restablecer" writes the same document the server would,
+// rather than clearing the field and hoping the fallback matches.
+//
+// It used to be a flat "refund 100%, always" (D18). That changed when the engine started pricing
+// apartados too (D20): an inherited policy that refunds every deposit to a no-show is not a
+// conservative default, it is a trap. This is the spec's worked ladder, promoted to the default.
 export const DEFAULT_CANCELLATION_POLICY: CancellationPolicy = {
-  version: 1,
-  tiers: [{ min_hours: null, refund_pct: 100, agent_commission_pct: 0 }],
-  booking_deposit_retained_pct: 100,
-}
-
-// A worked example an admin can start from — the spec's ladder. Offered as a suggestion, never
-// applied silently: an inherited policy is the flat 100% above, not this.
-export const EXAMPLE_CANCELLATION_LADDER: CancellationPolicy = {
   version: 1,
   tiers: [
     { min_hours: 120, refund_pct: 100, agent_commission_pct: 0 },
     { min_hours: 24, refund_pct: 50, agent_commission_pct: 100 },
     { min_hours: null, refund_pct: 0, agent_commission_pct: 100 },
   ],
-  booking_deposit_retained_pct: 100,
 }

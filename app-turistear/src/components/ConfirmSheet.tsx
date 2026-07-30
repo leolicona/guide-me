@@ -12,6 +12,13 @@ export interface ConfirmSheetProps {
   confirmColor?: 'error' | 'primary'
   onConfirm: () => void
   busy?: boolean
+  /**
+   * Block content under the description — a money readout, a small table, anything that is not a
+   * sentence. It exists because `description` is rendered INSIDE a `Typography` (a `<p>`), so a
+   * `<div>` passed there is invalid HTML; this slot renders raw. Use `description` for prose and
+   * this for structure.
+   */
+  detail?: ReactNode
   /** Error/notice region under the description (e.g. the 409 "has folios" Alert). */
   error?: ReactNode
   /** Terminal-error mode: hide the confirm button entirely, leaving only cancel/close. */
@@ -34,6 +41,7 @@ export function ConfirmSheet({
   confirmColor = 'error',
   onConfirm,
   busy = false,
+  detail,
   error,
   hideConfirm = false,
   cancelLabel = 'Cancelar',
@@ -73,7 +81,8 @@ export function ConfirmSheet({
             {description}
           </Typography>
         )}
-        {error && <Box sx={{ mt: description ? 1.5 : 0 }}>{error}</Box>}
+        {detail && <Box sx={{ mt: description ? 1.5 : 0 }}>{detail}</Box>}
+        {error && <Box sx={{ mt: description || detail ? 1.5 : 0 }}>{error}</Box>}
       </Box>
     </BottomSheet>
   )

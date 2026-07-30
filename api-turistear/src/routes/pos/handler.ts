@@ -52,6 +52,10 @@ import {
   depositMethodSql,
   readFolioPayments,
 } from '../../utils/folioPayments'
+// D20 — the agent apartado cancel shares the admin path's commit, so the two cannot price the same
+// folio differently. Reaching across routes is deliberate: the alternative is a second copy of the
+// release + reversal logic, which is exactly what this replaced.
+import { cancelFolioPriced, queueCancellationEmail, quoteCancellation } from '../folios/handler'
 
 export type PosContext = Context<{
   Bindings: CloudflareBindings
@@ -1964,7 +1968,26 @@ export const getFolio = async (c: PosContext) => {
     throw new ApiError('NOT_FOUND', 404, 'Folio not found')
   }
 
-  return c.json({ folio })
+  // What cancelling RIGHT NOW would cost, computed by the same function the cancel endpoint uses —
+  // so the figure the agent reads before confirming is the figure that will be written, not an
+  // estimate the client re-derives. `null` once the folio is cancelled: there is nothing left to
+  // quote, and a stale number next to a cancelled folio is worse than none.
+  const quote =
+    folio.status === 'cancelled'
+      ? null
+      : await quoteCancellation(db, agent.organizationId, id, new Date())
+
+  return c.json({
+    folio,
+    cancellation_quote: quote
+      ? {
+          refund: quote.refund,
+          retention: quote.retention,
+          kept_commission: quote.keptCommission,
+          reversed_commission: quote.reversedCommission,
+        }
+      : null,
+  })
 }
 
 // POST /pos/folios/:id/ticket-delivery — the seller records that they sent the tickets over
@@ -2555,9 +2578,21 @@ export const rejectPayment = async (c: PosContext) => {
 }
 
 // US-AG07.4 — manual cancellation of a booking: release the held spots immediately and close the
-// folio. The collected deposit is NON-REFUNDABLE and retained (refund_status stays 'none', D7);
-// the agent keeps the percent commission already accrued. Booking-only and distinct from the
-// admin refunding cancellation (US-A21). Owner-or-admin scoped.
+// folio. Booking-only, owner-or-admin scoped.
+//
+// D20 — this used to be a THIRD pricing path. It hard-coded `refund_status: 'none'` (the deposit is
+// never refunded), `clawback: false` (the agent keeps every peso of commission), and a FULL ledger
+// reversal — which zeroed the collected deposit in the books while the cash was still physically in
+// the agent's drawer, so no cash-drop report ever asked for it. All three are now decided by the
+// ladder, through the same function the admin and tourist-request paths use.
+//
+// Two race bugs went with it, both fixed by delegating: the flip had no `status != 'cancelled'`
+// guard, and the seat release subtracted without a `MAX(0, …)` clamp, so two concurrent cancels
+// double-released the spots.
+//
+// Consequence worth stating plainly, because it changes what an agent earns: under the default
+// ladder an apartado cancelled 5+ days out now refunds the deposit IN FULL and the agent keeps no
+// commission on it. Inside 24h they keep both, as before.
 export const cancelBooking = async (c: PosContext) => {
   const agent = c.get('user')
   const id = c.req.param('id')
@@ -2586,74 +2621,43 @@ export const cancelBooking = async (c: PosContext) => {
     .where(and(eq(folioLines.folioId, id), eq(folioLines.organizationId, org)))
 
   const now = new Date()
-  const statements: BatchItem<'sqlite'>[] = [
-    db
-      .update(folios)
-      .set({
-        status: 'cancelled',
-        cancelledAt: now,
-        cancelledBy: agent.userId,
-        cancellationReason: body.reason ?? null,
-        refundStatus: 'none', // deposit retained (D7)
-        updatedAt: now,
-      })
-      .where(and(eq(folios.id, id), eq(folios.organizationId, org))),
-  ]
-  // US-LG — cancelling a booking drops it from the ledger's sales/cash buckets exactly as the
-  // status-exclusion did (clawback=false: the agent KEEPS the accrued commission, D7).
-  statements.push(
-    ...(await buildCancellationReversal(db, {
-      organizationId: org,
-      folioId: id,
-      collectedBy: agent.userId,
-      at: now,
-      clawback: false,
-    })),
-  )
-  for (const line of lineRows) {
-    if (!line.slotId) continue
-    if (line.zoneId) {
-      // US-A64 — release the seats to the zone counter, then reconcile the slot totals.
-      statements.push(
-        db
-          .update(slotZones)
-          .set({ booked: sql`${slotZones.booked} - ${line.quantity}`, updatedAt: new Date() })
-          .where(
-            and(
-              eq(slotZones.slotId, line.slotId),
-              eq(slotZones.zoneId, line.zoneId),
-              eq(slotZones.organizationId, org),
-            ),
-          ),
-        reconcileSlotTotals(db, line.slotId),
-      )
-    } else {
-      statements.push(
-        db
-          .update(slots)
-          .set({ booked: sql`${slots.booked} - ${line.quantity}`, updatedAt: new Date() })
-          .where(and(eq(slots.id, line.slotId), eq(slots.organizationId, org))),
-      )
-    }
+  // Seat release, zone reconcile, reservation release and the proportional ledger reversal all live
+  // inside this call — the same batch the admin path commits.
+  const { won, outcome } = await cancelFolioPriced(db, org, id, lineRows, now, {
+    cancelledBy: agent.userId,
+    reason: body.reason ?? null,
+    source: 'agent',
+  })
+  if (!won) {
+    // A concurrent cancellation won the guarded flip after our pre-check. Nothing was released
+    // twice, which is exactly what the guard is for.
+    throw new ApiError('NOT_A_BOOKING', 409, 'Only a live booking can be cancelled here')
   }
-  // Lodging: release the stay's dates by cancelling its active reservations (frees inventory,
-  // mirroring the slot re-increment). Deposit stays non-refundable (D7), set above.
-  statements.push(
-    db
-      .update(accommodationReservations)
-      .set({ status: 'cancelled', updatedAt: new Date() })
-      .where(
-        and(
-          eq(accommodationReservations.folioId, id),
-          eq(accommodationReservations.organizationId, org),
-          eq(accommodationReservations.status, 'active'),
-        ),
-      ),
-  )
-  await db.batch(statements as [BatchItem<'sqlite'>, ...BatchItem<'sqlite'>[]])
 
   const updated = await readFolio(db, org, agent.userId, id, c.env.QR_SECRET, c.env.API_BASE_URL)
-  return c.json({ folio: updated ?? { id, status: 'cancelled' } })
+  // The same notice the admin path sends. It matters more here: this cancellation can now open a
+  // refund obligation the customer has to come and collect, and until now the only thing telling
+  // them was whatever the agent said at the counter.
+  if (updated) {
+    await queueCancellationEmail(c, db, org, id, {
+      customer_email: updated.customer_email,
+      customer_name: updated.customer_name,
+      cancellation_reason: body.reason ?? null,
+      lines: updated.lines,
+    })
+  }
+
+  return c.json({
+    folio: updated ?? { id, status: 'cancelled' },
+    // What the ladder decided, so the POS can tell the agent what they owe the customer instead of
+    // asserting "no es reembolsable" the way the old confirm dialog did.
+    cancellation: {
+      refund: outcome.refund,
+      retention: outcome.retention,
+      kept_commission: outcome.keptCommission,
+      reversed_commission: outcome.reversedCommission,
+    },
+  })
 }
 
 // US-AG07.3 — claim the WhatsApp reminder (D6). An ATOMIC conditional update so two viewers

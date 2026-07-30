@@ -26,7 +26,6 @@ const LADDER = {
     { min_hours: 0, refund_pct: 50, agent_commission_pct: 100 },
     { min_hours: null, refund_pct: 0, agent_commission_pct: 100 },
   ],
-  booking_deposit_retained_pct: 100,
 }
 
 const ts = () => Math.floor(Date.now() / 1000)
@@ -342,25 +341,33 @@ describe('Scenario 3 — a redeemed line retains everything (D7)', () => {
   })
 })
 
-describe('Scenario 4 — the booking deposit floor (US-AG07.4 preserved)', () => {
-  it('a booking refunds nothing at 100%, even under a full-refund tier', async () => {
-    const { organizationId, agentId, serviceId, folioId } = await scenario({ hours: 144 })
-    await env.DB.prepare(`UPDATE folios SET status = 'booking', amount_paid = 30000 WHERE id = ?`)
-      .bind(folioId)
+// D20 — Scenario 4 used to assert the opposite: a `booking_deposit_retained_pct` floor pinned an
+// apartado's refund to 0 whatever the ladder said. The floor is deleted, so an apartado is now
+// priced by the same tiers as any other folio and the only thing that makes it different is how
+// much money there is to refund from.
+describe('Scenario 4 — an apartado is priced by the ladder (D20)', () => {
+  const asApartado = (folioId: string, amountPaid = 30_000) =>
+    env.DB.prepare(`UPDATE folios SET status = 'booking', amount_paid = ? WHERE id = ?`)
+      .bind(amountPaid, folioId)
       .run()
-    const { json } = await cancel(ADMIN, folioId)
-    expect(json.cancellation.refund).toBe(0)
-    expect(await folioRow(folioId)).toMatchObject({ refund_status: 'none' })
-  })
 
-  it('at 0% the deposit follows the ladder', async () => {
-    const policy = { ...LADDER, booking_deposit_retained_pct: 0 }
-    const { folioId } = await scenario({ hours: 144, policy })
-    await env.DB.prepare(`UPDATE folios SET status = 'booking', amount_paid = 30000 WHERE id = ?`)
-      .bind(folioId)
-      .run()
+  it('refunds the deposit in full under a full-refund tier', async () => {
+    const { folioId } = await scenario({ hours: 144 }) // ≥120h → the 100% tier
+    await asApartado(folioId)
     const { json } = await cancel(ADMIN, folioId)
     expect(json.cancellation.refund).toBe(30_000)
+    // Money owed back opens a real obligation, whoever cancelled and whatever the folio's status.
+    expect(await folioRow(folioId)).toMatchObject({ refund_status: 'pending', refund_amount: 30_000 })
+  })
+
+  it('refunds nothing when the retention already exceeds the deposit', async () => {
+    // Inside 120h the ladder retains half of the 100,000 sale = 50,000, and only 30,000 was ever
+    // collected. Nothing is left over — and the customer is not chased for the other 20,000.
+    const { folioId } = await scenario({ hours: 20 })
+    await asApartado(folioId)
+    const { json } = await cancel(ADMIN, folioId)
+    expect(json.cancellation).toMatchObject({ refund: 0, retention: 30_000 })
+    expect(await folioRow(folioId)).toMatchObject({ refund_status: 'none' })
   })
 })
 
@@ -471,9 +478,11 @@ describe('Scenario 14/15 — proportional ledger reversal across methods', () =>
 // unconfigured orgs. This is the Phase-2 counterpart, and it IS the point of the change.
 describe('Scenario 10 — an unconfigured org still prices coherently', () => {
   it('both cancellation paths refund the SAME amount', async () => {
-    // `policy: null` here means the ORG row carries no ladder — the state migration 0054 removes.
-    // The fallback still prices it, so this doubles as the Scenario-13 "missed row" case.
-    const admin = await scenario({ hours: 3, policy: null })
+    // `policy: null` here means the ORG row carries no ladder — the state migrations 0054/0055
+    // remove. The fallback still prices it, so this doubles as the Scenario-13 "missed row" case.
+    // 200h out lands in the inherited ladder's top tier, so the assertion is a real number rather
+    // than the 0 that a broken quote would also produce.
+    const admin = await scenario({ hours: 200, policy: null })
     const { status, json } = await cancel(ADMIN, admin.folioId, { reason: 'x' })
     expect(status).toBe(200)
     expect(json.cancellation).toMatchObject({ refund: 100_000, retention: 0 })
@@ -572,7 +581,7 @@ describe('cancellation_quote on folio detail', () => {
   // D17 — was "is null when the org has no policy". Every live folio quotes now, because there is
   // always a policy to quote against; a null quote means only "already cancelled".
   it('quotes even for an org that configured nothing', async () => {
-    const { folioId } = await scenario({ hours: 3, policy: null })
+    const { folioId } = await scenario({ hours: 200, policy: null }) // inherited top tier
     expect((await getFolio(ADMIN, folioId)).json.cancellation_quote).toMatchObject({
       refund: 100_000,
       retention: 0,
@@ -606,11 +615,13 @@ describe('Scenario 31/32 — multitenancy', () => {
     // org_a cannot even see it.
     expect((await cancel(orgA.adminEmail, folioB)).status).toBe(404)
 
-    // org_b cancels its own folio. Its departure is 3h out, which under org_a's ladder would be a
-    // 50% tier — org_b gets 100%, so its own (default) policy applied and org_a's never leaked.
+    // org_b cancels its own folio. Its departure is 3h out: under org_a's ladder that is the 50%
+    // tier (retention 50,000), under the INHERITED default it is past the 24h step and lands on the
+    // terminal tier (retention 100,000). The retention is what discriminates — org_b got its own
+    // policy and org_a's never leaked across.
     const { json } = await cancel(orgB.adminEmail, folioB, { reason: 'x' })
-    expect(json.cancellation).toMatchObject({ refund: 100_000, retention: 0 })
-    expect((await folioRow(folioB))?.refund_amount).toBe(100_000)
+    expect(json.cancellation).toMatchObject({ refund: 0, retention: 100_000 })
+    expect((await folioRow(folioB))?.refund_status).toBe('none')
   })
 
   it('injected money fields are ignored — the computed refund wins', async () => {
