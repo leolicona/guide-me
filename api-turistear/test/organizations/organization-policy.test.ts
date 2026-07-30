@@ -78,6 +78,45 @@ describe('US-A46 — org booking policy', () => {
     expect((await put('admin@empresa.com', { booking_pre_departure_buffer_hours: -1 })).status).toBe(400)
   })
 
+  // US-A77 (S1) — the apartado creation cutoff, and the coherence rule that gives it its point.
+  it('the apartado creation cutoff round-trips, defaulting to 0 (no restriction)', async () => {
+    await seedUser({ email: 'admin@empresa.com', role: 'admin' })
+    expect((await get('admin@empresa.com')).json.organization.booking_creation_cutoff_hours).toBe(0)
+
+    const { status } = await put('admin@empresa.com', { booking_creation_cutoff_hours: 48 })
+    expect(status).toBe(200)
+    expect((await get('admin@empresa.com')).json.organization.booking_creation_cutoff_hours).toBe(48)
+  })
+
+  it('rejects a cutoff below the settle deadline → 400, in BOTH directions', async () => {
+    await seedUser({ email: 'admin@empresa.com', role: 'admin' })
+    // Default deadline is 24h. A 12h cutoff would let an apartado be created inside the window it
+    // is expected to be settled in — born owing money it has no time to pay.
+    expect((await put('admin@empresa.com', { booking_creation_cutoff_hours: 12 })).status).toBe(400)
+
+    // The other direction: a cutoff already stored, and a PATCH that raises the deadline past it.
+    // The check reads the STORED value of whichever field the request did not send, so this fails
+    // too — validating the body alone would have let it through.
+    expect((await put('admin@empresa.com', { booking_creation_cutoff_hours: 48 })).status).toBe(200)
+    expect(
+      (await put('admin@empresa.com', { booking_pre_departure_buffer_hours: 72 })).status,
+    ).toBe(400)
+
+    // Both together, coherent, is fine.
+    expect(
+      (await put('admin@empresa.com', {
+        booking_creation_cutoff_hours: 96,
+        booking_pre_departure_buffer_hours: 72,
+      })).status,
+    ).toBe(200)
+  })
+
+  it('0 means no restriction, so it is coherent with any deadline', async () => {
+    await seedUser({ email: 'admin@empresa.com', role: 'admin' })
+    await put('admin@empresa.com', { booking_pre_departure_buffer_hours: 168 })
+    expect((await put('admin@empresa.com', { booking_creation_cutoff_hours: 0 })).status).toBe(200)
+  })
+
   it('an agent may not edit the policy → 403', async () => {
     const { organizationId } = await seedUser({ email: 'admin@empresa.com', role: 'admin' })
     await seedUser({ email: 'agent@empresa.com', role: 'agent', organizationId })

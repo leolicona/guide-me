@@ -1,107 +1,182 @@
-import type { BatchItem } from 'drizzle-orm/batch'
-import { and, eq, lte, sql } from 'drizzle-orm'
-import { getDb } from '../../db/client'
-import { accommodationReservations, folioLines, folios, slots, slotZones } from '../../db/schema'
-import { reconcileSlotTotals } from '../services/zones.reconcile'
+import { and, eq, inArray, lte } from 'drizzle-orm'
+import { getDb, type Db } from '../../db/client'
+import { folioLines, folios, organizations } from '../../db/schema'
+import { cancelFolioPriced } from '../folios/handler'
+import { sendBookingReminderEmail } from '../../services/resend'
+import { naiveEpoch } from '../../utils/tz'
 
-// US-AG07 (P3) — auto-expiry sweep. Cancels every booking past its `booking_expires_at`, releasing
-// its held spots back into inventory (so the seats free up for last-minute walk-ins). The deposit
-// is RETAINED (non-refundable, D7) — same accounting as a manual cancel. Run by the scheduled
-// Worker (see src/index.tsx). Each write is filtered by the folio's OWN organization_id, so a
-// foreign org's row can never be touched while processing another's. Returns the count swept.
-export async function sweepExpiredBookings(env: CloudflareBindings): Promise<number> {
+// US-AG07 (P3) / US-A77 — the apartado sweep, run every 15 minutes by the scheduled Worker
+// (src/index.tsx).
+//
+// It used to do one thing: cancel every booking past `booking_expires_at`. That made the settle
+// deadline an EVENT — a customer who forgot to pay lost their deposit without a single message, and
+// found out by finding out. The deadline is now a TRANSITION between two stages, and this sweep
+// drives both:
+//
+//   ① RETENIDO  — until `booking_expires_at`. Nothing happens here.
+//   ② GRACIA    — from `booking_expires_at` until `salida − gracia` (default 15 min). Entered
+//                 automatically; on entry the customer is emailed that their spots are about to be
+//                 released. Sales made close to departure are BORN here (their expiry was already
+//                 computed as the grace instant), which is why entry is not a separate event.
+//   cancel      — at the grace instant, priced by the cancellation ladder like every other
+//                 cancellation. Fifteen minutes before departure the ladder is always in its
+//                 terminal tier, which is what makes running the engine here safe by construction
+//                 rather than by coincidence of defaults (engine spec D21, superseded).
+//
+// STAGE IS DERIVED, never stored. `booking_expires_at` is the ①→② boundary and the grace instant is
+// computed from the line's own snapshotted departure, so no cron writes a state that the clock then
+// contradicts. `reminder_status` is the notification guard, deliberately shared with the agent's
+// manual WhatsApp claim: whoever told the customer first, the customer was told.
+//
+// Every write is filtered by the folio's OWN organization_id, so processing one org's row can never
+// touch another's. Returns what happened, for the log.
+export interface SweepResult {
+  notified: number
+  cancelled: number
+  failed: number
+}
+
+export async function sweepExpiredBookings(env: CloudflareBindings): Promise<SweepResult> {
   const db = getDb(env)
+  const now = new Date()
+  const nowSec = Math.floor(now.getTime() / 1000)
+  const result: SweepResult = { notified: 0, cancelled: 0, failed: 0 }
 
-  const expired = await db
-    .select({ id: folios.id, organizationId: folios.organizationId })
+  // Everything past its stage-① boundary: candidates for BOTH a notification and a cancellation.
+  // Which one each gets is decided per folio, below, by where the grace instant falls.
+  const due = await db
+    .select({
+      id: folios.id,
+      organizationId: folios.organizationId,
+      customerEmail: folios.customerEmail,
+      customerName: folios.customerName,
+      total: folios.total,
+      amountPaid: folios.amountPaid,
+      reminderStatus: folios.reminderStatus,
+    })
     .from(folios)
-    .where(
-      and(eq(folios.status, 'booking'), lte(folios.bookingExpiresAt, new Date())),
-    )
+    .where(and(eq(folios.status, 'booking'), lte(folios.bookingExpiresAt, now)))
 
-  let swept = 0
-  for (const folio of expired) {
-    const lineRows = await db
-      .select({
-        slotId: folioLines.slotId,
-        quantity: folioLines.quantity,
-        zoneId: folioLines.zoneId,
-      })
-      .from(folioLines)
-      .where(
-        and(
-          eq(folioLines.folioId, folio.id),
-          eq(folioLines.organizationId, folio.organizationId),
-        ),
-      )
+  if (due.length === 0) return result
 
-    const statements: BatchItem<'sqlite'>[] = [
-      db
-        .update(folios)
-        .set({
-          status: 'cancelled',
-          cancelledAt: new Date(),
-          cancelledBy: null, // system
-          cancellationReason: 'Apartado vencido',
-          updatedAt: new Date(),
-        })
-        .where(
-          and(
-            eq(folios.id, folio.id),
-            eq(folios.organizationId, folio.organizationId),
-          ),
-        ),
-    ]
-    for (const line of lineRows) {
-      if (!line.slotId) continue // a lodging stay line has no slot (released via reservations below)
-      if (line.zoneId) {
-        // US-A64 — return the seats to the zone counter, then re-derive the slot totals.
-        statements.push(
-          db
-            .update(slotZones)
-            .set({ booked: sql`${slotZones.booked} - ${line.quantity}`, updatedAt: new Date() })
-            .where(
-              and(
-                eq(slotZones.slotId, line.slotId),
-                eq(slotZones.zoneId, line.zoneId),
-                eq(slotZones.organizationId, folio.organizationId),
-              ),
-            ),
-          reconcileSlotTotals(db, line.slotId),
-        )
-      } else {
-        statements.push(
-          db
-            .update(slots)
-            .set({
-              booked: sql`${slots.booked} - ${line.quantity}`,
-              updatedAt: new Date(),
-            })
-            .where(
-              and(
-                eq(slots.id, line.slotId),
-                eq(slots.organizationId, folio.organizationId),
-              ),
-            ),
-        )
+  const orgIds = [...new Set(due.map((f) => f.organizationId))]
+  const orgRows = await db
+    .select({
+      id: organizations.id,
+      name: organizations.name,
+      timezone: organizations.timezone,
+      graceOffsetMinutes: organizations.bookingGraceOffsetMinutes,
+    })
+    .from(organizations)
+    .where(inArray(organizations.id, orgIds))
+  const orgById = new Map(orgRows.map((o) => [o.id, o]))
+
+  for (const folio of due) {
+    // FAIL-SOFT PER FOLIO. The spec has claimed this since the engine landed; the code did not do
+    // it — there was a single `.catch` on the scheduled handler, so one folio that threw aborted
+    // the whole run and every apartado behind it silently kept its seats.
+    try {
+      const org = orgById.get(folio.organizationId)
+      if (!org) {
+        result.failed++
+        continue
       }
-    }
-    // Lodging: free the stay's dates by cancelling its active reservations (deposit retained, D7).
-    statements.push(
-      db
-        .update(accommodationReservations)
-        .set({ status: 'cancelled', updatedAt: new Date() })
+
+      const lineRows = await db
+        .select({
+          slotId: folioLines.slotId,
+          quantity: folioLines.quantity,
+          zoneId: folioLines.zoneId,
+          serviceName: folioLines.serviceName,
+          slotDate: folioLines.slotDate,
+          slotStartTime: folioLines.slotStartTime,
+          checkIn: folioLines.checkIn,
+        })
+        .from(folioLines)
         .where(
           and(
-            eq(accommodationReservations.folioId, folio.id),
-            eq(accommodationReservations.organizationId, folio.organizationId),
-            eq(accommodationReservations.status, 'active'),
+            eq(folioLines.folioId, folio.id),
+            eq(folioLines.organizationId, folio.organizationId),
           ),
-        ),
-    )
-    await db.batch(statements as [BatchItem<'sqlite'>, ...BatchItem<'sqlite'>[]])
-    swept++
+        )
+
+      // The protected instant: the earliest departure across the cart, in the ORG's zone. A stay
+      // line departs at its check-in, 00:00 org-local (engine D11).
+      const departures = lineRows
+        .map((l) =>
+          l.slotDate
+            ? naiveEpoch(l.slotDate, l.slotStartTime ?? '00:00', org.timezone)
+            : l.checkIn
+              ? naiveEpoch(l.checkIn, '00:00', org.timezone)
+              : null,
+        )
+        .filter((e): e is number => e !== null)
+
+      // No readable departure means we cannot compute a grace instant. Cancel rather than hold
+      // seats forever — the folio is already past its deadline and there is nothing to wait for.
+      const graceInstant =
+        departures.length > 0
+          ? Math.min(...departures) - org.graceOffsetMinutes * 60
+          : nowSec
+
+      if (nowSec >= graceInstant) {
+        const { won } = await cancelFolioPriced(
+          db,
+          folio.organizationId,
+          folio.id,
+          lineRows,
+          now,
+          {
+            cancelledBy: null, // the system; there is no user
+            reason: 'Apartado vencido',
+            source: 'system_expiry',
+          },
+        )
+        if (won) result.cancelled++
+        continue
+      }
+
+      // Still inside the grace window: this folio has just entered stage ②. Tell the customer their
+      // spots are about to go, once.
+      if (folio.reminderStatus !== 'none' || !folio.customerEmail || !env.RESEND_API_KEY) continue
+
+      // The send has its OWN guard, separate from the per-folio one. A Resend outage is not a
+      // failed folio: the apartado is fine, it advanced to ② by the clock alone, and nothing about
+      // it is stuck. Counting it under `failed` would make an email provider's bad afternoon read
+      // as apartados breaking. It retries on the next run because the flag is written only after
+      // the send succeeds — the one notification this customer gets is never silently consumed.
+      try {
+        await sendBookingReminderEmail(env, {
+          to: folio.customerEmail,
+          customerName: folio.customerName,
+          orgName: org.name,
+          folioId: folio.id,
+          pendingBalance: folio.total - folio.amountPaid,
+          releasesAt: new Date(graceInstant * 1000),
+          lines: lineRows.map((l) => ({
+            serviceName: l.serviceName,
+            slotDate: l.slotDate,
+            slotStartTime: l.slotStartTime,
+            quantity: l.quantity,
+          })),
+        })
+      } catch (err) {
+        console.error('[sweep] reminder email failed', folio.id, err)
+        continue
+      }
+
+      await db
+        .update(folios)
+        .set({ reminderStatus: 'sent', reminderSentBy: null, updatedAt: now })
+        .where(
+          and(eq(folios.id, folio.id), eq(folios.organizationId, folio.organizationId)),
+        )
+      result.notified++
+    } catch (err) {
+      result.failed++
+      console.error('[sweep] folio failed', folio.id, err)
+    }
   }
 
-  return swept
+  return result
 }

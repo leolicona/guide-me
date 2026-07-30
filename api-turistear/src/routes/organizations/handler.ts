@@ -22,6 +22,7 @@ const orgColumns = {
   salesCutoffOffsetMinutes: organizations.salesCutoffOffsetMinutes,
   bookingGraceOffsetMinutes: organizations.bookingGraceOffsetMinutes,
   bookingPreDepartureBufferHours: organizations.bookingPreDepartureBufferHours,
+  bookingCreationCutoffHours: organizations.bookingCreationCutoffHours,
   lodgingWeekendDays: organizations.lodgingWeekendDays,
   lodgingFreeCancelDays: organizations.lodgingFreeCancelDays,
   lodgingCancelPenaltyPct: organizations.lodgingCancelPenaltyPct,
@@ -40,6 +41,7 @@ const serializeOrg = (o: {
   salesCutoffOffsetMinutes: number
   bookingGraceOffsetMinutes: number
   bookingPreDepartureBufferHours: number
+  bookingCreationCutoffHours: number
   lodgingWeekendDays: string
   lodgingFreeCancelDays: number
   lodgingCancelPenaltyPct: number
@@ -56,6 +58,7 @@ const serializeOrg = (o: {
   sales_cutoff_offset_minutes: o.salesCutoffOffsetMinutes,
   booking_grace_offset_minutes: o.bookingGraceOffsetMinutes,
   booking_pre_departure_buffer_hours: o.bookingPreDepartureBufferHours,
+  booking_creation_cutoff_hours: o.bookingCreationCutoffHours,
   lodging_weekend_days: o.lodgingWeekendDays
     ? o.lodgingWeekendDays.split(',').map(Number)
     : [],
@@ -113,6 +116,40 @@ export const updateMyOrganization = async (c: OrganizationsContext) => {
     updates.bookingGraceOffsetMinutes = input.booking_grace_offset_minutes
   if (input.booking_pre_departure_buffer_hours !== undefined)
     updates.bookingPreDepartureBufferHours = input.booking_pre_departure_buffer_hours
+  if (input.booking_creation_cutoff_hours !== undefined)
+    updates.bookingCreationCutoffHours = input.booking_creation_cutoff_hours
+
+  // US-A77 (S1) — the two apartado windows have to stay coherent, and the check needs the STORED
+  // value of whichever field this request did not send. A PATCH that raises the settle deadline
+  // above an existing creation cutoff is just as incoherent as one that lowers the cutoff below the
+  // deadline, so both directions are checked against the merged result rather than the body alone.
+  //
+  // An apartado created inside its own settle window is born owing money it has no time to pay:
+  // that is the shape that produced the one-minute apartado.
+  if (
+    input.booking_creation_cutoff_hours !== undefined ||
+    input.booking_pre_departure_buffer_hours !== undefined
+  ) {
+    const [stored] = await db
+      .select({
+        cutoff: organizations.bookingCreationCutoffHours,
+        buffer: organizations.bookingPreDepartureBufferHours,
+      })
+      .from(organizations)
+      .where(eq(organizations.id, user.organizationId))
+      .limit(1)
+
+    const cutoff = input.booking_creation_cutoff_hours ?? stored?.cutoff ?? 0
+    const buffer = input.booking_pre_departure_buffer_hours ?? stored?.buffer ?? 24
+    // 0 means "no restriction", which is coherent with any deadline.
+    if (cutoff !== 0 && cutoff < buffer) {
+      throw new ApiError(
+        'VALIDATION_ERROR',
+        400,
+        `El límite para crear apartados (${cutoff} h) no puede ser menor que el plazo para pagar el saldo (${buffer} h).`,
+      )
+    }
+  }
   if (input.lodging_weekend_days !== undefined)
     updates.lodgingWeekendDays = input.lodging_weekend_days.join(',')
   if (input.lodging_free_cancel_days !== undefined)

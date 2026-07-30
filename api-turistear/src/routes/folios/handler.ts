@@ -617,6 +617,7 @@ const refundFieldsFor = (outcome: CancellationOutcome): Partial<typeof folios.$i
 //   * admin (US-A21)                    — the admin cancels a folio outright
 //   * tourist_request (US-T04)          — an admin approves a tourist's request
 //   * agent (US-AG07.4)                 — an agent cancels an apartado from the POS
+//   * system_expiry (US-A74/A77)        — the sweep releases an apartado at its grace instant
 //
 // Everything that touches money — the price, the refund obligation, the PIN, the clawback flag, the
 // proportional ledger reversal — is derived HERE, so no entrance can express a different opinion
@@ -636,7 +637,7 @@ export const cancelFolioPriced = async (
   by: {
     cancelledBy: string | null
     reason: string | null
-    source: 'admin' | 'agent' | 'tourist_request'
+    source: 'admin' | 'agent' | 'tourist_request' | 'system_expiry'
   },
 ): Promise<{ won: boolean; outcome: CancellationOutcome }> => {
   const outcome = await quoteCancellation(db, org, folioId, now)

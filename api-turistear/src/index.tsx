@@ -78,9 +78,15 @@ export default {
     ctx: ExecutionContext,
   ) => {
     ctx.waitUntil(
-      sweepExpiredBookings(env).catch((err) =>
-        console.error('[sweep] expired-bookings sweep failed', err),
-      ),
+      sweepExpiredBookings(env)
+        .then((r) =>
+          console.log(
+            `[sweep] notified=${r.notified} cancelled=${r.cancelled} failed=${r.failed}`,
+          ),
+        )
+        // The sweep is fail-soft per folio, so reaching here means the run itself broke (a bad
+        // connection, a missing binding) rather than one bad apartado.
+        .catch((err) => console.error('[sweep] expired-bookings sweep failed', err)),
     )
   },
 }
