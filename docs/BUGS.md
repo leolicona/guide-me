@@ -6,6 +6,77 @@ Tracks confirmed bugs, root causes, and fixes. Each entry is immutable once clos
 
 ---
 
+## BUG-020 — A Ticket WhatsApp Link Is Built for Phone Numbers That Cannot Be Dialled — ⚠️ OPEN
+
+**Discovered:** 2026-07-31
+**Reporter:** the frontend test harness — `docs/testing/frontend-testing.plan.md` Phase 1
+**Affected component:** `app-turistear/src/features/pos/delivery.ts:106-110` (`ticketWhatsAppUrl`)
+**Severity:** Low — the agent taps *Enviar*, WhatsApp opens on a dead number, and the tourist never
+receives the portal link. Silent: nothing in the UI says the send failed.
+
+### Symptom
+
+A folio whose `customer_phone` holds a partial number (`123`, a half-typed `998 12`) still renders
+an active WhatsApp send button, and tapping it opens `wa.me/123` — which resolves to nothing.
+
+### Root Cause
+
+`normalizePhone` returns **both** `e164` and `valid` (E.164 plausibility: 11–15 digits), and
+`isSendablePhone` exists precisely to express the gate. But `ticketWhatsAppUrl` guards on the
+wrong one:
+
+```ts
+const phone = normalizePhone(ctx.folio.customer_phone).e164
+if (!phone) return null      // ← "any digits at all", not "dialable"
+```
+
+So it rejects only a phone with *zero* digits. Anything from one digit up produces a link. The
+checkout's own gate uses `isSendablePhone`, so the two paths disagree about what "sendable" means.
+
+### Fix
+
+Not yet applied — found while writing tests, and fixing it inside the test PR would have mixed a
+behaviour change into a phase that deliberately touches no product code. The fix is one line
+(guard on `.valid` instead of `.e164`) plus a decision about what the folio UI should show for an
+unusable number. `delivery.test.ts` pins the current behaviour with a comment pointing here; that
+expectation flips to `toBeNull()` when this closes.
+
+---
+
+## BUG-019 — The "Invalid Calendar Date" Check Accepts 31 February — ⚠️ OPEN
+
+**Discovered:** 2026-07-31
+**Reporter:** the frontend test harness — `docs/testing/frontend-testing.plan.md` Phase 1
+**Affected component:** `app-turistear/src/features/schedules/schemas.ts:4-11` (`dateStr`)
+**Severity:** Low — reachable only by typing a date rather than picking one, but it sends a date
+the calendar does not have to an API that will store it verbatim.
+
+### Symptom
+
+`slotFormSchema` and `scheduleFormSchema` accept `2026-02-31`, `2026-02-30` and `2026-04-31`. The
+field shows no error and the value is posted as-is.
+
+### Root Cause
+
+The refine is meant to be the guard behind the regex:
+
+```ts
+.refine((s) => !Number.isNaN(Date.parse(`${s}T00:00:00Z`)), 'Fecha de calendario inválida')
+```
+
+`Date.parse` rejects an out-of-range **month** (`2026-13-01` → `NaN`) but silently **rolls over**
+an out-of-range **day**: `Date.parse('2026-02-31T00:00:00Z')` is a valid timestamp — 3 March 2026.
+So the check catches roughly half of what its message promises, and the half it misses is the half
+a human actually types.
+
+### Fix
+
+Not yet applied (same reason as BUG-019 — the test phase changes no product code). The fix is to
+compare the parsed date back to its input, e.g. reject when
+`new Date(\`${s}T00:00:00Z\`).toISOString().slice(0, 10) !== s`. Note the same pattern appears in
+`features/catalog/schemas.ts`, whose `dateStr` has **no** refine at all — worth fixing together.
+`schedules/schemas.test.ts` pins the current behaviour with a comment pointing here.
+
 ## BUG-018 — A Single Mis-Scan Makes a Ticket Permanently Non-Refundable, and Nothing Can Un-Redeem It — ⚠️ OPEN
 
 **Discovered:** 2026-07-31
