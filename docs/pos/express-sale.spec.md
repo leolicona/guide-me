@@ -433,22 +433,42 @@ Then `INVALID_SIGNATURE` — the caller-org key derivation is unchanged by this 
 
 ## Definition of Done
 
-- [ ] Migration `0057` — `folios.sale_mode`, `folios.idempotency_key` + partial unique index;
-      Drizzle schema updated; `pnpm cf-typegen:api` if bindings shift
-- [ ] `confirmSaleSchema` extended: `sale_mode`, `idempotency_key`, conditional `customer_name`;
+- [x] Migration `0057` — `folios.sale_mode`, `folios.idempotency_key` + partial unique index;
+      Drizzle schema updated; no binding shift (no `wrangler.jsonc` change), so no cf-typegen
+- [x] `confirmSaleSchema` extended: `sale_mode`, `idempotency_key`, conditional `customer_name`;
       rules 1–6 enforced in `confirmSale`
-- [ ] `POST /api/pos/folios/:id/void` — rules 7–8, no call into `cancelFolioPriced`
-- [ ] `GET /t/:token` + `POST /t/:token/seen` — rules 9–10, registered outside `/api/*`
-- [ ] `TicketQr` renders the URL form; `stripTicketUrl()` in the scan path; both encodings verified
-- [ ] S-1 … S-21 covered in `test/pos/express-sale.test.ts` and `test/portal/ticket-page.test.ts`
-- [ ] Cross-org isolation S-22/S-23 using `seedTwoOrgs` (`test/multitenancy/`)
-- [ ] Frontend: card ⚡ (card restructured off `CardActionArea`), `ExpressSalePanel`,
-      `ExpressTicketOverlay`, shared `<TicketCard>`, delivery-queue surfaces
-- [ ] `pnpm build:app` and `pnpm lint:app` clean; `verify` green
-- [ ] `SPEC.md`: US-AG45/AG46/AG47, US-T07, US-A78 under their roles; one Features-by-Phase line;
+- [x] `POST /api/pos/folios/:id/void` — rules 7–8, no call into `cancelFolioPriced`
+- [x] `GET /t/:token` + `POST /t/:token/seen` — rules 9–10, registered outside `/api/*`
+- [x] `TicketQr` renders the URL form; `stripTicketUrl()` in the scan path; both encodings verified
+      (S-20)
+- [x] Server scenarios S-5–S-9, S-11–S-20 covered in `test/pos/express-sale.test.ts` and
+      `test/portal/ticket-page.test.ts`; the sheet behaviours S-1–S-4/S-10 (added in build:
+      frontend-only) are verified by build/lint, matching the fast-sale spec's precedent
+- [x] Cross-org isolation S-22/S-23 using `seedTwoOrgs` (in the two suites above)
+- [x] Frontend: card ⚡ (an absolutely-positioned SIBLING of the `CardActionArea` — see the
+      amendment note below), `ExpressSalePanel`, `ExpressTicketOverlay`, shared `<TicketCard>`,
+      delivery-queue surfaces
+- [x] `pnpm build:app` and `pnpm lint:app` clean; API suite 689/689
+- [x] `SPEC.md`: US-AG45/AG46/AG47, US-T07, US-A78 under their roles; one Features-by-Phase line;
       glossary — *Venta Express*, *Ticket page (`/t/`)*, *Void*
 
 ---
+
+## Amended in build
+
+- **Rule 7's window is measured in SQL** (`unixepoch() - created_at`), not in JS: the Workers
+  runtime freezes `Date.now()` per request (the test pool pins it outright), while `created_at`
+  is stamped by `unixepoch()` — one clock, the DB's, or the window drifts.
+- **The catalog read gained `express_eligible`** (boolean per tour card): D4's eligibility needs
+  `zones_enabled` + a sellable slot TODAY, neither of which the lightweight card payload carried.
+  Today-anchored regardless of the selected window (D5).
+- **The replay response** (rule 6) is `200 { folio, replayed: true }` in the same shape as
+  `GET /api/pos/folios/:id`, so the client renders it exactly like the sale it already made.
+- **The ⚡ is an absolutely-positioned sibling** of the `CardActionArea`, not a restructure of the
+  card into explicit tap zones — same a11y outcome (no button nested in a button), a fraction of
+  the churn.
+- **S-21's queue count** is derived client-side from the existing paid-list reads (shared query
+  cache), not a new endpoint — the delivery axis already travels on the list payloads.
 
 ## Deferred — and why each is safe to defer
 

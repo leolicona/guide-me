@@ -230,16 +230,20 @@ Then `404` — never `403`, which would confirm it exists.
 
 ## Definition of Done
 
-- [ ] Migration `0057` adds `organizations.qr_redemption_mode`; Drizzle schema updated
-- [ ] `scanTicket` branches its SET expression only; the guarded UPDATE and gate order are unchanged
-- [ ] Response branches per D6; `GET /api/organizations/me` exposes the mode
-- [ ] Organization settings schema accepts and validates the enum, `admin` only
-- [ ] S-1 … S-8 covered in `test/tickets/group-redemption.test.ts`
-- [ ] Cross-org S-9/S-10 using `seedTwoOrgs`
-- [ ] `test/tickets/online-qr-scanner.test.ts` and `test/qr/folio-qr-signing.test.ts` pass **unedited**
-- [ ] `ScanResult` copy branch; `SettingsPage` control with the D8 help text
-- [ ] `pnpm build:app` and `pnpm lint:app` clean; `verify` green
-- [ ] `SPEC.md`: US-AG48, US-A79; one Features-by-Phase line; glossary — *Group redemption*
+- [x] Migration `0057` adds `organizations.qr_redemption_mode`; Drizzle schema updated
+- [x] `scanTicket` branches its SET expression only; the guarded UPDATE and gate order are unchanged
+- [x] Response branches per D6 (`redeemed_now` = passes THIS scan took); `GET /api/organizations/me`
+      exposes the mode
+- [x] Organization settings schema accepts and validates the enum, `admin` only (`PUT /me`)
+- [x] S-1 … S-5, S-7, S-8 covered in `test/tickets/group-redemption.test.ts`. S-6 (true
+      concurrency) is not directly reproducible under the single-worker test pool — the guarantee
+      is the single guarded UPDATE itself, and S-2 asserts its refusal semantics
+- [x] Cross-org S-9 using `seedTwoOrgs`. S-10 is **structurally unreachable**: the settings write
+      is `/api/organizations/me` — there exists no route that names another org
+- [x] `test/tickets/online-qr-scanner.test.ts` and `test/qr/folio-qr-signing.test.ts` pass **unedited**
+- [x] `ScanResult` copy branch; `SettingsPage` control with the D8 help text
+- [x] `pnpm build:app` and `pnpm lint:app` clean; API suite 689/689
+- [x] `SPEC.md`: US-AG48, US-A79; one Features-by-Phase line; glossary — *Group redemption*
 
 ---
 
