@@ -996,19 +996,23 @@ describe('POS lodging sale path', () => {
     expect((await reservationsForFolio(folioId))[0].status).toBe('active')
   })
 
-  it('Sc12 — admin cancel of a paid stay opens a structured refund (free window vs penalty)', async () => {
+  // US-A63 / D9 SUPERSEDED (Cancellation Policy Engine). The `lodging_free_cancel_days` /
+  // `lodging_cancel_penalty_pct` path is deleted: a stay is priced by the org's refund LADDER, the
+  // same as a tour, with check-in (00:00 org-local) as its departure. This test now guards two
+  // things — that the retired fields no longer influence anything, and that a ladder does.
+  it('Sc12 — a paid stay is priced by the cancellation ladder, not the retired lodging fields', async () => {
     const { serviceId } = await seedLodgingService(orgId)
     const { typeId } = await seedUnitType({
       organizationId: orgId, serviceId, inventoryCount: 2, baseRate: 100000,
     })
-    // Org policy: free cancellation ≥ 7 days out, else a 50% penalty.
+    // The retired fields, still set on the row. Nothing should read them.
     await env.DB.prepare(
       'UPDATE organizations SET lodging_free_cancel_days = 7, lodging_cancel_penalty_pct = 50 WHERE id = ?',
     )
       .bind(orgId)
       .run()
 
-    // Frozen clock is 2026-06-14. Check-in 2026-07-10 is 26 days out → inside the free window.
+    // Frozen clock is 2026-06-14. Check-in 2026-07-10 is 26 days out.
     const free = await sellStay(typeId, '2026-07-10', '2026-07-13', 2)
     const freeId = ((await free.json()) as SaleResponse).folio.id
     const cancelFree = await SELF.fetch(`http://api.local/api/folios/${freeId}/cancel`, {
@@ -1023,12 +1027,17 @@ describe('POS lodging sale path', () => {
       .bind(freeId)
       .first<{ refund_status: string; refund_amount: number }>()
     expect(freeRow!.refund_status).toBe('pending')
-    expect(freeRow!.refund_amount).toBe(300000) // full refund inside the free window
+    expect(freeRow!.refund_amount).toBe(300000)
     // The reservation is released on cancel.
     expect((await reservationsForFolio(freeId))[0].status).toBe('cancelled')
 
-    // Check-in 2026-06-16 is 2 days out → inside the penalty window (50% withheld).
-    const late = await sellStay(typeId, '2026-06-16', '2026-06-18', 2)
+    // Check-in 2026-06-20 is 6 days out, and that date is chosen to make the two rules DISAGREE —
+    // otherwise this assertion proves nothing. The retired rule (free until 7 days before, then a
+    // 50% penalty) would withhold half here. The ladder's top tier starts at 120h = 5 days, so 6
+    // days out refunds in full. A 2-days-out check-in used to be the discriminator, but under the
+    // inherited ladder (D18 revised) 48h also lands on 50% and the two rules would agree by
+    // coincidence.
+    const late = await sellStay(typeId, '2026-06-20', '2026-06-22', 2)
     const lateId = ((await late.json()) as SaleResponse).folio.id
     await SELF.fetch(`http://api.local/api/folios/${lateId}/cancel`, {
       method: 'POST',
@@ -1038,7 +1047,41 @@ describe('POS lodging sale path', () => {
     const lateRow = await env.DB.prepare('SELECT refund_amount FROM folios WHERE id = ?')
       .bind(lateId)
       .first<{ refund_amount: number }>()
-    expect(lateRow!.refund_amount).toBe(100000) // 200000 × (100−50)%
+    expect(lateRow!.refund_amount).toBe(200000) // full — the 50% penalty field is inert
+  })
+
+  it('Sc12b — a ladder DOES withhold on a near check-in (what replaces the retired fields)', async () => {
+    const { serviceId } = await seedLodgingService(orgId)
+    const { typeId } = await seedUnitType({
+      organizationId: orgId, serviceId, inventoryCount: 2, baseRate: 100000,
+    })
+    // 7 days = 168h free, then 50% withheld — the same intent as the old fields, expressed as a
+    // ladder measured in HOURS from check-in (D5/D16) rather than calendar days.
+    await env.DB.prepare('UPDATE organizations SET cancellation_policy = ? WHERE id = ?')
+      .bind(
+        JSON.stringify({
+          version: 1,
+          tiers: [
+            { min_hours: 168, refund_pct: 100, agent_commission_pct: 0 },
+            { min_hours: null, refund_pct: 50, agent_commission_pct: 100 },
+          ],
+          booking_deposit_retained_pct: 100,
+        }),
+        orgId,
+      )
+      .run()
+
+    const late = await sellStay(typeId, '2026-06-16', '2026-06-18', 2)
+    const lateId = ((await late.json()) as SaleResponse).folio.id
+    await SELF.fetch(`http://api.local/api/folios/${lateId}/cancel`, {
+      method: 'POST',
+      headers: jsonAuth(ADMIN_EMAIL),
+      body: JSON.stringify({ reason: 'no show' }),
+    })
+    const row = await env.DB.prepare('SELECT refund_amount FROM folios WHERE id = ?')
+      .bind(lateId)
+      .first<{ refund_amount: number }>()
+    expect(row!.refund_amount).toBe(100000) // 200000 × 50%
   })
 })
 

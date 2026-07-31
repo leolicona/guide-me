@@ -23,7 +23,9 @@ import {
 } from '@mui/material'
 import ArrowBackRounded from '@mui/icons-material/ArrowBackRounded'
 import { useFolio, useCancelFolio, useConfirmRefund, FolioStatusChip } from '../features/folios'
+import type { FolioDetail } from '../features/folios/types'
 import { useOrgDateFormatter } from '../features/organization'
+import type { CancellationQuote } from '../features/organization/types'
 import WarningAmberRounded from '@mui/icons-material/WarningAmberRounded'
 import {
   BookingActions,
@@ -50,12 +52,15 @@ const DATE_FMT: Intl.DateTimeFormatOptions = {
 export default function FolioDetailPage() {
   const formatDate = useOrgDateFormatter(DATE_FMT) // US-A66 — org-local audit timestamps
   const { id } = useParams<{ id: string }>()
-  const { data: folio, isLoading, isError } = useFolio(id)
+  const { data, isLoading, isError } = useFolio(id)
+  const folio = data?.folio
+  // US-A69 — what cancelling right now would cost, priced by the org's ladder. Every org has one
+  // (D17), so this is null only for a folio that is already cancelled: nothing left to quote.
+  const quote = data?.quote ?? null
   const cancel = useCancelFolio()
   const refund = useConfirmRefund()
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [reason, setReason] = useState('')
-  const [clawback, setClawback] = useState(false)
   // US-A23 / US-T05 — refund confirmation dialog: PIN (primary) or no-PIN override + note.
   const [refundOpen, setRefundOpen] = useState(false)
   const [pin, setPin] = useState('')
@@ -69,15 +74,13 @@ export default function FolioDetailPage() {
   const closeDialog = () => {
     setConfirmOpen(false)
     setReason('')
-    setClawback(false)
   }
 
   const handleCancel = () => {
     if (!id) return
-    cancel.mutate(
-      { id, reason: reason.trim() || undefined, clawback },
-      { onSuccess: closeDialog },
-    )
+    // D10 — nothing else to send. The refund and the commission outcome are the ladder's, so the
+    // dialog collects a note and confirms a number it did not compute.
+    cancel.mutate({ id, reason: reason.trim() || undefined }, { onSuccess: closeDialog })
   }
 
   const openRefundDialog = () => {
@@ -304,10 +307,10 @@ export default function FolioDetailPage() {
               </SectionCard>
             )}
 
-            {/* US-AG07/07.4/07.5 — a live apartado settles/cancels (non-refundable) or, once
-                expired, reactivates here. The US-A21 refundable cancel below is hidden for
-                bookings so the two flows never overlap (per the confirmed decision). */}
-            <BookingActions folio={folio} />
+            {/* US-AG07/07.4/07.5 — a live apartado settles or cancels here (priced by the ladder
+                since US-A76 — it is no longer a non-refundable flow), or once expired, reactivates.
+                The US-A21 cancel below is hidden for bookings so the two never overlap. */}
+            <BookingActions folio={folio} quote={quote} quoteLoading={isLoading} />
 
             {!isCancelled && !isBooking && (
               <Button
@@ -322,13 +325,24 @@ export default function FolioDetailPage() {
           </Stack>
         )}
 
-        <Dialog open={confirmOpen} onClose={closeDialog}>
+        <Dialog open={confirmOpen} onClose={closeDialog} fullWidth maxWidth="xs">
           <DialogTitle>¿Cancelar este folio?</DialogTitle>
           <DialogContent>
             <DialogContentText sx={{ mb: 2 }}>
               Esto libera todos los lugares de cada servicio en el folio y no se puede deshacer.
               Los boletos de acceso del cliente dejarán de ser válidos.
             </DialogContentText>
+
+            {/* US-A69 — the money, before committing. Computed server-side by the same function
+                the cancel endpoint uses, so what is shown here is what gets written.
+
+                D10 — there are no switches in this dialog any more. The clawback choice (US-A26)
+                and the company-cancellation override (US-A71) are both withdrawn: a cancellation
+                is priced by the company's ladder and by nothing the person cancelling decides. An
+                admin who wants a different outcome changes the policy, where the terms are visible
+                and apply to everyone — not this one folio, silently. */}
+            {quote && <RefundQuote quote={quote} folio={folio} />}
+
             <TextField
               label="Motivo (opcional)"
               size="small"
@@ -337,26 +351,7 @@ export default function FolioDetailPage() {
               minRows={2}
               value={reason}
               onChange={(e) => setReason(e.target.value)}
-            />
-            <FormControlLabel
-              sx={{ mt: 1, alignItems: 'flex-start' }}
-              control={
-                <Switch
-                  checked={clawback}
-                  onChange={(e) => setClawback(e.target.checked)}
-                  color="error"
-                />
-              }
-              label={
-                <Box sx={{ pt: 0.75 }}>
-                  <Typography variant="body2">Recuperar comisión del agente</Typography>
-                  <Typography variant="caption" color="text.secondary">
-                    {clawback
-                      ? 'El agente pierde la comisión generada en esta venta.'
-                      : 'Desactivado: la empresa absorbe la pérdida y el agente conserva la comisión.'}
-                  </Typography>
-                </Box>
-              }
+              sx={{ mt: quote ? 2 : 0 }}
             />
           </DialogContent>
           <DialogActions>
@@ -434,5 +429,87 @@ export default function FolioDetailPage() {
         </Dialog>
       </Box>
     </Fade>
+  )
+}
+
+// US-A69 — the refund the policy computes, shown BEFORE the admin commits. The server calculates
+// it with the same function the cancel endpoint uses, so this is a preview of a decision already
+// made rather than a client-side re-implementation that could drift from it.
+//
+// The per-line breakdown only appears when it explains something: on a single-line folio the
+// headline number already says everything, and repeating it adds noise to a confirmation dialog.
+function RefundQuote({ quote, folio }: { quote: CancellationQuote; folio?: FolioDetail }) {
+  // Straight from the server — nothing in this dialog can change it any more (D10), so there is no
+  // client-side re-derivation that could drift from what gets written.
+  const { refund, retention, kept_commission: keptCommission } = quote
+  const reversedCommission = quote.reversed_commission
+
+  const lineName = (lineId: string) =>
+    folio?.lines.find((l) => l.id === lineId)?.service_name ?? 'Servicio'
+
+  return (
+    <Box sx={{ border: 1, borderColor: 'grey.200', borderRadius: 2, p: 2, bgcolor: 'grey.50' }}>
+      <Stack direction="row" sx={{ justifyContent: 'space-between', alignItems: 'baseline' }}>
+        <Typography variant="body2" color="text.secondary">
+          Se devuelve al cliente
+        </Typography>
+        <MoneyText cents={refund} variant="h6" srLabel="Se devuelve al cliente" />
+      </Stack>
+
+      {retention > 0 && (
+        <Stack
+          direction="row"
+          sx={{ justifyContent: 'space-between', alignItems: 'baseline', mt: 0.5 }}
+        >
+          <Typography variant="caption" color="text.secondary">
+            La empresa retiene
+          </Typography>
+          <Typography variant="caption" color="text.secondary" className="numeric">
+            {formatMoney(retention)}
+          </Typography>
+        </Stack>
+      )}
+
+      {(keptCommission > 0 || reversedCommission > 0) && (
+        <Stack
+          direction="row"
+          sx={{ justifyContent: 'space-between', alignItems: 'baseline', mt: 0.5 }}
+        >
+          <Typography variant="caption" color="text.secondary">
+            {reversedCommission > 0 ? 'El agente pierde de comisión' : 'El agente conserva su comisión'}
+          </Typography>
+          <Typography variant="caption" color="text.secondary" className="numeric">
+            {formatMoney(reversedCommission > 0 ? reversedCommission : keptCommission)}
+          </Typography>
+        </Stack>
+      )}
+
+      {quote.lines.length > 1 && (
+        <>
+          <Divider sx={{ my: 1.5 }} />
+          <Stack spacing={0.5}>
+            {quote.lines.map((l) => (
+              <Stack
+                key={l.line_id}
+                direction="row"
+                sx={{ justifyContent: 'space-between', alignItems: 'baseline', gap: 2 }}
+              >
+                <Typography variant="caption" color="text.secondary" sx={{ minWidth: 0 }} noWrap>
+                  {lineName(l.line_id)}
+                  {l.redeemed
+                    ? ' · ya utilizado'
+                    : l.hours_out !== null && l.hours_out >= 0
+                      ? ` · faltan ${l.hours_out} h`
+                      : ' · ya salió'}
+                </Typography>
+                <Typography variant="caption" color="text.secondary" className="numeric">
+                  {l.refund_pct}%
+                </Typography>
+              </Stack>
+            ))}
+          </Stack>
+        </>
+      )}
+    </Box>
   )
 }

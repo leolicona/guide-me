@@ -18,6 +18,7 @@ import {
   verifyToken,
 } from '../../services/agnosticAuth'
 import { sendMagicLinkEmail, sendPasswordResetEmail } from '../../services/resend'
+import { DEFAULT_CANCELLATION_POLICY } from '../../utils/cancellationPolicy'
 import { clearSessionCookies, setSessionCookies } from '../../utils/cookies'
 import { extractIdentity } from '../../utils/jwt'
 import { ApiError } from '../../types/errors'
@@ -64,6 +65,11 @@ export const register = async (c: AuthContext) => {
   await db.insert(organizations).values({
     id: organizationId,
     name: input.company_name,
+    // D17 — a new org is born WITH a cancellation policy. Migration 0054 backfilled the existing
+    // ones; without this, every org created afterwards would be policy-less again and re-open the
+    // state the migration exists to eliminate. The admin sees a real ladder in Settings from day
+    // one rather than inheriting behaviour they cannot read.
+    cancellationPolicy: JSON.stringify(DEFAULT_CANCELLATION_POLICY),
   })
 
   await db.insert(users).values({
@@ -320,7 +326,7 @@ export const completeInvite = async (c: AuthContext) => {
   const isAffiliate = invitation.kind === 'affiliate'
   const role = isAffiliate ? 'affiliate' : 'agent'
 
-  // D13 (docs/affiliate-operators/spec.md) — at most ONE affiliate (the manager) per company. Guard
+  // D13 (docs/affiliate-operators/affiliate-operators.spec.md) — at most ONE affiliate (the manager) per company. Guard
   // the accept path too (a race where a stale second invite is redeemed): if a manager already
   // exists for this company, refuse. Extra sellers are added as PIN operators (US-AF10).
   if (isAffiliate) {

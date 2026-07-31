@@ -16,6 +16,7 @@ import posRouter from './routes/pos'
 import { sweepExpiredBookings } from './routes/pos/sweep'
 import reportsRouter from './routes/reports'
 import servicesRouter from './routes/services'
+import ticketRouter from './routes/ticket'
 import ticketsRouter from './routes/tickets'
 import type { AppVariables } from './types/context'
 
@@ -64,6 +65,10 @@ app.use(renderer)
 // folio-scoped token in the URL is the credential).
 app.route('/portal', portalRouter)
 
+// US-T07 — the line-scoped public ticket page a tourist's camera resolves to (the QR encodes
+// `${API_BASE_URL}/t/<qr_token>`, express-sale D9). Same placement rules as the portal.
+app.route('/t', ticketRouter)
+
 app.get('/', (c) => {
   return c.render(<h1>Hello!</h1>)
 })
@@ -78,9 +83,15 @@ export default {
     ctx: ExecutionContext,
   ) => {
     ctx.waitUntil(
-      sweepExpiredBookings(env).catch((err) =>
-        console.error('[sweep] expired-bookings sweep failed', err),
-      ),
+      sweepExpiredBookings(env)
+        .then((r) =>
+          console.log(
+            `[sweep] notified=${r.notified} cancelled=${r.cancelled} failed=${r.failed}`,
+          ),
+        )
+        // The sweep is fail-soft per folio, so reaching here means the run itself broke (a bad
+        // connection, a missing binding) rather than one bad apartado.
+        .catch((err) => console.error('[sweep] expired-bookings sweep failed', err)),
     )
   },
 }

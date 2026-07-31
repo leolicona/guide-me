@@ -1,4 +1,4 @@
-// Operator shift sessions (US-OP01/OP02, docs/affiliate-operators/spec.md).
+// Operator shift sessions (US-OP01/OP02, docs/affiliate-operators/affiliate-operators.spec.md).
 //
 // Operators are NOT `users` and don't go through the external agnostic-auth service. Instead an
 // operator "shift" is a short-lived, stateless, HMAC-signed token carried in its own httpOnly

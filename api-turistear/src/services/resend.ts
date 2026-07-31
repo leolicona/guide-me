@@ -388,6 +388,86 @@ export const sendBookingConfirmationEmail = async (
   }
 }
 
+// US-A77 — the balance reminder, sent by the cron when an apartado reaches its settle deadline.
+// The deadline no longer cancels anything; it notifies. This email IS the change: before it, a
+// customer who forgot to pay lost their deposit without a single message.
+export interface BookingReminderEmailInput {
+  to: string
+  customerName: string | null
+  orgName: string
+  folioId: string
+  pendingBalance: number
+  /** When the hold actually ends — the grace instant, not the deadline that just passed. */
+  releasesAt: Date
+  lines: Array<{
+    serviceName: string
+    slotDate: string | null
+    slotStartTime: string | null
+    quantity: number
+  }>
+}
+
+export const sendBookingReminderEmail = async (
+  env: CloudflareBindings,
+  data: BookingReminderEmailInput,
+): Promise<void> => {
+  const orgName = escapeHtml(data.orgName)
+  const greeting = data.customerName ? `Hola ${escapeHtml(data.customerName)},` : 'Hola,'
+  const releasesStr = data.releasesAt.toLocaleString('es-MX', {
+    day: '2-digit', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit',
+  })
+
+  const linesHtml = data.lines
+    .map((l) => {
+      const when = [l.slotDate, l.slotStartTime].filter(Boolean).join(' ')
+      const detail = when ? ` — ${escapeHtml(when)}` : ''
+      return `<li>${escapeHtml(l.serviceName)}${detail} (×${l.quantity})</li>`
+    })
+    .join('')
+
+  const html = `
+    <div style="font-family:sans-serif;max-width:600px;margin:0 auto;color:#1a1a2e">
+      <h2 style="color:#b45309">Tu apartado está por liberarse</h2>
+      <p>${greeting}</p>
+      <p>Aún tienes un saldo pendiente en tu apartado con <strong>${orgName}</strong>.
+         Tus lugares siguen reservados, pero se liberarán si no lo liquidas.</p>
+
+      <p><strong>Servicios:</strong></p>
+      <ul>${linesHtml}</ul>
+
+      <table style="width:100%;margin:8px 0;font-size:14px">
+        <tr><td><strong>Folio</strong></td><td>#${shortId(data.folioId)}</td></tr>
+        <tr><td><strong>Saldo pendiente</strong></td><td><strong>${formatAmount(data.pendingBalance)}</strong></td></tr>
+        <tr><td><strong>Tus lugares se liberan</strong></td><td>${releasesStr}</td></tr>
+      </table>
+
+      <p>Comunícate con <strong>${orgName}</strong> para liquidar y conservar tu reserva.</p>
+
+      <p style="font-size:12px;color:#777;margin-top:24px;">
+        ${orgName} — Gestión de reservas con Turistear Ya!
+      </p>
+    </div>`
+
+  const res = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${env.RESEND_API_KEY}`,
+    },
+    body: JSON.stringify({
+      from: env.RESEND_FROM,
+      to: data.to,
+      subject: `Tu apartado está por liberarse — ${data.orgName}`,
+      html,
+    }),
+  })
+
+  if (!res.ok) {
+    const body = await res.text()
+    throw new ApiError('INTERNAL_ERROR', 502, `Resend error: ${body}`)
+  }
+}
+
 export interface CancellationEmailInput {
   to: string
   customerName: string | null
@@ -397,8 +477,12 @@ export interface CancellationEmailInput {
   cancellationReason: string | null
   lines: Array<{
     serviceName: string
-    slotDate: string
-    slotStartTime: string
+    // NULLABLE on purpose: a lodging stay line has no slot date or time (it carries a check-in
+    // instead). The type used to require both, which the callers could not satisfy — they passed
+    // the folio's nullable fields straight through, so a cancelled stay emailed the customer
+    // "Hotel X — null null (×1)". The renderer now omits what is absent.
+    slotDate: string | null
+    slotStartTime: string | null
     quantity: number
   }>
 }
@@ -410,10 +494,11 @@ export const sendCancellationEmail = async (
   const orgName = escapeHtml(data.orgName)
   const greeting = data.customerName ? `Hola ${escapeHtml(data.customerName)},` : 'Hola,'
   const servicesHtml = data.lines
-    .map(
-      (l) =>
-        `<li>${escapeHtml(l.serviceName)} — ${l.slotDate} ${l.slotStartTime} (×${l.quantity})</li>`,
-    )
+    .map((l) => {
+      const when = [l.slotDate, l.slotStartTime].filter(Boolean).join(' ')
+      const detail = when ? ` — ${escapeHtml(when)}` : ''
+      return `<li>${escapeHtml(l.serviceName)}${detail} (×${l.quantity})</li>`
+    })
     .join('')
   const reasonHtml = data.cancellationReason
     ? `<p><strong>Motivo:</strong> ${escapeHtml(data.cancellationReason)}</p>`

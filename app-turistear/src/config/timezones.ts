@@ -1,4 +1,4 @@
-// US-A66 (docs/timezone/spec.md — D5) — the curated set of IANA zones an admin may pick, one human
+// US-A66 (docs/timezone/timezone.spec.md — D5) — the curated set of IANA zones an admin may pick, one human
 // label per mainland-Mexico offset. Mirrors the API allow-list (`ORG_TIMEZONES` in
 // api-turistear/src/routes/organizations/schema.ts) — keep the two in sync. IANA (not a raw offset)
 // so DST + multi-zone resolve automatically, incl. the northern border strip that still observes

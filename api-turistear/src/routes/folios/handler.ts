@@ -1,6 +1,6 @@
 import type { Context } from 'hono'
 import type { BatchItem } from 'drizzle-orm/batch'
-import { and, asc, desc, eq, ne, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, isNotNull, lt, ne, sql } from 'drizzle-orm'
 import { getDb, type Db } from '../../db/client'
 import {
   accommodationReservations,
@@ -11,10 +11,11 @@ import {
   folioLines,
   folios,
   organizations,
+  slotZones,
   slots,
   users,
 } from '../../db/schema'
-import { nightsBetween } from '../../utils/lodging'
+import { reconcileSlotTotals } from '../services/zones.reconcile'
 import { ApiError } from '../../types/errors'
 import type { AppVariables } from '../../types/context'
 import type {
@@ -28,6 +29,11 @@ import {
 } from '../../services/resend'
 import { generateRefundPin } from '../../utils/portal'
 import { buildCancellationReversal, displayMethodSql, readFolioPayments } from '../../utils/folioPayments'
+import {
+  computeCancellationRefund,
+  resolvePolicy,
+  type CancellationOutcome,
+} from '../../utils/cancellationPolicy'
 
 export type FoliosContext = Context<{
   Bindings: CloudflareBindings
@@ -242,6 +248,11 @@ export const listFolios = async (c: FoliosContext) => {
   const agentQ = c.req.query('agent_id')
   // US-A67 — the "Por verificar" queue filters to electronic payments awaiting an admin.
   const verificationQ = c.req.query('verification')
+  // US-A78/A79 (docs/oversight/pending-work-queues.spec.md) — the two work queues. Both are pure
+  // WHERE clauses over existing columns: no stored "overdue" state, because a stored stage needs a
+  // writer and a cron that writes state drifts from the clock that defines it (apartado-stages S7).
+  const refundStatusQ = c.req.query('refund_status')
+  const overdueQ = c.req.query('overdue')
 
   const filters = [eq(folios.organizationId, org)]
   if (statusQ === 'paid' || statusQ === 'booking' || statusQ === 'cancelled') {
@@ -263,6 +274,30 @@ export const listFolios = async (c: FoliosContext) => {
     )
   }
   if (agentQ) filters.push(eq(folios.agentId, agentQ))
+
+  // US-A78 — refunds still owed. Ordered OLDEST FIRST (spec Q5): the count alone is not the signal,
+  // the age of the debt is. Unknown values fall through to "no filter", matching `status` above.
+  const wantsPendingRefunds = refundStatusQ === 'pending'
+  if (wantsPendingRefunds || refundStatusQ === 'none' || refundStatusQ === 'refunded') {
+    filters.push(eq(folios.refundStatus, refundStatusQ))
+  }
+  // US-A79 — apartados past their settle deadline. DERIVED here, never stored.
+  const wantsOverdue = overdueQ === 'true'
+  if (wantsOverdue) {
+    filters.push(
+      eq(folios.status, 'booking'),
+      isNotNull(folios.bookingExpiresAt),
+      lt(folios.bookingExpiresAt, new Date()),
+    )
+  }
+
+  // Each queue reads by its own clock: the refund debt by how long it has been owed, the expired
+  // hold by how long it has been sitting on seats. Everything else keeps the newest-first list.
+  const order = wantsPendingRefunds
+    ? asc(folios.cancelledAt)
+    : wantsOverdue
+      ? asc(folios.bookingExpiresAt)
+      : desc(folios.createdAt)
 
   const rows = await db
     .select({
@@ -288,12 +323,16 @@ export const listFolios = async (c: FoliosContext) => {
       paymentReference: folios.paymentReference,
       paymentVerification: folios.paymentVerification,
       operatorName: affiliateOperators.name,
+      // US-A78 — the debt itself. The lean row never carried these, so the pending-refunds queue
+      // could not show what is owed without a second read per folio.
+      refundStatus: folios.refundStatus,
+      refundAmount: folios.refundAmount,
     })
     .from(folios)
     .innerJoin(users, eq(folios.agentId, users.id))
     .leftJoin(affiliateOperators, eq(folios.operatorId, affiliateOperators.id))
     .where(and(...filters))
-    .orderBy(desc(folios.createdAt))
+    .orderBy(order)
 
   return c.json({
     folios: rows.map((r) => ({
@@ -323,6 +362,9 @@ export const listFolios = async (c: FoliosContext) => {
       tickets_viewed_at: tsOrNull(r.ticketsViewedAt),
       // US-A68 — the affiliate shift operator who took the sale (null ⇒ sold directly).
       operator_name: r.operatorName ?? null,
+      // US-A78 — 'pending' = cancelled, money owed, nobody confirmed the hand-back.
+      refund_status: r.refundStatus,
+      refund_amount: r.refundAmount,
     })),
   })
 }
@@ -338,8 +380,32 @@ export const getFolioDetail = async (c: FoliosContext) => {
     throw new ApiError('NOT_FOUND', 404, 'Folio not found')
   }
 
-  return c.json({ folio })
+  // What cancelling RIGHT NOW would cost — so the confirm sheet states the refund before the admin
+  // commits, instead of discovering it afterwards. Pure read: it persists nothing, and it is
+  // computed by the same function the cancel endpoint uses, so the number shown is the number
+  // written. `null` only for an already-cancelled folio: there is nothing left to quote.
+  const quote =
+    folio.status === 'cancelled'
+      ? null
+      : await quoteCancellation(db, admin.organizationId, id, new Date())
+
+  return c.json({ folio, cancellation_quote: quote ? serializeQuote(quote) : null })
 }
+
+const serializeQuote = (o: CancellationOutcome) => ({
+  refund: o.refund,
+  retention: o.retention,
+  kept_commission: o.keptCommission,
+  reversed_commission: o.reversedCommission,
+  lines: o.lines.map((l) => ({
+    line_id: l.lineId,
+    // Rounded for display; the decision itself used the exact value.
+    hours_out: Number.isFinite(l.hoursOut) ? Math.round(l.hoursOut) : null,
+    refund_pct: l.refundPct,
+    retention: l.retention,
+    redeemed: l.redeemed,
+  })),
+})
 
 // POST /folios/:id/ticket-delivery — the admin records the tickets were sent over WhatsApp
 // (whatsapp-qr-delivery D4/D13). Org-scoped (any folio in the org, no agent filter). Last-write-wins.
@@ -368,20 +434,29 @@ export const markTicketsSentAdmin = async (c: FoliosContext) => {
 // race-safe order (BUG-013):
 //   1. Flip the FOLIO first with a guarded UPDATE (`status != 'cancelled'`); RETURNING
 //      tells us whether WE won. A concurrent cancellation loses here and releases nothing.
-//   2. Only the winner releases the seats, per line `slots.booked = MAX(0, booked −
-//      quantity)` (clamped so a manually edited slot can never go negative), in one batch.
+//   2. Only the winner releases the seats, per line `booked = MAX(0, booked − quantity)`
+//      (clamped so a manually edited counter can never go negative), in one batch.
 // The reversed order (seats in the same batch as the guarded flip) double-released seats
 // when two cancellations raced: a 0-row guarded UPDATE does not abort a D1 batch, so the
 // loser's seat decrements still applied. Residual: a crash between 1 and 2 leaves seats
 // booked on a cancelled folio — conservative (no oversell), same compensate-style
 // trade-off as POS confirm.
+//
+// BUG — a ZONED line (US-A64) releases its seats on `slot_zones`, then reconciles the slot
+// totals from the zone sums; decrementing `slots.booked` directly would be overwritten by the
+// next reconcile and leave the zone counter permanently inflated (its seats unsellable
+// forever). Every other release site already branched on `zone_id` (`cancelBooking`,
+// `rejectPayment`, `sweepExpiredBookings`); this one — the MANUAL cancellation path — did not.
 const applyCancellation = async (
   db: Db,
   org: string,
   folioId: string,
-  lines: Array<{ slotId: string | null; quantity: number }>,
+  lines: Array<{ slotId: string | null; quantity: number; zoneId: string | null }>,
   now: Date,
   folioUpdate: Partial<typeof folios.$inferInsert>,
+  // Cancellation Policy Engine — how much of the collected money and commission to reverse. OMITTED
+  // (no policy configured) means "reverse everything", the pre-feature behaviour (D1).
+  reversal?: { refundAmount: number; reversedCommission: number },
 ): Promise<boolean> => {
   // The agent whose ledger the cancellation reversal (US-LG05/LG06) attributes to.
   const [meta] = await db
@@ -403,29 +478,58 @@ const applyCancellation = async (
     .returning({ id: folios.id })
   if (won.length === 0) return false
 
-  const statements: BatchItem<'sqlite'>[] = lines
-    .filter((line) => line.slotId)
-    .map((line) =>
-      db
-        .update(slots)
-        .set({
-          booked: sql`MAX(0, ${slots.booked} - ${line.quantity})`,
-          updatedAt: now,
-        })
-        .where(and(eq(slots.id, line.slotId!), eq(slots.organizationId, org))),
-    )
+  const statements: BatchItem<'sqlite'>[] = []
+  for (const line of lines) {
+    if (!line.slotId) continue // a lodging stay line has no slot (released via reservations below)
+    if (line.zoneId) {
+      // Zoned: the zone counter is authoritative; `slots.booked` is re-derived from the zone
+      // sums by the reconcile, which must run in the SAME batch (US-A64, zones.reconcile).
+      statements.push(
+        db
+          .update(slotZones)
+          .set({
+            booked: sql`MAX(0, ${slotZones.booked} - ${line.quantity})`,
+            updatedAt: now,
+          })
+          .where(
+            and(
+              eq(slotZones.slotId, line.slotId),
+              eq(slotZones.zoneId, line.zoneId),
+              eq(slotZones.organizationId, org),
+            ),
+          ),
+        reconcileSlotTotals(db, line.slotId),
+      )
+    } else {
+      statements.push(
+        db
+          .update(slots)
+          .set({
+            booked: sql`MAX(0, ${slots.booked} - ${line.quantity})`,
+            updatedAt: now,
+          })
+          .where(and(eq(slots.id, line.slotId), eq(slots.organizationId, org))),
+      )
+    }
+  }
 
   // US-LG — reverse the collected money per method + (on clawback) the commission, dated at the
   // cancellation, so the folio drops out of the ledger buckets exactly as status-exclusion did.
   if (meta) {
-    const reversal = await buildCancellationReversal(db, {
+    const reversalRows = await buildCancellationReversal(db, {
       organizationId: org,
       folioId,
       collectedBy: meta.agentId,
       at: now,
       clawback: folioUpdate.cancellationClawback === true,
+      ...(reversal
+        ? {
+            refundAmount: reversal.refundAmount,
+            reversedCommission: reversal.reversedCommission,
+          }
+        : {}),
     })
-    statements.push(...reversal)
+    statements.push(...reversalRows)
   }
   // Lodging: release any stay reservations on this folio (US-A21 / tourist-approved cancel).
   statements.push(
@@ -444,15 +548,182 @@ const applyCancellation = async (
   return true
 }
 
-// Fire-and-forget cancellation email — a Resend failure must never fail a committed
-// cancellation. waitUntil guarantees the send completes after the response returns (a bare
-// floating promise can be cancelled when the Worker returns, silently dropping the email).
-const queueCancellationEmail = async (
-  c: FoliosContext,
+// Cancellation Policy Engine — price a cancellation, or decide there is no policy to price it with.
+// Spec: docs/cancellation/cancellation-policy-engine.spec.md
+//
+// THE single place a policy is resolved and applied, shared by the admin cancel, the tourist-request
+// approval, and the read-only quote on folio detail. Before this existed the two cancellation paths
+// disagreed about the same folio — the admin one recorded no refund for a tour while the tourist one
+// refunded everything. Routing both through here is what makes that impossible rather than merely
+// fixed.
+//
+// D17 — this ALWAYS returns an outcome. Phase 1 returned null for an org with no policy and the
+// caller fell back to a legacy branch; both the null and the branch are gone. `null` here now means
+// only "no such folio", which callers check before ever getting this far.
+export const quoteCancellation = async (
   db: Db,
   org: string,
   folioId: string,
-  folioOut: NonNullable<Awaited<ReturnType<typeof readFolio>>>,
+  now: Date,
+): Promise<CancellationOutcome> => {
+  const [folio] = await db
+    .select({
+      status: folios.status,
+      amountPaid: folios.amountPaid,
+      commissionAmount: folios.commissionAmount,
+      snapshot: folios.cancellationPolicySnapshot,
+      affiliateCompanyId: folios.affiliateCompanyId,
+    })
+    .from(folios)
+    .where(and(eq(folios.id, folioId), eq(folios.organizationId, org)))
+    .limit(1)
+  if (!folio) {
+    // Unreachable from the handlers, which 404 on a missing folio first. Throwing rather than
+    // returning a fake outcome keeps "priced by nothing" from being representable.
+    throw new ApiError('NOT_FOUND', 404, 'Folio not found')
+  }
+
+  const [orgRow] = await db
+    .select({ policy: organizations.cancellationPolicy, timezone: organizations.timezone })
+    .from(organizations)
+    .where(eq(organizations.id, org))
+    .limit(1)
+
+  // D6 — the folio's own snapshot wins; the org's live ladder is the fallback for folios sold
+  // before the feature. D17 — if neither exists, the module default applies, so this never fails.
+  const policy = resolvePolicy(folio.snapshot, orgRow?.policy)
+
+  const lines = await db
+    .select({
+      id: folioLines.id,
+      lineTotal: folioLines.lineTotal,
+      quantity: folioLines.quantity,
+      redeemedCount: folioLines.redeemedCount,
+      commissionType: folioLines.commissionType,
+      commissionValue: folioLines.commissionValue,
+      lineType: folioLines.lineType,
+      slotDate: folioLines.slotDate,
+      slotStartTime: folioLines.slotStartTime,
+      checkIn: folioLines.checkIn,
+    })
+    .from(folioLines)
+    .where(and(eq(folioLines.folioId, folioId), eq(folioLines.organizationId, org)))
+
+  return computeCancellationRefund({
+    policy,
+    lines,
+    amountPaid: folio.amountPaid,
+    nowEpoch: Math.floor(now.getTime() / 1000),
+    timezone: orgRow?.timezone ?? 'America/Mexico_City',
+    // D12 — an affiliate sale is already stamped on the folio (US-A51), so which of the tier's two
+    // commission percentages applies needs no join.
+    sellerKind: folio.affiliateCompanyId ? 'affiliate' : 'agent',
+    // The authoritative commission the sale booked. Only differs from the per-line sum for folios
+    // sold before `0028` snapshotted commission onto lines; without it those would forfeit nothing.
+    bookedCommission: folio.commissionAmount,
+  })
+}
+
+// The realised numbers a cancellation returns, so the client can state what just happened without
+// re-deriving it. (US-A71's company-cancellation override lived here in Phase 1; it is withdrawn —
+// D10. Nothing overrides the ladder any more.)
+const serializeOutcome = (o: CancellationOutcome) => ({
+  refund: o.refund,
+  retention: o.retention,
+  kept_commission: o.keptCommission,
+  reversed_commission: o.reversedCommission,
+})
+
+// The folio fields a priced cancellation writes. Refund obligation and PIN follow the MONEY, not
+// the path that produced it (spec Rules 3–4): any cancellation that owes the customer something
+// mints a PIN, because a tourist owed money must be able to prove they were present to receive it
+// regardless of who pressed cancel.
+const refundFieldsFor = (outcome: CancellationOutcome): Partial<typeof folios.$inferInsert> =>
+  outcome.refund > 0
+    ? {
+        refundStatus: 'pending' as const,
+        refundAmount: outcome.refund,
+        refundPin: generateRefundPin(),
+      }
+    : { refundStatus: 'none' as const, refundAmount: 0 }
+
+// Cancel a folio at the ladder's price: quote it, flip it, release its inventory, reverse its money.
+//
+// The entrances differ ONLY in who is recorded as having cancelled and why:
+//   * admin (US-A21)                    — the admin cancels a folio outright
+//   * tourist_request (US-T04)          — an admin approves a tourist's request
+//   * agent (US-AG07.4)                 — an agent cancels an apartado from the POS
+//   * system_expiry (US-A74/A77)        — the sweep releases an apartado at its grace instant
+//
+// Everything that touches money — the price, the refund obligation, the PIN, the clawback flag, the
+// proportional ledger reversal — is derived HERE, so no entrance can express a different opinion
+// about the same folio. That is the whole point of the engine: the original defect was two paths
+// answering differently, and the agent path was a third answering differently again (it retained the
+// deposit unconditionally and reversed the collected money in full, which left cash in a drawer that
+// no report accounted for). Adding a fourth entrance means passing a different `source`, nothing else.
+//
+// Returns `won: false` when a concurrent cancellation won the guarded flip; the caller decides what
+// that means for its own bookkeeping.
+export const cancelFolioPriced = async (
+  db: Db,
+  org: string,
+  folioId: string,
+  lines: Array<{ slotId: string | null; quantity: number; zoneId: string | null }>,
+  now: Date,
+  by: {
+    cancelledBy: string | null
+    reason: string | null
+    source: 'admin' | 'agent' | 'tourist_request' | 'system_expiry'
+  },
+): Promise<{ won: boolean; outcome: CancellationOutcome }> => {
+  const outcome = await quoteCancellation(db, org, folioId, now)
+  const won = await applyCancellation(
+    db,
+    org,
+    folioId,
+    lines,
+    now,
+    {
+      status: 'cancelled',
+      cancelledAt: now,
+      cancelledBy: by.cancelledBy,
+      cancellationReason: by.reason,
+      // Derived, never chosen (D10). The flag keeps its meaning for every existing reader — the
+      // cash engine and the commission report both ask "was any commission taken back".
+      cancellationClawback: outcome.reversedCommission > 0,
+      cancellationSource: by.source,
+      ...refundFieldsFor(outcome),
+    },
+    { refundAmount: outcome.refund, reversedCommission: outcome.reversedCommission },
+  )
+  return { won, outcome }
+}
+
+// Fire-and-forget cancellation email — a Resend failure must never fail a committed
+// cancellation. waitUntil guarantees the send completes after the response returns (a bare
+// floating promise can be cancelled when the Worker returns, silently dropping the email).
+//
+// The context and folio are STRUCTURAL rather than the admin's concrete types, so the agent's
+// apartado cancel can send the same email. That path never sent one — tolerable while it never
+// owed anybody money, and not tolerable now that it can open a refund obligation (US-A76): a
+// customer owed cash has to learn about it from something other than a phone call that may not
+// happen. Both POS and admin contexts satisfy `{ env, executionCtx }`.
+export const queueCancellationEmail = async (
+  c: { env: CloudflareBindings; executionCtx: ExecutionContext },
+  db: Db,
+  org: string,
+  folioId: string,
+  folioOut: {
+    customer_email: string | null
+    customer_name: string | null
+    cancellation_reason?: string | null
+    lines: Array<{
+      service_name: string
+      slot_date: string | null
+      slot_start_time: string | null
+      quantity: number
+    }>
+  },
 ) => {
   if (!folioOut.customer_email || !c.env.RESEND_API_KEY) return
 
@@ -469,7 +740,7 @@ const queueCancellationEmail = async (
     orgName,
     folioId,
     cancelledAt: new Date(),
-    cancellationReason: folioOut.cancellation_reason,
+    cancellationReason: folioOut.cancellation_reason ?? null,
     lines: folioOut.lines.map((l) => ({
       serviceName: l.service_name,
       slotDate: l.slot_date,
@@ -515,6 +786,7 @@ export const cancelFolio = async (c: FoliosContext) => {
     .select({
       slotId: folioLines.slotId,
       quantity: folioLines.quantity,
+      zoneId: folioLines.zoneId,
       lineType: folioLines.lineType,
       lineTotal: folioLines.lineTotal,
       checkIn: folioLines.checkIn,
@@ -524,44 +796,13 @@ export const cancelFolio = async (c: FoliosContext) => {
 
   const now = new Date()
 
-  // D9 — a PAID stay cancellation computes a structured refund (free-window then penalty %) on the
-  // stay portion; a booking-status deposit stays non-refundable (handled on the POS cancel path,
-  // US-AG07.4). Org settings drive the policy; tour-only or booking folios keep the default (none).
-  const refundUpdate: Partial<typeof folios.$inferInsert> = {}
-  const stayLines = lines.filter((l) => l.lineType === 'stay')
-  if (folio.status === 'paid' && stayLines.length > 0) {
-    const orgRows = await db
-      .select({
-        freeCancelDays: organizations.lodgingFreeCancelDays,
-        penaltyPct: organizations.lodgingCancelPenaltyPct,
-      })
-      .from(organizations)
-      .where(eq(organizations.id, org))
-      .limit(1)
-    const freeCancelDays = orgRows[0]?.freeCancelDays ?? 0
-    const penaltyPct = orgRows[0]?.penaltyPct ?? 0
-    const stayTotal = stayLines.reduce((sum, l) => sum + l.lineTotal, 0)
-    const today = new Date().toISOString().slice(0, 10)
-    const earliestCheckIn = stayLines
-      .map((l) => l.checkIn)
-      .filter((d): d is string => !!d)
-      .sort()[0]
-    const daysBefore = earliestCheckIn ? nightsBetween(today, earliestCheckIn) : 0
-    const refund =
-      daysBefore >= freeCancelDays
-        ? stayTotal
-        : Math.floor((stayTotal * (100 - penaltyPct)) / 100)
-    refundUpdate.refundStatus = 'pending'
-    refundUpdate.refundAmount = refund
-  }
-
-  const won = await applyCancellation(db, org, id, lines, now, {
-    status: 'cancelled',
-    cancelledAt: now,
+  // D17 — the ladder prices every cancellation. There is no second path: the legacy branch (a
+  // lodging-only refund for stays, nothing at all for tours) was deleted in Phase 2, and
+  // `quoteCancellation` always returns an outcome because `resolvePolicy` always resolves.
+  const { won, outcome } = await cancelFolioPriced(db, org, id, lines, now, {
     cancelledBy: admin.userId,
-    cancellationReason: input.reason ?? null,
-    cancellationClawback: input.clawback ?? false,
-    ...refundUpdate,
+    reason: input.reason ?? null,
+    source: 'admin',
   })
   if (!won) {
     // A concurrent cancellation won the guarded flip after our pre-check.
@@ -571,7 +812,7 @@ export const cancelFolio = async (c: FoliosContext) => {
   const folioOut = await readFolio(db, org, id)
   if (folioOut) await queueCancellationEmail(c, db, org, id, folioOut)
 
-  return c.json({ folio: folioOut })
+  return c.json({ folio: folioOut, cancellation: serializeOutcome(outcome) })
 }
 
 // --- Tourist cancellation requests (US-T04) + refund tracking (US-A23/US-T05) ---
@@ -682,9 +923,9 @@ export const approveCancellationRequest = async (c: FoliosContext) => {
   const admin = c.get('user')
   const org = admin.organizationId
   const requestId = c.req.param('requestId')
-  // Optional body: { clawback } — the US-A26 choice applies to tourist-initiated
-  // cancellations too. Lenient parse: an empty body means "company absorbs".
-  const input = (await c.req.json().catch(() => ({}))) as { clawback?: boolean }
+  // No body. Approving is an authorisation, not a pricing decision — the ladder decides the money
+  // (D10), so there is nothing for a caller to supply. The `clawback` flag this used to accept was
+  // withdrawn with US-A26's supersession.
   const db = getDb(c.env)
 
   const request = await loadRequest(db, org, requestId)
@@ -705,28 +946,27 @@ export const approveCancellationRequest = async (c: FoliosContext) => {
   }
 
   const lines = await db
-    .select({ slotId: folioLines.slotId, quantity: folioLines.quantity })
+    .select({
+      slotId: folioLines.slotId,
+      quantity: folioLines.quantity,
+      zoneId: folioLines.zoneId,
+    })
     .from(folioLines)
     .where(
       and(eq(folioLines.folioId, folio.id), eq(folioLines.organizationId, org)),
     )
 
   const now = new Date()
-  // Refund obligation only when money actually changed hands (S9: unpaid → no PIN).
-  const owesRefund = folio.amountPaid > 0
-  const won = await applyCancellation(db, org, folio.id, lines, now, {
-    status: 'cancelled',
-    cancelledAt: now,
+  // The SAME pricing the admin path uses — that identity IS the fix. Approving a tourist's request
+  // used to refund `amount_paid` in full while an admin cancelling the identical folio recorded no
+  // refund at all; routing both through one function makes that divergence unrepresentable rather
+  // than merely corrected. Approving is an authorisation, not a pricing decision, so this endpoint
+  // takes no body fields (D10). `refundFieldsFor` still opens no obligation when the refund is 0,
+  // which covers the unpaid-folio case the old `owesRefund` guard handled.
+  const { won, outcome } = await cancelFolioPriced(db, org, folio.id, lines, now, {
     cancelledBy: admin.userId,
-    cancellationReason: request.reason ?? 'Solicitud de cancelación del cliente',
-    cancellationClawback: input.clawback === true,
-    ...(owesRefund
-      ? {
-          refundStatus: 'pending' as const,
-          refundAmount: folio.amountPaid,
-          refundPin: generateRefundPin(),
-        }
-      : {}),
+    reason: request.reason ?? 'Solicitud de cancelación del cliente',
+    source: 'tourist_request',
   })
   if (!won) {
     // A concurrent cancellation won the guarded flip after our pre-check. The request
@@ -760,7 +1000,11 @@ export const approveCancellationRequest = async (c: FoliosContext) => {
     .where(eq(cancellationRequests.id, requestId))
     .limit(1)
 
-  return c.json({ request: updated ? serializeRequest(updated) : null, folio: folioOut })
+  return c.json({
+    request: updated ? serializeRequest(updated) : null,
+    folio: folioOut,
+    cancellation: serializeOutcome(outcome),
+  })
 }
 
 // US-T04 — REJECT a tourist's cancellation request with a REQUIRED note (the tourist reads

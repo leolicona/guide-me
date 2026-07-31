@@ -47,11 +47,17 @@ import { settleSchema, type ConfirmSaleInput, type SettleInput } from './schema'
 import {
   paymentRow,
   commissionRow,
+  commissionReversalRow,
+  refundRow,
   buildCancellationReversal,
   displayMethodSql,
   depositMethodSql,
   readFolioPayments,
 } from '../../utils/folioPayments'
+// D20 — the agent apartado cancel shares the admin path's commit, so the two cannot price the same
+// folio differently. Reaching across routes is deliberate: the alternative is a second copy of the
+// release + reversal logic, which is exactly what this replaced.
+import { cancelFolioPriced, queueCancellationEmail, quoteCancellation } from '../folios/handler'
 
 export type PosContext = Context<{
   Bindings: CloudflareBindings
@@ -205,6 +211,8 @@ export const listPosServices = async (c: PosContext) => {
     isFlexible: services.isFlexible,
     flexCapacityPct: services.flexCapacityPct,
     category: services.category,
+    // US-AG45 (D4) — a zoned service is never Express-eligible (a zone pick can't be defaulted).
+    zonesEnabled: services.zonesEnabled,
   }
   const baseWhere = and(
     eq(services.organizationId, agent.organizationId),
@@ -268,6 +276,35 @@ export const listPosServices = async (c: PosContext) => {
     availabilityRows.map((r) => [r.serviceId, r]),
   )
 
+  // US-AG45 (D4) — Express eligibility is TODAY-anchored regardless of the catalog's selected
+  // window (D5: the ⚡ sells to the customer standing at the counter, so a catalog filtered to
+  // Saturday must not light it up for Saturday). Same effective-remaining + cutoff math as the
+  // window query, collapsed to one day and a membership set.
+  const todayRows = await db
+    .select({
+      serviceId: slots.serviceId,
+      availableSpots: sql<number>`sum(
+        (${slots.capacity} - ${slots.booked})
+        + (CASE WHEN ${services.isFlexible}
+                THEN (${slots.capacity} * ${services.flexCapacityPct}) / 100
+                ELSE 0 END)
+      )`,
+    })
+    .from(slots)
+    .innerJoin(services, eq(slots.serviceId, services.id))
+    .where(
+      and(
+        eq(slots.organizationId, agent.organizationId),
+        eq(slots.status, 'active'),
+        eq(slots.date, today),
+        sellableSlotSql(sellableThreshold),
+      ),
+    )
+    .groupBy(slots.serviceId)
+  const sellableToday = new Set(
+    todayRows.filter((r) => Number(r.availableSpots) > 0).map((r) => r.serviceId),
+  )
+
   // Lodging (spec §4.3, D14 — FLATTENED catalog): the parent lodging service is never a card;
   // it contributes one `unit_type` card per active type, each with its exact nightly rate,
   // per-night-windowed availability, and the `remaining` count ("Quedan N"). Tours are unchanged
@@ -304,6 +341,10 @@ export const listPosServices = async (c: PosContext) => {
         // US-AG30 — lightweight boolean (no count): ≥ 1 in-window slot is sellable.
         has_availability: a ? Number(a.availableSpots) > 0 : false,
         next_slot_date: a ? a.nextSlotDate : null,
+        // US-AG45 (D4) — the ⚡ renders only where Express can work: slot-based (this branch),
+        // non-zoned, with a sellable departure TODAY. The server re-enforces at confirm
+        // (EXPRESS_NOT_ELIGIBLE); this flag only decides whether the button exists.
+        express_eligible: !s.zonesEnabled && sellableToday.has(s.id),
       }
     })
 
@@ -617,6 +658,8 @@ interface BookingPolicy {
   holdDays: number
   bookingGraceOffsetMinutes: number
   preDepartureBufferHours: number
+  /** US-A77 — hours before departure past which an apartado may no longer be CREATED. 0 = off. */
+  creationCutoffHours: number
 }
 
 // US-AG07.1 — cascade-ready policy resolver. A per-service override (later phase) would take
@@ -626,12 +669,14 @@ function resolveBookingPolicy(org: {
   bookingHoldDays: number
   bookingGraceOffsetMinutes: number
   bookingPreDepartureBufferHours: number
+  bookingCreationCutoffHours?: number
 }): BookingPolicy {
   return {
     minDownPaymentPct: org.bookingMinDownPaymentPct,
     holdDays: org.bookingHoldDays,
     bookingGraceOffsetMinutes: org.bookingGraceOffsetMinutes,
     preDepartureBufferHours: org.bookingPreDepartureBufferHours,
+    creationCutoffHours: org.bookingCreationCutoffHours ?? 0,
   }
 }
 
@@ -834,6 +879,56 @@ export const confirmSale = async (c: PosContext) => {
   const db = getDb(c.env)
   const org = agent.organizationId
 
+  // US-AG45 (docs/pos/express-sale.spec.md, rules 1–2) — an Express sale is structurally exactly
+  // one bare slot line, paid in full, in cash. Anything else is a payload the ⚡ sheet cannot have
+  // produced, refused with its own code so the client can tell it from an ordinary 400. The name
+  // exemption (D17) already happened in the schema; the phone stayed required there for BOTH modes.
+  const isExpress = (input.sale_mode ?? 'standard') === 'express'
+  if (isExpress) {
+    const bad =
+      input.lines.length !== 1 ||
+      input.down_payment != null ||
+      (input.payment_method ?? 'cash') !== 'cash' ||
+      input.lines.some((l) => 'slot_id' in l && (l.extras ?? []).length > 0)
+    if (bad) {
+      throw new ApiError(
+        'EXPRESS_PAYLOAD_INVALID',
+        422,
+        'An Express sale is exactly one slot line, no extras, full payment, cash',
+      )
+    }
+  }
+
+  // US-AG45 (D21) — idempotency replay: the same key inside this org means this confirm already
+  // happened (a double-tap, a 3G retry). Return the existing folio and touch NOTHING — no
+  // decrement, no ledger row. Scoped to the caller: a key is per-attempt, so a cross-seller reuse
+  // is a client bug, surfaced at the unique-index catch below rather than leaking another
+  // seller's folio here.
+  if (input.idempotency_key) {
+    const existing = await db
+      .select({ id: folios.id })
+      .from(folios)
+      .where(
+        and(
+          eq(folios.organizationId, org),
+          eq(folios.agentId, agent.userId),
+          eq(folios.idempotencyKey, input.idempotency_key),
+        ),
+      )
+      .limit(1)
+    if (existing[0]) {
+      const folio = await readFolio(
+        db,
+        org,
+        agent.userId,
+        existing[0].id,
+        c.env.QR_SECRET,
+        c.env.API_BASE_URL,
+      )
+      return c.json({ folio, replayed: true }, 200)
+    }
+  }
+
   // Affiliate sale (affiliate-portal.spec.md D2/D3): the seller may only sell allow-list
   // services, and the commission resolves from the per-affiliate rate — NOT services.commission_*.
   // Pre-fetch the company's allow-list once (serviceId → rate) so the validate loop both guards
@@ -876,8 +971,10 @@ export const confirmSale = async (c: PosContext) => {
       salesCutoffOffsetMinutes: organizations.salesCutoffOffsetMinutes,
       bookingGraceOffsetMinutes: organizations.bookingGraceOffsetMinutes,
       bookingPreDepartureBufferHours: organizations.bookingPreDepartureBufferHours,
+      bookingCreationCutoffHours: organizations.bookingCreationCutoffHours,
       lodgingWeekendDays: organizations.lodgingWeekendDays,
       timezone: organizations.timezone,
+      cancellationPolicy: organizations.cancellationPolicy,
     })
     .from(organizations)
     .where(eq(organizations.id, org))
@@ -899,6 +996,14 @@ export const confirmSale = async (c: PosContext) => {
     // Re-quote via the shared engine (D12) and snapshot the total; the atomic per-night count
     // guard (D10) runs at the reservation insert below. ---
     if ('unit_type_id' in line) {
+      // US-AG45 (rule 3) — lodging is a date-range primitive with no slots; Express cannot sell it.
+      if (isExpress) {
+        throw new ApiError(
+          'EXPRESS_NOT_ELIGIBLE',
+          422,
+          'Express sales are for slot-based services only',
+        )
+      }
       const typeRows = await db
         .select({
           id: accommodationUnitTypes.id,
@@ -1075,6 +1180,16 @@ export const confirmSale = async (c: PosContext) => {
       throw new ApiError('NOT_FOUND', 404, 'Slot not found or unavailable')
     }
 
+    // US-AG45 (rule 3) — a zoned service needs a zone pick, and defaulting one would silently
+    // oversell a deck (D4). The ⚡ never renders for these; this is the server's own gate.
+    if (isExpress && slot.zonesEnabled) {
+      throw new ApiError(
+        'EXPRESS_NOT_ELIGIBLE',
+        422,
+        'Express sales are not available for zoned services',
+      )
+    }
+
     // US-A47 — refuse a slot whose departure has passed the sales cutoff (no selling a tour
     // that already left / is past the walk-in window). Closes the past-slot integrity hole for
     // both full sales and booking creation, regardless of a stale client.
@@ -1240,6 +1355,7 @@ export const confirmSale = async (c: PosContext) => {
     bookingHoldDays: orgRow?.bookingHoldDays ?? 7,
     bookingGraceOffsetMinutes: orgRow?.bookingGraceOffsetMinutes ?? 15,
     bookingPreDepartureBufferHours: orgRow?.bookingPreDepartureBufferHours ?? 24,
+    bookingCreationCutoffHours: orgRow?.bookingCreationCutoffHours ?? 0,
   })
   const isBooking = input.down_payment != null
   // US-AG41/US-A67 — an electronic (transfer) payment is not yet in hand: the folio is created
@@ -1292,6 +1408,22 @@ export const confirmSale = async (c: PosContext) => {
       },
       { epoch: Infinity, date: '' },
     )
+    // US-A77 (S1) — an apartado may not be opened this close to departure. Distinct from the sales
+    // cutoff, which gates every folio and stays at 0 so a cash walk-in sells until the last minute:
+    // a completed sale near departure is fine, a promise to come back and pay is not. Without this
+    // an agent could open an apartado twenty minutes out that expires fifteen minutes out — five
+    // minutes of hold, and a customer who never had a chance to settle.
+    if (policy.creationCutoffHours > 0) {
+      const hoursOut = (earliest.epoch - nowSec) / 3600
+      if (hoursOut < policy.creationCutoffHours) {
+        throw new ApiError(
+          'BOOKING_TOO_LATE',
+          422,
+          `Los apartados cierran ${policy.creationCutoffHours} h antes de la salida. Cobra el total para vender este servicio.`,
+        )
+      }
+    }
+
     bookingExpiresAt = bookingExpiryDate(
       policy,
       nowSec,
@@ -1302,30 +1434,71 @@ export const confirmSale = async (c: PosContext) => {
   // A stay reservation FK-references the folio, so the folio row must exist BEFORE the reserve
   // step. Insert it now; compensation deletes it if any line fails (mirrors the slot re-increment).
   const folioId = crypto.randomUUID()
-  await db.insert(folios).values({
-    id: folioId,
-    organizationId: org,
-    agentId: agent.userId,
-    // D5 — stamp the seller's company on an affiliate sale; null for in-house (agent/admin).
-    affiliateCompanyId,
-    // US-AF13 — the shift operator who made the sale (null unless this is an operator session).
-    operatorId: c.get('operator')?.operatorId ?? null,
-    customerName: input.customer_name ?? null,
-    customerEmail: input.customer_email ?? null,
-    customerPhone: input.customer_phone ?? null,
-    status,
-    // US-LG08 — the folio no longer stores a payment method; it is DERIVED from the ledger's
-    // collection rows (the payment row written below), shown as the shared method or 'Mixto'.
-    // US-AG41/US-A67 — the transfer's reference + the verification gate (see `cleared` above).
-    paymentReference: needsVerification ? (input.payment_reference ?? null) : null,
-    paymentVerification,
-    subtotal,
-    discountTotal,
-    total,
-    amountPaid,
-    commissionAmount,
-    bookingExpiresAt,
-  })
+  try {
+    await db.insert(folios).values({
+      id: folioId,
+      organizationId: org,
+      agentId: agent.userId,
+      // D5 — stamp the seller's company on an affiliate sale; null for in-house (agent/admin).
+      affiliateCompanyId,
+      // US-AF13 — the shift operator who made the sale (null unless this is an operator session).
+      operatorId: c.get('operator')?.operatorId ?? null,
+      customerName: input.customer_name ?? null,
+      customerEmail: input.customer_email ?? null,
+      customerPhone: input.customer_phone ?? null,
+      status,
+      // US-LG08 — the folio no longer stores a payment method; it is DERIVED from the ledger's
+      // collection rows (the payment row written below), shown as the shared method or 'Mixto'.
+      // US-AG41/US-A67 — the transfer's reference + the verification gate (see `cleared` above).
+      paymentReference: needsVerification ? (input.payment_reference ?? null) : null,
+      paymentVerification,
+      subtotal,
+      discountTotal,
+      total,
+      amountPaid,
+      commissionAmount,
+      bookingExpiresAt,
+      // Cancellation Policy Engine (D6) — freeze the refund ladder in force RIGHT NOW. The customer
+      // agreed to the terms they were shown, so a later edit to the org's policy must never re-price
+      // this sale. Copied verbatim (it was validated on the way into the column) and never rewritten
+      // — not on settle, not on edit. NULL when the org has no policy, which leaves this folio on the
+      // pre-feature cancellation path (D1).
+      cancellationPolicySnapshot: orgRow?.cancellationPolicy ?? null,
+      // US-AG45 — the sale mode (reports + the 60-second void key off it) and the replay guard.
+      saleMode: isExpress ? 'express' : 'standard',
+      idempotencyKey: input.idempotency_key ?? null,
+    })
+  } catch (err) {
+    // Two same-key confirms racing: the pre-check above missed the winner because it hadn't
+    // inserted yet, and the 0057 partial unique index caught it here. Re-run the replay lookup —
+    // same seller gets their folio back; a cross-seller key reuse (a client bug) gets a 409
+    // instead of another seller's data.
+    if (input.idempotency_key && /unique/i.test(String(err))) {
+      const winner = await db
+        .select({ id: folios.id, agentId: folios.agentId })
+        .from(folios)
+        .where(
+          and(
+            eq(folios.organizationId, org),
+            eq(folios.idempotencyKey, input.idempotency_key),
+          ),
+        )
+        .limit(1)
+      if (winner[0]?.agentId === agent.userId) {
+        const folio = await readFolio(
+          db,
+          org,
+          agent.userId,
+          winner[0].id,
+          c.env.QR_SECRET,
+          c.env.API_BASE_URL,
+        )
+        return c.json({ folio, replayed: true }, 200)
+      }
+      throw new ApiError('VALIDATION_ERROR', 409, 'Idempotency key already used')
+    }
+    throw err
+  }
 
   // 2. RESERVE INVENTORY — per line, conditionally & atomically, tracking successes so a later
   //    failure can be compensated. Slot lines decrement booked (effective-capacity guard); stay
@@ -1957,7 +2130,26 @@ export const getFolio = async (c: PosContext) => {
     throw new ApiError('NOT_FOUND', 404, 'Folio not found')
   }
 
-  return c.json({ folio })
+  // What cancelling RIGHT NOW would cost, computed by the same function the cancel endpoint uses —
+  // so the figure the agent reads before confirming is the figure that will be written, not an
+  // estimate the client re-derives. `null` once the folio is cancelled: there is nothing left to
+  // quote, and a stale number next to a cancelled folio is worse than none.
+  const quote =
+    folio.status === 'cancelled'
+      ? null
+      : await quoteCancellation(db, agent.organizationId, id, new Date())
+
+  return c.json({
+    folio,
+    cancellation_quote: quote
+      ? {
+          refund: quote.refund,
+          retention: quote.retention,
+          kept_commission: quote.keptCommission,
+          reversed_commission: quote.reversedCommission,
+        }
+      : null,
+  })
 }
 
 // POST /pos/folios/:id/ticket-delivery — the seller records that they sent the tickets over
@@ -2548,9 +2740,21 @@ export const rejectPayment = async (c: PosContext) => {
 }
 
 // US-AG07.4 — manual cancellation of a booking: release the held spots immediately and close the
-// folio. The collected deposit is NON-REFUNDABLE and retained (refund_status stays 'none', D7);
-// the agent keeps the percent commission already accrued. Booking-only and distinct from the
-// admin refunding cancellation (US-A21). Owner-or-admin scoped.
+// folio. Booking-only, owner-or-admin scoped.
+//
+// D20 — this used to be a THIRD pricing path. It hard-coded `refund_status: 'none'` (the deposit is
+// never refunded), `clawback: false` (the agent keeps every peso of commission), and a FULL ledger
+// reversal — which zeroed the collected deposit in the books while the cash was still physically in
+// the agent's drawer, so no cash-drop report ever asked for it. All three are now decided by the
+// ladder, through the same function the admin and tourist-request paths use.
+//
+// Two race bugs went with it, both fixed by delegating: the flip had no `status != 'cancelled'`
+// guard, and the seat release subtracted without a `MAX(0, …)` clamp, so two concurrent cancels
+// double-released the spots.
+//
+// Consequence worth stating plainly, because it changes what an agent earns: under the default
+// ladder an apartado cancelled 5+ days out now refunds the deposit IN FULL and the agent keeps no
+// commission on it. Inside 24h they keep both, as before.
 export const cancelBooking = async (c: PosContext) => {
   const agent = c.get('user')
   const id = c.req.param('id')
@@ -2579,74 +2783,190 @@ export const cancelBooking = async (c: PosContext) => {
     .where(and(eq(folioLines.folioId, id), eq(folioLines.organizationId, org)))
 
   const now = new Date()
-  const statements: BatchItem<'sqlite'>[] = [
-    db
-      .update(folios)
-      .set({
-        status: 'cancelled',
-        cancelledAt: now,
-        cancelledBy: agent.userId,
-        cancellationReason: body.reason ?? null,
-        refundStatus: 'none', // deposit retained (D7)
-        updatedAt: now,
-      })
-      .where(and(eq(folios.id, id), eq(folios.organizationId, org))),
-  ]
-  // US-LG — cancelling a booking drops it from the ledger's sales/cash buckets exactly as the
-  // status-exclusion did (clawback=false: the agent KEEPS the accrued commission, D7).
-  statements.push(
-    ...(await buildCancellationReversal(db, {
-      organizationId: org,
-      folioId: id,
-      collectedBy: agent.userId,
-      at: now,
-      clawback: false,
-    })),
-  )
-  for (const line of lineRows) {
-    if (!line.slotId) continue
-    if (line.zoneId) {
-      // US-A64 — release the seats to the zone counter, then reconcile the slot totals.
-      statements.push(
-        db
-          .update(slotZones)
-          .set({ booked: sql`${slotZones.booked} - ${line.quantity}`, updatedAt: new Date() })
-          .where(
-            and(
-              eq(slotZones.slotId, line.slotId),
-              eq(slotZones.zoneId, line.zoneId),
-              eq(slotZones.organizationId, org),
-            ),
-          ),
-        reconcileSlotTotals(db, line.slotId),
-      )
-    } else {
-      statements.push(
-        db
-          .update(slots)
-          .set({ booked: sql`${slots.booked} - ${line.quantity}`, updatedAt: new Date() })
-          .where(and(eq(slots.id, line.slotId), eq(slots.organizationId, org))),
-      )
-    }
+  // Seat release, zone reconcile, reservation release and the proportional ledger reversal all live
+  // inside this call — the same batch the admin path commits.
+  const { won, outcome } = await cancelFolioPriced(db, org, id, lineRows, now, {
+    cancelledBy: agent.userId,
+    reason: body.reason ?? null,
+    source: 'agent',
+  })
+  if (!won) {
+    // A concurrent cancellation won the guarded flip after our pre-check. Nothing was released
+    // twice, which is exactly what the guard is for.
+    throw new ApiError('NOT_A_BOOKING', 409, 'Only a live booking can be cancelled here')
   }
-  // Lodging: release the stay's dates by cancelling its active reservations (frees inventory,
-  // mirroring the slot re-increment). Deposit stays non-refundable (D7), set above.
-  statements.push(
-    db
-      .update(accommodationReservations)
-      .set({ status: 'cancelled', updatedAt: new Date() })
-      .where(
-        and(
-          eq(accommodationReservations.folioId, id),
-          eq(accommodationReservations.organizationId, org),
-          eq(accommodationReservations.status, 'active'),
-        ),
-      ),
-  )
-  await db.batch(statements as [BatchItem<'sqlite'>, ...BatchItem<'sqlite'>[]])
 
   const updated = await readFolio(db, org, agent.userId, id, c.env.QR_SECRET, c.env.API_BASE_URL)
-  return c.json({ folio: updated ?? { id, status: 'cancelled' } })
+  // The same notice the admin path sends. It matters more here: this cancellation can now open a
+  // refund obligation the customer has to come and collect, and until now the only thing telling
+  // them was whatever the agent said at the counter.
+  if (updated) {
+    await queueCancellationEmail(c, db, org, id, {
+      customer_email: updated.customer_email,
+      customer_name: updated.customer_name,
+      cancellation_reason: body.reason ?? null,
+      lines: updated.lines,
+    })
+  }
+
+  return c.json({
+    folio: updated ?? { id, status: 'cancelled' },
+    // What the ladder decided, so the POS can tell the agent what they owe the customer instead of
+    // asserting "no es reembolsable" the way the old confirm dialog did.
+    cancellation: {
+      refund: outcome.refund,
+      retention: outcome.retention,
+      kept_commission: outcome.keptCommission,
+      reversed_commission: outcome.reversedCommission,
+    },
+  })
+}
+
+// US-AG47 (docs/pos/express-sale.spec.md, rules 7–8) — the 60-second VOID of an Express sale.
+// A void is not a cancellation: it asserts the sale never happened, so it reverses the payment and
+// commission ledger rows IN FULL, releases the seats, records the refund as already handed back
+// across the counter (no Refund PIN, D15), and NEVER consults the cancellation ladder — for a
+// same-day departure the terminal tier would keep 100% of a sale that never happened (D14).
+// Strictly the selling seller's own Express sale, inside the window, undelivered, unscanned.
+const VOID_WINDOW_SECONDS = 60
+
+export const voidExpressSale = async (c: PosContext) => {
+  const agent = c.get('user')
+  const id = c.req.param('id')
+  const db = getDb(c.env)
+  const org = agent.organizationId
+
+  // Org-scoped read only — a foreign org's folio is a 404 (never a 403, which would confirm it
+  // exists). A same-org folio that fails a guard is a 409 with the reason (S-14).
+  const folioRows = await db
+    .select({
+      agentId: folios.agentId,
+      status: folios.status,
+      saleMode: folios.saleMode,
+      amountPaid: folios.amountPaid,
+      commissionAmount: folios.commissionAmount,
+      ticketsSentAt: folios.ticketsSentAt,
+      ticketsViewedAt: folios.ticketsViewedAt,
+      settledAt: folios.settledAt,
+      // ONE clock — the DB's. The Workers runtime freezes Date.now() per request (and the test
+      // pool pins it), while created_at was stamped by unixepoch(); mixing the two makes the
+      // window drift. Computing the age in SQL keeps writer and reader on the same clock.
+      elapsedSeconds: sql<number>`unixepoch() - ${folios.createdAt}`,
+    })
+    .from(folios)
+    .where(and(eq(folios.id, id), eq(folios.organizationId, org)))
+    .limit(1)
+  const folio = folioRows[0]
+  if (!folio) throw new ApiError('NOT_FOUND', 404, 'Folio not found')
+
+  const closed = (why: string) => new ApiError('VOID_WINDOW_CLOSED', 409, why)
+  // D16 — the seller only. Not an admin: an admin already has the ladder-priced cancel path.
+  if (folio.agentId !== agent.userId) {
+    throw closed('Solo el vendedor que hizo la venta puede anularla')
+  }
+  if (folio.saleMode !== 'express') throw closed('Solo una Venta Express puede anularse')
+  if (folio.status !== 'paid' || folio.settledAt) {
+    throw closed('Esta venta ya no puede anularse')
+  }
+  if (Number(folio.elapsedSeconds) > VOID_WINDOW_SECONDS) {
+    throw closed('La ventana de anulación (60 s) ya cerró')
+  }
+  // Delivered = the ticket left the counter; the void's premise (nothing happened) is gone.
+  if (folio.ticketsSentAt || folio.ticketsViewedAt) {
+    throw closed('Los boletos ya fueron entregados')
+  }
+
+  const lineRows = await db
+    .select({
+      slotId: folioLines.slotId,
+      quantity: folioLines.quantity,
+      redeemedCount: folioLines.redeemedCount,
+      lineType: folioLines.lineType,
+    })
+    .from(folioLines)
+    .where(and(eq(folioLines.folioId, id), eq(folioLines.organizationId, org)))
+  if (lineRows.some((l) => l.redeemedCount > 0)) {
+    throw closed('Un pase de esta venta ya fue escaneado')
+  }
+
+  // Guarded flip FIRST (the applyCancellation pattern): a racing void/cancel that loses matches 0
+  // rows and releases nothing twice. The refund settles immediately — the customer is standing
+  // there and the cash goes straight back — so refund_status is born 'refunded' and refund_pin
+  // stays null (D15): minting a PIN for money already returned would open a fake obligation in
+  // the admin's refund queue.
+  const now = new Date()
+  const flipped = await db
+    .update(folios)
+    .set({
+      status: 'cancelled',
+      cancelledAt: now,
+      cancelledBy: agent.userId,
+      cancellationSource: 'agent',
+      cancellationReason: 'Venta Express anulada por el vendedor',
+      cancellationClawback: folio.commissionAmount > 0,
+      refundStatus: 'refunded',
+      refundAmount: folio.amountPaid,
+      refundedAt: now,
+      refundedBy: agent.userId,
+      updatedAt: now,
+    })
+    .where(and(eq(folios.id, id), eq(folios.organizationId, org), eq(folios.status, 'paid')))
+    .returning({ id: folios.id })
+  if (flipped.length === 0) throw closed('Esta venta ya no puede anularse')
+
+  // Seats back + full ledger reversal, one batch. An Express folio is exactly one unzoned slot
+  // line (rules 1/3), so there is no zone branch here; MAX(0, …) mirrors applyCancellation's
+  // defensive floor. Both reversal rows are dated NOW — they land in the seller's current shift,
+  // netting the caja to exactly its pre-sale balance (S-12).
+  const statements: BatchItem<'sqlite'>[] = []
+  let releasedSeats = 0
+  for (const line of lineRows) {
+    if (line.lineType !== 'slot' || !line.slotId) continue
+    releasedSeats += line.quantity
+    statements.push(
+      db
+        .update(slots)
+        .set({
+          booked: sql`MAX(0, ${slots.booked} - ${line.quantity})`,
+          updatedAt: now,
+        })
+        .where(and(eq(slots.id, line.slotId), eq(slots.organizationId, org))),
+    )
+  }
+  if (folio.amountPaid > 0) {
+    statements.push(
+      refundRow(db, {
+        organizationId: org,
+        folioId: id,
+        amount: folio.amountPaid,
+        method: 'cash', // rule 1 — an Express sale is always cash
+        collectedBy: agent.userId,
+        at: now,
+      }),
+    )
+  }
+  if (folio.commissionAmount > 0) {
+    statements.push(
+      commissionReversalRow(db, {
+        organizationId: org,
+        folioId: id,
+        amount: folio.commissionAmount,
+        method: 'cash',
+        collectedBy: agent.userId,
+        at: now,
+      }),
+    )
+  }
+  if (statements.length > 0) {
+    await db.batch(statements as [BatchItem<'sqlite'>, ...BatchItem<'sqlite'>[]])
+  }
+
+  return c.json({
+    id,
+    status: 'cancelled' as const,
+    refund_amount: folio.amountPaid,
+    released_seats: releasedSeats,
+  })
 }
 
 // US-AG07.3 — claim the WhatsApp reminder (D6). An ATOMIC conditional update so two viewers
@@ -2756,6 +3076,7 @@ export const reactivateBooking = async (c: PosContext) => {
       salesCutoffOffsetMinutes: organizations.salesCutoffOffsetMinutes,
       bookingGraceOffsetMinutes: organizations.bookingGraceOffsetMinutes,
       bookingPreDepartureBufferHours: organizations.bookingPreDepartureBufferHours,
+      bookingCreationCutoffHours: organizations.bookingCreationCutoffHours,
       timezone: organizations.timezone,
     })
     .from(organizations)
@@ -2766,6 +3087,7 @@ export const reactivateBooking = async (c: PosContext) => {
     bookingHoldDays: orgRows[0]?.bookingHoldDays ?? 7,
     bookingGraceOffsetMinutes: orgRows[0]?.bookingGraceOffsetMinutes ?? 15,
     bookingPreDepartureBufferHours: orgRows[0]?.bookingPreDepartureBufferHours ?? 24,
+    bookingCreationCutoffHours: orgRows[0]?.bookingCreationCutoffHours ?? 0,
   })
   // US-A66 — the cutoff guard + fresh same-day expiry below resolve in the org's time zone.
   const tz = orgRows[0]?.timezone ?? 'America/Mexico_City'

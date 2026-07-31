@@ -13,7 +13,7 @@
 | **Implementation** | `app-turistear/src/config/theme.ts` + `app-turistear/src/styles/tokens.css` |
 | **Shared primitives** | `app-turistear/src/components/` (`MoneyText`, `SectionCard`, `StatusChip`, `AlertCard`, `BottomSheet`, `WizardShell`) |
 | **Philosophy / rationale** | `.design/design-system/DESIGN_BRIEF.md` |
-| **Quick reference** | `CLAUDE.md` → "Design System — Elegant Field Minimalism" |
+| **Quick reference** | `CLAUDE.md` → "Design System — Elegant Field Minimalism" — a **summary**; `DESIGN_TOKENS.md` wins any disagreement |
 
 ## What changed (old → new)
 

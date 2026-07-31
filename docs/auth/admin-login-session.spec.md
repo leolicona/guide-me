@@ -6,7 +6,7 @@ Both administrators and sales agents access the platform using their email and p
 
 **User Stories:** US-A03, US-AG02  
 **Endpoints:** `POST /api/auth/login`, `POST /api/auth/refresh`, `POST /api/auth/logout`  
-**Full Reference:** `docs/auth/user-story-admin-registration.md`
+**Full Reference:** `docs/SPEC.md` (US-A01–US-A04)
 
 ---
 
@@ -22,8 +22,12 @@ Both administrators and sales agents access the platform using their email and p
 **Then**
 - Status `200 OK`
 - Body: `{ "user": { "name": "Usuario Prueba", "role": "admin" } }` (or `"agent"` depending on the user's role)
-- The cookie `gm_access` is set (`HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=900`)
-- The cookie `gm_refresh` is set (`HttpOnly; Secure; SameSite=Lax; Path=/api/auth/refresh; Max-Age=604800`)
+- The cookie `gm_access` is set (`HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=SESSION_REFRESH_TTL_SECONDS`)
+- The cookie `gm_refresh` is set (`HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=SESSION_REFRESH_TTL_SECONDS`)
+
+> Both cookies share the idle-session window (`SESSION_REFRESH_TTL_SECONDS`, see `wrangler.jsonc`),
+> which must match `refreshTokenTtlSeconds` in the agnostic-auth `APP_REGISTRY` entry for `guide-me`.
+> `Path` is `/` for both — `gm_refresh` is read by `authMiddleware` on every route, not just refresh.
 - The tokens **do not appear** in the response body
 
 ---
@@ -112,11 +116,26 @@ Both administrators and sales agents access the platform using their email and p
 
 ### Scenario 9 — Access Protected Route Without Session
 
-**Given** the client does not have a `gm_access` cookie  
-**When** making a request to any protected endpoint  
+**Given** the client has **neither** a `gm_access` **nor** a `gm_refresh` cookie
+**When** making a request to any protected endpoint
 **Then**
 - Status `401 Unauthorized`
 - No refresh is attempted
+
+---
+
+### Scenario 9b — Access Protected Route with Only a Refresh Cookie
+
+**Given** the client has no `gm_access` cookie but a valid `gm_refresh`
+**When** making a request to any protected endpoint
+**Then**
+- The middleware treats it exactly like an expired access token: it renews from `gm_refresh`
+- Both cookies are re-issued and the handler runs normally — Status `200 OK`
+
+> A missing `gm_access` is not a missing session. The cookie holds a 10-minute token and both
+> session cookies carry the same (long) `Max-Age`, so `gm_access` is routinely stale and can be
+> absent while `gm_refresh` is still valid. Refusing the request here made every idle gap an
+> unrecoverable 401 and forced the user to re-enter their password.
 
 ---
 

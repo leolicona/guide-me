@@ -1,7 +1,7 @@
 // Phone normalization — the single source of truth for turning an agent-typed phone into a
 // wa.me-ready international number, and for the checkout's "is this sendable?" gate.
 //
-// Spec: docs/whatsapp-qr-delivery/spec.md — D3. WhatsApp deep links (wa.me/<number>) need a full
+// Spec: docs/whatsapp-qr-delivery/whatsapp-qr-delivery.spec.md — D3. WhatsApp deep links (wa.me/<number>) need a full
 // international number in digits (no '+'). The default country code is +52 (Mexico): a bare
 // 10-digit local number gets 52 prepended; a number that already carries a country code (≥ 11
 // digits) is kept as-is. This also fixes the recovery flow (BookingWhatsAppButton), which

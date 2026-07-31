@@ -1,4 +1,4 @@
--- Admin-edited WhatsApp message templates (docs/whatsapp-qr-delivery/spec.md — D10). NULL ⇒ the
+-- Admin-edited WhatsApp message templates (docs/whatsapp-qr-delivery/whatsapp-qr-delivery.spec.md — D10). NULL ⇒ the
 -- shipped default (utils/waTemplates) is used. wa_ticket_template delivers paid tickets (tours +
 -- lodging) and must contain {portal_link}; wa_reminder_template is the apartado payment reminder.
 --

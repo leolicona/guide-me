@@ -48,10 +48,19 @@ const lineSchema = z.union([stayLineSchema, slotLineSchema])
 
 export const confirmSaleSchema = z
   .object({
+    // US-AG45 (docs/pos/express-sale.spec.md) — 'express' is the one-sheet cash walk-up. Its
+    // structural constraints (one slot line, no extras, no deposit, cash) depend on cross-field
+    // reads and want their own error code, so they live in the handler (422 EXPRESS_PAYLOAD_INVALID)
+    // — only the name exemption is schema-level (the refine below).
+    sale_mode: z.enum(['standard', 'express']).optional().default('standard'),
+    // US-AG45 (D21) — client-generated replay guard, unique per org. A re-send of the same key
+    // returns the existing folio instead of selling twice.
+    idempotency_key: z.string().trim().min(8).max(128).optional(),
     // D2 (whatsapp-qr-delivery) — every POS sale requires a name and a dialable phone: WhatsApp
-    // is now the primary ticket-delivery channel (the agent sends the portal link). Uniform for
-    // all roles, so it's enforced here in the schema (no per-role exemption).
-    customer_name: z.string().trim().min(1, 'A customer name is required'),
+    // is now the primary ticket-delivery channel (the agent sends the portal link). ONE documented
+    // exception (US-AG45 D17): an Express sale hands the ticket over in person, so it collects the
+    // phone only — the refine below keeps the name mandatory for every standard sale.
+    customer_name: z.string().trim().min(1, 'A customer name is required').nullish(),
     // Email drops to an OPTIONAL copy — valid only if present (no longer the required channel).
     customer_email: z.string().trim().email('A valid customer email is required').nullish(),
     // Dialable (≥ 10 digits after stripping formatting; mirrors the client's +52 normalizer floor).
@@ -91,6 +100,11 @@ export const confirmSaleSchema = z
   .refine((v) => v.payment_method !== 'transfer' || !!v.payment_reference, {
     message: 'A payment reference is required for a bank transfer',
     path: ['payment_reference'],
+  })
+  // US-AG45 (D17) — the name stays required for every non-Express sale (whatsapp-qr-delivery D2).
+  .refine((v) => v.sale_mode === 'express' || !!v.customer_name, {
+    message: 'A customer name is required',
+    path: ['customer_name'],
   })
 
 export type ConfirmSaleInput = z.infer<typeof confirmSaleSchema>

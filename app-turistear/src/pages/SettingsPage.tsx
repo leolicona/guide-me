@@ -21,9 +21,14 @@ import {
 } from '@mui/material'
 import SavingsRounded from '@mui/icons-material/SavingsRounded'
 import StorefrontRounded from '@mui/icons-material/StorefrontRounded'
+import QrCodeScannerRounded from '@mui/icons-material/QrCodeScannerRounded'
 import HotelRounded from '@mui/icons-material/HotelRounded'
 import WhatsAppIcon from '@mui/icons-material/WhatsApp'
-import { useMyOrganization, useUpdateOrganization } from '../features/organization'
+import {
+  CancellationPolicyCard,
+  useMyOrganization,
+  useUpdateOrganization,
+} from '../features/organization'
 import { InfoPopover } from '../components'
 import {
   DEFAULT_TICKET_TEMPLATE,
@@ -119,6 +124,7 @@ export default function SettingsPage() {
   const [timezone, setTimezone] = useState('')
   const [minPct, setMinPct] = useState('')
   const [bufferHours, setBufferHours] = useState('')
+  const [creationCutoff, setCreationCutoff] = useState('')
   const [cutoffMag, setCutoffMag] = useState('')
   const [cutoffDir, setCutoffDir] = useState<OffsetDir>('before')
   const [graceMag, setGraceMag] = useState('')
@@ -127,8 +133,6 @@ export default function SettingsPage() {
 
   // US-A60/A63 — lodging org policy: weekend days, free-cancel window, penalty %.
   const [weekendDays, setWeekendDays] = useState<number[]>([])
-  const [freeCancelDays, setFreeCancelDays] = useState('')
-  const [penaltyPct, setPenaltyPct] = useState('')
 
   // whatsapp-qr-delivery D10 — the two admin-edited templates (seeded from the shipped default
   // when the org hasn't customized them).
@@ -138,7 +142,7 @@ export default function SettingsPage() {
   // Seed the form from the org's saved values (render-phase, no effect). Re-seeds whenever the
   // saved values change — i.e. on first load and after a successful save — resetting the dirty flag.
   const savedSig = org
-    ? `${org.timezone}|${org.booking_min_down_payment_pct}|${org.booking_pre_departure_buffer_hours}|${org.sales_cutoff_offset_minutes}|${org.booking_grace_offset_minutes}|${org.lodging_weekend_days.join(',')}|${org.lodging_free_cancel_days}|${org.lodging_cancel_penalty_pct}|${org.wa_ticket_template ?? ''}|${org.wa_reminder_template ?? ''}`
+    ? `${org.timezone}|${org.booking_min_down_payment_pct}|${org.booking_pre_departure_buffer_hours}|${org.booking_creation_cutoff_hours}|${org.sales_cutoff_offset_minutes}|${org.booking_grace_offset_minutes}|${org.lodging_weekend_days.join(',')}|${org.lodging_free_cancel_days}|${org.lodging_cancel_penalty_pct}|${org.wa_ticket_template ?? ''}|${org.wa_reminder_template ?? ''}`
     : null
   const [seededSig, setSeededSig] = useState<string | null>(null)
   if (org && savedSig !== seededSig) {
@@ -146,6 +150,7 @@ export default function SettingsPage() {
     setTimezone(org.timezone)
     setMinPct(String(org.booking_min_down_payment_pct))
     setBufferHours(String(org.booking_pre_departure_buffer_hours))
+    setCreationCutoff(String(org.booking_creation_cutoff_hours))
     const c = splitOffset(org.sales_cutoff_offset_minutes)
     setCutoffMag(String(c.mag))
     setCutoffDir(c.dir)
@@ -153,25 +158,33 @@ export default function SettingsPage() {
     setGraceMag(String(g.mag))
     setGraceDir(g.dir)
     setWeekendDays(org.lodging_weekend_days)
-    setFreeCancelDays(String(org.lodging_free_cancel_days))
-    setPenaltyPct(String(org.lodging_cancel_penalty_pct))
     setWaTicket(org.wa_ticket_template ?? DEFAULT_TICKET_TEMPLATE)
     setWaReminder(org.wa_reminder_template ?? DEFAULT_REMINDER_TEMPLATE)
   }
 
   const pctNum = Number(minPct)
   const bufferNum = Number(bufferHours)
+  const cutoffHoursNum = Number(creationCutoff)
   const cutoffMagNum = Number(cutoffMag)
   const graceMagNum = Number(graceMag)
 
   const pctInvalid = minPct === '' || !Number.isInteger(pctNum) || pctNum < 0 || pctNum > 100
   const bufferInvalid =
     bufferHours === '' || !Number.isInteger(bufferNum) || bufferNum < 0 || bufferNum > 168
+  // US-A77 — 0 disables the restriction; anything else must leave room for the settle deadline,
+  // or an apartado could be created inside the window it is supposed to be settled in. The server
+  // enforces the same rule against the STORED values — this is the fast feedback, not the guard.
+  const creationCutoffInvalid =
+    creationCutoff === '' ||
+    !Number.isInteger(cutoffHoursNum) ||
+    cutoffHoursNum < 0 ||
+    cutoffHoursNum > 720 ||
+    (cutoffHoursNum !== 0 && !bufferInvalid && cutoffHoursNum < bufferNum)
   const magInvalid = (m: string, n: number) =>
     m === '' || !Number.isInteger(n) || n < 0 || n > OFFSET_MAX
   const cutoffInvalid = magInvalid(cutoffMag, cutoffMagNum)
   const graceInvalid = magInvalid(graceMag, graceMagNum)
-  const invalid = pctInvalid || bufferInvalid || cutoffInvalid || graceInvalid
+  const invalid = pctInvalid || bufferInvalid || creationCutoffInvalid || cutoffInvalid || graceInvalid
 
   const cutoffSigned = joinOffset(cutoffMagNum, cutoffDir)
   const graceSigned = joinOffset(graceMagNum, graceDir)
@@ -181,6 +194,7 @@ export default function SettingsPage() {
     (timezone !== org.timezone ||
       pctNum !== org.booking_min_down_payment_pct ||
       bufferNum !== org.booking_pre_departure_buffer_hours ||
+      cutoffHoursNum !== org.booking_creation_cutoff_hours ||
       cutoffSigned !== org.sales_cutoff_offset_minutes ||
       graceSigned !== org.booking_grace_offset_minutes)
 
@@ -190,6 +204,7 @@ export default function SettingsPage() {
         timezone,
         booking_min_down_payment_pct: pctNum,
         booking_pre_departure_buffer_hours: bufferNum,
+        booking_creation_cutoff_hours: cutoffHoursNum,
         sales_cutoff_offset_minutes: cutoffSigned,
         booking_grace_offset_minutes: graceSigned,
       },
@@ -198,28 +213,22 @@ export default function SettingsPage() {
   }
 
   // --- Lodging (Hospedaje) settings ---
-  const freeCancelNum = Number(freeCancelDays)
-  const penaltyNum = Number(penaltyPct)
-  const freeCancelInvalid =
-    freeCancelDays === '' || !Number.isInteger(freeCancelNum) || freeCancelNum < 0
-  const penaltyInvalid =
-    penaltyPct === '' || !Number.isInteger(penaltyNum) || penaltyNum < 0 || penaltyNum > 100
-  const lodgingInvalid = freeCancelInvalid || penaltyInvalid || weekendDays.length === 0
+  // The free-cancel window and penalty % that used to live here are RETIRED: a stay is priced by
+  // the cancellation ladder now, like everything else. Their inputs are gone rather than disabled —
+  // a control that changes no behaviour is worse than a missing one. Weekend days stay: that is a
+  // PRICING input (which nights bill at weekend_rate), not a cancellation one.
+  const lodgingInvalid = weekendDays.length === 0
   const lodgingDirty =
     !!org &&
-    ([...weekendDays].sort().join(',') !== [...org.lodging_weekend_days].sort().join(',') ||
-      freeCancelNum !== org.lodging_free_cancel_days ||
-      penaltyNum !== org.lodging_cancel_penalty_pct)
+    [...weekendDays].sort().join(',') !== [...org.lodging_weekend_days].sort().join(',')
+
+  // An org that had configured a penalty lost it when the ladder took over. Say so where they
+  // would look for it, once, instead of letting them find out from a refund.
+  const hadLodgingCancelPolicy =
+    !!org && (org.lodging_free_cancel_days > 0 || org.lodging_cancel_penalty_pct > 0)
 
   const handleSaveLodging = () => {
-    update.mutate(
-      {
-        lodging_weekend_days: weekendDays,
-        lodging_free_cancel_days: freeCancelNum,
-        lodging_cancel_penalty_pct: penaltyNum,
-      },
-      { onSuccess: () => setSaved(true) },
-    )
+    update.mutate({ lodging_weekend_days: weekendDays }, { onSuccess: () => setSaved(true) })
   }
 
   // --- WhatsApp message templates (whatsapp-qr-delivery D10) ---
@@ -349,6 +358,53 @@ export default function SettingsPage() {
                   }}
                 />
 
+                {/* US-A77 — how close to departure an APARTADO may still be opened. Sits directly
+                    under the settle deadline because the two are a pair: this one has to leave room
+                    for that one, or an apartado is born inside the window it must be settled in. */}
+                <TextField
+                  label="Los apartados cierran"
+                  type="number"
+                  value={creationCutoff}
+                  onChange={(e) => setCreationCutoff(e.target.value)}
+                  error={creationCutoff !== '' && creationCutoffInvalid}
+                  helperText={
+                    creationCutoff !== '' && creationCutoffInvalid
+                      ? cutoffHoursNum !== 0 && cutoffHoursNum < bufferNum
+                        ? `Debe ser al menos el plazo para pagar el saldo (${bufferNum} h), o el apartado nacería sin tiempo para liquidarse.`
+                        : 'Captura entre 0 y 720 horas.'
+                      : cutoffHoursNum === 0
+                        ? 'Sin restricción: se puede apartar hasta el momento de la salida.'
+                        : `Horas antes de la salida en que dejas de aceptar apartados. Más cerca que eso, solo pago completo.`
+                  }
+                  slotProps={{
+                    input: {
+                      endAdornment: (
+                        <InputAdornment position="end">
+                          horas
+                          <InfoPopover label="¿Por qué cerrar los apartados antes?">
+                            <Stack spacing={1}>
+                              <Box>
+                                Un apartado es una <b>promesa de volver a pagar</b>. Muy cerca de la
+                                salida no hay tiempo de cumplirla: se abre, vence y se cancela sin
+                                que el cliente alcanzara a liquidar.
+                              </Box>
+                              <Box>
+                                Esto <b>no</b> deja de vender el horario — solo deja de aceptar
+                                anticipos. La misma salida se sigue vendiendo con{' '}
+                                <b>pago completo</b> hasta el «Cierre de ventas».
+                              </Box>
+                              <Box color="text.secondary">
+                                <b>0</b> desactiva la restricción, que es como funcionaba antes.
+                              </Box>
+                            </Stack>
+                          </InfoPopover>
+                        </InputAdornment>
+                      ),
+                    },
+                    htmlInput: { min: 0, max: 720, step: 1, inputMode: 'numeric' },
+                  }}
+                />
+
                 <Divider flexItem />
 
                 {/* US-A47 — sales cutoff: closes NEW walk-in sales for a departing slot. */}
@@ -426,39 +482,23 @@ export default function SettingsPage() {
                   </Typography>
                 </Box>
 
-                <TextField
-                  label="Cancelación gratuita"
-                  type="number"
-                  value={freeCancelDays}
-                  onChange={(e) => setFreeCancelDays(e.target.value)}
-                  error={freeCancelDays !== '' && freeCancelInvalid}
-                  helperText={
-                    freeCancelDays !== '' && freeCancelInvalid
-                      ? 'Captura un número de días válido (0 o más).'
-                      : 'Días antes del check-in en que la cancelación de una estancia pagada se reembolsa al 100%.'
-                  }
-                  slotProps={{
-                    input: { endAdornment: <InputAdornment position="end">días</InputAdornment> },
-                    htmlInput: { min: 0, step: 1, inputMode: 'numeric' },
-                  }}
-                />
-
-                <TextField
-                  label="Penalización"
-                  type="number"
-                  value={penaltyPct}
-                  onChange={(e) => setPenaltyPct(e.target.value)}
-                  error={penaltyPct !== '' && penaltyInvalid}
-                  helperText={
-                    penaltyPct !== '' && penaltyInvalid
-                      ? 'Captura un porcentaje entre 0 y 100.'
-                      : 'Porcentaje del total que se retiene si la cancelación cae dentro de la ventana.'
-                  }
-                  slotProps={{
-                    input: { endAdornment: <InputAdornment position="end">%</InputAdornment> },
-                    htmlInput: { min: 0, max: 100, step: 1, inputMode: 'numeric' },
-                  }}
-                />
+                {/* The free-cancel window and penalty % used to be edited here. They are retired:
+                    a stay is priced by the cancellation ladder now. Orgs that had configured them
+                    are told once, here, where they would go looking for them. */}
+                {hadLodgingCancelPolicy && (
+                  <Alert severity="warning">
+                    Tu política de cancelación de hospedaje (
+                    {org.lodging_free_cancel_days > 0
+                      ? `${org.lodging_free_cancel_days} días libres`
+                      : 'sin ventana libre'}
+                    {org.lodging_cancel_penalty_pct > 0
+                      ? `, ${org.lodging_cancel_penalty_pct}% de penalización`
+                      : ''}
+                    ) <strong>ya no se aplica</strong>. Ahora las estancias se cancelan con la{' '}
+                    <strong>política de cancelación</strong> de abajo, igual que los tours —
+                    mientras no la configures, se reembolsan al 100%.
+                  </Alert>
+                )}
 
                 <Button
                   variant="contained"
@@ -472,6 +512,16 @@ export default function SettingsPage() {
               </Stack>
             </CardContent>
           </Card>
+        )}
+
+        {/* US-A69/A70/A72 — the cancellation refund ladder. Sits after Hospedaje because it
+            SUPERSEDES the two lodging cancellation fields above once configured: with a policy, the
+            ladder prices stays too. Keyed on the stored policy so a save resets the draft cleanly. */}
+        {org && (
+          <CancellationPolicyCard
+            key={JSON.stringify(org.cancellation_policy)}
+            policy={org.cancellation_policy}
+          />
         )}
 
         {/* whatsapp-qr-delivery D10 — admin-edited message templates (read-only for sellers, who
@@ -552,6 +602,40 @@ export default function SettingsPage() {
               }
               sx={{ alignItems: 'flex-start', mx: 0 }}
             />
+          </CardContent>
+        </Card>
+
+        {/* US-A81 (group-redemption) — how a scan consumes un boleto's passes. Commits on tap
+            (no dirty tracking): a two-value org-wide choice whose trade-off the copy states
+            explicitly (D8) — the admin is trading an accurate boarded-count for speed, and
+            nothing in the system can un-redeem a pass. */}
+        <Card sx={{ mt: 3 }}>
+          <CardContent>
+            <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center', mb: 1 }}>
+              <QrCodeScannerRounded color="primary" />
+              <Typography variant="h6">Escáner de acceso</Typography>
+            </Stack>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+              Cómo consume los pases un escaneo de QR.
+            </Typography>
+            <ToggleButtonGroup
+              exclusive
+              fullWidth
+              value={org?.qr_redemption_mode ?? 'per_pass'}
+              onChange={(_, value: 'per_pass' | 'all_passes' | null) => {
+                if (value && value !== org?.qr_redemption_mode) {
+                  update.mutate({ qr_redemption_mode: value }, { onSuccess: () => setSaved(true) })
+                }
+              }}
+              aria-label="Modo de redención del QR"
+            >
+              <ToggleButton value="per_pass">Un pase por escaneo</ToggleButton>
+              <ToggleButton value="all_passes">Todos los pases a la vez</ToggleButton>
+            </ToggleButtonGroup>
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
+              «Todos a la vez» agiliza el abordaje de grupos (una familia = un escaneo), a cambio
+              de perder el conteo exacto de cuántos abordaron — y un escaneo no se puede deshacer.
+            </Typography>
           </CardContent>
         </Card>
 

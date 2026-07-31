@@ -1,5 +1,5 @@
 -- US-AF10–AF13 / US-OP01–OP02 / US-A68 — Temporary PIN access for affiliate operators.
--- docs/affiliate-operators/spec.md. Operators are shift cashiers under ONE affiliate (manager)
+-- docs/affiliate-operators/affiliate-operators.spec.md. Operators are shift cashiers under ONE affiliate (manager)
 -- account — NOT users. Additive: a new table + a nullable attribution column on folios.
 
 CREATE TABLE affiliate_operators (

@@ -6,7 +6,7 @@ Solo el administrador usa contraseña en Turistear Ya! Cuando la olvida puede so
 
 **User Stories:** US-A04  
 **Endpoints:** `POST /api/auth/forgot-password`, `POST /api/auth/reset-password`  
-**Referencia completa:** `docs/auth/user-story-admin-registration.md`
+**Referencia completa:** `docs/SPEC.md` (US-A01–US-A04) + `docs/auth/`
 
 ---
 

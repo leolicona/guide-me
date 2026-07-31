@@ -1,4 +1,4 @@
--- US-LG04/LG05/LG06 (docs/paid-ledger/spec.md) — Step 4: make the folio_payments ledger the cash
+-- US-LG04/LG05/LG06 (docs/paid-ledger/paid-ledger.spec.md) — Step 4: make the folio_payments ledger the cash
 -- engine's source of truth. This migration brings HISTORICAL rows up to the shape the ledger-based
 -- engine reads, so the cutover reproduces today's numbers exactly. Additive/idempotent.
 

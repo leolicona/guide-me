@@ -22,6 +22,12 @@ export const organizations = sqliteTable('organizations', {
   // `bookingGraceOffsetMinutes` grace applies (so a near-but-next-day slot is no longer treated as
   // a full-24h-buffer booking that would be born expired). Default 24h.
   bookingPreDepartureBufferHours: integer('booking_pre_departure_buffer_hours').notNull().default(24),
+  // US-A77 — how close to departure an APARTADO may still be created, in hours. Distinct from
+  // `salesCutoffOffsetMinutes`, which gates every folio and must stay at 0 so cash walk-ins sell
+  // until the last minute. `0` = no restriction (today's behaviour); when set it must be at least
+  // `bookingPreDepartureBufferHours`, so an apartado is never born inside the window it is supposed
+  // to be settled in.
+  bookingCreationCutoffHours: integer('booking_creation_cutoff_hours').notNull().default(0),
   // Accommodation/lodging settings (docs/lodging/accommodation-stays.spec.md §2.5). weekendDays:
   // CSV of ISO weekday ints (0=Sun … 6=Sat) — which nights use a unit's weekend_rate (default
   // Fri+Sat). A PAID stay cancels free until lodgingFreeCancelDays before check-in; inside that
@@ -30,16 +36,33 @@ export const organizations = sqliteTable('organizations', {
   lodgingWeekendDays: text('lodging_weekend_days').notNull().default('5,6'),
   lodgingFreeCancelDays: integer('lodging_free_cancel_days').notNull().default(0),
   lodgingCancelPenaltyPct: integer('lodging_cancel_penalty_pct').notNull().default(0),
-  // WhatsApp message templates (docs/whatsapp-qr-delivery/spec.md — D10). Admin-edited in Settings.
+  // WhatsApp message templates (docs/whatsapp-qr-delivery/whatsapp-qr-delivery.spec.md — D10). Admin-edited in Settings.
   // NULL ⇒ use the shipped default (see utils/waTemplates). waTicketTemplate delivers paid tickets
   // (tours + lodging) and MUST contain {portal_link}; waReminderTemplate is the apartado reminder.
   waTicketTemplate: text('wa_ticket_template'),
   waReminderTemplate: text('wa_reminder_template'),
-  // US-A66 (docs/timezone/spec.md) — the org's single IANA time zone. The one org-local clock all
+  // US-A66 (docs/timezone/timezone.spec.md) — the org's single IANA time zone. The one org-local clock all
   // wall-clock scheduling resolves against: catalog "today", sale-cutoff/grace/expiry math (closes
   // BUG-007), and audit-timestamp display. Stored slot strings stay naive wall-clock — this fixes
   // only the "now" they compare against. Curated Mexican-zone picker in Settings (D5).
   timezone: text('timezone').notNull().default('America/Mexico_City'),
+  // Cancellation Policy Engine (docs/cancellation/cancellation-policy-engine.spec.md). The refund
+  // ladder as a JSON document — see `utils/cancellationPolicy` for the shape and its Zod schema.
+  // NULL is load-bearing (D1): no policy configured ⇒ every cancellation path runs its pre-feature
+  // code, so no existing org changes behaviour. Clearing it back to NULL is the rollback.
+  cancellationPolicy: text('cancellation_policy'),
+  // US-A73 (D14) — may an agent cancel their OWN sale, bounded by their current shift (everything
+  // up to their next confirmed cash drop)? Off by default: admin-only, as it has always been.
+  agentCancellationEnabled: integer('agent_cancellation_enabled', { mode: 'boolean' })
+    .notNull()
+    .default(false),
+  // US-A81 (docs/scanner/group-redemption.spec.md, D1) — how a scan consumes a ticket's passes:
+  // 'per_pass' (default — one pass per scan, byte-identical to pre-feature) or 'all_passes' (one
+  // scan boards the whole party). Read from the SCANNING agent's org at scan time (D3), never
+  // from the token — the operator at the gate decides how their gate works.
+  qrRedemptionMode: text('qr_redemption_mode', { enum: ['per_pass', 'all_passes'] })
+    .notNull()
+    .default('per_pass'),
   createdAt: integer('created_at', { mode: 'timestamp' })
     .notNull()
     .default(sql`(unixepoch())`),
@@ -312,9 +335,19 @@ export const folios = sqliteTable('folios', {
   status: text('status', { enum: ['paid', 'booking', 'cancelled'] })
     .notNull()
     .default('paid'),
+  // US-AG45 (docs/pos/express-sale.spec.md, D22) — how the sale was taken. 'express' is the
+  // one-sheet cash walk-up (phone-only, full cash, no cart); everything else is 'standard'.
+  // Reports and the 60-second void key off it.
+  saleMode: text('sale_mode', { enum: ['standard', 'express'] })
+    .notNull()
+    .default('standard'),
+  // US-AG45 (D21) — client-generated replay guard, unique per organization (partial index in
+  // 0057). A confirm that re-sends the same key is a REPLAY: the existing folio is returned and
+  // nothing is decremented or ledgered again.
+  idempotencyKey: text('idempotency_key'),
   // US-LG08 — there is no folio-level payment method. How money was collected lives per-movement in
   // folio_payments; the display method (shared method or 'Mixto') is DERIVED via `displayMethodSql`.
-  // US-AG41/US-A67 (docs/payment-verification/spec.md). paymentReference: the transfer's bank ref
+  // US-AG41/US-A67 (docs/payment-verification/payment-verification.spec.md). paymentReference: the transfer's bank ref
   // (free text; null for cash; holds the most recent transfer awaiting verification). The RE-ARMABLE
   // paymentVerification axis gates QR: 'not_required' (all-cash) · 'pending' (a transfer payment
   // awaits an admin) · 'verified'. A slot line's QR is signed only when the folio is `paid` AND this
@@ -353,6 +386,16 @@ export const folios = sqliteTable('folios', {
   cancellationClawback: integer('cancellation_clawback', { mode: 'boolean' })
     .notNull()
     .default(false),
+  // Cancellation Policy Engine (D6) — the refund ladder in force when this sale was CONFIRMED.
+  // Read in preference to the org's live policy so editing the policy never re-prices a sale
+  // already made. NULL ⇒ fall back to the org's live policy (which is NULL too for a folio sold
+  // before the feature, so it takes the legacy path).
+  cancellationPolicySnapshot: text('cancellation_policy_snapshot'),
+  // WHO cancelled, as a type rather than prose — so a report never has to parse
+  // `cancellation_reason`. NULL = cancelled before the policy engine shipped.
+  cancellationSource: text('cancellation_source', {
+    enum: ['admin', 'agent', 'tourist_request', 'company', 'system_expiry'],
+  }),
   // Cash refund tracking (US-A23 / US-T05). `pending` is set when a PAID folio is cancelled
   // via an approved tourist cancellation request; `refunded` once the admin confirms the
   // physical hand-back (PIN or override). `none` = no refund obligation.
@@ -368,7 +411,7 @@ export const folios = sqliteTable('folios', {
   refundNote: text('refund_note'),
   refundedAt: integer('refunded_at', { mode: 'timestamp' }),
   refundedBy: text('refunded_by').references(() => users.id),
-  // WhatsApp ticket delivery (docs/whatsapp-qr-delivery/spec.md — D4). A separate axis from
+  // WhatsApp ticket delivery (docs/whatsapp-qr-delivery/whatsapp-qr-delivery.spec.md — D4). A separate axis from
   // payment status. ticketsSentAt: the agent tapped "Enviar por WhatsApp" (their metric, cleared
   // once they act — idempotent last-write-wins, D13). ticketsViewedAt: the tourist opened the
   // portal (the bot-proof "Visto" beacon, first-view). A folio is "pendiente de enviar" once a
@@ -376,7 +419,7 @@ export const folios = sqliteTable('folios', {
   ticketsSentAt: integer('tickets_sent_at', { mode: 'timestamp' }),
   ticketsSentBy: text('tickets_sent_by').references(() => users.id),
   ticketsViewedAt: integer('tickets_viewed_at', { mode: 'timestamp' }),
-  // US-AF13 — the affiliate shift operator who made the sale (docs/affiliate-operators/spec.md).
+  // US-AF13 — the affiliate shift operator who made the sale (docs/affiliate-operators/affiliate-operators.spec.md).
   // Null ⇒ the manager/agent sold directly. Pure attribution: agent_id still owns the caja/commission.
   operatorId: text('operator_id').references((): any => affiliateOperators.id),
   createdAt: integer('created_at', { mode: 'timestamp' })
@@ -813,7 +856,7 @@ export const affiliateInvitations = sqliteTable('affiliate_invitations', {
     .default(sql`(unixepoch())`),
 })
 
-// US-AF10–AF13 / US-OP01–OP02 (docs/affiliate-operators/spec.md). A shift cashier at an affiliate
+// US-AF10–AF13 / US-OP01–OP02 (docs/affiliate-operators/affiliate-operators.spec.md). A shift cashier at an affiliate
 // company's register — NOT a `users` row (no email/password). Registered by the manager with name +
 // phone; identified by a durable access_token (the saved WhatsApp link) and unlocked by a 4-digit
 // PIN. Pure attribution: its sales roll into the owning manager's one caja (folios.agent_id stays
@@ -851,7 +894,7 @@ export const affiliateOperators = sqliteTable('affiliate_operators', {
 export type AffiliateOperator = typeof affiliateOperators.$inferSelect
 export type NewAffiliateOperator = typeof affiliateOperators.$inferInsert
 
-// US-LG01 (docs/paid-ledger/spec.md) — per-payment money-movement ledger. One SIGNED row per
+// US-LG01 (docs/paid-ledger/paid-ledger.spec.md) — per-payment money-movement ledger. One SIGNED row per
 // movement on a folio; the cash engine's source of truth (later steps re-home cash_collected /
 // by-method sales / commissions onto it). `entry_type` separates money movements (payment/refund,
 // which carry a `method`) from accruals (commission/commission_reversal, `method` null). `amount`

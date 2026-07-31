@@ -6,7 +6,7 @@ The admin invites a sales agent by sending a link via email. The agent clicks on
 
 **User Stories:** US-A05, US-AG01  
 **Endpoints:** `POST /api/agents/invite`, `GET /api/auth/invite/accept?token=xxx`, `POST /api/auth/invite/complete`  
-**Full Reference:** `docs/auth/user-story-admin-registration.md`
+**Full Reference:** `docs/SPEC.md` (US-A01–US-A04)
 
 ---
 

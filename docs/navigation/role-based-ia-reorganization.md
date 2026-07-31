@@ -65,7 +65,7 @@ The Dashboard destination disappears for agents. Logo link → `/pos`.
 
 | Slot | Destination | Notes |
 |---|---|---|
-| 1 | **Hoy** (`/dashboard`) | Default landing. Phase 2 fills it with the already-spec'd **Daily Operations Dashboard** (`docs/dashboard/occupancy-dashboard.spec.md`: occupancy US-A14/A15, day's sales US-A16). Phase 1 ships an interim version: pending-queues cards (cancellations, drops) that deep-link to Ventas/Caja. |
+| 1 | **Hoy** (`/dashboard`) | Default landing. Phase 2 fills it with the **Daily Operations Dashboard** (occupancy US-A14/A15, day's sales US-A16 — spec not written yet). Phase 1 ships an interim version: pending-queues cards (cancellations, drops) that deep-link to Ventas/Caja. |
 | 2 | **Vender** (`/pos`) | Unlocked for admins (G1). Same POS flow, same screens. |
 | 3 | **Escáner** (`/scan`) | Unlocked for admins (G2). |
 | 4 | **Ventas** (`/folios`) | renamed from "Folios"; cancellation-request badge stays. "Folio" remains the domain word for an individual receipt — only the destination label changes. |
@@ -188,8 +188,8 @@ against this glossary.
   avatar popover / mobile avatar chip + sheet), nav restructure with the shared
   vocabulary, label/CTA sweep, role-based landing, interim Hoy, Tu caja section +
   Caja badge.
-- **Phase 2 — Daily Operations Dashboard:** implement
-  `docs/dashboard/occupancy-dashboard.spec.md` as the real "Hoy"; fold the US-AG26
+- **Phase 2 — Daily Operations Dashboard:** spec it (nothing is written yet), then
+  implement it as the real "Hoy"; fold the US-AG26
   agent snapshot into the agent's Caja.
 - **Phase 3 — overflow grows + screen unification:** Configuración home (ack
   window), Reportes (US-A17/A18/A20, export US-A20); merge the duplicate

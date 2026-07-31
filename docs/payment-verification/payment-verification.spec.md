@@ -6,7 +6,7 @@ released — a "Por verificar" queue, verify/reject, and one-step delivery). To 
 `docs/SPEC.md`. **Phase:** 2 (Core Enhancements) · **agent/affiliate + admin surface.**
 
 **Depends on:** *POS Checkout* (`confirmSale`, `settle`) — the paid/booking flow this gates ·
-*WhatsApp Ticket Delivery* (`docs/whatsapp-qr-delivery/spec.md`, US-AG39/AG40) — the delivery axis
+*WhatsApp Ticket Delivery* (`docs/whatsapp-qr-delivery/whatsapp-qr-delivery.spec.md`, US-AG39/AG40) — the delivery axis
 (Pendiente→Enviado→Visto) that now starts only after the money clears · *Agent Cash Balance*
 (US-AG25/AG29) — the cash-vs-electronic split already in place · *Cash-Drop Review* (US-A19/A27) —
 the admin review-queue + dispute pattern this mirrors · *Total Folio Cancellation* (US-A21) — the

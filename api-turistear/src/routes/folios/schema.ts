@@ -5,9 +5,16 @@ import { z } from 'zod'
 // unknown keys, so an injected `organizationId`/`cancelled_by` is dropped before the handler.
 export const cancelFolioSchema = z.object({
   reason: z.string().trim().min(1).nullable().optional(),
-  // US-A26 — true → claw back the agent's commission (agent loses it); false (default) →
-  // the company absorbs the loss and the agent keeps the commission earned on this folio.
-  clawback: z.boolean().optional().default(false),
+  // D10 — the two withdrawn money flags, declared as `never` so sending either is a 400 rather
+  // than a silent no-op. `clawback` (US-A26) and `cancelled_by_company` (US-A71) are gone: a
+  // cancellation is priced by the org's ladder and by nothing else.
+  //
+  // Rejected EXPLICITLY rather than via `.strict()`, which would also start 400-ing the injected
+  // `organizationId` that the multitenancy contract says is stripped — the same contract every
+  // other route in this codebase relies on. A silently discarded money flag is how an admin comes
+  // to believe they made a decision that never took effect; an unknown key is not.
+  clawback: z.never().optional(),
+  cancelled_by_company: z.never().optional(),
 })
 
 export type CancelFolioInput = z.infer<typeof cancelFolioSchema>

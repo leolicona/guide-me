@@ -1,9 +1,15 @@
-// WhatsApp ticket delivery — the client half (docs/whatsapp-qr-delivery/spec.md). Derives the
+// WhatsApp ticket delivery — the client half (docs/whatsapp-qr-delivery/whatsapp-qr-delivery.spec.md). Derives the
 // delivery state (Pendiente → Enviado → Visto), holds the default message templates + placeholder
 // engine, and builds the wa.me deep link the agent taps to send the portal link.
 
 import { normalizePhone } from './phone'
 import { formatMoney } from '../catalog/types'
+
+// US-T07 (express-sale D9) — every rendered QR encodes the public ticket-page URL instead of the
+// bare signed token, so a tourist's plain camera resolves to their ticket while the agent's
+// scanner (which strips this wrapper) still redeems the same code.
+const API_BASE = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? ''
+export const ticketPageUrl = (qrToken: string): string => `${API_BASE}/t/${qrToken}`
 
 // Structural line shape for {itinerary} — satisfied by both the POS `FolioLine` and the admin
 // `FolioDetailLine`, so this module never couples to either concrete folio type.

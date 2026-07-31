@@ -16,6 +16,7 @@ import {
   ToggleButtonGroup,
 } from '@mui/material'
 import { useMyFolios } from '../features/pos/hooks'
+import { deliveryState } from '../features/pos/delivery'
 import { useOrgDateFormatter } from '../features/organization'
 import {
   BookingWhatsAppButton,
@@ -36,16 +37,23 @@ const DATE_FMT: Intl.DateTimeFormatOptions = {
   minute: '2-digit',
 }
 
-type Filter = 'all' | FolioStatus
+// US-A80 — 'undelivered' is a client-side view over the loaded list: folios still
+// `● Pendiente de enviar` on the delivery axis (paid, portal link issued, never sent/seen).
+type Filter = 'all' | FolioStatus | 'undelivered'
 
 // US-AG20 — the agent's own read-only sales history. Tapping a row opens the detail
 // (US-AG21). No cancel/edit affordance — cancellation is admin-only.
 export default function FolioHistoryPage() {
   const formatDate = useOrgDateFormatter(DATE_FMT) // US-A66 — org-local audit timestamps
   const [filter, setFilter] = useState<Filter>('all')
-  const { data: folios, isLoading, isError } = useMyFolios(
-    filter === 'all' ? {} : { status: filter },
+  const { data: rows, isLoading, isError } = useMyFolios(
+    filter === 'all' || filter === 'undelivered' ? {} : { status: filter },
   )
+  // US-A80 — the pending-delivery queue: what the existing one-tap WhatsApp is for.
+  const folios =
+    filter === 'undelivered'
+      ? rows?.filter((f) => deliveryState(f) === 'pending')
+      : rows
 
   return (
     <Fade in timeout={400}>
@@ -65,6 +73,7 @@ export default function FolioHistoryPage() {
           <ToggleButton value="paid">Pagado</ToggleButton>
           <ToggleButton value="booking">Reservas</ToggleButton>
           <ToggleButton value="cancelled">Cancelado</ToggleButton>
+          <ToggleButton value="undelivered">Sin entregar</ToggleButton>
         </ToggleButtonGroup>
 
         {isLoading && (

@@ -9,6 +9,7 @@ import type {
   FolioListItem,
   RejectCancellationRequestInput,
 } from '../features/folios/types'
+import type { CancellationQuote } from '../features/organization/types'
 
 // Admin folio management (US-A21): browse folios and cancel one in full. All calls require
 // the admin role (enforced server-side). Money is integer minor units.
@@ -20,37 +21,57 @@ export const listFolios = async (filters: FolioFilters = {}): Promise<FolioListI
   if (filters.date) params.set('date', filters.date)
   if (filters.agentId) params.set('agent_id', filters.agentId)
   if (filters.verification) params.set('verification', filters.verification)
+  if (filters.refundStatus) params.set('refund_status', filters.refundStatus)
+  if (filters.overdue) params.set('overdue', 'true')
   const qs = params.toString()
   const res = await request<{ folios: FolioListItem[] }>(`/api/folios${qs ? `?${qs}` : ''}`)
   return res.folios
 }
 
-// US-A21 — one folio's detail (confirm before cancelling).
-export const getFolio = async (id: string): Promise<FolioDetail> => {
-  const res = await request<{ folio: FolioDetail }>(`/api/folios/${id}`)
-  return res.folio
+// US-A21 — one folio's detail (confirm before cancelling), plus what cancelling it right now
+// would cost when the org has a cancellation policy (`cancellation_quote`, null otherwise).
+export const getFolio = async (
+  id: string,
+): Promise<{ folio: FolioDetail; quote: CancellationQuote | null }> => {
+  const res = await request<{
+    folio: FolioDetail
+    cancellation_quote?: CancellationQuote | null
+  }>(`/api/folios/${id}`)
+  return { folio: res.folio, quote: res.cancellation_quote ?? null }
 }
 
+// D10 — `reason` is the ONLY thing a caller may send. The `clawback` (US-A26) and
+// `cancelled_by_company` (US-A71) flags are withdrawn: a cancellation is priced by the org's
+// ladder and nothing else, and the server now REJECTS either with a 400 rather than dropping it.
 export interface CancelFolioOptions {
   reason?: string
-  // US-A26 — true → claw back the agent's commission; omitted/false → company absorbs it.
-  clawback?: boolean
 }
 
-// US-A21 / US-A26 — cancel the whole folio: releases every line's spots, records the
-// cancellation, and flags whether the agent's commission is clawed back.
+// The realised numbers every cancellation returns — every org has a ladder now (D17), so this is
+// always present. Typed nullable only so an older API build cannot break the page.
+export interface CancellationOutcome {
+  refund: number
+  retention: number
+  kept_commission: number
+  reversed_commission: number
+}
+
+// US-A21 — cancel the whole folio: releases every line's spots, records the cancellation, and
+// prices the refund from the org's ladder.
 export const cancelFolio = async (
   id: string,
   options: CancelFolioOptions = {},
-): Promise<FolioDetail> => {
+): Promise<{ folio: FolioDetail; cancellation: CancellationOutcome | null }> => {
   const body: Record<string, unknown> = {}
   if (options.reason) body.reason = options.reason
-  if (options.clawback) body.clawback = true
-  const res = await request<{ folio: FolioDetail }>(`/api/folios/${id}/cancel`, {
+  const res = await request<{
+    folio: FolioDetail
+    cancellation?: CancellationOutcome | null
+  }>(`/api/folios/${id}/cancel`, {
     method: 'POST',
     body: JSON.stringify(body),
   })
-  return res.folio
+  return { folio: res.folio, cancellation: res.cancellation ?? null }
 }
 
 // --- Tourist cancellation requests + refund tracking (US-T04/T05, US-A23) ---

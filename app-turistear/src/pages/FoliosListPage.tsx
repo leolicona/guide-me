@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Link as RouterLink } from 'react-router-dom'
+import { Link as RouterLink, useSearchParams } from 'react-router-dom'
 import {
   Box,
   Typography,
@@ -22,12 +22,16 @@ import {
   useFolios,
   usePendingCancellationCount,
   usePendingVerificationCount,
+  usePendingRefundCount,
+  useOverdueBookingCount,
   FolioStatusChip,
 } from '../features/folios'
 import { useOrgDateFormatter } from '../features/organization'
 import type { FolioStatus } from '../features/folios'
 import { CancellationRequestsTab } from '../features/folios/components/CancellationRequestsTab'
 import { PaymentVerificationTab } from '../features/folios/components/PaymentVerificationTab'
+import { PendingRefundsTab } from '../features/folios/components/PendingRefundsTab'
+import { OverdueBookingsTab } from '../features/folios/components/OverdueBookingsTab'
 import {
   BookingWhatsAppButton,
   DeliveryBadge,
@@ -36,6 +40,7 @@ import {
 } from '../features/bookings'
 import { MoneyText } from '../components'
 import { ROUTES } from '../config/routes'
+import { deliveryState } from '../features/pos/delivery'
 
 const DATE_FMT: Intl.DateTimeFormatOptions = {
   year: 'numeric',
@@ -45,15 +50,22 @@ const DATE_FMT: Intl.DateTimeFormatOptions = {
   minute: '2-digit',
 }
 
-type Filter = 'all' | FolioStatus
+// US-A80 — 'undelivered' is a client-side view over the loaded list: folios still
+// `● Pendiente de enviar` on the delivery axis (paid, portal link issued, never sent/seen).
+type Filter = 'all' | FolioStatus | 'undelivered'
 
 // The browse-and-cancel list (US-A21), unchanged — now one tab of the Folios screen.
 function FoliosTab() {
   const formatDate = useOrgDateFormatter(DATE_FMT) // US-A66 — org-local audit timestamps
   const [filter, setFilter] = useState<Filter>('all')
-  const { data: folios, isLoading, isError } = useFolios(
-    filter === 'all' ? {} : { status: filter },
+  const { data: rows, isLoading, isError } = useFolios(
+    filter === 'all' || filter === 'undelivered' ? {} : { status: filter },
   )
+  // US-A80 — the pending-delivery queue: what the existing one-tap WhatsApp is for.
+  const folios =
+    filter === 'undelivered'
+      ? rows?.filter((f) => deliveryState(f) === 'pending')
+      : rows
 
   return (
     <Box>
@@ -68,6 +80,7 @@ function FoliosTab() {
           <ToggleButton value="paid">Pagado</ToggleButton>
           <ToggleButton value="booking">Reservas</ToggleButton>
           <ToggleButton value="cancelled">Cancelado</ToggleButton>
+          <ToggleButton value="undelivered">Sin entregar</ToggleButton>
         </ToggleButtonGroup>
 
         {isLoading && (
@@ -177,13 +190,32 @@ function FoliosTab() {
   )
 }
 
+// US-A78/A79 — Hoy's queue cards deep-link here. Without carrying the target tab the card would
+// drop the admin on tab 0, which is not the list they tapped.
+//
+// The `?tab=` param IS the state — it is not merely read once to seed it. Seeding `useState` from
+// the URL was the first cut and it drifted: React Router keeps this component MOUNTED when only
+// the query string changes (the route path `/folios` is unchanged), so the initializer never ran
+// again. Arriving from the Hoy card and then tapping "Ventas" in the nav left the URL saying
+// `/folios` while the page still showed Reembolsos — and a reload of that same URL showed Folios.
+// One address, three different screens, decided by history. Deriving it removes the copy that
+// could disagree, and the URL becomes shareable and reload-stable for free.
+const TAB_KEYS = ['folios', 'verify', 'requests', 'refunds', 'overdue'] as const
+
 export default function FoliosListPage() {
-  const [tab, setTab] = useState(0)
+  const [searchParams, setSearchParams] = useSearchParams()
+  const tab = Math.max(0, TAB_KEYS.indexOf(searchParams.get('tab') as never))
+  // `replace` so switching tabs does not stack history entries the back button has to walk out of.
+  const setTab = (next: number) =>
+    setSearchParams(next === 0 ? {} : { tab: TAB_KEYS[next] }, { replace: true })
   // US-T04 (D7) — pending tourists' cancellation requests surface as a badge so the
   // queue can't be missed without polluting the main list.
   const { data: pendingCount = 0 } = usePendingCancellationCount(true)
   // US-A67 — the "Por verificar" queue: electronic payments awaiting an admin.
   const { data: verifyCount = 0 } = usePendingVerificationCount(true)
+  // US-A78/A79 — the two work queues.
+  const { data: refundCount = 0 } = usePendingRefundCount(true)
+  const { data: overdueCount = 0 } = useOverdueBookingCount(true)
 
   return (
     <Fade in timeout={400}>
@@ -208,14 +240,32 @@ export default function FoliosListPage() {
               </Badge>
             }
           />
+          <Tab
+            label={
+              <Badge badgeContent={refundCount} color="warning" sx={{ '& .MuiBadge-badge': { right: -12 } }}>
+                Reembolsos
+              </Badge>
+            }
+          />
+          <Tab
+            label={
+              <Badge badgeContent={overdueCount} color="warning" sx={{ '& .MuiBadge-badge': { right: -12 } }}>
+                Vencidos
+              </Badge>
+            }
+          />
         </Tabs>
 
         {tab === 0 ? (
           <FoliosTab />
         ) : tab === 1 ? (
           <PaymentVerificationTab />
-        ) : (
+        ) : tab === 2 ? (
           <CancellationRequestsTab />
+        ) : tab === 3 ? (
+          <PendingRefundsTab />
+        ) : (
+          <OverdueBookingsTab />
         )}
       </Box>
     </Fade>

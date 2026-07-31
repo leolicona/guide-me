@@ -21,7 +21,7 @@ export const depositMethodSql = sql<string>`(
   order by fp.created_at asc limit 1
 )`
 
-// US-LG (docs/paid-ledger/spec.md) — builders that RETURN a Drizzle insert statement for a
+// US-LG (docs/paid-ledger/paid-ledger.spec.md) — builders that RETURN a Drizzle insert statement for a
 // folio_payments row, so a caller can add it to its own `db.batch(...)` and persist the ledger row
 // ATOMICALLY with the folio-scalar mutation it shadows / the cancellation it records.
 //
@@ -123,12 +123,56 @@ export const commissionReversalRow = (db: Db, input: ReversalRowInput) =>
     createdAt: input.at,
   })
 
+// Split `target` across `buckets` in proportion to what each holds, in whole minor units.
+//
+// Used when a cancellation reverses only PART of what was collected (the Cancellation Policy
+// Engine retains the rest). Each bucket is floored to its proportional share and the remainder —
+// at most one unit per bucket, from the flooring — goes to the largest, so `Σ result === target`
+// EXACTLY. That exactness is the point: the ledger is the cash engine's source of truth, so a
+// stray unit here is a corte that does not reconcile.
+//
+// `target` is clamped to the total, so an over-large ask can never push a bucket negative. Ties
+// are broken by method name to keep the split deterministic across runs.
+export const prorateAcrossBuckets = <T extends { method: Method; amount: number }>(
+  buckets: T[],
+  target: number,
+): Array<{ method: Method; amount: number }> => {
+  const positive = buckets.filter((b) => b.amount > 0)
+  const total = positive.reduce((sum, b) => sum + b.amount, 0)
+  const want = Math.max(0, Math.min(target, total))
+  if (want === 0 || total === 0) return []
+
+  const shares = positive.map((b) => ({
+    method: b.method,
+    bucket: b.amount,
+    amount: Math.floor((b.amount * want) / total),
+  }))
+  const remainder = want - shares.reduce((sum, s) => sum + s.amount, 0)
+  if (remainder > 0) {
+    const biggest = shares.reduce((best, s) =>
+      s.bucket > best.bucket || (s.bucket === best.bucket && s.method < best.method) ? s : best,
+    )
+    biggest.amount += remainder
+  }
+  return shares.filter((s) => s.amount > 0).map(({ method, amount }) => ({ method, amount }))
+}
+
 // The one entry point every cancellation site uses (admin cancel, tourist-approved cancel, booking
 // cancel, payment reject). Reads the folio's NET money AND commission per method from the ledger and
 // reverses each positive bucket — so a MIXED folio reverses cash and transfer (and their commission
 // accruals) in the RIGHT proportions, not lumped into the deposit method. Dated at `at`
 // (cancelled_at) so the drop-watermark fast path treats it as a current-shift event. Commission is
 // reversed only on `clawback` (an absorbed cancellation keeps it).
+//
+// PARTIAL reversal (Cancellation Policy Engine, spec Rule 8) — `refundAmount` / `reversedCommission`
+// are OPTIONAL and change nothing when omitted:
+//   omitted  → every positive bucket is reversed IN FULL, exactly as before the engine existed.
+//              This is the path every org without a configured policy takes (D1), which is why the
+//              paid-ledger reconciliation suite needed no edits.
+//   provided → only that much is reversed, prorated across the buckets. What is NOT reversed stays
+//              live in the ledger — and that is the whole point: it is revenue the company kept,
+//              physically in the collecting agent's hands, which a full reversal made invisible to
+//              the corte and to every report.
 export const buildCancellationReversal = async (
   db: Db,
   input: {
@@ -137,6 +181,10 @@ export const buildCancellationReversal = async (
     collectedBy: string
     at: Date
     clawback: boolean
+    /** Reverse only this much money, prorated. Omit to reverse everything collected. */
+    refundAmount?: number
+    /** Reverse only this much commission, prorated. Omit to reverse it all (when `clawback`). */
+    reversedCommission?: number
   },
 ) => {
   const grouped = await db
@@ -154,36 +202,59 @@ export const buildCancellationReversal = async (
     )
     .groupBy(folioPayments.method)
 
+  const buckets = grouped
+    .filter((r) => r.method)
+    .map((r) => ({
+      method: r.method as Method,
+      money: Number(r.money ?? 0),
+      commission: Number(r.commission ?? 0),
+    }))
+
+  // Full reversal is the default and is expressed as "reverse each bucket entirely"; a partial one
+  // prorates. Both end up as the same shape, so there is one row-building path below.
+  const moneyToReverse =
+    input.refundAmount === undefined
+      ? buckets.filter((b) => b.money > 0).map((b) => ({ method: b.method, amount: b.money }))
+      : prorateAcrossBuckets(
+          buckets.map((b) => ({ method: b.method, amount: b.money })),
+          input.refundAmount,
+        )
+
+  const commissionToReverse = !input.clawback
+    ? []
+    : input.reversedCommission === undefined
+      ? buckets
+          .filter((b) => b.commission > 0)
+          .map((b) => ({ method: b.method, amount: b.commission }))
+      : prorateAcrossBuckets(
+          buckets.map((b) => ({ method: b.method, amount: b.commission })),
+          input.reversedCommission,
+        )
+
   const rows = []
-  for (const r of grouped) {
-    if (!r.method) continue
-    const method = r.method as Method
-    const money = Number(r.money ?? 0)
-    if (money > 0) {
-      rows.push(
-        refundRow(db, {
-          organizationId: input.organizationId,
-          folioId: input.folioId,
-          amount: money,
-          method,
-          collectedBy: input.collectedBy,
-          at: input.at,
-        }),
-      )
-    }
-    const commission = Number(r.commission ?? 0)
-    if (input.clawback && commission > 0) {
-      rows.push(
-        commissionReversalRow(db, {
-          organizationId: input.organizationId,
-          folioId: input.folioId,
-          amount: commission,
-          method,
-          collectedBy: input.collectedBy,
-          at: input.at,
-        }),
-      )
-    }
+  for (const { method, amount } of moneyToReverse) {
+    rows.push(
+      refundRow(db, {
+        organizationId: input.organizationId,
+        folioId: input.folioId,
+        amount,
+        method,
+        collectedBy: input.collectedBy,
+        at: input.at,
+      }),
+    )
+  }
+  for (const { method, amount } of commissionToReverse) {
+    rows.push(
+      commissionReversalRow(db, {
+        organizationId: input.organizationId,
+        folioId: input.folioId,
+        amount,
+        method,
+        collectedBy: input.collectedBy,
+        at: input.at,
+      }),
+    )
   }
   return rows
 }

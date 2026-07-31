@@ -8,6 +8,7 @@ import {
   listFolios,
   rejectCancellationRequest,
 } from '../../../services/foliosService'
+import { deliveryState } from '../../pos/delivery'
 import type {
   ApproveCancellationRequestInput,
   CancellationRequestStatus,
@@ -39,6 +40,42 @@ export const usePendingVerificationCount = (enabled: boolean) =>
     select: (folios) => folios.length,
   })
 
+// US-A80 (express-sale D23) — the pending-delivery queue count: PAID folios whose tickets were
+// never sent nor seen. Shares the paid-list cache with FoliosListPage; counted client-side off
+// the delivery axis (a folio leaves the queue the moment a tourist's camera-scan fires the
+// /t beacon or a seller taps WhatsApp).
+export const usePendingDeliveryCount = (enabled: boolean) =>
+  useQuery({
+    queryKey: [...FOLIOS_KEY, { status: 'paid' }] as const,
+    queryFn: () => listFolios({ status: 'paid' }),
+    enabled,
+    select: (folios) => folios.filter((f) => deliveryState(f) === 'pending').length,
+  })
+
+// US-A78 (docs/oversight/pending-work-queues.spec.md) — refunds still owed. The server orders
+// them OLDEST FIRST: the count alone is not the signal, the age of the debt is.
+export const usePendingRefunds = () => useFolios({ refundStatus: 'pending' })
+
+export const usePendingRefundCount = (enabled: boolean) =>
+  useQuery({
+    queryKey: [...FOLIOS_KEY, { refundStatus: 'pending' }] as const,
+    queryFn: () => listFolios({ refundStatus: 'pending' }),
+    enabled,
+    select: (folios) => folios.length,
+  })
+
+// US-A79 — apartados past their settle deadline, most overdue first. Derived server-side from
+// `booking_expires_at`, never stored (apartado-stages S7).
+export const useOverdueBookings = () => useFolios({ overdue: true })
+
+export const useOverdueBookingCount = (enabled: boolean) =>
+  useQuery({
+    queryKey: [...FOLIOS_KEY, { overdue: true }] as const,
+    queryFn: () => listFolios({ overdue: true }),
+    enabled,
+    select: (folios) => folios.length,
+  })
+
 // US-A21 — one folio's detail.
 export const useFolio = (id: string | undefined) =>
   useQuery({
@@ -47,20 +84,12 @@ export const useFolio = (id: string | undefined) =>
     enabled: !!id,
   })
 
-// US-A21 / US-A26 — cancel the whole folio (optionally clawing back the agent's commission);
-// refresh both the list and the open detail.
+// US-A21 — cancel the whole folio; refresh both the list and the open detail. The refund is priced
+// by the org's ladder (D10): there is nothing for the caller to decide beyond an optional note.
 export const useCancelFolio = () => {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: ({
-      id,
-      reason,
-      clawback,
-    }: {
-      id: string
-      reason?: string
-      clawback?: boolean
-    }) => cancelFolio(id, { reason, clawback }),
+    mutationFn: ({ id, reason }: { id: string; reason?: string }) => cancelFolio(id, { reason }),
     onSuccess: () => qc.invalidateQueries({ queryKey: FOLIOS_KEY }),
   })
 }

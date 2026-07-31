@@ -122,6 +122,18 @@ const expire = (id: string) =>
     .bind(ts() - 60, id)
     .run()
 
+// US-A77 — the sweep only CANCELS once the grace instant passes; the settle deadline alone just
+// notifies. It reads each line's snapshotted departure, so that is what moves. Test orgs are UTC.
+const arriveAtGrace = async (folioId: string) => {
+  const now = new Date()
+  await env.DB.prepare(
+    'UPDATE folio_lines SET slot_date = ?, slot_start_time = ? WHERE folio_id = ?',
+  )
+    .bind(now.toISOString().slice(0, 10), now.toISOString().slice(11, 16), folioId)
+    .run()
+  await expire(folioId)
+}
+
 const clearDb = async () => {
   for (const t of [
     'folio_line_extras',
@@ -166,10 +178,10 @@ describe('US-A64 §4 — release paths', () => {
     const { organizationId } = await seedUser({ email: AGENT, role: 'agent' })
     const { slotId, alto } = await seedZonedService(organizationId)
     const folioId = await bookZone(slotId, alto, 3)
-    await expire(folioId)
+    await arriveAtGrace(folioId)
 
-    const swept = await sweepExpiredBookings(env)
-    expect(swept).toBe(1)
+    const result = await sweepExpiredBookings(env)
+    expect(result).toMatchObject({ cancelled: 1, failed: 0 })
     expect(await folioStatus(folioId)).toBe('cancelled')
     expect(await zoneBooked(slotId, alto)).toBe(0)
     expect(await slotBooked(slotId)).toBe(0)

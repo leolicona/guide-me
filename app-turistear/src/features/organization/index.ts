@@ -1,3 +1,5 @@
 export * from './hooks/useMyOrganization'
 export * from './hooks/useUpdateOrganization'
 export * from './hooks/useOrgDateFormatter'
+export * from './types'
+export { CancellationPolicyCard } from './components/CancellationPolicyCard'

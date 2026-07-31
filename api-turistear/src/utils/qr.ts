@@ -54,6 +54,31 @@ const b64urlToBytes = (s: string): Uint8Array => {
   return out
 }
 
+// US-T07 (docs/pos/express-sale.spec.md, D9) — the QR now ENCODES a URL, `${API_BASE_URL}/t/<token>`,
+// so a tourist's plain camera resolves to their ticket page while the agent's scanner still redeems.
+// The stored token is unchanged; this strips a URL wrapper (either origin — dev/prod) back to the
+// raw token before verification, and passes a bare token through untouched, so every QR already in
+// an inbox keeps scanning.
+export const stripTicketUrl = (scanned: string): string => {
+  const trimmed = scanned.trim()
+  const match = /^https?:\/\/[^/]+\/t\/([^/?#\s]+)/i.exec(trimmed)
+  return match ? match[1] : trimmed
+}
+
+// UNVERIFIED payload peek — for KEY SELECTION ONLY (the public /t/:token page has no caller org
+// to derive from, so it reads organization_id out of the payload, derives that org's key, and
+// then verifies properly — express-sale D12). Never trust any field from this before verifyTicket
+// has passed.
+export const peekTicketPayload = (token: string): TicketPayload | null => {
+  const dot = token.indexOf('.')
+  if (dot <= 0) return null
+  try {
+    return JSON.parse(dec.decode(b64urlToBytes(token.slice(0, dot)))) as TicketPayload
+  } catch {
+    return null
+  }
+}
+
 // Derive the per-organization signing key from the app secret. The resulting key can
 // both sign (issuance) and verify (scanner / tests).
 export async function deriveOrgKey(

@@ -3,7 +3,7 @@ import { env, SELF } from 'cloudflare:test'
 import { seedUser } from '../helpers/tenancy'
 import { buildFakeJwt } from '../helpers/jwt'
 
-// WhatsApp ticket delivery — Phases 2/3 backend (docs/whatsapp-qr-delivery/spec.md). The seller/
+// WhatsApp ticket delivery — Phases 2/3 backend (docs/whatsapp-qr-delivery/whatsapp-qr-delivery.spec.md). The seller/
 // admin mark-sent endpoints (D4/D13) + the bot-proof "Visto" beacon (D6), plus cross-org isolation.
 
 const auth = (email: string) => ({ Cookie: `gm_access=${buildFakeJwt(email)}` })

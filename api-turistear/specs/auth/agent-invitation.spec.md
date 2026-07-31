@@ -6,7 +6,7 @@ El admin invita a un agente de ventas enviando un link por email o WhatsApp. El 
 
 **User Stories:** US-A05, US-AG01  
 **Endpoints:** `POST /api/agents/invite`, `GET /api/auth/invite/accept?token=xxx`, `POST /api/auth/invite/complete`  
-**Referencia completa:** `docs/auth/user-story-admin-registration.md`
+**Referencia completa:** `docs/SPEC.md` (US-A01–US-A04) + `docs/auth/`
 
 ---
 

@@ -78,6 +78,45 @@ describe('US-A46 — org booking policy', () => {
     expect((await put('admin@empresa.com', { booking_pre_departure_buffer_hours: -1 })).status).toBe(400)
   })
 
+  // US-A77 (S1) — the apartado creation cutoff, and the coherence rule that gives it its point.
+  it('the apartado creation cutoff round-trips, defaulting to 0 (no restriction)', async () => {
+    await seedUser({ email: 'admin@empresa.com', role: 'admin' })
+    expect((await get('admin@empresa.com')).json.organization.booking_creation_cutoff_hours).toBe(0)
+
+    const { status } = await put('admin@empresa.com', { booking_creation_cutoff_hours: 48 })
+    expect(status).toBe(200)
+    expect((await get('admin@empresa.com')).json.organization.booking_creation_cutoff_hours).toBe(48)
+  })
+
+  it('rejects a cutoff below the settle deadline → 400, in BOTH directions', async () => {
+    await seedUser({ email: 'admin@empresa.com', role: 'admin' })
+    // Default deadline is 24h. A 12h cutoff would let an apartado be created inside the window it
+    // is expected to be settled in — born owing money it has no time to pay.
+    expect((await put('admin@empresa.com', { booking_creation_cutoff_hours: 12 })).status).toBe(400)
+
+    // The other direction: a cutoff already stored, and a PATCH that raises the deadline past it.
+    // The check reads the STORED value of whichever field the request did not send, so this fails
+    // too — validating the body alone would have let it through.
+    expect((await put('admin@empresa.com', { booking_creation_cutoff_hours: 48 })).status).toBe(200)
+    expect(
+      (await put('admin@empresa.com', { booking_pre_departure_buffer_hours: 72 })).status,
+    ).toBe(400)
+
+    // Both together, coherent, is fine.
+    expect(
+      (await put('admin@empresa.com', {
+        booking_creation_cutoff_hours: 96,
+        booking_pre_departure_buffer_hours: 72,
+      })).status,
+    ).toBe(200)
+  })
+
+  it('0 means no restriction, so it is coherent with any deadline', async () => {
+    await seedUser({ email: 'admin@empresa.com', role: 'admin' })
+    await put('admin@empresa.com', { booking_pre_departure_buffer_hours: 168 })
+    expect((await put('admin@empresa.com', { booking_creation_cutoff_hours: 0 })).status).toBe(200)
+  })
+
   it('an agent may not edit the policy → 403', async () => {
     const { organizationId } = await seedUser({ email: 'admin@empresa.com', role: 'admin' })
     await seedUser({ email: 'agent@empresa.com', role: 'agent', organizationId })
@@ -131,5 +170,119 @@ describe('US-A66 — organization time zone', () => {
     expect((await get(orgA.adminEmail)).json.organization.timezone).toBe('America/Tijuana')
     // orgB was seeded via seedUser (UTC) and must be untouched by orgA's edit.
     expect((await get(orgB.adminEmail)).json.organization.timezone).toBe('UTC')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// US-A69/A70/A72/A73 — the cancellation policy ladder.
+// Spec: docs/cancellation/cancellation-policy-engine.spec.md
+//
+// The endpoint is the only writer of the ladder, so it is also the only place a malformed
+// document can be rejected. Everything downstream (the engine, the snapshot, the sweep) assumes a
+// stored policy is evaluable — these tests are what makes that assumption safe.
+// ---------------------------------------------------------------------------
+describe('US-A69 — cancellation policy ladder', () => {
+  const LADDER = {
+    version: 1,
+    tiers: [
+      { min_hours: 120, refund_pct: 100, agent_commission_pct: 0 },
+      { min_hours: 0, refund_pct: 50, agent_commission_pct: 100, affiliate_commission_pct: 50 },
+      { min_hours: null, refund_pct: 0, agent_commission_pct: 100 },
+    ],
+  }
+
+  it('defaults to NO policy — which is what keeps every org on the pre-feature path (D1)', async () => {
+    await seedUser({ email: 'admin@empresa.com', role: 'admin' })
+    const { json } = await get('admin@empresa.com')
+    expect(json.organization.cancellation_policy).toBeNull()
+    expect(json.organization.agent_cancellation_enabled).toBe(false)
+  })
+
+  it('stores a ladder and reads it back as an object', async () => {
+    await seedUser({ email: 'admin@empresa.com', role: 'admin' })
+    const { status, json } = await put('admin@empresa.com', { cancellation_policy: LADDER })
+    expect(status).toBe(200)
+    expect(json.organization.cancellation_policy).toMatchObject({ version: 1 })
+    expect(json.organization.cancellation_policy.tiers).toHaveLength(3)
+    // Round-trips through the column, not just the response.
+    const reread = (await get('admin@empresa.com')).json.organization.cancellation_policy
+    expect(reread.tiers[1]).toMatchObject({ refund_pct: 50, affiliate_commission_pct: 50 })
+  })
+
+  // D20 — an admin (or an older client build) may still send the retired deposit floor. The endpoint
+  // must accept the document and drop the key rather than 400, so a stale tab cannot lock someone
+  // out of editing their own ladder.
+  it('accepts a legacy ladder carrying the retired deposit floor, and stores it without', async () => {
+    await seedUser({ email: 'admin@empresa.com', role: 'admin' })
+    const legacy = { ...LADDER, booking_deposit_retained_pct: 100 }
+    const { status, json } = await put('admin@empresa.com', { cancellation_policy: legacy })
+    expect(status).toBe(200)
+    expect(json.organization.cancellation_policy).not.toHaveProperty(
+      'booking_deposit_retained_pct',
+    )
+    const reread = (await get('admin@empresa.com')).json.organization.cancellation_policy
+    expect(reread).not.toHaveProperty('booking_deposit_retained_pct')
+    expect(reread.tiers).toHaveLength(3)
+  })
+
+  it('null CLEARS the policy — the rollback (D1)', async () => {
+    await seedUser({ email: 'admin@empresa.com', role: 'admin' })
+    await put('admin@empresa.com', { cancellation_policy: LADDER })
+    const { status, json } = await put('admin@empresa.com', { cancellation_policy: null })
+    expect(status).toBe(200)
+    expect(json.organization.cancellation_policy).toBeNull()
+  })
+
+  it('leaves the ladder alone when the field is absent from a partial update', async () => {
+    await seedUser({ email: 'admin@empresa.com', role: 'admin' })
+    await put('admin@empresa.com', { cancellation_policy: LADDER })
+    await put('admin@empresa.com', { booking_hold_days: 3 })
+    expect((await get('admin@empresa.com')).json.organization.cancellation_policy).not.toBeNull()
+  })
+
+  it('rejects a malformed ladder → 400, and stores nothing', async () => {
+    await seedUser({ email: 'admin@empresa.com', role: 'admin' })
+    const bad = [
+      // no terminal tier — a departure that has passed would match nothing
+      { ...LADDER, tiers: [{ min_hours: 120, refund_pct: 100, agent_commission_pct: 0 }] },
+      // two terminal tiers — ambiguous
+      {
+        ...LADDER,
+        tiers: [
+          { min_hours: null, refund_pct: 100, agent_commission_pct: 0 },
+          { min_hours: null, refund_pct: 0, agent_commission_pct: 100 },
+        ],
+      },
+      // ascending thresholds — the second tier is unreachable
+      {
+        ...LADDER,
+        tiers: [
+          { min_hours: 24, refund_pct: 50, agent_commission_pct: 0 },
+          { min_hours: 120, refund_pct: 100, agent_commission_pct: 0 },
+          { min_hours: null, refund_pct: 0, agent_commission_pct: 100 },
+        ],
+      },
+      // out-of-range percentages
+      { ...LADDER, tiers: [{ min_hours: null, refund_pct: 101, agent_commission_pct: 0 }] },
+      // wrong version
+      { ...LADDER, version: 2 },
+    ]
+    for (const policy of bad) {
+      expect((await put('admin@empresa.com', { cancellation_policy: policy })).status).toBe(400)
+    }
+    expect((await get('admin@empresa.com')).json.organization.cancellation_policy).toBeNull()
+  })
+
+  it('US-A73 — the agent-cancellation switch round-trips', async () => {
+    await seedUser({ email: 'admin@empresa.com', role: 'admin' })
+    expect((await put('admin@empresa.com', { agent_cancellation_enabled: true })).status).toBe(200)
+    expect((await get('admin@empresa.com')).json.organization.agent_cancellation_enabled).toBe(true)
+  })
+
+  it('isolation — one org\'s ladder is invisible to another', async () => {
+    const { orgA, orgB } = await seedTwoOrgs()
+    await put(orgA.adminEmail, { cancellation_policy: LADDER })
+    expect((await get(orgA.adminEmail)).json.organization.cancellation_policy).not.toBeNull()
+    expect((await get(orgB.adminEmail)).json.organization.cancellation_policy).toBeNull()
   })
 })

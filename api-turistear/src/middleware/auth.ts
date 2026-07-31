@@ -125,12 +125,19 @@ export const authMiddleware: MiddlewareHandler<AuthEnv> = async (c, next) => {
   if (await tryOperatorSession(c)) return next()
 
   const accessToken = getCookie(c, 'gm_access')
+  const refreshToken = getCookie(c, 'gm_refresh')
 
-  if (!accessToken) {
+  // A missing `gm_access` is NOT a missing session. The cookie holds a 10-minute token, so it is
+  // routinely absent while `gm_refresh` is still valid for weeks. Refusing the request here (as
+  // this did before) turned every idle gap into an unrecoverable 401 — the user re-typed their
+  // password with a perfectly good refresh token sitting in the very same request. Only the
+  // absence of BOTH cookies means there is no session; a lone refresh token falls through to the
+  // renewal path below.
+  if (!accessToken && !refreshToken) {
     throw new ApiError('UNAUTHORIZED', 401, 'Authentication required')
   }
 
-  const payload = decodeJwtPayload(accessToken)
+  const payload = accessToken ? decodeJwtPayload(accessToken) : null
   const identity = payload?.sub ?? payload?.identity ?? null
   const nowSeconds = Math.floor(Date.now() / 1000)
   const isExpired = !payload || (payload.exp != null && payload.exp <= nowSeconds)
@@ -149,7 +156,6 @@ export const authMiddleware: MiddlewareHandler<AuthEnv> = async (c, next) => {
     return next()
   }
 
-  const refreshToken = getCookie(c, 'gm_refresh')
   if (!refreshToken) {
     clearSessionCookies(c)
     throw new ApiError('UNAUTHORIZED', 401, 'Session expired')

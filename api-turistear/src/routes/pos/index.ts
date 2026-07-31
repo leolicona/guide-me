@@ -18,6 +18,7 @@ import {
   rejectPayment,
   settleBooking,
   verifyPayment,
+  voidExpressSale,
 } from './handler'
 import { getLodgingAvailability, getUnitTypeCalendar } from './lodging.handler'
 import { availabilityDaysQuerySchema, confirmSaleSchema } from './schema'
@@ -69,6 +70,8 @@ pos.post('/folios/:id/verify', requireRole('admin'), verifyPayment)
 pos.post('/folios/:id/reject', requireRole('admin'), rejectPayment)
 // US-AG07.4 — manual cancellation of a booking (release spots; deposit retained).
 pos.post('/folios/:id/cancel', cancelBooking)
+// US-AG47 — 60-second void of the seller's own Express sale (full ledger reversal, no ladder).
+pos.post('/folios/:id/void', voidExpressSale)
 // US-AG07.3 — claim the WhatsApp reminder (atomic, prevents double-contact).
 pos.post('/folios/:id/reminder', claimReminder)
 // US-AG07.5 — reactivate an expired booking when capacity allows (reactivation only).

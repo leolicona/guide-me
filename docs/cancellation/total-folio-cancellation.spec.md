@@ -33,10 +33,16 @@ inventory logic in MVP").
 - **Agent cash balance** (`docs/cash-drops/agent-balance-cash-drops.spec.md`) — the agent's
   **running balance** is derived from events and **excludes** `cancelled` folios from
   `cash_collected`, so cancelling a cash sale immediately lowers that agent's collected cash.
-  The commission booked on the folio follows the **clawback** choice (US-A26): on a clawback
-  the agent's `commission_total` drops too (they forfeit it); when the company absorbs it the
-  agent keeps the commission. The balance recomputes automatically — there is no snapshot to
-  rewrite. *(This replaces the retired daily cash-drawer / `deriveIncome` model.)*
+  The commission booked on the folio follows `cancellation_clawback`: when set, the agent's
+  `commission_total` drops too (they forfeit it); otherwise they keep it. The balance recomputes
+  automatically — there is no snapshot to rewrite. *(This replaces the retired daily cash-drawer /
+  `deriveIncome` model.)*
+
+  > **Superseded (US-A26 → Cancellation Policy Engine).** The clawback used to be the **admin's
+  > per-cancellation choice**, sent as a `clawback` body flag. It is now **derived** from the
+  > org's cancellation ladder: `cancellation_clawback = (reversedCommission > 0)`. The column and
+  > every reader of it are unchanged — only who decides it moved, from the person cancelling to
+  > the company's stated policy. See `docs/cancellation/cancellation-policy-engine.spec.md` (D10).
 - **Auth & roles** — `authMiddleware`, `requireRole`, the multitenancy Enforcement
   Contract (`docs/multitenancy/multitenancy.spec.md`).
 - **SPEC business rule (Inventory):** *"Upon cancelling a folio, all spots for the involved
@@ -50,7 +56,7 @@ inventory logic in MVP").
 | **Per-service / partial cancellation** | **WON'T HAVE THIS TIME** (SPEC) — out of scope |
 | **Client email on cancellation** (US-C03) | *Resend ticket delivery* (SHOULD HAVE) — **not built yet**; this feature leaves a single integration seam and a TECH_DEBT note, no email is sent |
 | **QR ticket invalidation** | *Scanner* — already enforced by the `CANCELLED` gate; **no new code** |
-| **Commission clawback on cancel** (US-A26) | **This feature** sets `cancellation_clawback` from the admin's choice; the *Agent cash balance* derivation reads it to decide whether the agent forfeits or keeps the commission |
+| **Commission clawback on cancel** (US-A26) | ~~**This feature**, from the admin's choice~~ → **superseded**: `cancellation_clawback` is now derived from the org's cancellation ladder (*Cancellation Policy Engine*, D10). The *Agent cash balance* derivation still reads the same column |
 | **Excluding cancelled cash / commission from the balance** | *Agent cash balance* (`docs/cash-drops/…`) — its derivation already excludes `cancelled` folios from `cash_collected` and applies the clawback to `commission_total`; this feature only flips the status + flag, it computes no money |
 | **Admin sales summary / occupancy dashboard** (US-A14–A16) | *Occupancy dashboard* (SHOULD HAVE) — this feature ships only a **lean folio list** sufficient to find a folio to cancel, not a metrics dashboard |
 | **Cash refund tracking & Refund PIN** (US-A23, US-T05) | *Cash refund tracking* + *Tourist Self-Service Portal* (Phase 2) — confirming the **physical cash handed back** (and the tourist-facing **Refund PIN**) is a separate flow that attaches to the cancelled folio. This feature leaves that seam; it moves no money |
@@ -116,22 +122,23 @@ table record the cancellation. Additive nullable columns are safe on a populated
 7. **Tickets follow status — no extra work.** Outstanding QR tickets of a cancelled folio
    are rejected by the scanner's existing `CANCELLED` gate. Already-redeemed passes are
    **not** "un-redeemed"; `redeemed_count` is left as-is (historical record).
-8. **Running-balance & commission interaction (US-A26).** The cancel request carries an
-   optional `clawback` boolean; cancelling sets `cancellation_clawback` from it (default
-   `false`). The agent's **running balance** (`docs/cash-drops/…`) is event-derived, so the
-   cancelled folio immediately leaves `cash_collected`. The folio's snapshot
-   `commission_amount` is left **as-is** (historical record), and the derivation applies the
-   clawback: `clawback = true` → the agent **forfeits** that commission (it leaves
-   `commission_total`); `clawback = false` → the company absorbs the loss and the agent
-   **keeps** the commission. This feature writes only the status + flag; it computes no money.
-9. **Refund is a separate flow (US-A23 / US-T05).** Cancellation is an inventory + record
-   action and moves no cash. Tracking that the **physical cash was returned** to the customer
-   (and the tourist-facing **Refund PIN**) is a future flow that will attach to the cancelled
-   folio. This feature leaves the seam and changes no money.
+8. **Running-balance & commission interaction (US-A26).** ~~The cancel request carries an optional
+   `clawback` boolean.~~ **Superseded** — `cancellation_clawback` is now derived from the org's
+   cancellation ladder, never from the request (*Cancellation Policy Engine*, D10). Everything
+   downstream is unchanged: the agent's **running balance** is event-derived, so a cancelled folio
+   immediately leaves `cash_collected`; the folio's snapshot `commission_amount` stays as-is
+   (historical record); and the derivation applies the clawback flag exactly as before —
+   set → the agent **forfeits** that commission, unset → they **keep** it.
+9. **Refund is a separate flow (US-A23 / US-T05).** ~~Cancellation is an inventory + record action
+   and moves no cash.~~ **No longer true.** A cancellation now computes a refund from the policy
+   ladder, writes `refund_amount` / `refund_status`, and reverses the corresponding ledger rows.
+   What remains separate is only the **physical hand-back** — confirming the cash actually reached
+   the customer (`confirmRefund`, the Refund PIN), which stays audit-only.
 10. **Multitenancy & role.** Admin-only. Every query filters `organization_id` from context
     (Rules 2 & 4). A cross-org or unknown folio id → `404 NOT_FOUND` (no existence leak).
     `organization_id` / `status` / `cancelled_by` are **never** read from a body (Rules 1 & 3);
-    only `reason` and the `clawback` flag are client-supplied.
+    **`reason` is now the only client-supplied field** — `clawback` was removed with US-A26's
+    supersession, so nothing a caller sends can influence money.
 11. **No new `ErrorCode`.** Reuse `409 CONFLICT` (already cancelled), `404 NOT_FOUND`
     (unknown/cross-org), `400 VALIDATION_ERROR` (bad body).
 

@@ -120,7 +120,7 @@ app-turistear/
     components/          shared design-system primitives
     features/<name>/     feature modules (components · hooks · types)
     store/ services/ config/ styles/
-docs/                    ci-cd.md, ARCHITECTURE.md, SPEC.md, …
+docs/                    ci-cd.md, ARCHITECTURE.md, TESTING.md, SPEC.md, …
 .design/design-system/   design tokens & brief
 ```
 
@@ -129,4 +129,5 @@ docs/                    ci-cd.md, ARCHITECTURE.md, SPEC.md, …
 - [`CLAUDE.md`](./CLAUDE.md) — architecture, backend/frontend folder rules, design system.
 - [`docs/ci-cd.md`](./docs/ci-cd.md) — pipeline, environments, one-time setup runbook.
 - [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md) — multitenancy & data-isolation model.
+- [`docs/TESTING.md`](./docs/TESTING.md) — what is tested where, and the merge gate.
 - [`docs/SPEC.md`](./docs/SPEC.md) — product spec and user stories.

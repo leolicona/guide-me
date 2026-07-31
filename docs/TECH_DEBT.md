@@ -2,6 +2,72 @@
 
 This document tracks known technical debt, deferred tasks, and architectural improvements that are planned for future phases.
 
+## 21. The API Contract Is Hand-Mirrored Into the Frontend — ⚠️ OPEN
+
+**Status:** the response shapes the frontend expects live in `app-turistear/src/features/*/types.ts`,
+typed by hand from the API's handlers. Nothing links the two. When an API response gains, renames or
+drops a field, the mirror keeps compiling and the screen quietly renders `undefined` — `tsc` is
+checking the frontend against the frontend.
+
+`docs/TESTING.md` Phase 3 adds MSW handlers, which makes this **slightly worse before it gets
+better**: a handler written from a stale type proves only that the frontend agrees with itself. The
+convention that fixtures are copied from the shapes `api-turistear/test/**` asserts is a discipline,
+not a mechanism — it holds exactly as long as everyone remembers it.
+
+**Why it was not fixed now:** it needs a third workspace package (shared Zod schemas both sides
+validate against) plus a pass over 16 service clients and every `types.ts`. That is a refactor of
+its own, and doing it *inside* the phase that first introduces frontend tests would mean landing two
+large changes with no gate to catch either.
+
+**Action required:**
+- **Who:** whoever next hits a bug where the API changed and the UI silently rendered nothing.
+- **What:** a `packages/contracts` workspace exporting the Zod schemas for every API response; the
+  API validates outbound with them, the frontend infers its types from them, and MSW fixtures are
+  built by `schema.parse(...)` — so a drifted fixture becomes a test failure rather than a fiction.
+- **Reference:** `docs/TESTING.md` § The known gap · `docs/testing/frontend-testing.plan.md` Phase 3.
+
+## 20. Transactional Emails Are Off the Design System — ⚠️ OPEN
+
+**Status:** every customer-facing email built in `api-turistear/src/services/resend.ts` uses its own
+palette — `#1a1a2e` navy for ink and the CTA button, `#f5f5f7` panels, `#e0e0e0` rules — and
+`font-family: sans-serif`. None of those values exists in `.design/design-system/DESIGN_TOKENS.md`.
+The app is teal-accented Manrope on `#F8FAFC`; the email that lands in the customer's inbox is a
+different product visually. Since the WhatsApp delivery feature the email is often the *only*
+branded surface a tourist sees before the QR.
+
+**Why it happened:** email clients cannot read CSS custom properties, so `tokens.css` is unusable
+there and the templates were written with ad-hoc literals. The constraint is real; the conclusion
+is not — the token *values* can be inlined, they just cannot be referenced.
+
+**Action required:**
+- **Who:** whoever next edits an email template.
+- **What:** replace the literals with the token values (ink `#0F172A`, surface `#F8FAFC`, border
+  `#E2E8F0`, CTA teal `#0F766E`, money semantic green/red) and load Manrope with a websafe fallback
+  stack. Do it in one pass over all templates — a half-converted set is worse than a consistent
+  wrong one.
+- **Reference:** `.design/design-system/DESIGN_TOKENS.md`; the rule in `docs/PROCESS.md`
+  (§ The design system has exactly one source).
+
+## 19. Auth Specs Exist Twice — ⚠️ OPEN (documentation debt)
+
+**Status:** `api-turistear/specs/auth/` holds five Spanish-language auth specs that predate the
+`docs/` convention (`docs/PROCESS.md`). Four have English counterparts in `docs/auth/`; the folder
+now carries a README saying it is not a spec location, and its dangling reference to a
+`docs/auth/user-story-admin-registration.md` that never existed has been repointed at `docs/SPEC.md`.
+
+**Why it was not simply deleted:** two of the five are not pure duplicates.
+- `auth/agent-magic-link.spec.md` is the **only copy** — passwordless agent login by email *or*
+  WhatsApp, 7 scenarios. It has no counterpart in `docs/auth/` and **no story in `SPEC.md`**, so it
+  may describe a path that was designed and never built. Deleting it would drop the only record.
+- `auth/agent-invitation.spec.md` is **16 lines longer** than `docs/auth/agent-invitation.spec.md`.
+  The difference has not been read; it may be translation slack or it may be a scenario.
+
+**Action required:**
+- **Who:** whoever next touches auth.
+- **What:** diff the two `agent-invitation` specs and fold anything real into `docs/auth/`; decide
+  whether agent magic-link login is a live requirement (→ story in `SPEC.md` + spec in `docs/auth/`)
+  or dead (→ delete). Then remove `api-turistear/specs/` entirely.
+
 ## 18. Accommodation Stays — Error Codes & `folio_lines` Rebuild — ✅ INTRODUCED & CONSUMED (no open debt)
 
 **Status:** The accommodation/lodging feature (`docs/lodging/accommodation-stays.spec.md`) added three
@@ -33,7 +99,30 @@ check passes. **Takeaway for future table rebuilds: never rely on `defer_foreign
 FK.** Verified by the full suite via `applyD1Migrations` (the PRAGMA is kept as a harmless no-op
 safety net for engines that do defer).
 
-## 17. Cash Drawer — Retained Booking-Deposit Carve-Out — ⚠️ OPEN (cross-feature follow-up)
+## 17. Cash Drawer — Retained Booking-Deposit Carve-Out — ✅ RESOLVED
+
+**Resolved by the paid ledger (US-LG) + Cancellation Policy Engine Phase 3 (D20).** No carve-out was
+ever needed; the premise below stopped being true in two steps.
+
+1. **The paid ledger replaced status-exclusion with signed movement rows.** `cash/handler.ts` now
+   sums `folio_payments` filtered by `entry_type` and `collected_by` — there is **no**
+   `folios.status` predicate left. A cancelled folio contributes whatever its rows net to, so
+   "cancelled folios are excluded from collected cash" no longer describes the system.
+2. **The reversal became proportional.** That alone was not enough: the agent's apartado cancel
+   still reversed the collected money *in full*, so a retained deposit netted to zero and vanished
+   from the drawer anyway — the same under-count, arriving by a different route. Phase 3 routed that
+   path through `cancelFolioPriced`, so the reversal now matches the refund and the retained
+   portion stays on the books as money the company is owed.
+
+An **expired** apartado (D21) writes no reversal rows at all, so its payment row stands untouched
+and is likewise counted.
+
+Regression coverage: `test/pos/pos-bookings-cancel.test.ts` — *"a retained deposit stays on the
+books — the reversal is proportional, not total"*, which asserts the ledger nets to `+45,000` after
+the cancellation. `docs/bookings/…` O3 and D7 are closed by the same change.
+
+<details>
+<summary>Original entry (kept for the record)</summary>
 
 **Status:** Bookings/down-payments (`docs/bookings/bookings-down-payments.spec.md`, decision D7 /
 open decision O3) ship with a **non-refundable retained deposit**: when a booking is cancelled
@@ -58,6 +147,8 @@ the bookings PR would reach into another feature's derivation and tests.
   Mirror the existing watermark-reversal logic (TECH_DEBT §12a) so a deposit retained pre-watermark
   isn't double-counted.
 - **Reference:** `docs/bookings/bookings-down-payments.spec.md` §6 (cash-drawer row) + O3.
+
+</details>
 
 ## 16. Tourist Portal — Deferred Notifications & Electronic Refund Movement — ⚠️ OPEN (by design)
 
