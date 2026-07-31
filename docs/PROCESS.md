@@ -16,12 +16,19 @@ being consulted, which is how the same folio ended up with three different cance
 | **Product** | `docs/SPEC.md` | *What does this product do?* Vision, roles, numbered user stories, Features by Phase, key business rules, glossary |
 | **Feature** | `docs/<domain>/<feature>.spec.md` | *What exactly does this feature do, and what may it not break?* The contract |
 | **Execution** | `docs/<domain>/<feature>.plan.md` | *In what order do I type it?* Phases → tasks with file paths |
-| **Cross-cutting** | `ARCHITECTURE.md` · `TECH_DEBT.md` · `BUGS.md` · `RFCs/` | Facts that outlive any one feature |
+| **Cross-cutting** | `ARCHITECTURE.md` · `TECH_DEBT.md` · `BUGS.md` · `RFCs/` · `ci-cd.md` | Facts that outlive any one feature |
+| **Not ours** | `docs/integrations/<service>.md` · `.design/design-system/` | Contracts and systems we consume but do not decide |
 
 `ARCHITECTURE.md` holds decisions that bind every feature (the multitenancy isolation model).
 `TECH_DEBT.md` holds what was knowingly deferred. `BUGS.md` holds defects found in shipped code.
 An `RFC` is for a change of *model* that needs approval before a spec is worth writing
 (`RFCs/rfc-airbnb-inventory-model.md` is the example).
+
+The last row is the one people get wrong. **An integration doc is not a spec** — no Definition of
+Done, no scenarios, no story ID, because we do not decide what Resend or the auth service does. It
+records what they promise, how we reach them, and **what breaks when they are down**. Same logic
+for the design system: `.design/design-system/` is the authority the frontend obeys, not something
+a feature spec re-decides.
 
 ---
 
@@ -34,6 +41,44 @@ An `RFC` is for a change of *model* that needs approval before a spec is worth w
 | Story ID | Next free in its series — `US-A*` admin · `US-AG*` agent · `US-AF*` affiliate · `US-OP*` operator · `US-T*` tourist · `US-UX*` shell · `US-L*` localization · `US-LG*` ledger. **Never renumber**; a superseded story is struck through and annotated, not reused. |
 | Migration | Next integer, four digits, `NNNN_snake_case.sql`. Additive whenever possible. One migration per phase of a phased feature. |
 | Error code | `SCREAMING_SNAKE`, declared in the spec's *Error responses* table before it exists in code. |
+
+---
+
+## Local workflow — a worktree and one PR per unit of work
+
+**Every unit of work gets its own git worktree and its own pull request.** A unit is one feature,
+one fix, one enhancement, one docs change — whatever a reviewer can judge as a whole and a
+`git revert` can undo without collateral.
+
+```bash
+git fetch origin
+git worktree add .claude/worktrees/<name> -b feat/<slug> origin/develop
+cd .claude/worktrees/<name>
+```
+
+| | Convention |
+|---|---|
+| **Worktree** | `.claude/worktrees/<short-name>` — always branched from **`origin/develop`**, never from another feature branch unless it genuinely depends on it |
+| **Branch** | `feat/<slug>` · `fix/<slug>` · `docs/<slug>` |
+| **Commits** | Conventional Commits with the **domain** as scope: `feat(cancellation):` · `fix(bookings):` · `docs(spec):` · `test(paid-ledger):` |
+| **PR** | Base **`develop`**, title mirroring the lead commit. Squash-merged, so the PR title becomes the commit on `develop` — write it as the sentence you want in the history |
+| **CI** | The `verify` job must pass before merge |
+| **Release** | A PR **`develop` → `main`**, titled `release: <what> → prod`. Nothing deploys from a laptop (`docs/ci-cd.md`) |
+
+Why worktrees rather than switching branches in place: the dev servers bind **fixed ports by
+design** (BUG-008) and each checkout carries its own local D1. Switching branches under a running
+server is how you end up debugging yesterday's schema.
+
+**Two rules that exist because breaking them has already cost us:**
+
+- **Never bare `git stash` / `git stash pop`.** The stash stack is shared across every worktree, so
+  a pop can take work that belongs to another session. Prefer a temporary WIP commit; if you must
+  stash, `git stash push -u -m "<unique-tag>"` and restore with `git stash apply <sha>`.
+- **A feature's `SPEC.md` registration ships inside that feature's PR.** The apartado-stages entry
+  was written in a worktree, the branch was merged from elsewhere without it, and the index silently
+  lost a shipped feature. "I'll add it after merging" is how the index rots.
+
+Delete the worktree when its PR merges: `git worktree remove .claude/worktrees/<name>`.
 
 ---
 
@@ -86,6 +131,34 @@ not a nicety.
 close; if an item cannot be ticked, say why in the same line.
 
 **Say what you deferred *and why deferring is safe*.** "Deferred" alone reads as forgotten.
+
+---
+
+## The design system has exactly one source
+
+A feature spec's *Frontend* section says which screens change and which shared primitives it
+reuses. It **never** re-decides a colour, a font, a radius or a spacing step.
+
+| Role | File |
+|---|---|
+| **Authority** — every token, AA-verified | `.design/design-system/DESIGN_TOKENS.md` |
+| Rationale, the three laws | `.design/design-system/DESIGN_BRIEF.md` |
+| Layout & hierarchy | `.design/design-system/INFORMATION_ARCHITECTURE.md` |
+| Implementation (MUI theme) | `app-turistear/src/config/theme.ts` |
+| Implementation (CSS variables for non-MUI code) | `app-turistear/src/styles/tokens.css` |
+| Shared primitives | `app-turistear/src/components/` |
+| Summary for agents — **subordinate, never authoritative** | `CLAUDE.md` § Design System |
+| Retired predecessor, kept as a redirect | `docs/DESING.md` |
+
+The two implementation files are the only places allowed to restate a token value, because a
+machine has to read them. Anywhere else, **cite the section instead of copying the hex** —
+`docs/lodging/frontend-plan.md` does this correctly (*"green `#15803D` … (Tokens §3; IA §Badges)"*).
+A value copied without a citation is a fork waiting to happen.
+
+**One live exception, and it is not a good one:** transactional email HTML
+(`api-turistear/src/services/resend.ts`) uses its own navy/grey palette and `sans-serif`, matching
+no token. Email clients cannot read CSS variables — but the values could still be the token values,
+inlined. Tracked as `docs/TECH_DEBT.md` #20.
 
 ---
 
