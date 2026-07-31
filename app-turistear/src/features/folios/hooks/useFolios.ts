@@ -39,6 +39,30 @@ export const usePendingVerificationCount = (enabled: boolean) =>
     select: (folios) => folios.length,
   })
 
+// US-A78 (docs/oversight/pending-work-queues.spec.md) — refunds still owed. The server orders
+// them OLDEST FIRST: the count alone is not the signal, the age of the debt is.
+export const usePendingRefunds = () => useFolios({ refundStatus: 'pending' })
+
+export const usePendingRefundCount = (enabled: boolean) =>
+  useQuery({
+    queryKey: [...FOLIOS_KEY, { refundStatus: 'pending' }] as const,
+    queryFn: () => listFolios({ refundStatus: 'pending' }),
+    enabled,
+    select: (folios) => folios.length,
+  })
+
+// US-A79 — apartados past their settle deadline, most overdue first. Derived server-side from
+// `booking_expires_at`, never stored (apartado-stages S7).
+export const useOverdueBookings = () => useFolios({ overdue: true })
+
+export const useOverdueBookingCount = (enabled: boolean) =>
+  useQuery({
+    queryKey: [...FOLIOS_KEY, { overdue: true }] as const,
+    queryFn: () => listFolios({ overdue: true }),
+    enabled,
+    select: (folios) => folios.length,
+  })
+
 // US-A21 — one folio's detail.
 export const useFolio = (id: string | undefined) =>
   useQuery({

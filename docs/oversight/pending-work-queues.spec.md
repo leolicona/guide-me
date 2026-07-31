@@ -54,6 +54,7 @@ Mechanically: `test/folios/*.test.ts` and `test/pos/pos-bookings-sweep.test.ts` 
 | **Q5** | **The refunds queue shows the AGE of the debt, and sorts oldest first.** | The number alone is not the signal — a refund pending three days is a question, one pending three minutes is Tuesday. Age is the whole reason the screen exists. |
 | **Q6** | **Read-only. No "confirm refund" action on the list.** | Confirming a refund needs the customer's PIN, which needs the customer present. The list's job is to make the debt findable; `FolioDetailPage` already owns the confirm flow (US-A23). Putting a money action one tap from a list is how the wrong folio gets confirmed. |
 | **Q7** | **Cancelled folios are excluded from the overdue queue** (`status = 'booking'` already does this), and **`refund_status='pending'` folios are shown whoever cancelled them** — admin, agent, tourist or the sweep. | The debt is the same debt regardless of who created it. Filtering by `cancellation_source` would hide exactly the case this queue exists to catch. |
+| **Q8** *(added in build)* | **The current time is read in an effect, never in render** — `useNowSeconds`, refreshing every 60 s. | The lint rules reject `Date.now()` in a render body as impure, and they are right for a reason that matters here: a queue left open on a booth tablet would otherwise keep claiming *"hace 1 min"* an hour later. The age is the signal (Q5), so a stale age is a wrong screen, not a cosmetic one. The hook returns `null` on first render so "time unknown" has to be handled rather than silently rendering an age of zero. |
 
 ## Data Model
 
@@ -96,8 +97,10 @@ GET /api/folios?overdue=true
 GET /api/folios?refund_status=pending&agent=<userId>
 ```
 
-Response shape is **unchanged** — the same folio rows the list already returns. No new fields, so
-no client type changes beyond the filter argument.
+**Corrected in build.** The spec originally claimed the response shape was unchanged. It was
+wrong: the lean list row carries neither `refund_status` nor `refund_amount`, so the refunds queue
+could not show **what is owed** without a second read per folio. Both are added to the row —
+additive, nullable in the client type, and every existing caller ignores them.
 
 ### Error responses
 
@@ -214,15 +217,20 @@ Then only org A's folio is returned — org B's is absent, not `403`.
 
 ## Definition of Done
 
-- [ ] `refund_status` and `overdue` filters on `listFolios`, whitelisted like `status` /
-      `verification`, with the two orderings (Rules 1–2)
-- [ ] Scenarios S-1…S-10 in `test/folios/pending-queues.test.ts`
-- [ ] S-11 cross-org isolation via `seedTwoOrgs`
-- [ ] `PendingRefundsTab` + `OverdueBookingsTab` in Ventas, with count badges
-- [ ] Two `QueueCard`s on Hoy, deep-linking to the right tab (`?tab=`)
-- [ ] Age display with the 24 h / 72 h functional-colour thresholds, icon-paired
-- [ ] `SPEC.md`: US-A78 + US-A79 under Administrator → Cancellations, a Features-by-Phase line,
-      and a glossary entry for **Reembolso pendiente**
+- [x] `refund_status` and `overdue` filters on `listFolios`, whitelisted like `status` /
+      `verification`, with the two orderings (Rules 1–2) — plus `refund_status` / `refund_amount`
+      on the row, which the spec had wrongly assumed were already there
+- [x] Scenarios S-1…S-10 in `test/folios/pending-queues.test.ts` (15 cases — the build added
+      **S-7b** a booking with no expiry is never overdue, an ordering case per queue, and an
+      unknown-filter-value case, because "ignored, not rejected" is a contract worth pinning)
+- [x] S-11 cross-org isolation via `seedTwoOrgs`, for **both** queues
+- [x] `PendingRefundsTab` + `OverdueBookingsTab` in Ventas, with count badges
+- [x] Two `QueueCard`s on Hoy, deep-linking to the right tab (`?tab=`)
+- [x] Age display with the 24 h / 72 h functional-colour thresholds, icon-paired, via the shared
+      `QueueRow` — both queues ask the same question (who, how much, for how long)
+- [x] `SPEC.md`: US-A78 + US-A79 under Administrator → Cancellations, a Features-by-Phase line,
+      and glossary entries for **Reembolso pendiente** and **Apartado vencido**
+- [x] Full suite green: 678 API tests across 51 files, app `tsc -b` and `eslint` clean
 
 ## Deferred — and why each is safe to defer
 

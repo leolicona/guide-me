@@ -4,15 +4,22 @@ import { Link as RouterLink } from 'react-router-dom'
 import type { SvgIconComponent } from '@mui/icons-material'
 import EventBusyRounded from '@mui/icons-material/EventBusyRounded'
 import AccountBalanceWalletRounded from '@mui/icons-material/AccountBalanceWalletRounded'
+import PaymentsRounded from '@mui/icons-material/PaymentsRounded'
+import HourglassBottomRounded from '@mui/icons-material/HourglassBottomRounded'
 import { useCurrentUser } from '../features/auth/CurrentUserContext'
-import { usePendingCancellationCount } from '../features/folios/hooks'
+import {
+  usePendingCancellationCount,
+  usePendingRefundCount,
+  useOverdueBookingCount,
+} from '../features/folios/hooks'
 import { usePendingDropCount } from '../features/cash/hooks'
 import { ROUTES } from '../config/routes'
 
-// US-UX01 — the admin's "Hoy" landing. Interim version (Reorg Phase 1): two queue cards that
-// surface what needs the admin's attention today and deep-link to the destination that
-// resolves it. Reorg Phase 2 replaces this with the Daily Operations Dashboard
-// (US-A14/A15/A16 in docs/SPEC.md; no spec written yet). Agents never route here.
+// US-UX01 — the admin's "Hoy" landing. Interim version (Reorg Phase 1): queue cards that surface
+// what needs the admin's attention today and deep-link to the destination that resolves it — four
+// of them since US-A78/A79 added the two work queues (docs/oversight/pending-work-queues.spec.md).
+// Reorg Phase 2 replaces this with the Daily Operations Dashboard (US-A14/A15/A16 in docs/SPEC.md;
+// no spec written yet). Agents never route here.
 
 interface QueueCardProps {
   icon: SvgIconComponent
@@ -67,6 +74,9 @@ export default function DashboardPage() {
   // Admin-only route, so both feeds are always enabled here.
   const { data: pendingCancellationCount = 0 } = usePendingCancellationCount(true)
   const { data: pendingDropCount = 0 } = usePendingDropCount(true)
+  // US-A78/A79 — the two work queues that had no surface at all before this feature.
+  const { data: pendingRefundCount = 0 } = usePendingRefundCount(true)
+  const { data: overdueBookingCount = 0 } = useOverdueBookingCount(true)
 
   return (
     <Fade in timeout={400}>
@@ -78,7 +88,13 @@ export default function DashboardPage() {
           Hola, {user.name}. Esto es lo que necesita tu atención.
         </Typography>
 
-        <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
+        {/* Four cards now: they stack on mobile and wrap in two rows from sm up. */}
+        <Stack
+          direction={{ xs: 'column', sm: 'row' }}
+          spacing={2}
+          useFlexGap
+          sx={{ flexWrap: 'wrap' }}
+        >
           <QueueCard
             icon={EventBusyRounded}
             count={pendingCancellationCount}
@@ -94,6 +110,25 @@ export default function DashboardPage() {
             pendingHint="Entregas de efectivo por confirmar en Caja"
             emptyHint="Sin entregas por confirmar"
             to={ROUTES.CASH}
+          />
+          {/* US-A78 — cash the company owes back. The count is the only place this debt is
+              visible: the ledger already credited the agent at cancellation. */}
+          <QueueCard
+            icon={PaymentsRounded}
+            count={pendingRefundCount}
+            title="Reembolsos"
+            pendingHint="Por entregar al cliente, en Ventas"
+            emptyHint="Sin reembolsos pendientes"
+            to={`${ROUTES.FOLIOS}?tab=refunds`}
+          />
+          {/* US-A79 — holds past their deadline, still sitting on seats. */}
+          <QueueCard
+            icon={HourglassBottomRounded}
+            count={overdueBookingCount}
+            title="Apartados vencidos"
+            pendingHint="Sin liquidar, en Ventas"
+            emptyHint="Sin apartados vencidos"
+            to={`${ROUTES.FOLIOS}?tab=overdue`}
           />
         </Stack>
       </Box>
