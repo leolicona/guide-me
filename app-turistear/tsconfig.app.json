@@ -21,5 +21,8 @@
     "erasableSyntaxOnly": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["src"]
+  "include": ["src"],
+  /* Tests live beside the code they cover (docs/TESTING.md D10) but must never reach the
+     production build. tsconfig.test.json picks them back up so `tsc -b` still checks them. */
+  "exclude": ["src/**/*.test.ts", "src/**/*.test.tsx", "src/test"]
 }

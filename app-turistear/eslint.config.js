@@ -19,4 +19,16 @@ export default defineConfig([
       globals: globals.browser,
     },
   },
+  {
+    // Tests and their helpers are not Fast Refresh boundaries — the rule that every module in a
+    // React tree export only components does not apply to a file whose job is to export a render
+    // helper. They also run in Node, so they see both global sets.
+    files: ['src/**/*.test.{ts,tsx}', 'src/test/**/*.{ts,tsx}'],
+    languageOptions: {
+      globals: { ...globals.browser, ...globals.node },
+    },
+    rules: {
+      'react-refresh/only-export-components': 'off',
+    },
+  },
 ])
