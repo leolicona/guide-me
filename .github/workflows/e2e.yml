@@ -1,0 +1,72 @@
+name: E2E
+
+# Playwright journeys against a DEPLOYED environment. Deliberately NOT part of `verify`
+# (docs/TESTING.md D7): a real browser at 90s timeouts would cost the merge queue far more than
+# it catches, and Tiers 1–3 already gate every PR in seconds.
+#
+# Runs nightly, on demand, and on any PR that carries the `e2e` label.
+on:
+  schedule:
+    # 08:00 UTC ≈ 02:00 in Cancún — after the dev deploys of the day, before anyone is selling.
+    - cron: '0 8 * * *'
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: 'App origin to test (defaults to app-dev)'
+        required: false
+        type: string
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
+
+permissions:
+  contents: read
+
+concurrency:
+  # The suite seeds real data in a shared environment — never let two runs overlap.
+  group: e2e-${{ github.event.inputs.base_url || 'dev' }}
+  cancel-in-progress: false
+
+jobs:
+  journeys:
+    # On a PR, only when someone asks for it by label.
+    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'e2e')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # The `dev` environment holds the credentials; no Cloudflare tokens are needed — nothing deploys.
+    environment: dev
+    env:
+      E2E_BASE_URL: ${{ github.event.inputs.base_url || 'https://app-dev.turistearya.com' }}
+      E2E_API_BASE: ${{ vars.E2E_API_BASE || 'https://api-dev.turistearya.com' }}
+      E2E_AGENT_EMAIL: ${{ secrets.E2E_AGENT_EMAIL }}
+      E2E_AGENT_PASSWORD: ${{ secrets.E2E_AGENT_PASSWORD }}
+      E2E_ADMIN_EMAIL: ${{ secrets.E2E_ADMIN_EMAIL }}
+      E2E_ADMIN_PASSWORD: ${{ secrets.E2E_ADMIN_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Chromium
+        run: pnpm --filter app-turistear exec playwright install --with-deps chromium
+
+      - name: Run journeys
+        run: pnpm --filter app-turistear test:e2e
+
+      # Always upload: the trace/video of a failure is the whole reason to keep the report.
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: playwright-report
+          path: app-turistear/e2e/.report
+          retention-days: 14

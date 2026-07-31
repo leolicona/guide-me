@@ -20,5 +20,8 @@
     "erasableSyntaxOnly": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["vite.config.ts"]
+  /* Build-tool configs and the Playwright suite: Node-side TypeScript that `tsc -b` would
+     otherwise never look at. playwright.config.ts now imports from e2e/, so the two belong to the
+     same project. */
+  "include": ["vite.config.ts", "vitest.config.ts", "playwright.config.ts", "e2e"]
 }
