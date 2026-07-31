@@ -16,7 +16,6 @@ import AddRounded from '@mui/icons-material/AddRounded'
 import RemoveRounded from '@mui/icons-material/RemoveRounded'
 import BoltRounded from '@mui/icons-material/BoltRounded'
 import QrCode2Rounded from '@mui/icons-material/QrCode2Rounded'
-import UndoRounded from '@mui/icons-material/UndoRounded'
 import { useQueryClient } from '@tanstack/react-query'
 import { useConfirmSale } from '../hooks'
 import { useRepeatPress } from '../hooks'
@@ -25,7 +24,6 @@ import { isSendablePhone } from '../phone'
 import { voidExpressSale } from '../../../services/posService'
 import { ServiceError } from '../../../services/authService'
 import { formatMoney, amountToCents, centsToAmount } from '../../catalog/types'
-import { TicketWhatsAppButton } from '../../bookings/components/TicketWhatsAppButton'
 import { ExpressTicketOverlay } from './ExpressTicketOverlay'
 import type { PosServiceDetail, PosSlot, Folio } from '../types'
 import { POS_QUERY_KEY } from '../hooks/usePosServices'
@@ -396,18 +394,6 @@ export function ExpressSalePanel({ service, today }: ExpressSalePanelProps) {
             >
               Mostrar QR
             </Button>
-            <TicketWhatsAppButton folio={lastSale.folio} variant="icon" />
-            {inVoidWindow && (
-              <Button
-                size="small"
-                color="error"
-                startIcon={<UndoRounded />}
-                disabled={voiding}
-                onClick={handleVoid}
-              >
-                Deshacer
-              </Button>
-            )}
           </Stack>
         )}
 
@@ -431,6 +417,9 @@ export function ExpressSalePanel({ service, today }: ExpressSalePanelProps) {
         </Button>
       </Box>
 
+      {/* The handoff screen carries the sale's actions too (amended): WhatsApp + Deshacer live
+          next to the QR, so Cobrar lands on ONE surface and "Siguiente venta" returns to the
+          already-reset form. The footer strip keeps only Mostrar QR to re-open it. */}
       <ExpressTicketOverlay
         qrToken={overlayToken}
         serviceName={service.name}
@@ -439,6 +428,10 @@ export function ExpressSalePanel({ service, today }: ExpressSalePanelProps) {
         }
         passes={lastSale ? (saleSlotLine(lastSale.folio)?.quantity ?? seats) : seats}
         total={lastSale?.folio.total ?? total}
+        folio={lastSale?.folio ?? null}
+        inVoidWindow={inVoidWindow}
+        voiding={voiding}
+        onVoid={handleVoid}
         onClose={() => setOverlayToken(null)}
       />
 
