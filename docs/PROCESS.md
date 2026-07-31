@@ -16,11 +16,13 @@ being consulted, which is how the same folio ended up with three different cance
 | **Product** | `docs/SPEC.md` | *What does this product do?* Vision, roles, numbered user stories, Features by Phase, key business rules, glossary |
 | **Feature** | `docs/<domain>/<feature>.spec.md` | *What exactly does this feature do, and what may it not break?* The contract |
 | **Execution** | `docs/<domain>/<feature>.plan.md` | *In what order do I type it?* Phases → tasks with file paths |
-| **Cross-cutting** | `ARCHITECTURE.md` · `TECH_DEBT.md` · `BUGS.md` · `RFCs/` · `ci-cd.md` | Facts that outlive any one feature |
+| **Cross-cutting** | `ARCHITECTURE.md` · `TESTING.md` · `TECH_DEBT.md` · `BUGS.md` · `RFCs/` · `ci-cd.md` | Facts that outlive any one feature |
 | **Not ours** | `docs/integrations/<service>.md` · `.design/design-system/` | Contracts and systems we consume but do not decide |
 
 `ARCHITECTURE.md` holds decisions that bind every feature (the multitenancy isolation model).
-`TECH_DEBT.md` holds what was knowingly deferred. `BUGS.md` holds defects found in shipped code.
+`TESTING.md` holds which layer proves which assertion — and it is the reason a spec can state its
+scope boundary as a mechanical test. `TECH_DEBT.md` holds what was knowingly deferred.
+`BUGS.md` holds defects found in shipped code.
 An `RFC` is for a change of *model* that needs approval before a spec is worth writing
 (`RFCs/rfc-airbnb-inventory-model.md` is the example).
 

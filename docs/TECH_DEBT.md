@@ -2,6 +2,30 @@
 
 This document tracks known technical debt, deferred tasks, and architectural improvements that are planned for future phases.
 
+## 21. The API Contract Is Hand-Mirrored Into the Frontend — ⚠️ OPEN
+
+**Status:** the response shapes the frontend expects live in `app-turistear/src/features/*/types.ts`,
+typed by hand from the API's handlers. Nothing links the two. When an API response gains, renames or
+drops a field, the mirror keeps compiling and the screen quietly renders `undefined` — `tsc` is
+checking the frontend against the frontend.
+
+`docs/TESTING.md` Phase 3 adds MSW handlers, which makes this **slightly worse before it gets
+better**: a handler written from a stale type proves only that the frontend agrees with itself. The
+convention that fixtures are copied from the shapes `api-turistear/test/**` asserts is a discipline,
+not a mechanism — it holds exactly as long as everyone remembers it.
+
+**Why it was not fixed now:** it needs a third workspace package (shared Zod schemas both sides
+validate against) plus a pass over 16 service clients and every `types.ts`. That is a refactor of
+its own, and doing it *inside* the phase that first introduces frontend tests would mean landing two
+large changes with no gate to catch either.
+
+**Action required:**
+- **Who:** whoever next hits a bug where the API changed and the UI silently rendered nothing.
+- **What:** a `packages/contracts` workspace exporting the Zod schemas for every API response; the
+  API validates outbound with them, the frontend infers its types from them, and MSW fixtures are
+  built by `schema.parse(...)` — so a drifted fixture becomes a test failure rather than a fiction.
+- **Reference:** `docs/TESTING.md` § The known gap · `docs/testing/frontend-testing.plan.md` Phase 3.
+
 ## 20. Transactional Emails Are Off the Design System — ⚠️ OPEN
 
 **Status:** every customer-facing email built in `api-turistear/src/services/resend.ts` uses its own
