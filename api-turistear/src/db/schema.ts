@@ -56,6 +56,13 @@ export const organizations = sqliteTable('organizations', {
   agentCancellationEnabled: integer('agent_cancellation_enabled', { mode: 'boolean' })
     .notNull()
     .default(false),
+  // US-A79 (docs/scanner/group-redemption.spec.md, D1) — how a scan consumes a ticket's passes:
+  // 'per_pass' (default — one pass per scan, byte-identical to pre-feature) or 'all_passes' (one
+  // scan boards the whole party). Read from the SCANNING agent's org at scan time (D3), never
+  // from the token — the operator at the gate decides how their gate works.
+  qrRedemptionMode: text('qr_redemption_mode', { enum: ['per_pass', 'all_passes'] })
+    .notNull()
+    .default('per_pass'),
   createdAt: integer('created_at', { mode: 'timestamp' })
     .notNull()
     .default(sql`(unixepoch())`),
@@ -328,6 +335,16 @@ export const folios = sqliteTable('folios', {
   status: text('status', { enum: ['paid', 'booking', 'cancelled'] })
     .notNull()
     .default('paid'),
+  // US-AG45 (docs/pos/express-sale.spec.md, D22) — how the sale was taken. 'express' is the
+  // one-sheet cash walk-up (phone-only, full cash, no cart); everything else is 'standard'.
+  // Reports and the 60-second void key off it.
+  saleMode: text('sale_mode', { enum: ['standard', 'express'] })
+    .notNull()
+    .default('standard'),
+  // US-AG45 (D21) — client-generated replay guard, unique per organization (partial index in
+  // 0057). A confirm that re-sends the same key is a REPLAY: the existing folio is returned and
+  // nothing is decremented or ledgered again.
+  idempotencyKey: text('idempotency_key'),
   // US-LG08 — there is no folio-level payment method. How money was collected lives per-movement in
   // folio_payments; the display method (shared method or 'Mixto') is DERIVED via `displayMethodSql`.
   // US-AG41/US-A67 (docs/payment-verification/payment-verification.spec.md). paymentReference: the transfer's bank ref

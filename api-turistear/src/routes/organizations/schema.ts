@@ -60,6 +60,10 @@ export const updateOrganizationSchema = z.object({
   // US-A73 (D14) — may an agent cancel their own current-shift sale? A single org-level switch;
   // per-agent grants are a permissions system, not this.
   agent_cancellation_enabled: z.boolean().optional(),
+  // US-A79 (docs/scanner/group-redemption.spec.md, D1/D7) — how a scan consumes a ticket's
+  // passes. Admin-only, org-wide, deliberately NOT an agent-facing toggle: a mis-tap would burn a
+  // whole party's passes and nothing in the system can un-redeem one.
+  qr_redemption_mode: z.enum(['per_pass', 'all_passes']).optional(),
 })
 
 export type UpdateOrganizationInput = z.infer<typeof updateOrganizationSchema>

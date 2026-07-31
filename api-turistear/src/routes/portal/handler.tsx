@@ -1,6 +1,7 @@
 import type { Context } from 'hono'
 import { and, desc, eq, isNull } from 'drizzle-orm'
 import { renderSVG } from 'uqr'
+import { TicketCard } from '../ticket/card'
 import { getDb, type Db } from '../../db/client'
 import {
   cancellationRequests,
@@ -34,17 +35,7 @@ const shortId = (id: string): string => id.slice(0, 8).toUpperCase()
 const formatAmount = (cents: number): string =>
   `$${(cents / 100).toLocaleString('es-MX', { minimumFractionDigits: 2 })}`
 
-const formatSlotDate = (slotDate: string): string => {
-  const parsed = Date.parse(`${slotDate}T12:00:00Z`)
-  if (!Number.isFinite(parsed)) return slotDate
-  return new Date(parsed).toLocaleDateString('es-MX', {
-    weekday: 'long',
-    day: 'numeric',
-    month: 'long',
-    year: 'numeric',
-    timeZone: 'UTC',
-  })
-}
+// formatSlotDate moved to ../ticket/card with the shared TicketCard (US-T07 extraction).
 
 // --- Token resolution (Rule 2) -------------------------------------------------
 
@@ -130,6 +121,8 @@ interface PortalLine {
 interface PortalData {
   token: string
   orgName: string
+  // For the QR's URL form (express-sale D9): the on-page QR encodes `${apiBaseUrl}/t/<token>`.
+  apiBaseUrl: string
   folio: {
     id: string
     status: 'paid' | 'booking' | 'cancelled'
@@ -233,29 +226,19 @@ const PortalPage = ({ data }: { data: PortalData }) => {
 
       <section>
         <h2 class="portal-section-title">Itinerario</h2>
+        {/* US-T03 — the boarding-pass card, shared with the /t/:token ticket page (US-T07) so the
+            two surfaces cannot drift. The QR is omitted entirely on a cancelled folio so the page
+            never implies a valid ticket (Rule 3); since express-sale D9 it encodes the /t/<token>
+            URL, so a plain camera resolves to the ticket page while the scanner still redeems. */}
         {data.lines.map((line) => (
-          <article class="portal-card portal-line">
-            <h3>{line.serviceName}</h3>
-            <p>
-              📅 {formatSlotDate(line.slotDate)} — {line.slotStartTime} h
-            </p>
-            {line.zoneName && <p>📍 {line.zoneName}</p>}
-            <p>👥 {line.quantity} {line.quantity === 1 ? 'persona' : 'personas'}</p>
-            {line.description && <p class="portal-muted">{line.description}</p>}
-            {/* US-T03 — the same signed QR the email carries. Omitted entirely on a
-                cancelled folio so the page never implies a valid ticket (Rule 3). */}
-            {!cancelled && line.qrToken && (
-              <div class="portal-qr">
-                <div
-                  role="img"
-                  aria-label={`Código QR — ${line.serviceName}`}
-                  style="width:220px;height:220px"
-                  dangerouslySetInnerHTML={{ __html: qrSvg(line.qrToken) }}
-                />
-                <p class="portal-muted">Presenta este código al llegar</p>
-              </div>
-            )}
-          </article>
+          <TicketCard
+            line={line}
+            qrMarkup={
+              !cancelled && line.qrToken
+                ? qrSvg(`${data.apiBaseUrl}/t/${line.qrToken}`)
+                : null
+            }
+          />
         ))}
       </section>
 
@@ -339,6 +322,7 @@ const loadPortalData = async (
   return {
     token,
     orgName: folio.orgName,
+    apiBaseUrl: '', // overwritten by the caller from c.env (loadPortalData has no env access)
     folio: {
       id: folio.id,
       status: folio.status,
@@ -369,6 +353,8 @@ export const viewPortal = async (c: PortalContext) => {
     c.req.param('token'),
   )
   if (!data) return renderNotFound(c)
+  // express-sale D9 — the page QRs encode the /t/<token> URL form.
+  data.apiBaseUrl = c.env.API_BASE_URL
 
   c.executionCtx.waitUntil(
     db

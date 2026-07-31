@@ -16,6 +16,7 @@ import posRouter from './routes/pos'
 import { sweepExpiredBookings } from './routes/pos/sweep'
 import reportsRouter from './routes/reports'
 import servicesRouter from './routes/services'
+import ticketRouter from './routes/ticket'
 import ticketsRouter from './routes/tickets'
 import type { AppVariables } from './types/context'
 
@@ -63,6 +64,10 @@ app.use(renderer)
 // renderer so c.render is available; outside /api/* so CORS/auth never apply (the
 // folio-scoped token in the URL is the credential).
 app.route('/portal', portalRouter)
+
+// US-T07 — the line-scoped public ticket page a tourist's camera resolves to (the QR encodes
+// `${API_BASE_URL}/t/<qr_token>`, express-sale D9). Same placement rules as the portal.
+app.route('/t', ticketRouter)
 
 app.get('/', (c) => {
   return c.render(<h1>Hello!</h1>)

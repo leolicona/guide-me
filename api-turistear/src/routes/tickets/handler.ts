@@ -1,8 +1,8 @@
 import type { Context } from 'hono'
 import { and, eq, sql } from 'drizzle-orm'
 import { getDb } from '../../db/client'
-import { folioLines, folios } from '../../db/schema'
-import { deriveOrgKey, verifyTicket } from '../../utils/qr'
+import { folioLines, folios, organizations } from '../../db/schema'
+import { deriveOrgKey, stripTicketUrl, verifyTicket } from '../../utils/qr'
 import type { AppVariables } from '../../types/context'
 
 export type TicketsContext = Context<{
@@ -47,7 +47,11 @@ const invalid = (c: TicketsContext, reason: ScanReason, ticket: object | null = 
 export const scanTicket = async (c: TicketsContext) => {
   const agent = c.get('user')
   const org = agent.organizationId
-  const { token } = (await c.req.json()) as { token: string }
+  const { token: scanned } = (await c.req.json()) as { token: string }
+  // express-sale D9 — QRs now encode the `/t/<token>` URL form so a tourist's camera resolves
+  // to their ticket page. Strip the wrapper back to the raw token; a bare pre-feature token
+  // passes through untouched, so every QR already issued keeps scanning.
+  const token = stripTicketUrl(scanned ?? '')
   const db = getDb(c.env)
 
   // 1. VERIFY under the caller-org derived key. A forged/tampered token — or a valid token
@@ -110,10 +114,26 @@ export const scanTicket = async (c: TicketsContext) => {
     return invalid(c, 'EXPIRED', ctx)
   }
 
-  // 5. ATOMIC redeem — one pass, guarded so it can never exceed `quantity`.
+  // US-A79 (docs/scanner/group-redemption.spec.md) — how a scan consumes passes is the SCANNING
+  // org's choice (D3), read live at scan time, never snapshotted onto the ticket (S-5).
+  const [modeRow] = await db
+    .select({ mode: organizations.qrRedemptionMode })
+    .from(organizations)
+    .where(eq(organizations.id, org))
+    .limit(1)
+  const allPasses = modeRow?.mode === 'all_passes'
+
+  // 5. ATOMIC redeem — the SAME single guarded UPDATE in both modes; only the SET expression
+  //    branches (D4). `per_pass` takes one pass; `all_passes` takes everything left (a partially
+  //    redeemed ticket completes, S-3). The `redeemed_count < quantity` guard is identical, so a
+  //    rescan is ALREADY_CONSUMED and a concurrent double-scan admits exactly one winner (S-6).
   const redeemed = await db
     .update(folioLines)
-    .set({ redeemedCount: sql`${folioLines.redeemedCount} + 1` })
+    .set({
+      redeemedCount: allPasses
+        ? sql`${folioLines.quantity}`
+        : sql`${folioLines.redeemedCount} + 1`,
+    })
     .where(
       and(
         eq(folioLines.id, row.id),
@@ -129,8 +149,12 @@ export const scanTicket = async (c: TicketsContext) => {
   }
 
   const newCount = redeemed[0].redeemedCount
+  // D6 — the response branches: a pass ordinal is meaningless when the party redeems as one, so
+  // `all_passes` reports how many THIS scan took (`redeemed_now`) instead of a `pass_number`.
   return c.json({
     result: 'valid' as const,
-    ticket: { ...ctx, redeemed_count: newCount, pass_number: newCount },
+    ticket: allPasses
+      ? { ...ctx, redeemed_count: newCount, redeemed_now: newCount - row.redeemedCount }
+      : { ...ctx, redeemed_count: newCount, pass_number: newCount },
   })
 }
