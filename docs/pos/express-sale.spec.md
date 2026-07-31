@@ -272,13 +272,9 @@ the shared `BottomSheet` markup today; not this feature's job to fix, noted in `
 field clamped `[minimum, base]` · phone field · pinned **Cobrar** footer showing the live total in
 `MoneyText`. On success it swaps the footer for the confirmation strip (D20) and resets.
 
-**`ExpressTicketOverlay`** (new) — the counter-handoff panel, **non-blocking**: docked in the
-**lower half** of the sheet (between the scroll body and the pinned footer), never a modal — a
-backdrop would block exactly the selling loop Express protects. QR at **≥ 280 px**, error level
-**L**, on pure white with a teal top edge marking the handoff zone; the form above stays live, so
-the agent starts the next sale while this customer is still scanning. Auto-hides after ~20 s so it
-is not left exposed to the queue; re-opened by *Mostrar QR*. *(Amended in build from the original
-full-screen design — confirmed with product: the handoff must not interrupt the loop.)*
+**`ExpressTicketOverlay`** (new) — the QR full-bleed at **≥ 280 px**, error level **L**, on pure
+white, with a max-brightness request; auto-hides after ~20 s so it is not left exposed to the queue;
+re-opened by *Mostrar QR*.
 
 **Ticket page** (Worker SSR) — `<TicketCard>` extracted from `PortalPage`'s line `.map` and shared by
 both pages. The ticket page renders **only** that card plus the beacon: no header total, no
@@ -473,10 +469,6 @@ Then `INVALID_SIGNATURE` — the caller-org key derivation is unchanged by this 
   the churn.
 - **S-21's queue count** is derived client-side from the existing paid-list reads (shared query
   cache), not a new endpoint — the delivery axis already travels on the list payloads.
-- **The QR handoff is non-blocking** (product decision post-build): `ExpressTicketOverlay` was
-  first a full-screen Dialog, which held the sheet hostage for up to 20 s per customer — the exact
-  interruption Express exists to remove. It is now a panel docked in the sheet's lower half with
-  the form live above it; sale N+1 starts while customer N is still scanning.
 
 ## Deferred — and why each is safe to defer
 
