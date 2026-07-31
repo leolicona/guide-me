@@ -1,11 +1,12 @@
 import { useEffect } from 'react'
-import { Box, Dialog, Typography, Button, Stack } from '@mui/material'
+import { Box, Typography, IconButton, Stack } from '@mui/material'
+import CloseRounded from '@mui/icons-material/CloseRounded'
 import { QRCodeSVG } from 'qrcode.react'
 import { ticketPageUrl } from '../delivery'
 import { formatMoney } from '../../catalog/types'
 
 interface ExpressTicketOverlayProps {
-  /** The line's signed token; null keeps the overlay closed. */
+  /** The line's signed token; null keeps the panel closed. */
   qrToken: string | null
   serviceName: string
   slotLabel: string // "Hoy · 16:00"
@@ -14,11 +15,15 @@ interface ExpressTicketOverlayProps {
   onClose: () => void
 }
 
-// US-T07 / US-AG45 (D20) — the counter-handoff surface: the QR full-bleed on PURE WHITE at
-// ≥280px / level L (a dense URL-form token scanned off another phone's screen, possibly in
-// direct sun — the design system's first law is the constraint here). Auto-hides after ~20s so
-// the code isn't left exposed to the next customer in the queue; re-opened by "Mostrar QR".
+// US-T07 / US-AG45 (D20, amended in build) — the counter-handoff surface, NON-BLOCKING: a panel
+// docked in the lower half of the express sheet, QR on PURE WHITE at 280px / level L (a dense
+// URL-form token scanned off another phone's screen, possibly in direct sun — the design system's
+// first law is the constraint). The form above stays live, so the agent starts the NEXT sale
+// while this customer is still scanning. Auto-hides after ~20s so the code isn't left exposed to
+// the queue; re-opened by "Mostrar QR". Not a Dialog on purpose: a modal backdrop would block
+// exactly the selling loop Express exists to protect.
 const AUTO_HIDE_MS = 20_000
+const QR_SIZE = 280
 
 export function ExpressTicketOverlay({
   qrToken,
@@ -34,50 +39,47 @@ export function ExpressTicketOverlay({
     return () => clearTimeout(t)
   }, [qrToken, onClose])
 
+  if (!qrToken) return null
+
   return (
-    <Dialog
-      fullScreen
-      open={qrToken !== null}
-      onClose={onClose}
-      // Deliberately NOT the BottomSheet: this is a display surface the customer photographs,
-      // not an editing overlay — maximum area, maximum contrast, zero chrome.
-      slotProps={{ paper: { sx: { bgcolor: '#FFFFFF' } } }}
+    <Box
+      sx={{
+        flexShrink: 0,
+        position: 'relative',
+        // A confident teal top edge marks it as the handoff zone; the surface itself is pure
+        // white for maximum scan contrast — the one place brighter than the sheet around it.
+        borderTop: '2px solid',
+        borderColor: 'secondary.main',
+        bgcolor: '#FFFFFF',
+        px: 3,
+        pt: 1.5,
+        pb: 2,
+        textAlign: 'center',
+      }}
     >
-      <Stack
-        spacing={3}
-        sx={{
-          height: '100%',
-          alignItems: 'center',
-          justifyContent: 'center',
-          px: 3,
-          textAlign: 'center',
-        }}
+      <IconButton
+        size="small"
+        aria-label="Ocultar código QR"
+        onClick={onClose}
+        sx={{ position: 'absolute', top: 6, right: 8 }}
       >
-        <Box>
-          <Typography variant="h5" sx={{ fontWeight: 700 }}>
-            {serviceName}
-          </Typography>
-          <Typography color="text.secondary">
-            {slotLabel} · {passes} {passes === 1 ? 'pase' : 'pases'} ·{' '}
-            <Box component="span" className="numeric">
-              {formatMoney(total)}
-            </Box>
-          </Typography>
-        </Box>
+        <CloseRounded fontSize="small" />
+      </IconButton>
 
-        {qrToken && (
-          <QRCodeSVG value={ticketPageUrl(qrToken)} size={300} level="L" />
-        )}
-
-        <Typography color="text.secondary">
-          El cliente escanea este código con la cámara de su teléfono
-          <br />y su boleto queda entregado.
+      <Stack spacing={1} sx={{ alignItems: 'center' }}>
+        <Typography variant="body2" color="text.secondary">
+          {serviceName} · {slotLabel} · {passes} {passes === 1 ? 'pase' : 'pases'} ·{' '}
+          <Box component="span" className="numeric" sx={{ fontWeight: 700 }}>
+            {formatMoney(total)}
+          </Box>
         </Typography>
 
-        <Button variant="outlined" size="large" onClick={onClose} sx={{ minWidth: 200 }}>
-          Listo
-        </Button>
+        <QRCodeSVG value={ticketPageUrl(qrToken)} size={QR_SIZE} level="L" />
+
+        <Typography variant="caption" color="text.secondary">
+          El cliente escanea con la cámara de su teléfono — su boleto queda entregado.
+        </Typography>
       </Stack>
-    </Dialog>
+    </Box>
   )
 }

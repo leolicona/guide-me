@@ -378,6 +378,20 @@ export function ExpressSalePanel({ service, today }: ExpressSalePanelProps) {
         </Stack>
       </Box>
 
+      {/* ── The counter-handoff panel — docked in the LOWER HALF, non-blocking (D20 amended):
+          the form above stays live so the agent starts the next sale while this customer is
+          still scanning. The footer below keeps Cobrar reachable throughout. ── */}
+      <ExpressTicketOverlay
+        qrToken={overlayToken}
+        serviceName={service.name}
+        slotLabel={
+          lastSale ? `Hoy · ${saleSlotLine(lastSale.folio)?.slot_start_time ?? ''}` : 'Hoy'
+        }
+        passes={lastSale ? (saleSlotLine(lastSale.folio)?.quantity ?? seats) : seats}
+        total={lastSale?.folio.total ?? total}
+        onClose={() => setOverlayToken(null)}
+      />
+
       {/* ── Pinned footer: the confirmation strip (last sale) + Cobrar ── */}
       <Box sx={{ px: 3, py: 2, borderTop: '1px solid', borderColor: 'divider', flexShrink: 0 }}>
         {lastSale && (
@@ -430,17 +444,6 @@ export function ExpressSalePanel({ service, today }: ExpressSalePanelProps) {
                   : 'Revisa el precio'}
         </Button>
       </Box>
-
-      <ExpressTicketOverlay
-        qrToken={overlayToken}
-        serviceName={service.name}
-        slotLabel={
-          lastSale ? `Hoy · ${saleSlotLine(lastSale.folio)?.slot_start_time ?? ''}` : 'Hoy'
-        }
-        passes={lastSale ? (saleSlotLine(lastSale.folio)?.quantity ?? seats) : seats}
-        total={lastSale?.folio.total ?? total}
-        onClose={() => setOverlayToken(null)}
-      />
 
       <Snackbar
         open={notice !== null}
