@@ -1,6 +1,6 @@
 # Feature: Group Redemption — one scan boards the whole party
 
-**User stories:** **US-AG48** (one scan redeems every pass on the ticket), **US-A79** (the admin
+**User stories:** **US-AG48** (one scan redeems every pass on the ticket), **US-A81** (the admin
 chooses the mode). Registered in `docs/SPEC.md`. **Phase:** 2 (Core Enhancements) · **agent + admin.**
 
 **Builds on:** *Online QR Scanner* (`docs/scanner/online-qr-scanner.spec.md`, US-AG15/AG17/AG19) —
@@ -69,7 +69,7 @@ There is no way for an operator to say which of these two worlds they run in.
 ### Migration `0057_express_sale.sql` (shared)
 
 ```sql
--- US-A79 (D1) — how a scan consumes a ticket's passes. Existing orgs keep today's behaviour.
+-- US-A81 (D1) — how a scan consumes a ticket's passes. Existing orgs keep today's behaviour.
 ALTER TABLE `organizations` ADD COLUMN `qr_redemption_mode` text NOT NULL DEFAULT 'per_pass';
 ```
 
@@ -202,7 +202,7 @@ When both requests execute
 Then exactly one returns `valid` with `redeemed_count = 4` and the other returns
 `ALREADY_CONSUMED`; `redeemed_count` never exceeds `quantity`.
 
-### US-A79 — the admin chooses the mode
+### US-A81 — the admin chooses the mode
 
 **S-7 — An admin flips the mode**
 Given an admin on `/settings`
@@ -243,7 +243,7 @@ Then `404` — never `403`, which would confirm it exists.
 - [x] `test/tickets/online-qr-scanner.test.ts` and `test/qr/folio-qr-signing.test.ts` pass **unedited**
 - [x] `ScanResult` copy branch; `SettingsPage` control with the D8 help text
 - [x] `pnpm build:app` and `pnpm lint:app` clean; API suite 689/689
-- [x] `SPEC.md`: US-AG48, US-A79; one Features-by-Phase line; glossary — *Group redemption*
+- [x] `SPEC.md`: US-AG48, US-A81; one Features-by-Phase line; glossary — *Group redemption*
 
 ---
 

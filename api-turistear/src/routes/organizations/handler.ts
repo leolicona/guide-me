@@ -77,7 +77,7 @@ const serializeOrg = (o: {
   // Parsed rather than passed through raw so a corrupted row can never reach the client as junk.
   cancellation_policy: parseCancellationPolicy(o.cancellationPolicy),
   agent_cancellation_enabled: o.agentCancellationEnabled,
-  // US-A79 (docs/scanner/group-redemption.spec.md) — how a scan consumes a ticket's passes.
+  // US-A81 (docs/scanner/group-redemption.spec.md) — how a scan consumes a ticket's passes.
   qr_redemption_mode: o.qrRedemptionMode,
 })
 
@@ -176,7 +176,7 @@ export const updateMyOrganization = async (c: OrganizationsContext) => {
       : null
   if (input.agent_cancellation_enabled !== undefined)
     updates.agentCancellationEnabled = input.agent_cancellation_enabled
-  // US-A79 — the scan-consumption mode (group-redemption D1); enum-validated in the schema.
+  // US-A81 — the scan-consumption mode (group-redemption D1); enum-validated in the schema.
   if (input.qr_redemption_mode !== undefined)
     updates.qrRedemptionMode = input.qr_redemption_mode
 

@@ -3,7 +3,7 @@ import { env, SELF } from 'cloudflare:test'
 import { seedUser, seedTwoOrgs, clearTenancyDb } from '../helpers/tenancy'
 import { buildFakeJwt } from '../helpers/jwt'
 
-// Group Redemption — US-AG48 (one scan boards the whole party) + US-A79 (the admin picks the
+// Group Redemption — US-AG48 (one scan boards the whole party) + US-A81 (the admin picks the
 // mode). Spec: docs/scanner/group-redemption.spec.md (S-1..S-10). `per_pass` stays byte-identical
 // to pre-feature behaviour — that scope boundary is held by online-qr-scanner.test.ts unedited.
 
@@ -176,7 +176,7 @@ describe('US-AG48 — one scan boards the whole party', () => {
   })
 })
 
-describe('US-A79 — the admin picks the mode', () => {
+describe('US-A81 — the admin picks the mode', () => {
   it('S-7 — an admin flips the mode through the settings endpoint', async () => {
     const { organizationId } = await seedUser({ email: ADMIN_EMAIL, role: 'admin' })
 

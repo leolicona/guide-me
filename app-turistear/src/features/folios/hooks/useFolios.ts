@@ -40,7 +40,7 @@ export const usePendingVerificationCount = (enabled: boolean) =>
     select: (folios) => folios.length,
   })
 
-// US-A78 (express-sale D23) — the pending-delivery queue count: PAID folios whose tickets were
+// US-A80 (express-sale D23) — the pending-delivery queue count: PAID folios whose tickets were
 // never sent nor seen. Shares the paid-list cache with FoliosListPage; counted client-side off
 // the delivery axis (a folio leaves the queue the moment a tourist's camera-scan fires the
 // /t beacon or a seller taps WhatsApp).
@@ -50,6 +50,30 @@ export const usePendingDeliveryCount = (enabled: boolean) =>
     queryFn: () => listFolios({ status: 'paid' }),
     enabled,
     select: (folios) => folios.filter((f) => deliveryState(f) === 'pending').length,
+  })
+
+// US-A78 (docs/oversight/pending-work-queues.spec.md) — refunds still owed. The server orders
+// them OLDEST FIRST: the count alone is not the signal, the age of the debt is.
+export const usePendingRefunds = () => useFolios({ refundStatus: 'pending' })
+
+export const usePendingRefundCount = (enabled: boolean) =>
+  useQuery({
+    queryKey: [...FOLIOS_KEY, { refundStatus: 'pending' }] as const,
+    queryFn: () => listFolios({ refundStatus: 'pending' }),
+    enabled,
+    select: (folios) => folios.length,
+  })
+
+// US-A79 — apartados past their settle deadline, most overdue first. Derived server-side from
+// `booking_expires_at`, never stored (apartado-stages S7).
+export const useOverdueBookings = () => useFolios({ overdue: true })
+
+export const useOverdueBookingCount = (enabled: boolean) =>
+  useQuery({
+    queryKey: [...FOLIOS_KEY, { overdue: true }] as const,
+    queryFn: () => listFolios({ overdue: true }),
+    enabled,
+    select: (folios) => folios.length,
   })
 
 // US-A21 — one folio's detail.

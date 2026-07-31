@@ -15,7 +15,7 @@ CREATE UNIQUE INDEX folios_idempotency_key_idx
   ON folios (organization_id, idempotency_key)
   WHERE idempotency_key IS NOT NULL;
 
--- US-A79 (D1) — how a scan consumes a ticket's passes: one per scan (default,
+-- US-A81 (D1) — how a scan consumes a ticket's passes: one per scan (default,
 -- byte-identical to today) or the whole party at once. Read from the SCANNING
 -- agent's org at scan time, never snapshotted onto the ticket.
 ALTER TABLE organizations

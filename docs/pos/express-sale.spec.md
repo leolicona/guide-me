@@ -1,7 +1,7 @@
 # Feature: Express Sale — a cash walk-up closed in one sheet, with the ticket handed over the counter
 
 **User stories:** **US-AG45** (the express sheet), **US-AG46** (the reset loop), **US-AG47** (60-second void),
-**US-T07** (the tourist scans the QR and gets their ticket), **US-A78** (pending-delivery queue).
+**US-T07** (the tourist scans the QR and gets their ticket), **US-A80** (pending-delivery queue).
 Registered in `docs/SPEC.md`. **Phase:** 2 (Core Enhancements) · **agent + B2C surface.**
 
 **Builds on:** *Fast Sale via Bottom Sheet* (`docs/pos/fast-sale-bottom-sheet.spec.md`, US-AG31/AG32) —
@@ -13,7 +13,7 @@ the sheet this feature adds a second body to · *Reactive Date & Time Matrix*
 shell and `qrSvg()` reused by the ticket page · *WhatsApp QR Ticket Delivery*
 (`docs/whatsapp-qr-delivery/whatsapp-qr-delivery.spec.md`) — the delivery axis this feature feeds.
 
-**Sibling:** *Group Redemption* (`docs/scanner/group-redemption.spec.md`, US-AG48/US-A79) — one scan
+**Sibling:** *Group Redemption* (`docs/scanner/group-redemption.spec.md`, US-AG48/US-A81) — one scan
 boards a whole party. Independent of this feature, but the two are why a family of four becomes
 **one** QR, **one** scan.
 
@@ -410,7 +410,7 @@ Given one QR rendered as the raw token (pre-feature, sitting in an inbox) and on
 When each is scanned at `POST /api/tickets/scan`
 Then both verify and redeem identically.
 
-### US-A78 — the pending-delivery queue
+### US-A80 — the pending-delivery queue
 
 **S-21 — An unscanned sale is visible to both audiences**
 Given an Express sale whose customer never scanned
@@ -449,7 +449,7 @@ Then `INVALID_SIGNATURE` — the caller-org key derivation is unchanged by this 
       amendment note below), `ExpressSalePanel`, `ExpressTicketOverlay`, shared `<TicketCard>`,
       delivery-queue surfaces
 - [x] `pnpm build:app` and `pnpm lint:app` clean; API suite 689/689
-- [x] `SPEC.md`: US-AG45/AG46/AG47, US-T07, US-A78 under their roles; one Features-by-Phase line;
+- [x] `SPEC.md`: US-AG45/AG46/AG47, US-T07, US-A80 under their roles; one Features-by-Phase line;
       glossary — *Venta Express*, *Ticket page (`/t/`)*, *Void*
 
 ---

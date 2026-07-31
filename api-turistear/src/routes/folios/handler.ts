@@ -1,6 +1,6 @@
 import type { Context } from 'hono'
 import type { BatchItem } from 'drizzle-orm/batch'
-import { and, asc, desc, eq, ne, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, isNotNull, lt, ne, sql } from 'drizzle-orm'
 import { getDb, type Db } from '../../db/client'
 import {
   accommodationReservations,
@@ -248,6 +248,11 @@ export const listFolios = async (c: FoliosContext) => {
   const agentQ = c.req.query('agent_id')
   // US-A67 — the "Por verificar" queue filters to electronic payments awaiting an admin.
   const verificationQ = c.req.query('verification')
+  // US-A78/A79 (docs/oversight/pending-work-queues.spec.md) — the two work queues. Both are pure
+  // WHERE clauses over existing columns: no stored "overdue" state, because a stored stage needs a
+  // writer and a cron that writes state drifts from the clock that defines it (apartado-stages S7).
+  const refundStatusQ = c.req.query('refund_status')
+  const overdueQ = c.req.query('overdue')
 
   const filters = [eq(folios.organizationId, org)]
   if (statusQ === 'paid' || statusQ === 'booking' || statusQ === 'cancelled') {
@@ -269,6 +274,30 @@ export const listFolios = async (c: FoliosContext) => {
     )
   }
   if (agentQ) filters.push(eq(folios.agentId, agentQ))
+
+  // US-A78 — refunds still owed. Ordered OLDEST FIRST (spec Q5): the count alone is not the signal,
+  // the age of the debt is. Unknown values fall through to "no filter", matching `status` above.
+  const wantsPendingRefunds = refundStatusQ === 'pending'
+  if (wantsPendingRefunds || refundStatusQ === 'none' || refundStatusQ === 'refunded') {
+    filters.push(eq(folios.refundStatus, refundStatusQ))
+  }
+  // US-A79 — apartados past their settle deadline. DERIVED here, never stored.
+  const wantsOverdue = overdueQ === 'true'
+  if (wantsOverdue) {
+    filters.push(
+      eq(folios.status, 'booking'),
+      isNotNull(folios.bookingExpiresAt),
+      lt(folios.bookingExpiresAt, new Date()),
+    )
+  }
+
+  // Each queue reads by its own clock: the refund debt by how long it has been owed, the expired
+  // hold by how long it has been sitting on seats. Everything else keeps the newest-first list.
+  const order = wantsPendingRefunds
+    ? asc(folios.cancelledAt)
+    : wantsOverdue
+      ? asc(folios.bookingExpiresAt)
+      : desc(folios.createdAt)
 
   const rows = await db
     .select({
@@ -294,12 +323,16 @@ export const listFolios = async (c: FoliosContext) => {
       paymentReference: folios.paymentReference,
       paymentVerification: folios.paymentVerification,
       operatorName: affiliateOperators.name,
+      // US-A78 — the debt itself. The lean row never carried these, so the pending-refunds queue
+      // could not show what is owed without a second read per folio.
+      refundStatus: folios.refundStatus,
+      refundAmount: folios.refundAmount,
     })
     .from(folios)
     .innerJoin(users, eq(folios.agentId, users.id))
     .leftJoin(affiliateOperators, eq(folios.operatorId, affiliateOperators.id))
     .where(and(...filters))
-    .orderBy(desc(folios.createdAt))
+    .orderBy(order)
 
   return c.json({
     folios: rows.map((r) => ({
@@ -329,6 +362,9 @@ export const listFolios = async (c: FoliosContext) => {
       tickets_viewed_at: tsOrNull(r.ticketsViewedAt),
       // US-A68 — the affiliate shift operator who took the sale (null ⇒ sold directly).
       operator_name: r.operatorName ?? null,
+      // US-A78 — 'pending' = cancelled, money owed, nobody confirmed the hand-back.
+      refund_status: r.refundStatus,
+      refund_amount: r.refundAmount,
     })),
   })
 }

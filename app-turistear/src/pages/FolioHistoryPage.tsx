@@ -37,7 +37,7 @@ const DATE_FMT: Intl.DateTimeFormatOptions = {
   minute: '2-digit',
 }
 
-// US-A78 — 'undelivered' is a client-side view over the loaded list: folios still
+// US-A80 — 'undelivered' is a client-side view over the loaded list: folios still
 // `● Pendiente de enviar` on the delivery axis (paid, portal link issued, never sent/seen).
 type Filter = 'all' | FolioStatus | 'undelivered'
 
@@ -49,7 +49,7 @@ export default function FolioHistoryPage() {
   const { data: rows, isLoading, isError } = useMyFolios(
     filter === 'all' || filter === 'undelivered' ? {} : { status: filter },
   )
-  // US-A78 — the pending-delivery queue: what the existing one-tap WhatsApp is for.
+  // US-A80 — the pending-delivery queue: what the existing one-tap WhatsApp is for.
   const folios =
     filter === 'undelivered'
       ? rows?.filter((f) => deliveryState(f) === 'pending')

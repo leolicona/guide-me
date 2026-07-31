@@ -13,7 +13,7 @@ export function useMyFolios(filters: MyFolioFilters = {}) {
   })
 }
 
-// US-A78 (express-sale D23) — the seller's own pending-delivery count, surfaced on the Ventas
+// US-A80 (express-sale D23) — the seller's own pending-delivery count, surfaced on the Ventas
 // nav badge. Shares the paid-list cache with the history page; a folio leaves the count the
 // moment the tourist's camera-scan fires the /t beacon or the seller taps WhatsApp.
 export function usePendingDeliveryCount(enabled: boolean) {

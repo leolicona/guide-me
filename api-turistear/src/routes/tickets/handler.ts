@@ -114,7 +114,7 @@ export const scanTicket = async (c: TicketsContext) => {
     return invalid(c, 'EXPIRED', ctx)
   }
 
-  // US-A79 (docs/scanner/group-redemption.spec.md) — how a scan consumes passes is the SCANNING
+  // US-A81 (docs/scanner/group-redemption.spec.md) — how a scan consumes passes is the SCANNING
   // org's choice (D3), read live at scan time, never snapshotted onto the ticket (S-5).
   const [modeRow] = await db
     .select({ mode: organizations.qrRedemptionMode })

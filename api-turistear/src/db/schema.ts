@@ -56,7 +56,7 @@ export const organizations = sqliteTable('organizations', {
   agentCancellationEnabled: integer('agent_cancellation_enabled', { mode: 'boolean' })
     .notNull()
     .default(false),
-  // US-A79 (docs/scanner/group-redemption.spec.md, D1) — how a scan consumes a ticket's passes:
+  // US-A81 (docs/scanner/group-redemption.spec.md, D1) — how a scan consumes a ticket's passes:
   // 'per_pass' (default — one pass per scan, byte-identical to pre-feature) or 'all_passes' (one
   // scan boards the whole party). Read from the SCANNING agent's org at scan time (D3), never
   // from the token — the operator at the gate decides how their gate works.

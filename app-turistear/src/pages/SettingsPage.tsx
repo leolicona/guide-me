@@ -605,7 +605,7 @@ export default function SettingsPage() {
           </CardContent>
         </Card>
 
-        {/* US-A79 (group-redemption) — how a scan consumes un boleto's passes. Commits on tap
+        {/* US-A81 (group-redemption) — how a scan consumes un boleto's passes. Commits on tap
             (no dirty tracking): a two-value org-wide choice whose trade-off the copy states
             explicitly (D8) — the admin is trading an accurate boarded-count for speed, and
             nothing in the system can un-redeem a pass. */}

@@ -92,7 +92,7 @@ export function AppLayout() {
   // US-UX06 — agent cash drops awaiting confirmation, surfaced on the admin's Caja destination.
   // Admins only; the admin's own (self-authorized) drops never count.
   const { data: pendingDropCount = 0 } = usePendingDropCount(user.role === 'admin')
-  // US-A78 — the seller's paid folios whose tickets never reached the customer, surfaced on the
+  // US-A80 — the seller's paid folios whose tickets never reached the customer, surfaced on the
   // agent/affiliate Ventas destination ("Sin entregar" filter clears them).
   const { data: pendingDeliveryCount = 0 } = usePendingDeliveryCount(user.role !== 'admin')
 
