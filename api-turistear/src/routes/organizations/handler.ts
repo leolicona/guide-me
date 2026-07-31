@@ -31,6 +31,7 @@ const orgColumns = {
   timezone: organizations.timezone,
   cancellationPolicy: organizations.cancellationPolicy,
   agentCancellationEnabled: organizations.agentCancellationEnabled,
+  qrRedemptionMode: organizations.qrRedemptionMode,
 } as const
 
 const serializeOrg = (o: {
@@ -50,6 +51,7 @@ const serializeOrg = (o: {
   timezone: string
   cancellationPolicy: string | null
   agentCancellationEnabled: boolean
+  qrRedemptionMode: 'per_pass' | 'all_passes'
 }) => ({
   id: o.id,
   name: o.name,
@@ -75,6 +77,8 @@ const serializeOrg = (o: {
   // Parsed rather than passed through raw so a corrupted row can never reach the client as junk.
   cancellation_policy: parseCancellationPolicy(o.cancellationPolicy),
   agent_cancellation_enabled: o.agentCancellationEnabled,
+  // US-A81 (docs/scanner/group-redemption.spec.md) — how a scan consumes a ticket's passes.
+  qr_redemption_mode: o.qrRedemptionMode,
 })
 
 export const getMyOrganization = async (c: OrganizationsContext) => {
@@ -172,6 +176,9 @@ export const updateMyOrganization = async (c: OrganizationsContext) => {
       : null
   if (input.agent_cancellation_enabled !== undefined)
     updates.agentCancellationEnabled = input.agent_cancellation_enabled
+  // US-A81 — the scan-consumption mode (group-redemption D1); enum-validated in the schema.
+  if (input.qr_redemption_mode !== undefined)
+    updates.qrRedemptionMode = input.qr_redemption_mode
 
   await db
     .update(organizations)

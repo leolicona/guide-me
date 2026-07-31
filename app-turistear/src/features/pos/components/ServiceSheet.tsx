@@ -9,6 +9,7 @@ import CloseRounded from '@mui/icons-material/CloseRounded'
 import { usePosService } from '../hooks'
 import { usePosFilters } from '../../../store/posFilters'
 import { ServiceSelectionPanel } from './ServiceSelectionPanel'
+import { ExpressSalePanel } from './ExpressSalePanel'
 import { todayStr, addDays } from '../dates'
 import { useMyOrganization } from '../../organization'
 
@@ -19,6 +20,9 @@ interface ServiceSheetProps {
    * window). With no explicit date pick, the sheet opens its 3-day window here so the service's
    * upcoming schedule shows immediately. `null` (no in-window availability) falls back to today. */
   nextSlotDate?: string | null
+  /** US-AG45 (D1) — ⚡ Venta Express: same sheet, second body. Express is same-day ONLY and
+   * IGNORES the catalog's selected date (D5 — the customer is standing at the counter). */
+  express?: boolean
   onClose: () => void
   /** Bubbled up from the panel after a line is staged — the catalog closes + snackbars. */
   onAdded: () => void
@@ -31,6 +35,7 @@ interface ServiceSheetProps {
 export function ServiceSheet({
   serviceId,
   nextSlotDate,
+  express = false,
   onClose,
   onAdded,
 }: ServiceSheetProps) {
@@ -44,9 +49,13 @@ export function ServiceSheet({
   const { data: org } = useMyOrganization()
   const today = todayStr(org?.timezone) // US-A66 — org-local "today"
   const start = anchor ?? nextSlotDate ?? today
-  const days = anchor
-    ? [anchor]
-    : [start, addDays(start, 1), addDays(start, 2)]
+  // US-AG45 (D5) — Express is TODAY only, whatever the catalog is filtered to: a walk-up at the
+  // counter must never be sold a ticket for the day the agent happened to be browsing.
+  const days = express
+    ? [today]
+    : anchor
+      ? [anchor]
+      : [start, addDays(start, 1), addDays(start, 2)]
   const range = { from: days[0], to: days[days.length - 1] }
   const {
     data: service,
@@ -115,14 +124,17 @@ export function ServiceSheet({
         </Box>
       )}
 
-      {service && (
-        <ServiceSelectionPanel
-          service={service}
-          days={days}
-          today={today}
-          onAdded={onAdded}
-        />
-      )}
+      {service &&
+        (express ? (
+          <ExpressSalePanel service={service} today={today} />
+        ) : (
+          <ServiceSelectionPanel
+            service={service}
+            days={days}
+            today={today}
+            onAdded={onAdded}
+          />
+        ))}
     </SwipeableDrawer>
   )
 }

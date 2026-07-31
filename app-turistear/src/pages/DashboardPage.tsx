@@ -4,11 +4,13 @@ import { Link as RouterLink } from 'react-router-dom'
 import type { SvgIconComponent } from '@mui/icons-material'
 import EventBusyRounded from '@mui/icons-material/EventBusyRounded'
 import AccountBalanceWalletRounded from '@mui/icons-material/AccountBalanceWalletRounded'
+import SendRounded from '@mui/icons-material/SendRounded'
 import PaymentsRounded from '@mui/icons-material/PaymentsRounded'
 import HourglassBottomRounded from '@mui/icons-material/HourglassBottomRounded'
 import { useCurrentUser } from '../features/auth/CurrentUserContext'
 import {
   usePendingCancellationCount,
+  usePendingDeliveryCount,
   usePendingRefundCount,
   useOverdueBookingCount,
 } from '../features/folios/hooks'
@@ -77,6 +79,8 @@ export default function DashboardPage() {
   // US-A78/A79 — the two work queues that had no surface at all before this feature.
   const { data: pendingRefundCount = 0 } = usePendingRefundCount(true)
   const { data: overdueBookingCount = 0 } = useOverdueBookingCount(true)
+  // US-A80 — paid folios whose tickets never reached the customer (no scan, no WhatsApp).
+  const { data: pendingDeliveryCount = 0 } = usePendingDeliveryCount(true)
 
   return (
     <Fade in timeout={400}>
@@ -129,6 +133,16 @@ export default function DashboardPage() {
             pendingHint="Sin liquidar, en Ventas"
             emptyHint="Sin apartados vencidos"
             to={`${ROUTES.FOLIOS}?tab=overdue`}
+          />
+          {/* US-A80 — the pending-delivery queue: a customer who walked away without scanning
+              still gets their ticket (the one-tap WhatsApp in Ventas clears it). */}
+          <QueueCard
+            icon={SendRounded}
+            count={pendingDeliveryCount}
+            title="Boletos"
+            pendingHint="Boletos sin entregar en Ventas"
+            emptyHint="Todos los boletos entregados"
+            to={ROUTES.FOLIOS}
           />
         </Stack>
       </Box>

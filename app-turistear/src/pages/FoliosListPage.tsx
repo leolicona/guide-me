@@ -40,6 +40,7 @@ import {
 } from '../features/bookings'
 import { MoneyText } from '../components'
 import { ROUTES } from '../config/routes'
+import { deliveryState } from '../features/pos/delivery'
 
 const DATE_FMT: Intl.DateTimeFormatOptions = {
   year: 'numeric',
@@ -49,15 +50,22 @@ const DATE_FMT: Intl.DateTimeFormatOptions = {
   minute: '2-digit',
 }
 
-type Filter = 'all' | FolioStatus
+// US-A80 — 'undelivered' is a client-side view over the loaded list: folios still
+// `● Pendiente de enviar` on the delivery axis (paid, portal link issued, never sent/seen).
+type Filter = 'all' | FolioStatus | 'undelivered'
 
 // The browse-and-cancel list (US-A21), unchanged — now one tab of the Folios screen.
 function FoliosTab() {
   const formatDate = useOrgDateFormatter(DATE_FMT) // US-A66 — org-local audit timestamps
   const [filter, setFilter] = useState<Filter>('all')
-  const { data: folios, isLoading, isError } = useFolios(
-    filter === 'all' ? {} : { status: filter },
+  const { data: rows, isLoading, isError } = useFolios(
+    filter === 'all' || filter === 'undelivered' ? {} : { status: filter },
   )
+  // US-A80 — the pending-delivery queue: what the existing one-tap WhatsApp is for.
+  const folios =
+    filter === 'undelivered'
+      ? rows?.filter((f) => deliveryState(f) === 'pending')
+      : rows
 
   return (
     <Box>
@@ -72,6 +80,7 @@ function FoliosTab() {
           <ToggleButton value="paid">Pagado</ToggleButton>
           <ToggleButton value="booking">Reservas</ToggleButton>
           <ToggleButton value="cancelled">Cancelado</ToggleButton>
+          <ToggleButton value="undelivered">Sin entregar</ToggleButton>
         </ToggleButtonGroup>
 
         {isLoading && (
