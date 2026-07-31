@@ -6,6 +6,73 @@ Tracks confirmed bugs, root causes, and fixes. Each entry is immutable once clos
 
 ---
 
+## BUG-022 — A Submitting Sheet's Button Loses Its Accessible Name — ⚠️ OPEN
+
+**Discovered:** 2026-07-31
+**Reporter:** the frontend test harness — axe, `docs/testing/frontend-testing.plan.md` Phase 4
+**Affected component:** `app-turistear/src/components/FormSheet.tsx:66-68`,
+`app-turistear/src/components/ConfirmSheet.tsx:64-66`
+**Severity:** Low–Medium — transient (only while a mutation is in flight), but axe rates
+`button-name` **critical**, and it lands at the exact moment a screen-reader user needs to know
+what is happening.
+
+### Symptom
+
+While `busy`, both sheets render `{busy ? <CircularProgress /> : label}` — the label is *replaced*,
+not supplemented. The control becomes a `<button>` with no text at all, and the spinner is an
+unnamed `role="progressbar"`. axe reports two violations: `button-name` (critical) and
+`aria-progressbar-name`.
+
+Testing Library cannot find the control by name at all during submit, which is how it surfaced.
+
+### Root Cause
+
+The spinner was treated as a visual state swap. For a sighted user it is, because the button's
+position and disabled styling carry the meaning; for a screen-reader user the entire label
+disappears, and a disabled unnamed button announces as nothing useful.
+
+### Fix
+
+Not yet applied (the test phase deliberately changes no product code). Keep the label mounted and
+let the spinner sit beside it — or keep the swap but add `aria-label={submitLabel}` to the button
+and `aria-label` / `aria-labelledby` to the progress indicator, plus `aria-busy` on the button.
+`src/test/axe.ts` exports `BUSY_SHEET_KNOWN_ISSUES` tolerating exactly these two rule ids; delete
+that entry to verify the fix.
+
+---
+
+## BUG-021 — Every Bottom Sheet Is an Unnamed Dialog — ⚠️ OPEN
+
+**Discovered:** 2026-07-31
+**Reporter:** the frontend test harness — axe, `docs/testing/frontend-testing.plan.md` Phase 4
+**Affected component:** `app-turistear/src/components/BottomSheet.tsx`
+**Severity:** Medium — `BottomSheet` is the canonical overlay, so this affects **every** sheet in
+the product: settle, cancel, cash drop, every FormSheet and ConfirmSheet, the POS day picker.
+
+### Symptom
+
+The sheet's paper carries `role="dialog"` + `aria-modal="true"` with no accessible name. A screen
+reader announces "dialog" and nothing else, even though the sheet always has a visible title
+directly beneath. axe: `aria-dialog-name`, impact **serious**.
+
+### Root Cause
+
+`BottomSheet` accepts `header` as an opaque `ReactNode` and never relates it to the dialog element.
+`FormSheet` and `ConfirmSheet` both pass a `<Typography variant="h6">` title through that slot — so
+the name exists on screen, it is simply never wired to the role that needs it.
+
+### Fix
+
+Not yet applied (the test phase deliberately changes no product code). Give `BottomSheet` an
+optional `title`/`aria-label`, or generate an id for the header node and set
+`slotProps.paper['aria-labelledby']`. `FormSheet` and `ConfirmSheet` already receive the title as a
+string, so they can forward it with no API change at the call sites.
+
+`src/test/axe.ts` exports `SHEET_KNOWN_ISSUES` tolerating exactly this rule id in the sheet tests;
+every other axe rule stays live. Deleting that entry is how the fix gets verified.
+
+---
+
 ## BUG-020 — A Ticket WhatsApp Link Is Built for Phone Numbers That Cannot Be Dialled — ⚠️ OPEN
 
 **Discovered:** 2026-07-31
