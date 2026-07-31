@@ -78,6 +78,15 @@ export function ScanResult({ result }: ScanResultProps) {
               Pase {t.pass_number} de {t.passes_total} utilizado
             </Typography>
           )}
+
+          {/* US-AG48 (group-redemption D6) — an all-passes scan boards the whole party in one
+              go; a pass ordinal would be meaningless, so the copy states the count and closure. */}
+          {isValid && t?.redeemed_now != null && t?.passes_total != null && (
+            <Typography variant="h5" sx={{ mt: 1 }}>
+              {t.passes_total} {t.passes_total === 1 ? 'pase utilizado' : 'pases utilizados'} ·
+              grupo completo
+            </Typography>
+          )}
         </Stack>
       </CardContent>
     </Card>

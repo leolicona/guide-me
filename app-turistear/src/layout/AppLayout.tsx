@@ -20,6 +20,7 @@ import ReceiptLongRounded from '@mui/icons-material/ReceiptLongRounded'
 import TodayRounded from '@mui/icons-material/TodayRounded'
 import { useCurrentUser } from '../features/auth/CurrentUserContext'
 import { usePendingAckCount, usePendingDropCount } from '../features/cash/hooks'
+import { usePendingDeliveryCount } from '../features/pos/hooks'
 import { usePendingCancellationCount, usePendingVerificationCount } from '../features/folios/hooks'
 import { ROUTES } from '../config/routes'
 import { AccountMenu } from './AccountMenu'
@@ -91,6 +92,9 @@ export function AppLayout() {
   // US-UX06 — agent cash drops awaiting confirmation, surfaced on the admin's Caja destination.
   // Admins only; the admin's own (self-authorized) drops never count.
   const { data: pendingDropCount = 0 } = usePendingDropCount(user.role === 'admin')
+  // US-A78 — the seller's paid folios whose tickets never reached the customer, surfaced on the
+  // agent/affiliate Ventas destination ("Sin entregar" filter clears them).
+  const { data: pendingDeliveryCount = 0 } = usePendingDeliveryCount(user.role !== 'admin')
 
   // US-UX01 — both roles land on their first daily action; the monogram links there too.
   const landingRoute = user.role === 'admin' ? ROUTES.DASHBOARD : ROUTES.POS
@@ -114,6 +118,7 @@ export function AppLayout() {
     if (to === ROUTES.BALANCE) return pendingAckCount
     if (to === ROUTES.FOLIOS) return pendingCancellationCount + pendingVerificationCount
     if (to === ROUTES.CASH) return pendingDropCount
+    if (to === ROUTES.HISTORY) return pendingDeliveryCount
     return 0
   }
 

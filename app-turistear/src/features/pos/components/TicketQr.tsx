@@ -1,5 +1,6 @@
 import { Box, Card, CardContent, Typography, Stack, Chip } from '@mui/material'
 import { QRCodeSVG } from 'qrcode.react'
+import { ticketPageUrl } from '../delivery'
 import type { FolioLine } from '../types'
 
 interface TicketQrProps {
@@ -35,7 +36,8 @@ export function TicketQr({ line }: TicketQrProps) {
                   lineHeight: 0,
                 }}
               >
-                <QRCodeSVG value={line.qr_token} size={176} level="M" />
+                {/* US-T07 (D9) — the URL form: a tourist's camera lands on /t/<token>. */}
+                <QRCodeSVG value={ticketPageUrl(line.qr_token)} size={176} level="M" />
               </Box>
               <Chip
                 size="small"

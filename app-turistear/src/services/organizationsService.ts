@@ -35,6 +35,9 @@ export interface MyOrganization {
   // US-A73 — may an agent cancel their own current-shift sale? The endpoint that honours this is
   // not built yet, so nothing reads it in the UI.
   agent_cancellation_enabled: boolean
+  // US-A79 (group-redemption) — how a scan consumes a ticket's passes: one per scan (default) or
+  // the whole party at once. Read live at scan time from the SCANNING org.
+  qr_redemption_mode: 'per_pass' | 'all_passes'
 }
 
 export const getMyOrganization = async (): Promise<MyOrganization> => {
@@ -61,6 +64,9 @@ export interface UpdateOrganizationInput {
   // partially stored). `null` clears it and returns cancellations to their pre-feature behaviour.
   cancellation_policy?: CancellationPolicy | null
   agent_cancellation_enabled?: boolean
+  // US-A79 — admin-only, org-wide, deliberately not an agent-facing toggle (D7: nothing can
+  // un-redeem a pass).
+  qr_redemption_mode?: 'per_pass' | 'all_passes'
 }
 
 // US-A46 — admin updates the org booking policy.

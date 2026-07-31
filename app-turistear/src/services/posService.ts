@@ -45,6 +45,12 @@ export type ConfirmLineInput = ConfirmSlotLineInput | ConfirmStayLineInput
 export type PaymentMethod = 'cash' | 'card' | 'transfer' | 'link'
 
 export interface ConfirmSaleInput {
+  /** US-AG45 — 'express' is the ⚡ one-sheet cash walk-up (one slot line, no extras, full cash,
+   *  phone-only). Omitted/'standard' keeps every existing rule, including the required name. */
+  sale_mode?: 'standard' | 'express'
+  /** US-AG45 (D21) — client-generated replay guard: a double-tap or a retry over bad signal
+   *  re-sends the same key and gets the SAME folio back instead of selling twice. */
+  idempotency_key?: string
   customer_name?: string | null
   customer_email?: string | null
   customer_phone?: string | null
@@ -125,6 +131,19 @@ export const confirmSale = async (data: ConfirmSaleInput): Promise<Folio> => {
   })
   return res.folio
 }
+
+// US-AG47 — void the seller's OWN Express sale inside the 60-second window (undelivered,
+// unscanned): seats released, payment + commission ledger rows fully reversed, refund recorded
+// as handed back on the spot. 409 VOID_WINDOW_CLOSED once any guard fails.
+export interface VoidExpressResult {
+  id: string
+  status: 'cancelled'
+  refund_amount: number
+  released_seats: number
+}
+
+export const voidExpressSale = async (id: string): Promise<VoidExpressResult> =>
+  request<VoidExpressResult>(`/api/pos/folios/${id}/void`, { method: 'POST' })
 
 // What cancelling this folio RIGHT NOW would cost. The server computes it with the same function
 // the cancel endpoint uses, so the figure shown before confirming is the figure that gets written.

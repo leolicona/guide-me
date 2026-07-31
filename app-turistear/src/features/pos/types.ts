@@ -24,6 +24,10 @@ export interface PosTourCard {
   has_availability: boolean
   /** Earliest active slot date inside the availability window, or null when none. */
   next_slot_date: string | null
+  /** US-AG45 (D4) — the ⚡ Venta Express renders only when true: slot-based, non-zoned, with a
+   * sellable departure TODAY (today-anchored regardless of the selected window — D5). The server
+   * re-enforces at confirm (EXPRESS_NOT_ELIGIBLE). */
+  express_eligible: boolean
 }
 
 /** v2 (D14) — a lodging UNIT-TYPE card: the parent property is never a card; each active type

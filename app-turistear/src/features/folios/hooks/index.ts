@@ -4,6 +4,7 @@ export {
   useCancelFolio,
   useCancellationRequests,
   usePendingCancellationCount,
+  usePendingDeliveryCount,
   usePendingVerificationFolios,
   usePendingVerificationCount,
   useApproveCancellationRequest,

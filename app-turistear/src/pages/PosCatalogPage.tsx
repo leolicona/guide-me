@@ -20,6 +20,7 @@ import {
 import { filterChipSx, filterStripSx } from '../features/filters'
 import { MoneyText } from '../components'
 import ShoppingCartRounded from '@mui/icons-material/ShoppingCartRounded'
+import BoltRounded from '@mui/icons-material/BoltRounded'
 import CalendarMonthRounded from '@mui/icons-material/CalendarMonthRounded'
 import TuneRounded from '@mui/icons-material/TuneRounded'
 import { usePosServices } from '../features/pos/hooks'
@@ -130,6 +131,8 @@ export default function PosCatalogPage() {
   } | null>(null)
   // US-AG36 (v2) — a unit-type card opens the type-centric stay sheet instead of the slot sheet.
   const [openLodging, setOpenLodging] = useState<LodgingStayTarget | null>(null)
+  // US-AG45 — the ⚡ opens the SAME sheet in express mode (today-only, phone-only, cash).
+  const [expressServiceId, setExpressServiceId] = useState<string | null>(null)
   const [added, setAdded] = useState(false)
   // US-AG35 — the calendar Bottom Sheet (single-day or range picker) toggles off this state.
   const [datePickerOpen, setDatePickerOpen] = useState(false)
@@ -219,7 +222,29 @@ export default function PosCatalogPage() {
                 return (
                 // Structure-first: the theme gives the card its hairline border + 16px radius
                 // and no resting shadow — readable in any light (replaces the old soft-shadow).
-                <Card key={item.id}>
+                <Card key={item.id} sx={{ position: 'relative' }}>
+                  {/* US-AG45 (D2) — the ⚡ Venta Express entry point. An absolutely-positioned
+                      SIBLING of the CardActionArea, never a child (a button inside a button is
+                      the classic nesting/a11y fault); renders only where Express can work
+                      (slot-based, non-zoned, sellable today — server-computed D4 flag). */}
+                  {item.item_type === 'tour' && item.express_eligible && (
+                    <IconButton
+                      aria-label={`Venta Express — ${item.name}`}
+                      color="secondary"
+                      onClick={() => setExpressServiceId(item.id)}
+                      sx={{
+                        position: 'absolute',
+                        top: 8,
+                        right: 8,
+                        zIndex: 1,
+                        border: '1px solid',
+                        borderColor: 'grey.300',
+                        bgcolor: 'background.paper',
+                      }}
+                    >
+                      <BoltRounded fontSize="small" />
+                    </IconButton>
+                  )}
                   <CardActionArea
                     onClick={() =>
                       item.item_type === 'unit_type'
@@ -416,6 +441,15 @@ export default function PosCatalogPage() {
           setOpenService(null)
           setAdded(true)
         }}
+      />
+
+      {/* US-AG45 — the same sheet in ⚡ express mode. It stays open across sales (the reset
+          loop lives inside the panel); closing it is the agent's own gesture. */}
+      <ServiceSheet
+        serviceId={expressServiceId}
+        express
+        onClose={() => setExpressServiceId(null)}
+        onAdded={() => {}}
       />
 
       {/* US-AG36 (v2) — type-centric stay sheet (calendar + guests + rooms). */}

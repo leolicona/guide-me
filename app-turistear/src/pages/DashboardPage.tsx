@@ -4,8 +4,12 @@ import { Link as RouterLink } from 'react-router-dom'
 import type { SvgIconComponent } from '@mui/icons-material'
 import EventBusyRounded from '@mui/icons-material/EventBusyRounded'
 import AccountBalanceWalletRounded from '@mui/icons-material/AccountBalanceWalletRounded'
+import SendRounded from '@mui/icons-material/SendRounded'
 import { useCurrentUser } from '../features/auth/CurrentUserContext'
-import { usePendingCancellationCount } from '../features/folios/hooks'
+import {
+  usePendingCancellationCount,
+  usePendingDeliveryCount,
+} from '../features/folios/hooks'
 import { usePendingDropCount } from '../features/cash/hooks'
 import { ROUTES } from '../config/routes'
 
@@ -67,6 +71,8 @@ export default function DashboardPage() {
   // Admin-only route, so both feeds are always enabled here.
   const { data: pendingCancellationCount = 0 } = usePendingCancellationCount(true)
   const { data: pendingDropCount = 0 } = usePendingDropCount(true)
+  // US-A78 — paid folios whose tickets never reached the customer (no scan, no WhatsApp).
+  const { data: pendingDeliveryCount = 0 } = usePendingDeliveryCount(true)
 
   return (
     <Fade in timeout={400}>
@@ -94,6 +100,16 @@ export default function DashboardPage() {
             pendingHint="Entregas de efectivo por confirmar en Caja"
             emptyHint="Sin entregas por confirmar"
             to={ROUTES.CASH}
+          />
+          {/* US-A78 — the pending-delivery queue: a customer who walked away without scanning
+              still gets their ticket (the one-tap WhatsApp in Ventas clears it). */}
+          <QueueCard
+            icon={SendRounded}
+            count={pendingDeliveryCount}
+            title="Boletos"
+            pendingHint="Boletos sin entregar en Ventas"
+            emptyHint="Todos los boletos entregados"
+            to={ROUTES.FOLIOS}
           />
         </Stack>
       </Box>

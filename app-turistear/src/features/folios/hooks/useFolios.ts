@@ -8,6 +8,7 @@ import {
   listFolios,
   rejectCancellationRequest,
 } from '../../../services/foliosService'
+import { deliveryState } from '../../pos/delivery'
 import type {
   ApproveCancellationRequestInput,
   CancellationRequestStatus,
@@ -37,6 +38,18 @@ export const usePendingVerificationCount = (enabled: boolean) =>
     queryFn: () => listFolios({ verification: 'pending' }),
     enabled,
     select: (folios) => folios.length,
+  })
+
+// US-A78 (express-sale D23) — the pending-delivery queue count: PAID folios whose tickets were
+// never sent nor seen. Shares the paid-list cache with FoliosListPage; counted client-side off
+// the delivery axis (a folio leaves the queue the moment a tourist's camera-scan fires the
+// /t beacon or a seller taps WhatsApp).
+export const usePendingDeliveryCount = (enabled: boolean) =>
+  useQuery({
+    queryKey: [...FOLIOS_KEY, { status: 'paid' }] as const,
+    queryFn: () => listFolios({ status: 'paid' }),
+    enabled,
+    select: (folios) => folios.filter((f) => deliveryState(f) === 'pending').length,
   })
 
 // US-A21 — one folio's detail.

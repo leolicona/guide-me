@@ -21,6 +21,7 @@ import {
 } from '@mui/material'
 import SavingsRounded from '@mui/icons-material/SavingsRounded'
 import StorefrontRounded from '@mui/icons-material/StorefrontRounded'
+import QrCodeScannerRounded from '@mui/icons-material/QrCodeScannerRounded'
 import HotelRounded from '@mui/icons-material/HotelRounded'
 import WhatsAppIcon from '@mui/icons-material/WhatsApp'
 import {
@@ -601,6 +602,40 @@ export default function SettingsPage() {
               }
               sx={{ alignItems: 'flex-start', mx: 0 }}
             />
+          </CardContent>
+        </Card>
+
+        {/* US-A79 (group-redemption) — how a scan consumes un boleto's passes. Commits on tap
+            (no dirty tracking): a two-value org-wide choice whose trade-off the copy states
+            explicitly (D8) — the admin is trading an accurate boarded-count for speed, and
+            nothing in the system can un-redeem a pass. */}
+        <Card sx={{ mt: 3 }}>
+          <CardContent>
+            <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center', mb: 1 }}>
+              <QrCodeScannerRounded color="primary" />
+              <Typography variant="h6">Escáner de acceso</Typography>
+            </Stack>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+              Cómo consume los pases un escaneo de QR.
+            </Typography>
+            <ToggleButtonGroup
+              exclusive
+              fullWidth
+              value={org?.qr_redemption_mode ?? 'per_pass'}
+              onChange={(_, value: 'per_pass' | 'all_passes' | null) => {
+                if (value && value !== org?.qr_redemption_mode) {
+                  update.mutate({ qr_redemption_mode: value }, { onSuccess: () => setSaved(true) })
+                }
+              }}
+              aria-label="Modo de redención del QR"
+            >
+              <ToggleButton value="per_pass">Un pase por escaneo</ToggleButton>
+              <ToggleButton value="all_passes">Todos los pases a la vez</ToggleButton>
+            </ToggleButtonGroup>
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
+              «Todos a la vez» agiliza el abordaje de grupos (una familia = un escaneo), a cambio
+              de perder el conteo exacto de cuántos abordaron — y un escaneo no se puede deshacer.
+            </Typography>
           </CardContent>
         </Card>
 
