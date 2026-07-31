@@ -6,6 +6,74 @@ Tracks confirmed bugs, root causes, and fixes. Each entry is immutable once clos
 
 ---
 
+## BUG-018 — A Single Mis-Scan Makes a Ticket Permanently Non-Refundable, and Nothing Can Un-Redeem It — ⚠️ OPEN
+
+**Discovered:** 2026-07-31
+**Reporter:** Claude Code (found while specifying Express Sale / Group Redemption)
+**Affected component:** `api-turistear/src/routes/tickets/handler.ts:113-124` (`scanTicket`),
+`api-turistear/src/utils/cancellationPolicy.ts` (D7 — the redeemed-line rule)
+**Severity:** Medium — rare, but silent, irreversible, and it costs the customer money. No error,
+no log, no admin override; the refund simply stops being owed.
+
+### Symptom
+
+An agent scans a QR at the wrong moment — the wrong departure, a customer who then does not travel,
+a stray tap while re-arming the camera. From that instant the folio line is treated as **travelled**:
+if the customer later cancels, the refund quote returns **0** no matter how far from departure they
+are, and no path in the product can put it back.
+
+Reproducible: sell a tour departing in five days under a ladder whose 120-hour tier refunds 100 %,
+scan one pass by accident, then request cancellation. Before the scan the quote is a full refund;
+after it, nothing.
+
+### Root Cause
+
+Two correct decisions that combine into an unrecoverable state.
+
+1. **`redeemed_count` is increment-only.** `scanTicket` is the only writer:
+
+   ```ts
+   .set({ redeemedCount: sql`${folioLines.redeemedCount} + 1` })
+   .where(and(…, sql`${folioLines.redeemedCount} < ${folioLines.quantity}`))
+   ```
+
+   There is **no** decrement anywhere in the codebase — no un-redeem endpoint, no admin override,
+   no compensating path. A grep for writes to `redeemedCount` returns this one statement, the
+   schema default, and read-only selects.
+
+2. **The ladder treats any redemption as full consumption.** `computeCancellationRefund` skips the
+   tier evaluation for a line with `redeemedCount > 0` and retains its full total
+   (`cancellation-policy-engine.spec.md` D7). That is right for a passenger who travelled — you do
+   not refund a trip that was taken. It fires identically on `redeemedCount = 1` of 10.
+
+So the threshold for "this line is spent" is **one** pass, and the state that crosses it is
+**write-once**. The customer's refund is destroyed by an agent's slip, and the only remedy today is
+the admin's `override_note` path on `POST /api/folios/:id/refund/confirm` — which records a refund
+that the quote says is zero, i.e. an out-of-band correction, not a fix.
+
+### Impact and scope
+
+- Predates every current feature; not introduced by Express Sale or Group Redemption.
+- **Group redemption (`all_passes`, US-A79) does not create this bug but sharpens it:** the ladder
+  already fires at the first pass, so refundability is lost either way — but a mis-scan under
+  `all_passes` also burns the whole party's boarding rights in one tap, where `per_pass` burns one.
+  This is called out in `docs/scanner/group-redemption.spec.md` § Open.
+- Money is only lost when the customer subsequently cancels, so the incident and the loss are
+  separated in time and nobody connects them.
+
+### Proposed fix (not yet decided)
+
+Smallest change that closes it: an **admin-only** `POST /api/tickets/:folioLineId/unredeem` taking a
+required audit note, decrementing (or zeroing) `redeemed_count`, tenant-scoped like every other
+admin folio route. It needs a product decision first — **who may forgive a boarding**, and whether
+the correction is visible on the folio history — so it is recorded here rather than specified.
+
+A cheaper mitigation, if the endpoint is judged too much: a **confirmation step in the scanner** when
+`quantity > 1`, which reduces the accident rate without making the state recoverable. It does not
+close the bug.
+
+---
+
 ## BUG-017 — Any Idle Gap Longer Than 15 Minutes Forces a Full Re-Login — ✅ FIXED
 
 **Discovered:** 2026-07-30
