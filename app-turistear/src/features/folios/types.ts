@@ -41,6 +41,9 @@ export interface FolioListItem {
   payment_verification?: PaymentVerification
   // US-A68 — the affiliate shift operator who took the sale; null if sold directly.
   operator_name?: string | null
+  // US-A78 — the debt. 'pending' = cancelled, money owed, nobody confirmed the hand-back.
+  refund_status?: RefundStatus
+  refund_amount?: number
 }
 
 export interface FolioLineExtra {
@@ -126,6 +129,10 @@ export interface FolioFilters {
   agentId?: string
   // US-A67 — the "Por verificar" queue filters to electronic payments awaiting an admin.
   verification?: PaymentVerification
+  // US-A78 — refunds still owed, oldest first.
+  refundStatus?: RefundStatus
+  // US-A79 — apartados past `booking_expires_at`. Derived server-side, never stored.
+  overdue?: boolean
 }
 
 // --- Tourist cancellation requests + refund tracking (US-T04/T05, US-A23) ---
