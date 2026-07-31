@@ -2,6 +2,26 @@
 
 This document tracks known technical debt, deferred tasks, and architectural improvements that are planned for future phases.
 
+## 19. Auth Specs Exist Twice — ⚠️ OPEN (documentation debt)
+
+**Status:** `api-turistear/specs/auth/` holds five Spanish-language auth specs that predate the
+`docs/` convention (`docs/PROCESS.md`). Four have English counterparts in `docs/auth/`; the folder
+now carries a README saying it is not a spec location, and its dangling reference to a
+`docs/auth/user-story-admin-registration.md` that never existed has been repointed at `docs/SPEC.md`.
+
+**Why it was not simply deleted:** two of the five are not pure duplicates.
+- `auth/agent-magic-link.spec.md` is the **only copy** — passwordless agent login by email *or*
+  WhatsApp, 7 scenarios. It has no counterpart in `docs/auth/` and **no story in `SPEC.md`**, so it
+  may describe a path that was designed and never built. Deleting it would drop the only record.
+- `auth/agent-invitation.spec.md` is **16 lines longer** than `docs/auth/agent-invitation.spec.md`.
+  The difference has not been read; it may be translation slack or it may be a scenario.
+
+**Action required:**
+- **Who:** whoever next touches auth.
+- **What:** diff the two `agent-invitation` specs and fold anything real into `docs/auth/`; decide
+  whether agent magic-link login is a live requirement (→ story in `SPEC.md` + spec in `docs/auth/`)
+  or dead (→ delete). Then remove `api-turistear/specs/` entirely.
+
 ## 18. Accommodation Stays — Error Codes & `folio_lines` Rebuild — ✅ INTRODUCED & CONSUMED (no open debt)
 
 **Status:** The accommodation/lodging feature (`docs/lodging/accommodation-stays.spec.md`) added three

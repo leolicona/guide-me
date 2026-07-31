@@ -2,7 +2,7 @@ import { env } from 'cloudflare:test'
 import { describe, it, expect, beforeEach } from 'vitest'
 import { seedUser, seedFolioLedgerRows } from '../helpers/tenancy'
 
-// US-LG01 (docs/paid-ledger/spec.md) — the folio_payments ledger and its reconciliation invariant.
+// US-LG01 (docs/paid-ledger/paid-ledger.spec.md) — the folio_payments ledger and its reconciliation invariant.
 //
 // The Step-1 backfill migration (0049) ran historically against folios.payment_method, which US-LG08
 // (0051) has since DROPPED — so it can no longer be re-run against the current schema, and its

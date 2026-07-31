@@ -39,7 +39,7 @@ the shift in progress without ever changing the true balance. With **no confirme
 US-AG14 (register a cash drop / hand-in), US-AG23 (auto-deduct commissions), US-AG24 (card sales credit), US-AG25 (payment methods), US-A19 (admin confirms cash drops), US-A25 (payouts for negative balances), US-A26 (clawbacks on cancellation).
 
 > **This feature REPLACES the daily cash-closure model.** It supersedes and removes
-> `docs/cash-drawer/cash-drawer.spec.md` (now deprecated): the `cash_drawers` /
+> the former `docs/cash-drawer/cash-drawer.spec.md` (deleted with this feature): the `cash_drawers` /
 > `cash_drawer_expenses` tables, the `/api/cash-drawers` router, its tests, and the agent
 > **Caja** + admin **Closures** UI. The migration assumes **no production cash-drawer data
 > to preserve** (the daily-closure feature shipped immediately before this pivot).

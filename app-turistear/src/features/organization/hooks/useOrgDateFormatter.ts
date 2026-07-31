@@ -1,6 +1,6 @@
 import { useMyOrganization } from './useMyOrganization'
 
-// US-A66 (docs/timezone/spec.md) — a date/time formatter bound to the ORG's time zone, so audit
+// US-A66 (docs/timezone/timezone.spec.md) — a date/time formatter bound to the ORG's time zone, so audit
 // timestamps (folio created, payment, cash move, reminder sent) read the same for every viewer
 // regardless of their device zone. Returns a `(unixSeconds) => string` with `opts` baked in, a
 // drop-in for the per-page module-level `formatDate` helpers it replaces.

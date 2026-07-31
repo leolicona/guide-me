@@ -30,7 +30,7 @@ type AffiliatesContext = Context<{
 
 const INVITATION_TTL_SECONDS = 60 * 60 * 24 * 7 // 7 days
 
-// One-manager invariant (docs/affiliate-operators/spec.md, D13): a company has AT MOST ONE
+// One-manager invariant (docs/affiliate-operators/affiliate-operators.spec.md, D13): a company has AT MOST ONE
 // credentialed `affiliate` seat — the manager / "Hotel Cashier". Additional sellers are modeled as
 // PIN operators (US-AF10), not extra logins, so the hotel keeps a single caja (US-A68). A "seat" is
 // an accepted affiliate user OR a still-pending invitation. Throws 409 when one already exists.

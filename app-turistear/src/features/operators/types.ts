@@ -1,4 +1,4 @@
-// US-AF10–AF13 / US-OP01–OP02 — affiliate shift operators (docs/affiliate-operators/spec.md).
+// US-AF10–AF13 / US-OP01–OP02 — affiliate shift operators (docs/affiliate-operators/affiliate-operators.spec.md).
 
 export type OperatorStatus = 'active' | 'removed'
 

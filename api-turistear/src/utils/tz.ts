@@ -1,4 +1,4 @@
-// Organization time-zone helpers (docs/timezone/spec.md — US-A66). The org's single IANA zone is
+// Organization time-zone helpers (docs/timezone/timezone.spec.md — US-A66). The org's single IANA zone is
 // the clock all wall-clock scheduling resolves against, replacing the naive-UTC arithmetic that
 // WAS BUG-007 (a slot stored "19:00" compared as 19:00 UTC). Cloudflare Workers ship
 // `Intl.DateTimeFormat` with `timeZone` support, so no date library is needed.

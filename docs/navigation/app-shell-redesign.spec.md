@@ -55,7 +55,7 @@ same thing.
 |---|---|
 | Top-bar removal, rail/bottom-bar restructure, account surface (desktop popover + mobile chip/sheet), shared-vocabulary label sweep, CTA verb sweep, role-based landing, interim Hoy, Caja badge, Configuración entry point | **This feature** |
 | Route-guard widening for POS/scanner, admin commission, self-authorized cash, the **Tu caja** block | *Admin Vendor Capabilities* feature |
-| The real Hoy content (occupancy US-A14/15, day's sales US-A16, agent snapshot US-AG26) | *Daily Operations Dashboard* (`docs/dashboard/occupancy-dashboard.spec.md`) — Phase 2 |
+| The real Hoy content (occupancy US-A14/15, day's sales US-A16, agent snapshot US-AG26) | *Daily Operations Dashboard* (spec not written yet) — Phase 2 |
 | Reportes screens (US-A17/18/20) and the Configuración screen body (ack window US-A29) | *Reports* / *Config* features — this feature only adds their **menu entry points** |
 | Merging duplicate list/detail page pairs into role-aware components | Phase 3 cleanup (IA plan §4 frontend item 6) |
 | Any change to the balance derivation, folio data, or API business logic | **Out of scope** — this is a pure shell/IA feature |

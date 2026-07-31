@@ -1,5 +1,5 @@
 // Server-side phone normalization — mirrors app-turistear/src/features/pos/phone.ts (D7 of
-// docs/affiliate-operators/spec.md). We store operator phones in a canonical wa.me-ready form so
+// docs/affiliate-operators/affiliate-operators.spec.md). We store operator phones in a canonical wa.me-ready form so
 // the active-phone-uniqueness constraint compares apples to apples and the WhatsApp link is exact.
 // Default country code is +52 (Mexico): a bare 10-digit local number gets 52 prepended; a longer
 // number is assumed to already carry its country code.

@@ -54,6 +54,21 @@ Additional directories:
 - `src/types/` — TypeScript interfaces for data models
 - `src/bindings.d.ts` — Cloudflare env binding type declarations
 
+## Documentation — spec-driven development
+
+This repo is spec-driven. `docs/SPEC.md` is the index of the product: every shipped capability has
+a numbered user story there **and** a line in *Features by Phase* linking to its feature spec.
+
+Before adding a feature, read **`docs/PROCESS.md`** — it defines the four documentation layers,
+the naming/ID/migration rules, the seven steps, and the required sections of a spec. Start a new
+spec from `docs/_templates/feature.spec.md`.
+
+Two rules worth repeating here, because breaking them is how the index rotted before:
+- A feature's `SPEC.md` registration (stories + Features-by-Phase line + glossary terms) ships in
+  **the feature's own PR**, not "later".
+- A `docs/…md` path written in `SPEC.md` means the file exists. A feature with no spec yet reads
+  **"spec not written yet"**.
+
 ## Multitenancy
 
 When implementing any tenant-scoped route or migration, follow the data isolation rules in `docs/ARCHITECTURE.md` (§ Multitenancy — Data Isolation Model). Full scenarios and Definition of Done: `docs/multitenancy/multitenancy.spec.md`.

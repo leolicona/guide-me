@@ -1,4 +1,4 @@
--- WhatsApp ticket delivery tracking (docs/whatsapp-qr-delivery/spec.md — D4). A delivery axis on
+-- WhatsApp ticket delivery tracking (docs/whatsapp-qr-delivery/whatsapp-qr-delivery.spec.md — D4). A delivery axis on
 -- the folio, separate from payment status:
 --   tickets_sent_at / tickets_sent_by — the agent tapped "Enviar por WhatsApp" (their metric,
 --     cleared once they act; idempotent last-write-wins, D13).

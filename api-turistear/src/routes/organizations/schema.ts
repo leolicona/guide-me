@@ -1,7 +1,7 @@
 import { z } from 'zod'
 import { cancellationPolicySchema } from '../../utils/cancellationPolicy'
 
-// US-A66 (docs/timezone/spec.md — D3/D5) — the curated set of IANA zones an admin may pick, one
+// US-A66 (docs/timezone/timezone.spec.md — D3/D5) — the curated set of IANA zones an admin may pick, one
 // human label per mainland-Mexico offset. IANA (not a raw offset) so DST + multi-zone resolve
 // automatically — incl. the northern border strip that still observes US DST. The FIRST entry is
 // the app-wide default (D4). If non-Mexico operators ever onboard, widen this to a searchable list.

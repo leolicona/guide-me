@@ -4,7 +4,7 @@ import { seedUser, seedTwoOrgs, clearTenancyDb } from '../helpers/tenancy'
 import { buildFakeJwt } from '../helpers/jwt'
 
 // US-AG41 / US-A67 — record a transfer reference + admin verification before QR release.
-// Spec: docs/payment-verification/spec.md. The suite clock is frozen (see apply-migrations.ts); a
+// Spec: docs/payment-verification/payment-verification.spec.md. The suite clock is frozen (see apply-migrations.ts); a
 // slot 3 days out is always sellable, so cutoff never interferes.
 
 const AGENT_EMAIL = 'agent@empresa.com'

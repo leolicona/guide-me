@@ -1,4 +1,4 @@
--- US-AG41 / US-A67 (docs/payment-verification/spec.md) — record an electronic payment's bank
+-- US-AG41 / US-A67 (docs/payment-verification/payment-verification.spec.md) — record an electronic payment's bank
 -- reference, and gate ticket (QR) release behind an admin verification of that money.
 --
 -- payment_reference: the transfer's bank reference (free text; null for cash). If a folio takes two

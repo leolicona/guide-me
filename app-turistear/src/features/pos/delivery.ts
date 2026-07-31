@@ -1,4 +1,4 @@
-// WhatsApp ticket delivery — the client half (docs/whatsapp-qr-delivery/spec.md). Derives the
+// WhatsApp ticket delivery — the client half (docs/whatsapp-qr-delivery/whatsapp-qr-delivery.spec.md). Derives the
 // delivery state (Pendiente → Enviado → Visto), holds the default message templates + placeholder
 // engine, and builds the wa.me deep link the agent taps to send the portal link.
 

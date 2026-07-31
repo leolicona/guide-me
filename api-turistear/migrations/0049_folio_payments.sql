@@ -1,4 +1,4 @@
--- US-LG01 (docs/paid-ledger/spec.md) — per-payment money-movement ledger. One SIGNED row per
+-- US-LG01 (docs/paid-ledger/paid-ledger.spec.md) — per-payment money-movement ledger. One SIGNED row per
 -- movement on a folio (payment/refund/commission/commission_reversal). ADDITIVE: a new table + a
 -- one-time backfill; no existing column is touched. Nothing reads this table yet — Step 1 is a
 -- verified shadow of the folio money scalars. Later steps make it the cash engine's source of truth.

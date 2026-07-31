@@ -104,9 +104,9 @@ conservative — it is a trap that happens to look generous.
   `cancelFolio`, `applyCancellation`, `cancellation_clawback` (US-A26).
 - **Tourist portal** (`docs/tourist-portal/tourist-self-service-portal.spec.md`) —
   `approveCancellationRequest`, the refund PIN, `confirmRefund` (audit-only).
-- **Paid ledger** (`docs/paid-ledger/spec.md`) — `folio_payments`, `buildCancellationReversal`
+- **Paid ledger** (`docs/paid-ledger/paid-ledger.spec.md`) — `folio_payments`, `buildCancellationReversal`
   (`utils/folioPayments.ts:132`), decision **D6** (reversal is written at cancellation).
-- **Organization timezone** (`docs/timezone/spec.md`) — `utils/tz.ts` (`naiveEpoch`, `orgToday`).
+- **Organization timezone** (`docs/timezone/timezone.spec.md`) — `utils/tz.ts` (`naiveEpoch`, `orgToday`).
 - **Bookings & down payments** (`docs/bookings/`) — `booking_min_down_payment_pct`, and the
   current rule that a booking deposit is non-refundable (US-AG07.4).
 - **Service-based commission** (`docs/commissions/service-based-commission.spec.md`) —
