@@ -183,12 +183,22 @@ function FoliosTab() {
 
 // US-A78/A79 — Hoy's queue cards deep-link here. Without carrying the target tab the card would
 // drop the admin on tab 0, which is not the list they tapped.
+//
+// The `?tab=` param IS the state — it is not merely read once to seed it. Seeding `useState` from
+// the URL was the first cut and it drifted: React Router keeps this component MOUNTED when only
+// the query string changes (the route path `/folios` is unchanged), so the initializer never ran
+// again. Arriving from the Hoy card and then tapping "Ventas" in the nav left the URL saying
+// `/folios` while the page still showed Reembolsos — and a reload of that same URL showed Folios.
+// One address, three different screens, decided by history. Deriving it removes the copy that
+// could disagree, and the URL becomes shareable and reload-stable for free.
 const TAB_KEYS = ['folios', 'verify', 'requests', 'refunds', 'overdue'] as const
 
 export default function FoliosListPage() {
-  const [searchParams] = useSearchParams()
-  const initialTab = Math.max(0, TAB_KEYS.indexOf(searchParams.get('tab') as never))
-  const [tab, setTab] = useState(initialTab)
+  const [searchParams, setSearchParams] = useSearchParams()
+  const tab = Math.max(0, TAB_KEYS.indexOf(searchParams.get('tab') as never))
+  // `replace` so switching tabs does not stack history entries the back button has to walk out of.
+  const setTab = (next: number) =>
+    setSearchParams(next === 0 ? {} : { tab: TAB_KEYS[next] }, { replace: true })
   // US-T04 (D7) — pending tourists' cancellation requests surface as a badge so the
   // queue can't be missed without polluting the main list.
   const { data: pendingCount = 0 } = usePendingCancellationCount(true)
