@@ -3,7 +3,7 @@ import { env, SELF } from 'cloudflare:test'
 import { seedUser, seedTwoOrgs, clearTenancyDb } from '../helpers/tenancy'
 import { buildFakeJwt } from '../helpers/jwt'
 
-// US-LG02/LG03/LG07 (docs/paid-ledger/spec.md) — Step 2: DUAL-WRITE the money engine onto the
+// US-LG02/LG03/LG07 (docs/paid-ledger/paid-ledger.spec.md) — Step 2: DUAL-WRITE the money engine onto the
 // folio_payments ledger while the folio scalars stay authoritative. The ledger is a VERIFIED
 // SHADOW; the reconciliation invariant it must uphold after EVERY money operation is:
 //   Σ(payment + refund).amount   == folios.amount_paid

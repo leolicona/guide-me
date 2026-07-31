@@ -6,7 +6,7 @@ A system administrator registers in Turistear Ya! to create their organization. 
 
 **User Stories:** US-A01, US-A02  
 **Endpoints:** `POST /api/auth/register`, `GET /api/auth/verify?token=xxx`  
-**Full Reference:** `docs/auth/user-story-admin-registration.md`
+**Full Reference:** `docs/SPEC.md` (US-A01–US-A04)
 
 ---
 

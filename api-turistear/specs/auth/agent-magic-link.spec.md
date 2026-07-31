@@ -6,7 +6,7 @@ Los agentes de ventas no usan contraseña. Para iniciar sesión solicitan un mag
 
 **User Stories:** US-AG02  
 **Endpoints:** `POST /api/auth/magic-link`, `GET /api/auth/verify?token=xxx`  
-**Referencia completa:** `docs/auth/user-story-admin-registration.md`
+**Referencia completa:** `docs/SPEC.md` (US-A01–US-A04) + `docs/auth/`
 
 ---
 

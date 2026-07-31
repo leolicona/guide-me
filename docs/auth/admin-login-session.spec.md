@@ -6,7 +6,7 @@ Both administrators and sales agents access the platform using their email and p
 
 **User Stories:** US-A03, US-AG02  
 **Endpoints:** `POST /api/auth/login`, `POST /api/auth/refresh`, `POST /api/auth/logout`  
-**Full Reference:** `docs/auth/user-story-admin-registration.md`
+**Full Reference:** `docs/SPEC.md` (US-A01–US-A04)
 
 ---
 

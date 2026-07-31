@@ -3,7 +3,7 @@ import { env, SELF } from 'cloudflare:test'
 import { seedUser, clearTenancyDb } from '../helpers/tenancy'
 import { buildFakeJwt } from '../helpers/jwt'
 
-// US-LG03 (docs/paid-ledger/spec.md) — Step 3: settling a balance captures ITS OWN payment method,
+// US-LG03 (docs/paid-ledger/paid-ledger.spec.md) — Step 3: settling a balance captures ITS OWN payment method,
 // independent of the deposit. This is the reported defect's fix — a cash-deposit / transfer-balance
 // folio (and the reverse) is finally representable — plus the QR-clearance rule for mixed methods:
 // the ticket is released only when the folio is `paid` AND no payment is still awaiting an admin.

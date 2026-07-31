@@ -6,7 +6,7 @@ Both administrators and sales agents use passwords in Turistear Ya! When they fo
 
 **User Stories:** US-A04, US-AG18  
 **Endpoints:** `POST /api/auth/forgot-password`, `POST /api/auth/reset-password`  
-**Full Reference:** `docs/auth/user-story-admin-registration.md`
+**Full Reference:** `docs/SPEC.md` (US-A01–US-A04)
 
 ---
 

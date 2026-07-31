@@ -1,6 +1,6 @@
 import { z } from 'zod'
 
-// docs/affiliate-operators/spec.md. Manager-facing operator management (US-AF10/AF12) + the
+// docs/affiliate-operators/affiliate-operators.spec.md. Manager-facing operator management (US-AF10/AF12) + the
 // token-based operator access flow (US-OP01/OP02).
 
 export const createOperatorSchema = z.object({

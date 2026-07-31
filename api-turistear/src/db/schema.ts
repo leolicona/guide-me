@@ -36,12 +36,12 @@ export const organizations = sqliteTable('organizations', {
   lodgingWeekendDays: text('lodging_weekend_days').notNull().default('5,6'),
   lodgingFreeCancelDays: integer('lodging_free_cancel_days').notNull().default(0),
   lodgingCancelPenaltyPct: integer('lodging_cancel_penalty_pct').notNull().default(0),
-  // WhatsApp message templates (docs/whatsapp-qr-delivery/spec.md — D10). Admin-edited in Settings.
+  // WhatsApp message templates (docs/whatsapp-qr-delivery/whatsapp-qr-delivery.spec.md — D10). Admin-edited in Settings.
   // NULL ⇒ use the shipped default (see utils/waTemplates). waTicketTemplate delivers paid tickets
   // (tours + lodging) and MUST contain {portal_link}; waReminderTemplate is the apartado reminder.
   waTicketTemplate: text('wa_ticket_template'),
   waReminderTemplate: text('wa_reminder_template'),
-  // US-A66 (docs/timezone/spec.md) — the org's single IANA time zone. The one org-local clock all
+  // US-A66 (docs/timezone/timezone.spec.md) — the org's single IANA time zone. The one org-local clock all
   // wall-clock scheduling resolves against: catalog "today", sale-cutoff/grace/expiry math (closes
   // BUG-007), and audit-timestamp display. Stored slot strings stay naive wall-clock — this fixes
   // only the "now" they compare against. Curated Mexican-zone picker in Settings (D5).
@@ -330,7 +330,7 @@ export const folios = sqliteTable('folios', {
     .default('paid'),
   // US-LG08 — there is no folio-level payment method. How money was collected lives per-movement in
   // folio_payments; the display method (shared method or 'Mixto') is DERIVED via `displayMethodSql`.
-  // US-AG41/US-A67 (docs/payment-verification/spec.md). paymentReference: the transfer's bank ref
+  // US-AG41/US-A67 (docs/payment-verification/payment-verification.spec.md). paymentReference: the transfer's bank ref
   // (free text; null for cash; holds the most recent transfer awaiting verification). The RE-ARMABLE
   // paymentVerification axis gates QR: 'not_required' (all-cash) · 'pending' (a transfer payment
   // awaits an admin) · 'verified'. A slot line's QR is signed only when the folio is `paid` AND this
@@ -394,7 +394,7 @@ export const folios = sqliteTable('folios', {
   refundNote: text('refund_note'),
   refundedAt: integer('refunded_at', { mode: 'timestamp' }),
   refundedBy: text('refunded_by').references(() => users.id),
-  // WhatsApp ticket delivery (docs/whatsapp-qr-delivery/spec.md — D4). A separate axis from
+  // WhatsApp ticket delivery (docs/whatsapp-qr-delivery/whatsapp-qr-delivery.spec.md — D4). A separate axis from
   // payment status. ticketsSentAt: the agent tapped "Enviar por WhatsApp" (their metric, cleared
   // once they act — idempotent last-write-wins, D13). ticketsViewedAt: the tourist opened the
   // portal (the bot-proof "Visto" beacon, first-view). A folio is "pendiente de enviar" once a
@@ -402,7 +402,7 @@ export const folios = sqliteTable('folios', {
   ticketsSentAt: integer('tickets_sent_at', { mode: 'timestamp' }),
   ticketsSentBy: text('tickets_sent_by').references(() => users.id),
   ticketsViewedAt: integer('tickets_viewed_at', { mode: 'timestamp' }),
-  // US-AF13 — the affiliate shift operator who made the sale (docs/affiliate-operators/spec.md).
+  // US-AF13 — the affiliate shift operator who made the sale (docs/affiliate-operators/affiliate-operators.spec.md).
   // Null ⇒ the manager/agent sold directly. Pure attribution: agent_id still owns the caja/commission.
   operatorId: text('operator_id').references((): any => affiliateOperators.id),
   createdAt: integer('created_at', { mode: 'timestamp' })
@@ -839,7 +839,7 @@ export const affiliateInvitations = sqliteTable('affiliate_invitations', {
     .default(sql`(unixepoch())`),
 })
 
-// US-AF10–AF13 / US-OP01–OP02 (docs/affiliate-operators/spec.md). A shift cashier at an affiliate
+// US-AF10–AF13 / US-OP01–OP02 (docs/affiliate-operators/affiliate-operators.spec.md). A shift cashier at an affiliate
 // company's register — NOT a `users` row (no email/password). Registered by the manager with name +
 // phone; identified by a durable access_token (the saved WhatsApp link) and unlocked by a 4-digit
 // PIN. Pure attribution: its sales roll into the owning manager's one caja (folios.agent_id stays
@@ -877,7 +877,7 @@ export const affiliateOperators = sqliteTable('affiliate_operators', {
 export type AffiliateOperator = typeof affiliateOperators.$inferSelect
 export type NewAffiliateOperator = typeof affiliateOperators.$inferInsert
 
-// US-LG01 (docs/paid-ledger/spec.md) — per-payment money-movement ledger. One SIGNED row per
+// US-LG01 (docs/paid-ledger/paid-ledger.spec.md) — per-payment money-movement ledger. One SIGNED row per
 // movement on a folio; the cash engine's source of truth (later steps re-home cash_collected /
 // by-method sales / commissions onto it). `entry_type` separates money movements (payment/refund,
 // which carry a `method`) from accruals (commission/commission_reversal, `method` null). `amount`

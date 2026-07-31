@@ -2,6 +2,48 @@
 
 This document tracks known technical debt, deferred tasks, and architectural improvements that are planned for future phases.
 
+## 20. Transactional Emails Are Off the Design System — ⚠️ OPEN
+
+**Status:** every customer-facing email built in `api-turistear/src/services/resend.ts` uses its own
+palette — `#1a1a2e` navy for ink and the CTA button, `#f5f5f7` panels, `#e0e0e0` rules — and
+`font-family: sans-serif`. None of those values exists in `.design/design-system/DESIGN_TOKENS.md`.
+The app is teal-accented Manrope on `#F8FAFC`; the email that lands in the customer's inbox is a
+different product visually. Since the WhatsApp delivery feature the email is often the *only*
+branded surface a tourist sees before the QR.
+
+**Why it happened:** email clients cannot read CSS custom properties, so `tokens.css` is unusable
+there and the templates were written with ad-hoc literals. The constraint is real; the conclusion
+is not — the token *values* can be inlined, they just cannot be referenced.
+
+**Action required:**
+- **Who:** whoever next edits an email template.
+- **What:** replace the literals with the token values (ink `#0F172A`, surface `#F8FAFC`, border
+  `#E2E8F0`, CTA teal `#0F766E`, money semantic green/red) and load Manrope with a websafe fallback
+  stack. Do it in one pass over all templates — a half-converted set is worse than a consistent
+  wrong one.
+- **Reference:** `.design/design-system/DESIGN_TOKENS.md`; the rule in `docs/PROCESS.md`
+  (§ The design system has exactly one source).
+
+## 19. Auth Specs Exist Twice — ⚠️ OPEN (documentation debt)
+
+**Status:** `api-turistear/specs/auth/` holds five Spanish-language auth specs that predate the
+`docs/` convention (`docs/PROCESS.md`). Four have English counterparts in `docs/auth/`; the folder
+now carries a README saying it is not a spec location, and its dangling reference to a
+`docs/auth/user-story-admin-registration.md` that never existed has been repointed at `docs/SPEC.md`.
+
+**Why it was not simply deleted:** two of the five are not pure duplicates.
+- `auth/agent-magic-link.spec.md` is the **only copy** — passwordless agent login by email *or*
+  WhatsApp, 7 scenarios. It has no counterpart in `docs/auth/` and **no story in `SPEC.md`**, so it
+  may describe a path that was designed and never built. Deleting it would drop the only record.
+- `auth/agent-invitation.spec.md` is **16 lines longer** than `docs/auth/agent-invitation.spec.md`.
+  The difference has not been read; it may be translation slack or it may be a scenario.
+
+**Action required:**
+- **Who:** whoever next touches auth.
+- **What:** diff the two `agent-invitation` specs and fold anything real into `docs/auth/`; decide
+  whether agent magic-link login is a live requirement (→ story in `SPEC.md` + spec in `docs/auth/`)
+  or dead (→ delete). Then remove `api-turistear/specs/` entirely.
+
 ## 18. Accommodation Stays — Error Codes & `folio_lines` Rebuild — ✅ INTRODUCED & CONSUMED (no open debt)
 
 **Status:** The accommodation/lodging feature (`docs/lodging/accommodation-stays.spec.md`) added three

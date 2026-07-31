@@ -3,7 +3,7 @@ import { env, SELF } from 'cloudflare:test'
 import { seedUser, clearTenancyDb } from '../helpers/tenancy'
 import { buildFakeJwt } from '../helpers/jwt'
 
-// US-LG04 (docs/paid-ledger/spec.md) — Step 4: the cash engine reads the ledger. The flagship proof
+// US-LG04 (docs/paid-ledger/paid-ledger.spec.md) — Step 4: the cash engine reads the ledger. The flagship proof
 // is that a MIXED-method folio (cash deposit + transfer balance) finally buckets correctly — the
 // exact reconciliation defect that started this epic — and that a cancellation nets a folio back out
 // of the buckets via its ledger reversal rows (the §12a replacement), end-to-end through the API.

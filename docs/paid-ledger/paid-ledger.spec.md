@@ -11,12 +11,12 @@ verification), and **US-A68** (operator attribution on the caja). To register in
 **Depends on:**
 - *Agent Balance UX Overhaul* (`docs/cash-drops/…`, US-AG25/AG29 — the cash-collected / by-method
   buckets and the confirmed-drop **watermark** fast path this rewrite re-homes onto the ledger).
-- *Payment Verification* (`docs/payment-verification/spec.md`, US-AG41/US-A67 — the
+- *Payment Verification* (`docs/payment-verification/payment-verification.spec.md`, US-AG41/US-A67 — the
   `payment_reference` + `payment_verification` gate this makes **per-payment**).
 - *Bookings / Settle* (US-AG07 — the one-shot balance settle whose method this finally captures).
 - *Cancellation & Refund* (`docs/cancellation/…`, US-A21/A23/T05 — `confirmRefund`, the physical
   cash hand-back that becomes a negative ledger row).
-- *Affiliate Operators* (`docs/affiliate-operators/spec.md`, US-A68 — the `operator_id` each
+- *Affiliate Operators* (`docs/affiliate-operators/affiliate-operators.spec.md`, US-A68 — the `operator_id` each
   payment row stamps so a shift's collections are traceable).
 
 > **What & why.** Today a folio carries **one** `payment_method` and **one** `amount_paid` scalar.

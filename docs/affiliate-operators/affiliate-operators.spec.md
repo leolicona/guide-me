@@ -10,7 +10,7 @@ admin surface.**
 — the `affiliate_companies`, the `affiliate` role, and the folio attribution this layers under ·
 *Affiliate Reseller Portal* (`docs/affiliates/affiliate-portal.spec.md`, US-AF01–AF09) — the curated
 POS / balance / cash-drop machinery an operator session reuses **verbatim** · *WhatsApp Ticket
-Delivery* (`docs/whatsapp-qr-delivery/spec.md`) — the `wa.me/<phone>?text=` "opens the sender's
+Delivery* (`docs/whatsapp-qr-delivery/whatsapp-qr-delivery.spec.md`) — the `wa.me/<phone>?text=` "opens the sender's
 WhatsApp" pattern story #3 reuses · *Auth* (`agnosticAuth`, `hashPassword`/`verifyPassword`,
 `setSessionCookies`) — the scrypt hashing and cookie session this extends with a short-lived,
 operator-flavored token.

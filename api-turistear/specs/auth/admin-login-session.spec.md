@@ -6,7 +6,7 @@ El admin accede a la plataforma con email y contraseña. `api-turistear` actúa 
 
 **User Stories:** US-A03  
 **Endpoints:** `POST /api/auth/login`, `POST /api/auth/refresh`, `POST /api/auth/logout`  
-**Referencia completa:** `docs/auth/user-story-admin-registration.md`
+**Referencia completa:** `docs/SPEC.md` (US-A01–US-A04) + `docs/auth/`
 
 ---
 

@@ -21,7 +21,7 @@ export const depositMethodSql = sql<string>`(
   order by fp.created_at asc limit 1
 )`
 
-// US-LG (docs/paid-ledger/spec.md) — builders that RETURN a Drizzle insert statement for a
+// US-LG (docs/paid-ledger/paid-ledger.spec.md) — builders that RETURN a Drizzle insert statement for a
 // folio_payments row, so a caller can add it to its own `db.batch(...)` and persist the ledger row
 // ATOMICALLY with the folio-scalar mutation it shadows / the cancellation it records.
 //

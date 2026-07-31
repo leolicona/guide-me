@@ -4,7 +4,7 @@ import { seedUser, seedAffiliateCompany, seedAffiliateCommission } from '../help
 import { buildFakeJwt } from '../helpers/jwt'
 
 // US-AF10–AF13 / US-OP01–OP02 / US-A68 — temporary PIN access for affiliate operators.
-// docs/affiliate-operators/spec.md. The suite clock is frozen (apply-migrations.ts); a slot 3 days
+// docs/affiliate-operators/affiliate-operators.spec.md. The suite clock is frozen (apply-migrations.ts); a slot 3 days
 // out is always sellable.
 
 const MGR_EMAIL = 'gerente@hotel.com'

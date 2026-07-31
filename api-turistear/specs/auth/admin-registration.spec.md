@@ -6,7 +6,7 @@ Un administrador de sistema se registra en Turistear Ya! para crear su organizac
 
 **User Stories:** US-A01, US-A02  
 **Endpoints:** `POST /api/auth/register`, `GET /api/auth/verify?token=xxx`  
-**Referencia completa:** `docs/auth/user-story-admin-registration.md`
+**Referencia completa:** `docs/SPEC.md` (US-A01–US-A04) + `docs/auth/`
 
 ---
 

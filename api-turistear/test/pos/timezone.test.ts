@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { naiveEpoch, orgToday, orgWallClockMinute } from '../../src/utils/tz'
 
-// US-A66 (docs/timezone/spec.md) — the org time-zone helpers that replace the naive-UTC arithmetic
+// US-A66 (docs/timezone/timezone.spec.md) — the org time-zone helpers that replace the naive-UTC arithmetic
 // (BUG-007). Pure unit tests: no DB, exercising Intl-backed zone resolution in the workerd runtime.
 
 const secOf = (y: number, mo: number, d: number, h: number, mi = 0): number =>

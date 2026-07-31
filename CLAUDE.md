@@ -54,6 +54,38 @@ Additional directories:
 - `src/types/` — TypeScript interfaces for data models
 - `src/bindings.d.ts` — Cloudflare env binding type declarations
 
+## Documentation — spec-driven development
+
+This repo is spec-driven. `docs/SPEC.md` is the index of the product: every shipped capability has
+a numbered user story there **and** a line in *Features by Phase* linking to its feature spec.
+
+Before adding a feature, read **`docs/PROCESS.md`** — it defines the four documentation layers,
+the naming/ID/migration rules, the seven steps, and the required sections of a spec. Start a new
+spec from `docs/_templates/feature.spec.md`.
+
+Two rules worth repeating here, because breaking them is how the index rotted before:
+- A feature's `SPEC.md` registration (stories + Features-by-Phase line + glossary terms) ships in
+  **the feature's own PR**, not "later".
+- A `docs/…md` path written in `SPEC.md` means the file exists. A feature with no spec yet reads
+  **"spec not written yet"**.
+
+Contracts for services we do not own (Agnostic Auth, Resend, the QR image service) live in
+**`docs/integrations/`** — never inside a feature spec, since we do not decide what they do.
+
+### Local workflow — one worktree, one PR per unit of work
+
+Every feature, fix, enhancement or docs change gets **its own worktree and its own pull request**:
+
+```bash
+git worktree add .claude/worktrees/<name> -b feat/<slug> origin/develop
+```
+
+Branch `feat/` · `fix/` · `docs/`; commits are Conventional with the domain as scope
+(`feat(cancellation):`); PRs target **`develop`** and are squash-merged, so the PR title becomes the
+commit on `develop`. A release is a PR `develop → main` titled `release: … → prod`. The `verify` CI
+job must pass. Full detail and the two hard rules (never bare `git stash`; register in `SPEC.md`
+inside the feature's own PR) are in `docs/PROCESS.md`.
+
 ## Multitenancy
 
 When implementing any tenant-scoped route or migration, follow the data isolation rules in `docs/ARCHITECTURE.md` (§ Multitenancy — Data Isolation Model). Full scenarios and Definition of Done: `docs/multitenancy/multitenancy.spec.md`.
@@ -81,6 +113,10 @@ repetition.**
 > there) → implemented in `app-turistear/src/config/theme.ts` + `src/styles/tokens.css`. The full
 > rationale lives in `.design/design-system/DESIGN_BRIEF.md`. *(This supersedes the old indigo
 > "Luminous SaaS" system; `docs/DESING.md` is retired.)*
+>
+> **The section below is a summary — `DESIGN_TOKENS.md` wins any disagreement.** Only `theme.ts`
+> and `tokens.css` may restate a token value; everywhere else, cite the section instead of copying
+> the hex (`docs/PROCESS.md` § The design system has exactly one source).
 
 #### Theme Principles
 

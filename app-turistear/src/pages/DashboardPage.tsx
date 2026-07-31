@@ -12,7 +12,7 @@ import { ROUTES } from '../config/routes'
 // US-UX01 — the admin's "Hoy" landing. Interim version (Reorg Phase 1): two queue cards that
 // surface what needs the admin's attention today and deep-link to the destination that
 // resolves it. Reorg Phase 2 replaces this with the Daily Operations Dashboard
-// (docs/dashboard/occupancy-dashboard.spec.md). Agents never route here.
+// (US-A14/A15/A16 in docs/SPEC.md; no spec written yet). Agents never route here.
 
 interface QueueCardProps {
   icon: SvgIconComponent
