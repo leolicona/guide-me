@@ -17,6 +17,7 @@
     "lint:app": "pnpm --filter app-turistear lint",
     "dev": "pnpm --parallel dev",
     "test:api": "pnpm --filter api-turistear test",
+    "test:app": "pnpm --filter app-turistear test",
     "db:migrate:local": "pnpm --filter api-turistear db:migrate:local",
     "db:migrate:dev": "pnpm --filter api-turistear db:migrate:dev",
     "db:migrate:prod": "pnpm --filter api-turistear db:migrate:prod",
