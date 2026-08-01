@@ -1,32 +1,19 @@
 import { useState } from 'react'
-import { Link as RouterLink } from 'react-router-dom'
 import {
   Box,
   Typography,
-  Card,
-  CardActionArea,
-  CardContent,
   CircularProgress,
   Alert,
   Fade,
   Stack,
-  Divider,
-  Chip,
   ToggleButton,
   ToggleButtonGroup,
 } from '@mui/material'
 import { useMyFolios } from '../features/pos/hooks'
 import { deliveryState } from '../features/pos/delivery'
 import { useOrgDateFormatter } from '../features/organization'
-import {
-  BookingWhatsAppButton,
-  DeliveryBadge,
-  isUrgentBooking,
-  venceLabel,
-} from '../features/bookings'
-import { FolioStatusChip } from '../features/folios'
+import { FolioCard } from '../features/folios'
 import type { FolioStatus } from '../features/pos/types'
-import { MoneyText } from '../components'
 import { ROUTES } from '../config/routes'
 import { FilterStrip } from '../features/filters'
 
@@ -99,98 +86,19 @@ export default function FolioHistoryPage() {
 
         {folios && folios.length > 0 && (
           <Stack spacing={2}>
-            {folios.map((f) => {
-              // US-AG07.3/07.5 — apartado affordances integrated into THIS existing card: an
-              // urgency accent + countdown + the WhatsApp recovery button. No separate dashboard.
-              const isBooking = f.status === 'booking'
-              const urgent = isBooking && isUrgentBooking(f.booking_expires_at)
-              return (
-                <Card
-                  key={f.id}
-                  variant="outlined"
-                  sx={
-                    isBooking
-                      ? {
-                          borderLeftWidth: 4,
-                          borderLeftColor: urgent ? 'warning.main' : 'divider',
-                        }
-                      : undefined
-                  }
-                >
-                  <CardActionArea
-                    component={RouterLink}
-                    to={ROUTES.HISTORY_DETAIL.replace(':id', f.id)}
-                  >
-                    <CardContent>
-                      <Stack
-                        direction="row"
-                        spacing={1}
-                        sx={{ justifyContent: 'space-between', alignItems: 'flex-start' }}
-                      >
-                        <Box sx={{ minWidth: 0 }}>
-                          <Typography variant="subtitle1" noWrap>
-                            {f.customer_name ?? 'Sin nombre'}
-                          </Typography>
-                          <Typography variant="caption" color="text.secondary">
-                            {formatDate(f.created_at)}
-                            {/* US-AF13 — "Vendido por" the shift operator (manager's reconciliation). */}
-                            {f.operator_name ? ` · ${f.operator_name}` : ''}
-                          </Typography>
-                          {isBooking && f.booking_expires_at != null && (
-                            <Chip
-                              size="small"
-                              variant="outlined"
-                              color={urgent ? 'warning' : 'default'}
-                              label={venceLabel(f.booking_expires_at)}
-                              sx={{ mt: 0.5, display: 'flex', width: 'fit-content' }}
-                            />
-                          )}
-                        </Box>
-                        {/* Status chip + WhatsApp sit side by side in one cluster — never overlap. */}
-                        <Stack
-                          direction="row"
-                          spacing={0.5}
-                          sx={{ alignItems: 'center', flexShrink: 0 }}
-                        >
-                          <FolioStatusChip status={f.status} />
-                          {/* whatsapp-qr-delivery — the delivery badge (send lives on detail). */}
-                          <DeliveryBadge folio={f} />
-                          {isBooking && <BookingWhatsAppButton folio={f} />}
-                        </Stack>
-                      </Stack>
-                      <Divider sx={{ my: 1.5 }} />
-                      <Stack direction="row" spacing={3}>
-                        <Box>
-                          <Typography variant="caption" color="text.secondary">
-                            Total
-                          </Typography>
-                          <MoneyText cents={f.total} variant="body2" sx={{ display: 'block' }} />
-                        </Box>
-                        <Box>
-                          <Typography variant="caption" color="text.secondary">
-                            {isBooking ? 'Anticipo' : 'Pagado'}
-                          </Typography>
-                          <MoneyText cents={f.amount_paid} variant="body2" sx={{ display: 'block' }} />
-                        </Box>
-                        {isBooking && (
-                          <Box>
-                            <Typography variant="caption" color="text.secondary">
-                              Saldo pendiente
-                            </Typography>
-                            {/* Owed by the customer — neutral ink, not teal. */}
-                            <MoneyText
-                              cents={f.pending_balance ?? f.total - f.amount_paid}
-                              variant="body2"
-                              sx={{ display: 'block' }}
-                            />
-                          </Box>
-                        )}
-                      </Stack>
-                    </CardContent>
-                  </CardActionArea>
-                </Card>
-              )
-            })}
+            {/* US-AG49 — the same card the admin sees (spec D13). The byline follows the AUDIENCE
+                rather than the card: here it names the shift operator who took the sale, and a
+                direct sale passes null so the line simply collapses — no placeholder dash. */}
+            {folios.map((f) => (
+              <FolioCard
+                key={f.id}
+                folio={f}
+                to={ROUTES.HISTORY_DETAIL.replace(':id', f.id)}
+                byline={f.operator_name}
+                soldAt={formatDate(f.created_at)}
+                surface="seller"
+              />
+            ))}
           </Stack>
         )}
       </Box>

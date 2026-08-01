@@ -29,6 +29,7 @@ import {
 } from '../../services/resend'
 import { generateRefundPin } from '../../utils/portal'
 import { buildCancellationReversal, displayMethodSql, readFolioPayments } from '../../utils/folioPayments'
+import { readListLines, readListPortalLinks } from '../../utils/folioListRows'
 import {
   computeCancellationRefund,
   resolvePolicy,
@@ -327,12 +328,21 @@ export const listFolios = async (c: FoliosContext) => {
       // could not show what is owed without a second read per folio.
       refundStatus: folios.refundStatus,
       refundAmount: folios.refundAmount,
+      // US-A82 — no surface may infer Express from a null name (business rule 4).
+      saleMode: folios.saleMode,
     })
     .from(folios)
     .innerJoin(users, eq(folios.agentId, users.id))
     .leftJoin(affiliateOperators, eq(folios.operatorId, affiliateOperators.id))
     .where(and(...filters))
     .orderBy(order)
+
+  // US-A82 — the card names what was sold, and the ticket send happens from the list. Both
+  // decorations re-apply `filters` through a join rather than an id list (see folioListRows).
+  const [linesByFolio, portalLinkByFolio] = await Promise.all([
+    readListLines(db, org, filters),
+    readListPortalLinks(db, org, filters, c.env.API_BASE_URL),
+  ])
 
   return c.json({
     folios: rows.map((r) => ({
@@ -365,6 +375,11 @@ export const listFolios = async (c: FoliosContext) => {
       // US-A78 — 'pending' = cancelled, money owed, nobody confirmed the hand-back.
       refund_status: r.refundStatus,
       refund_amount: r.refundAmount,
+      // US-A82 — what was sold (card title + the WhatsApp {itinerary}), the link the ticket send
+      // needs, and the sale mode a null customer_name must never be used to infer.
+      sale_mode: r.saleMode,
+      portal_link: portalLinkByFolio.get(r.id) ?? null,
+      lines: linesByFolio.get(r.id) ?? [],
     })),
   })
 }

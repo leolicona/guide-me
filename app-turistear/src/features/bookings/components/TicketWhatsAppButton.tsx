@@ -25,7 +25,7 @@ export function TicketWhatsAppButton({
 }: {
   folio: DeliverableFolio
   surface?: 'seller' | 'admin'
-  variant?: 'primary' | 'icon'
+  variant?: 'primary' | 'icon' | 'card'
   agentName?: string
   onSent?: () => void
 }) {
@@ -62,6 +62,27 @@ export function TicketWhatsAppButton({
       : !phoneOk
         ? 'Sin teléfono válido'
         : 'Enviar boletos por WhatsApp'
+
+  // US-A82 D8/D10 — the labelled button FolioCard renders as a sibling of its link region. Teal
+  // (the action colour) rather than the icon variant's success green, which in this system means
+  // "paid" and would collide with the card's own rail.
+  if (variant === 'card') {
+    return (
+      <Tooltip title={disabled ? tip : ''}>
+        <span style={{ display: 'block' }}>
+          <Button
+            fullWidth
+            variant="contained"
+            startIcon={<WhatsAppIcon />}
+            disabled={disabled}
+            onClick={send}
+          >
+            Enviar boletos
+          </Button>
+        </span>
+      </Tooltip>
+    )
+  }
 
   if (variant === 'icon') {
     return (

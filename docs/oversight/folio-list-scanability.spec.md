@@ -218,13 +218,19 @@ Then the card renders exactly one action button
 And when a delivery is pending its label is `Enviar boletos` — the generic `Enviar mensaje` is absent,
 so a manually pasted link can never leave the folio silently undelivered (D7).
 
-### US-AG49 — the same card on the seller's own list
+### Attribution — the decoration belongs to the row it decorates
 
-**S-7 — The byline follows the audience**
-Given a folio sold by agent *Ana* through affiliate operator *Luis*
-When the admin opens `/folios` the byline reads `Ana`
-And when the seller opens `/history` it reads `Luis`
-And on a direct sale `/history` shows no byline and no placeholder dash.
+**S-7 — Two folios in one organization never wear each other's purchase**
+Given two folios in the same organization, each with its own line and its own portal token
+When the admin opens `/folios`
+Then each row carries only its own `service_name` and only its own `portal_link`.
+
+*This is the scenario with teeth for the new code. Cross-org leakage through the decorations is
+structurally impossible — the response iterates the caller's own rows and looks each up by id, so a
+foreign line would sit unused in the map and never be seen — which means S-8/S-9 below prove the
+response **contract**, not the grouping. Mis-grouping is the failure this feature could actually
+ship, and it is invisible to an isolation test. Verified by mutation: breaking the grouping key
+fails S-7 and nothing else.*
 
 ### Multitenancy isolation (required)
 
@@ -239,16 +245,34 @@ Given org B's folio holds an access token
 When org A calls `GET /api/folios`
 Then no `portal_link` in the response resolves to org B's token.
 
+### US-AG49 — the same card on the seller's own list
+
+**S-10 — The byline follows the audience** *(specified; not automatically covered — see DoD)*
+Given a folio sold by agent *Ana* through affiliate operator *Luis*
+When the admin opens `/folios` the byline reads `Ana`
+And when the seller opens `/history` it reads `Luis`
+And on a direct sale `/history` shows no byline and no placeholder dash.
+
 ## Definition of Done
 
-- [ ] `listFolios` + `listMyFolios` return `lines`, `portal_link`, `sale_mode` (additive; existing
-      fields byte-identical)
-- [ ] Scenarios S-1…S-9 covered in `test/folios/folio-list-scanability.test.ts`
-- [ ] Cross-org isolation tests (S-8, S-9) using `seedTwoOrgs`
-- [ ] `folioCustomerLabel()` helper + `FolioCard` shared by `/folios` and `/history`
-- [ ] `FolioCard` accessibility: hidden labels on checkmarks, two keyboard stops
-- [ ] `SPEC.md`: US-A82 + US-AG49 stories, *Features by Phase* line, glossary entry for **Riel de estado**
-- [ ] `TECH_DEBT.md`: `Sin nombre` on the three remaining surfaces; `/api/folios` still unpaginated
+- [x] `listFolios` + `listAgentFolios` return `lines`, `portal_link`, `sale_mode` (additive; existing
+      fields byte-identical) — shared `utils/folioListRows.ts`
+- [x] Payload scenarios **S-1, S-1b, S-2…S-5, S-7** + scope-boundary assertions **SB-1/SB-2** in
+      `api-turistear/test/folios/folio-list-scanability.test.ts` (11 cases)
+- [x] Cross-org isolation **S-8, S-9** using `seedTwoOrgs`
+- [x] Card derivations **S-1…S-6** in `app-turistear/src/features/folios/folioCardState.test.ts`
+      (27 cases) — the repo's first frontend unit tests, establishing `docs/TESTING.md` **Tier 1**
+      (Vitest, no DOM). Wired into CI as `pnpm test:app`
+- [x] `folioCustomerLabel()` helper + `FolioCard` shared by `/folios` and `/history`
+- [x] `FolioCard` accessibility: `aria-label` on the checkmarks, link region and action button as
+      two separate focus stops
+- [x] `SPEC.md`: US-A82 + US-AG49 stories, *Features by Phase* line, glossary entry for **Riel de estado**
+- [x] `TECH_DEBT.md`: `Sin nombre` on the three remaining surfaces; `/api/folios` still unpaginated
+- [ ] **S-10 (byline by audience) is NOT automatically covered.** It is a component render, which
+      `docs/TESTING.md` routes to Tier 3 (Vitest + Testing Library) — a tier this PR deliberately
+      does not stand up, because the DOM/RTL/MSW setup is a testing platform of its own and does not
+      belong inside a card redesign. The two call sites are three lines each and type-checked;
+      the assertion lands with Tier 3.
 
 ## Deferred — and why each is safe to defer
 

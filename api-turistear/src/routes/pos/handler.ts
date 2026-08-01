@@ -54,6 +54,7 @@ import {
   depositMethodSql,
   readFolioPayments,
 } from '../../utils/folioPayments'
+import { readListLines, readListPortalLinks } from '../../utils/folioListRows'
 // D20 — the agent apartado cancel shares the admin path's commit, so the two cannot price the same
 // folio differently. Reaching across routes is deliberate: the alternative is a second copy of the
 // release + reversal logic, which is exactly what this replaced.
@@ -3346,11 +3347,19 @@ export const listAgentFolios = async (c: PosContext) => {
       paymentMethod: displayMethodSql,
       paymentVerification: folios.paymentVerification,
       operatorName: affiliateOperators.name,
+      saleMode: folios.saleMode,
     })
     .from(folios)
     .leftJoin(affiliateOperators, eq(folios.operatorId, affiliateOperators.id))
     .where(and(...filters))
     .orderBy(desc(folios.createdAt))
+
+  // US-AG49 — same decorations as the admin list; `filters` here is already caller-scoped to this
+  // seller's own folios, so the join inherits that scope.
+  const [linesByFolio, portalLinkByFolio] = await Promise.all([
+    readListLines(db, org, filters),
+    readListPortalLinks(db, org, filters, c.env.API_BASE_URL),
+  ])
 
   return c.json({
     folios: rows.map((r) => ({
@@ -3386,6 +3395,11 @@ export const listAgentFolios = async (c: PosContext) => {
       reminder_sent_by: r.reminderSentBy,
       // US-AF13 — "Vendido por: {name}" (null ⇒ the manager/agent sold directly).
       operator_name: r.operatorName ?? null,
+      // US-AG49 — the seller's list renders the SAME FolioCard as the admin's, so it needs the
+      // same three decorations (docs/oversight/folio-list-scanability.spec.md D13/D14).
+      sale_mode: r.saleMode,
+      portal_link: portalLinkByFolio.get(r.id) ?? null,
+      lines: linesByFolio.get(r.id) ?? [],
     })),
   })
 }
