@@ -4,6 +4,7 @@ import {
   folioCustomerLabel,
   folioDeliveryMark,
   folioMoneyAxis,
+  folioSoldAtLabel,
   folioSoldSummary,
 } from './folioCardState'
 
@@ -211,6 +212,55 @@ describe('S-6 — exactly one action, and the two verbs never coexist', () => {
     // in the undelivered queue permanently — a queue growing from correct behaviour.
     const undelivered = { ...paidFolio, tickets_sent_at: null, tickets_viewed_at: null }
     expect(folioAction(undelivered, { urgent: false })).not.toBe('message')
+  })
+})
+
+describe('S-11 — the sale time compresses, in the org’s zone', () => {
+  const TZ = 'America/Cancun' // UTC−5 year round, no DST
+  // 2026-08-01 18:00Z = 13:00 in Cancún.
+  const NOW = Math.floor(Date.parse('2026-08-01T18:00:00Z') / 1000)
+
+  it('today reads "hoy" plus the org-local time', () => {
+    const at = Math.floor(Date.parse('2026-08-01T19:32:00Z') / 1000) // 14:32 in Cancún
+    expect(folioSoldAtLabel(at, NOW, TZ)).toBe('hoy 14:32')
+  })
+
+  it('yesterday reads "ayer"', () => {
+    const at = Math.floor(Date.parse('2026-07-31T19:32:00Z') / 1000)
+    expect(folioSoldAtLabel(at, NOW, TZ)).toBe('ayer 14:32')
+  })
+
+  it('older collapses to a date, with no time', () => {
+    const at = Math.floor(Date.parse('2026-07-28T19:32:00Z') / 1000)
+    expect(folioSoldAtLabel(at, NOW, TZ)).toMatch(/^28 jul/)
+    expect(folioSoldAtLabel(at, NOW, TZ)).not.toContain(':')
+  })
+
+  it('another year keeps the year', () => {
+    const at = Math.floor(Date.parse('2025-07-28T19:32:00Z') / 1000)
+    expect(folioSoldAtLabel(at, NOW, TZ)).toContain('2025')
+  })
+
+  it('uses the ORG zone, not the viewer’s — a late sale is still today at the counter', () => {
+    // 03:30Z on Aug 2 is 22:30 on Aug 1 in Cancún. A UTC viewer would call this "tomorrow";
+    // the counter that rang it up is still on the same shift (US-A66).
+    const at = Math.floor(Date.parse('2026-08-02T03:30:00Z') / 1000)
+    expect(folioSoldAtLabel(at, NOW, TZ)).toBe('hoy 22:30')
+    expect(folioSoldAtLabel(at, NOW, 'UTC')).not.toContain('hoy')
+  })
+
+  it('crosses a month boundary without arithmetic drift', () => {
+    const firstOfMonth = Math.floor(Date.parse('2026-08-01T18:00:00Z') / 1000)
+    const lastOfPrev = Math.floor(Date.parse('2026-07-31T20:00:00Z') / 1000)
+    expect(folioSoldAtLabel(lastOfPrev, firstOfMonth, TZ)).toBe('ayer 15:00')
+  })
+
+  it('falls back to the absolute date while the clock is still unknown', () => {
+    // useNowSeconds resolves in an effect, so the first render has no "now". Guessing "hoy" there
+    // would print a claim that is wrong for every row older than today.
+    const at = Math.floor(Date.parse('2026-08-01T19:32:00Z') / 1000)
+    expect(folioSoldAtLabel(at, null, TZ)).not.toContain('hoy')
+    expect(folioSoldAtLabel(at, null, TZ)).toContain('2026')
   })
 })
 

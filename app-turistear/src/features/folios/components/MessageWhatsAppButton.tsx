@@ -25,8 +25,8 @@ export function MessageWhatsAppButton({
 
   return (
     <Tooltip title={phoneOk ? '' : 'Sin teléfono válido'}>
-      <span style={{ display: 'block' }}>
-        <Button fullWidth variant="text" startIcon={<WhatsAppIcon />} disabled={!phoneOk} onClick={open}>
+      <span style={{ display: 'inline-flex' }}>
+        <Button variant="text" startIcon={<WhatsAppIcon />} disabled={!phoneOk} onClick={open}>
           Enviar mensaje
         </Button>
       </span>

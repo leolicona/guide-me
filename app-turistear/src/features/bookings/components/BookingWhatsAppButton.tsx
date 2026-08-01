@@ -83,8 +83,12 @@ export function BookingWhatsAppButton({
   // (D9), and a green button on a green rail re-merges the two channels the redesign separated.
   if (variant === 'card') {
     return (
+      // NOT fullWidth: on a 1280px list a full-bleed teal bar per pending apartado is a wall of
+      // accent, and the design system reserves teal precisely so it keeps meaning something. The
+      // button earns attention from its FILL against the plain-text resting verb (D8), not from
+      // its width — and every other card button is content-width, so a stretched one reads as a
+      // different kind of control.
       <Button
-        fullWidth
         variant="contained"
         startIcon={<WhatsAppIcon />}
         disabled={reminder.isPending || !folio.customer_phone}

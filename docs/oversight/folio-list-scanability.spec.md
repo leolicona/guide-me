@@ -85,6 +85,10 @@ Mechanically:
 | **D13** | **One `FolioCard`, used by `/folios` and `/history`; the byline is a prop.** Admin → `agent.name`. Seller/affiliate → `operator_name`, collapsing silently when the sale was direct. | The two cards are today near-identical inline JSX in two page files. That is exactly how they came to disagree about which name to show, and redesigning one would re-open the same gap. The byline differs by audience, not by card: an admin reconciles by agent, an affiliate by which operator worked the shift. |
 | **D14** | **The list payload carries lean lines in the `ItineraryLine` shape**, not a bespoke summary. | The same array feeds both consumers: the card renders line 1 + `+N`, and `ticketWhatsAppUrl()` renders `{itinerary}` from it unchanged. A summary object would have forced the card's WhatsApp button either to send a message with an empty itinerary or to fetch the detail on click — and opening `wa.me` after an `await` is what popup blockers exist to stop. |
 | **D15** | **`FolioStatusChip` and `DeliveryBadge` stay on detail surfaces.** | The rail exists because a list competes for scanning. A detail page has one folio and nothing to scan against, so the chip is the better instrument there. Divergence by surface, chosen; not drift. |
+| **D16** *(added after visual verification)* | **The sale time compresses to `hoy 14:32` · `ayer 09:05` · `28 jul`**, in the org's zone. | The full `1 ago 2026, 01:42 PM` cost more of the identity line than the customer's own name, on a line that also has to carry the seller. Recency is what a reader wants from a sale timestamp; the instant is one tap away. "hoy" is resolved in the ORG's zone (US-A66) — it must mean the counter's today, and the day arithmetic runs on the local date string rather than `now − 86400` so a DST boundary cannot shift it. |
+| **D17** *(added after visual verification)* | **No card button is `fullWidth`.** | The first build stretched the apartado reminder edge to edge. On a 1280px list that is a full-bleed teal bar per pending apartado — a wall of the one accent the design system reserves precisely so it keeps meaning something. The button earns attention from its FILL against the plain resting verb (D8), never from its width, and a single stretched control among content-width ones reads as a different kind of control. |
+| **D18** *(added after visual verification)* | **The mask's bullets carry their own letter tracking.** | Manrope gives `•` enough side bearing that `Cliente ••5678` renders as `Cliente • •5678` — which reads as a typo, not as a masked number, defeating D3 at the only moment it matters. Tightening the whole caption is not the fix (names crush at that tracking), so the identity is rendered as structure rather than one string, with an `aria-label` carrying the plain label so a screen reader hears an identity and not stray bullets. |
+| **D19** *(added after visual verification)* | **The payment reference rides on the unverified card.** | `Ref. SPEI 4471` is what an admin matches against the bank statement. It belongs on the row that says the money has not landed, not one tap away — otherwise the amber rail states a problem and withholds the one field needed to resolve it. |
 
 ## Data Model
 
@@ -165,7 +169,7 @@ Anatomy (D1 · D10):
 | paid, undelivered | green | `$2,400 pagado` | — | **Enviar boletos** *(filled)* |
 | paid, sent | green | `$2,400 pagado` | `✓` | Enviar mensaje *(plain)* |
 | paid, viewed | green | `$2,400 pagado` | `✓✓` | Enviar mensaje *(plain)* |
-| paid, unverified | amber | `$2,400 · por verificar` + `Ref. …` | — | Enviar mensaje *(plain)* |
+| paid, unverified | amber | `$2,400 por verificar` + `Ref. …` | — | Enviar mensaje *(plain)* |
 | booking, slack | amber | `Debe $1,600 de $2,400` | `✓` if reminded | Enviar mensaje *(plain)* |
 | booking, urgent or overdue | amber | `Debe $1,600 de $2,400` + `Vence en 3 h` | `✓` if reminded | **Recordar saldo** *(filled)* |
 | cancelled, refund owed | red | `Reembolsar $2,400` | — | Enviar mensaje *(plain)* |
@@ -175,6 +179,11 @@ Reused primitives: `MoneyText` (semantic colour, tabular figures), `TicketWhatsA
 (`variant='icon'` retired in favour of a labelled variant; `surface='admin'` on `/folios`),
 `BookingWhatsAppButton`, `useOrgDateFormatter`, `isUrgentBooking` / `venceLabel`,
 `folioLineMeta`. Design tokens: `.design/design-system/DESIGN_TOKENS.md` — this spec restates no value.
+
+**Verified visually** at 390px and 1280px against a local database seeded with all nine states
+(screenshots taken with Playwright, both pages, zero console errors). That pass is what produced
+D16–D19: four defects no test in this feature could see — a stretched button, an uncompressed
+timestamp, a mask that rendered as a typo, and a missing bank reference.
 
 **Accessibility.** The rail is decorative; the money wording carries the state. Each checkmark
 carries a visually-hidden label (`Boletos enviados 14:32` / `Boletos vistos por el cliente 15:02`) —
@@ -218,6 +227,14 @@ Then the card renders exactly one action button
 And when a delivery is pending its label is `Enviar boletos` — the generic `Enviar mensaje` is absent,
 so a manually pasted link can never leave the folio silently undelivered (D7).
 
+**S-11 — The sale time compresses, in the organization's zone**
+Given a folio rung up at 22:30 org-local (03:30Z the next calendar day)
+When the list renders
+Then it reads `hoy 22:30` — a viewer in UTC does not get to call the counter's shift "tomorrow"
+And a folio from the previous org-local day reads `ayer …`, older ones a bare date with no time,
+And while the clock is still unresolved on first render it falls back to the absolute date rather
+than guessing `hoy`, because a wrong `hoy` is worse than a right date.
+
 ### Attribution — the decoration belongs to the row it decorates
 
 **S-7 — Two folios in one organization never wear each other's purchase**
@@ -260,10 +277,11 @@ And on a direct sale `/history` shows no byline and no placeholder dash.
 - [x] Payload scenarios **S-1, S-1b, S-2…S-5, S-7** + scope-boundary assertions **SB-1/SB-2** in
       `api-turistear/test/folios/folio-list-scanability.test.ts` (11 cases)
 - [x] Cross-org isolation **S-8, S-9** using `seedTwoOrgs`
-- [x] Card derivations **S-1…S-6** in `app-turistear/src/features/folios/folioCardState.test.ts`
-      (27 cases) — the repo's first frontend unit tests, establishing `docs/TESTING.md` **Tier 1**
+- [x] Card derivations **S-1…S-6, S-11** in `app-turistear/src/features/folios/folioCardState.test.ts`
+      (34 cases) — the repo's first frontend unit tests, establishing `docs/TESTING.md` **Tier 1**
       (Vitest, no DOM). Wired into CI as `pnpm test:app`
 - [x] `folioCustomerLabel()` helper + `FolioCard` shared by `/folios` and `/history`
+- [x] Visual verification at 390px and 1280px on both `/folios` and `/history`, all nine states
 - [x] `FolioCard` accessibility: `aria-label` on the checkmarks, link region and action button as
       two separate focus stops
 - [x] `SPEC.md`: US-A82 + US-AG49 stories, *Features by Phase* line, glossary entry for **Riel de estado**

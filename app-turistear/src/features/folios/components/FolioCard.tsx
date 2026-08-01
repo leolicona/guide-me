@@ -7,6 +7,7 @@ import { BookingWhatsAppButton, TicketWhatsAppButton, isUrgentBooking, venceLabe
 import { MessageWhatsAppButton } from './MessageWhatsAppButton'
 import {
   folioAction,
+  folioCustomerIdentity,
   folioCustomerLabel,
   folioDeliveryMark,
   folioMoneyAxis,
@@ -59,7 +60,7 @@ function MoneyLine({ reading }: { reading: MoneyReading }) {
       return (
         <Stack direction="row" spacing={1} sx={{ alignItems: 'baseline', minWidth: 0 }}>
           <MoneyText cents={reading.cents} variant="h6" srLabel="Total por verificar" />
-          {caption('· por verificar')}
+          {caption('por verificar')}
         </Stack>
       )
     case 'owing':
@@ -125,6 +126,7 @@ export interface FolioCardFolio {
   payment_verification?: PaymentVerification
   refund_status?: RefundStatus
   refund_amount?: number | null
+  payment_reference?: string | null
   deliverable?: boolean
   portal_link?: string | null
   tickets_sent_at?: number | null
@@ -157,7 +159,9 @@ export function FolioCard({ folio, to, byline, soldAt, surface = 'admin' }: Foli
     ? [sold.name, sold.when, sold.more > 0 ? `+${sold.more}` : ''].filter(Boolean).join(' · ')
     : 'Venta sin detalle'
 
-  const identity = [folioCustomerLabel(folio), byline || '', soldAt].filter(Boolean).join(' · ')
+  const who = folioCustomerIdentity(folio)
+  // The rest of the identity line is plain text; only the mask needs its own tracking.
+  const restOfIdentity = [byline || '', soldAt].filter(Boolean).join(' · ')
 
   return (
     <Card variant="outlined" sx={{ borderLeftWidth: 4, borderLeftColor: RAIL_COLOR[rail] }}>
@@ -169,9 +173,41 @@ export function FolioCard({ folio, to, byline, soldAt, surface = 'admin' }: Foli
           <Typography variant="subtitle1" sx={{ fontWeight: 600 }} noWrap>
             {title}
           </Typography>
-          <Typography variant="caption" color="text.secondary" noWrap sx={{ display: 'block' }}>
-            {identity}
+          {/* The mask's bullets get their OWN tracking. Manrope gives `•` enough side bearing that
+              `••5678` renders as `• •5678` — which reads as a typo, not as a masked number. The
+              whole caption cannot simply be tightened: at −0.12em the names crush. `aria-label`
+              carries the label form so a screen reader hears one identity, not stray bullets. */}
+          <Typography
+            variant="caption"
+            color="text.secondary"
+            noWrap
+            sx={{ display: 'block' }}
+            aria-label={`${folioCustomerLabel(folio)}${restOfIdentity ? ` · ${restOfIdentity}` : ''}`}
+          >
+            <Box component="span" aria-hidden>
+              {who.kind === 'name' ? (
+                who.text
+              ) : who.kind === 'masked' ? (
+                <>
+                  Cliente{' '}
+                  <Box component="span" sx={{ letterSpacing: '-0.16em', mr: '0.16em' }}>
+                    ••
+                  </Box>
+                  {who.tail}
+                </>
+              ) : (
+                'Cliente'
+              )}
+              {restOfIdentity ? ` · ${restOfIdentity}` : ''}
+            </Box>
           </Typography>
+          {/* The reference is what an admin matches against the bank statement, so it belongs on
+              the row that says the money has not landed — not one tap away. */}
+          {reading.kind === 'unverified' && folio.payment_reference && (
+            <Typography variant="caption" color="text.secondary" noWrap sx={{ display: 'block' }}>
+              Ref. {folio.payment_reference}
+            </Typography>
+          )}
           {isBooking && folio.booking_expires_at != null && (
             <Chip
               size="small"

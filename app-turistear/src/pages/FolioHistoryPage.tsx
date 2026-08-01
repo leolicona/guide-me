@@ -11,19 +11,10 @@ import {
 } from '@mui/material'
 import { useMyFolios } from '../features/pos/hooks'
 import { deliveryState } from '../features/pos/delivery'
-import { useOrgDateFormatter } from '../features/organization'
-import { FolioCard } from '../features/folios'
+import { FolioCard, useFolioSoldAt } from '../features/folios'
 import type { FolioStatus } from '../features/pos/types'
 import { ROUTES } from '../config/routes'
 import { FilterStrip } from '../features/filters'
-
-const DATE_FMT: Intl.DateTimeFormatOptions = {
-  year: 'numeric',
-  month: 'short',
-  day: 'numeric',
-  hour: '2-digit',
-  minute: '2-digit',
-}
 
 // US-A80 — 'undelivered' is a client-side view over the loaded list: folios still
 // `● Pendiente de enviar` on the delivery axis (paid, portal link issued, never sent/seen).
@@ -32,7 +23,8 @@ type Filter = 'all' | FolioStatus | 'undelivered'
 // US-AG20 — the agent's own read-only sales history. Tapping a row opens the detail
 // (US-AG21). No cancel/edit affordance — cancellation is admin-only.
 export default function FolioHistoryPage() {
-  const formatDate = useOrgDateFormatter(DATE_FMT) // US-A66 — org-local audit timestamps
+  // US-A82 D6 — the compressed org-local sale time ("hoy 14:32"), not the full stamp.
+  const soldAt = useFolioSoldAt()
   const [filter, setFilter] = useState<Filter>('all')
   const { data: rows, isLoading, isError } = useMyFolios(
     filter === 'all' || filter === 'undelivered' ? {} : { status: filter },
@@ -95,7 +87,7 @@ export default function FolioHistoryPage() {
                 folio={f}
                 to={ROUTES.HISTORY_DETAIL.replace(':id', f.id)}
                 byline={f.operator_name}
-                soldAt={formatDate(f.created_at)}
+                soldAt={soldAt(f.created_at)}
                 surface="seller"
               />
             ))}

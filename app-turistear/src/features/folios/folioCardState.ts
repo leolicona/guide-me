@@ -19,14 +19,32 @@ import type { FolioListLine } from '../pos/types'
  * nameless states a deficiency where there is none. This is the fallback that spec prescribed
  * at line 490 and nobody built.
  */
+export type CustomerIdentity =
+  | { kind: 'name'; text: string }
+  | { kind: 'masked'; tail: string }
+  | { kind: 'anon' }
+
+/** The identity as STRUCTURE, so the card can render the mask's bullets with their own tracking —
+ *  in Manrope the two `•` carry enough side bearing to read as a typo rather than a mask, and that
+ *  is a rendering concern the label string cannot express. */
+export function folioCustomerIdentity(folio: {
+  customer_name?: string | null
+  customer_phone?: string | null
+}): CustomerIdentity {
+  const name = folio.customer_name?.trim()
+  if (name) return { kind: 'name', text: name }
+  const digits = normalizePhone(folio.customer_phone).e164.replace(/\D/g, '')
+  return digits.length >= 4 ? { kind: 'masked', tail: digits.slice(-4) } : { kind: 'anon' }
+}
+
 export function folioCustomerLabel(folio: {
   customer_name?: string | null
   customer_phone?: string | null
 }): string {
-  const name = folio.customer_name?.trim()
-  if (name) return name
-  const digits = normalizePhone(folio.customer_phone).e164.replace(/\D/g, '')
-  return digits.length >= 4 ? `Cliente ••${digits.slice(-4)}` : 'Cliente'
+  const identity = folioCustomerIdentity(folio)
+  if (identity.kind === 'name') return identity.text
+  if (identity.kind === 'masked') return `Cliente ••${identity.tail}`
+  return 'Cliente'
 }
 
 // --- The money axis: the rail, and how the figure reads (D4 · D5 · D6) ---------------------------
@@ -121,6 +139,60 @@ export function folioAction(
   if (folio.status === 'paid' && deliveryState(folio) === 'pending') return 'tickets'
   if (folio.status === 'booking' && opts.urgent) return 'reminder'
   return 'message'
+}
+
+// --- The sale time, compressed (D6) --------------------------------------------------------------
+
+/** The org-local calendar day of an instant, as `YYYY-MM-DD`. `en-CA` is the locale that formats
+ *  dates in that order — used as a key, never shown. */
+const orgDay = (unixSeconds: number, tz?: string): string =>
+  new Date(unixSeconds * 1000).toLocaleDateString('en-CA', { timeZone: tz })
+
+/** Calendar arithmetic on the day string, not `now − 86400`: subtracting a fixed number of seconds
+ *  lands on the wrong day across a DST boundary, and this list is read in a timezone that has one. */
+const previousDay = (day: string): string => {
+  const d = new Date(`${day}T00:00:00Z`)
+  d.setUTCDate(d.getUTCDate() - 1)
+  return d.toISOString().slice(0, 10)
+}
+
+/**
+ * "hoy 14:32" · "ayer 09:05" · "28 jul" · "28 jul 2025".
+ *
+ * The full `1 ago 2026, 02:32 p.m.` the card used to print is nine characters of ceremony on a line
+ * that also has to carry the customer and the seller. Recency is what the reader actually wants
+ * from a sale timestamp — the exact instant is one tap away on the detail — so the near days get
+ * words and a time, and everything older collapses to a date. Rendered in the ORG's zone (US-A66):
+ * "hoy" must mean the counter's today, not the viewer's.
+ */
+export function folioSoldAtLabel(
+  unixSeconds: number,
+  nowSeconds: number | null,
+  tz?: string,
+): string {
+  const day = orgDay(unixSeconds, tz)
+  const time = new Date(unixSeconds * 1000).toLocaleTimeString('es-MX', {
+    timeZone: tz,
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  })
+
+  // `now` is null on the first render (useNowSeconds resolves in an effect). Fall back to the
+  // absolute date rather than guessing "hoy" — a wrong "hoy" is worse than a right date.
+  if (nowSeconds !== null) {
+    const today = orgDay(nowSeconds, tz)
+    if (day === today) return `hoy ${time}`
+    if (day === previousDay(today)) return `ayer ${time}`
+  }
+
+  const sameYear = nowSeconds !== null && day.slice(0, 4) === orgDay(nowSeconds, tz).slice(0, 4)
+  return new Date(unixSeconds * 1000).toLocaleDateString('es-MX', {
+    timeZone: tz,
+    day: 'numeric',
+    month: 'short',
+    ...(sameYear ? {} : { year: 'numeric' }),
+  })
 }
 
 // --- The title: what was sold (D2) ---------------------------------------------------------------

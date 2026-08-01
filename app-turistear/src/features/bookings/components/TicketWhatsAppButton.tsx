@@ -69,9 +69,8 @@ export function TicketWhatsAppButton({
   if (variant === 'card') {
     return (
       <Tooltip title={disabled ? tip : ''}>
-        <span style={{ display: 'block' }}>
+        <span style={{ display: 'inline-flex' }}>
           <Button
-            fullWidth
             variant="contained"
             startIcon={<WhatsAppIcon />}
             disabled={disabled}

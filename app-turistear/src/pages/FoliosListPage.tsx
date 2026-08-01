@@ -20,8 +20,8 @@ import {
   usePendingRefundCount,
   useOverdueBookingCount,
   FolioCard,
+  useFolioSoldAt,
 } from '../features/folios'
-import { useOrgDateFormatter } from '../features/organization'
 import type { FolioStatus } from '../features/folios'
 import { CancellationRequestsTab } from '../features/folios/components/CancellationRequestsTab'
 import { PaymentVerificationTab } from '../features/folios/components/PaymentVerificationTab'
@@ -31,21 +31,14 @@ import { FilterStrip } from '../features/filters'
 import { ROUTES } from '../config/routes'
 import { deliveryState } from '../features/pos/delivery'
 
-const DATE_FMT: Intl.DateTimeFormatOptions = {
-  year: 'numeric',
-  month: 'short',
-  day: 'numeric',
-  hour: '2-digit',
-  minute: '2-digit',
-}
-
 // US-A80 — 'undelivered' is a client-side view over the loaded list: folios still
 // `● Pendiente de enviar` on the delivery axis (paid, portal link issued, never sent/seen).
 type Filter = 'all' | FolioStatus | 'undelivered'
 
 // The browse-and-cancel list (US-A21), unchanged — now one tab of the Folios screen.
 function FoliosTab() {
-  const formatDate = useOrgDateFormatter(DATE_FMT) // US-A66 — org-local audit timestamps
+  // US-A82 D6 — the compressed org-local sale time ("hoy 14:32"), not the full stamp.
+  const soldAt = useFolioSoldAt()
   const [filter, setFilter] = useState<Filter>('all')
   const { data: rows, isLoading, isError } = useFolios(
     filter === 'all' || filter === 'undelivered' ? {} : { status: filter },
@@ -101,7 +94,7 @@ function FoliosTab() {
                 folio={f}
                 to={ROUTES.FOLIO_DETAIL.replace(':id', f.id)}
                 byline={f.agent.name}
-                soldAt={formatDate(f.created_at)}
+                soldAt={soldAt(f.created_at)}
                 surface="admin"
               />
             ))}
