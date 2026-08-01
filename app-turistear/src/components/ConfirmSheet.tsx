@@ -50,6 +50,7 @@ export function ConfirmSheet({
     <BottomSheet
       open={open}
       onClose={onClose}
+      title={title}
       header={
         <Typography variant="h6" sx={{ px: 2, pb: 1 }}>
           {title}
@@ -65,8 +66,12 @@ export function ConfirmSheet({
               color={confirmColor}
               disabled={busy}
               onClick={onConfirm}
+              // BUG-022 — see FormSheet: the spinner replaces the label, so the name has to be
+              // stated explicitly or the control goes silent mid-submit.
+              aria-label={confirmLabel}
+              aria-busy={busy}
             >
-              {busy ? <CircularProgress size={22} color="inherit" /> : confirmLabel}
+              {busy ? <CircularProgress size={22} color="inherit" aria-hidden /> : confirmLabel}
             </Button>
           )}
           <Button fullWidth color="inherit" disabled={busy} onClick={onClose}>

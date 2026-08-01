@@ -121,7 +121,13 @@ export function DateRangeSheet({ open, onClose, from, to, maxDate, onApply }: Da
   )
 
   return (
-    <BottomSheet open={open} onClose={onClose} header={header} footer={footer}>
+    <BottomSheet
+      open={open}
+      onClose={onClose}
+      title="Seleccionar rango de fechas"
+      header={header}
+      footer={footer}
+    >
       <Box sx={{ px: 3, pb: 1 }}>
         {/* Weekday header. */}
         <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 1, mb: 1 }}>

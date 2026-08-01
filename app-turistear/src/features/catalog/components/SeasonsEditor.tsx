@@ -65,6 +65,7 @@ export function SeasonsEditor({ serviceId, unitId, unitName, open, onClose }: Se
     <BottomSheet
       open={open}
       onClose={onClose}
+      title={`Temporadas · ${unitName}`}
       header={
         <Typography variant="h6" sx={{ px: 2, pb: 1 }}>
           Temporadas · {unitName}

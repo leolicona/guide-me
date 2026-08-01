@@ -6,9 +6,10 @@ Tracks confirmed bugs, root causes, and fixes. Each entry is immutable once clos
 
 ---
 
-## BUG-022 — A Submitting Sheet's Button Loses Its Accessible Name — ⚠️ OPEN
+## BUG-022 — A Submitting Sheet's Button Loses Its Accessible Name — ✅ FIXED
 
 **Discovered:** 2026-07-31
+**Fixed:** 2026-08-01
 **Reporter:** the frontend test harness — axe, `docs/testing/frontend-testing.plan.md` Phase 4
 **Affected component:** `app-turistear/src/components/FormSheet.tsx:66-68`,
 `app-turistear/src/components/ConfirmSheet.tsx:64-66`
@@ -33,17 +34,22 @@ disappears, and a disabled unnamed button announces as nothing useful.
 
 ### Fix
 
-Not yet applied (the test phase deliberately changes no product code). Keep the label mounted and
-let the spinner sit beside it — or keep the swap but add `aria-label={submitLabel}` to the button
-and `aria-label` / `aria-labelledby` to the progress indicator, plus `aria-busy` on the button.
-`src/test/axe.ts` exports `BUSY_SHEET_KNOWN_ISSUES` tolerating exactly these two rule ids; delete
-that entry to verify the fix.
+The spinner swap stays (it is the right visual), but the name is now stated rather than implied:
+both buttons carry `aria-label={submitLabel}` / `aria-label={confirmLabel}` plus `aria-busy`, and
+the `CircularProgress` is marked `aria-hidden` — the button already announces that it is busy, so a
+second, unnamed progressbar inside it was noise as well as a violation.
+
+`BUSY_SHEET_KNOWN_ISSUES` is deleted from `src/test/axe.ts`, which is what verifies the fix: the
+sheet tests now run axe with **no tolerated rules**. `BottomSheet.test.tsx` asserts the confirm and
+submit buttons are still findable by name while busy, and carry `aria-busy="true"` — the assertion
+that used to pin the defect now pins the fix.
 
 ---
 
-## BUG-021 — Every Bottom Sheet Is an Unnamed Dialog — ⚠️ OPEN
+## BUG-021 — Every Bottom Sheet Is an Unnamed Dialog — ✅ FIXED
 
 **Discovered:** 2026-07-31
+**Fixed:** 2026-08-01
 **Reporter:** the frontend test harness — axe, `docs/testing/frontend-testing.plan.md` Phase 4
 **Affected component:** `app-turistear/src/components/BottomSheet.tsx`
 **Severity:** Medium — `BottomSheet` is the canonical overlay, so this affects **every** sheet in
@@ -63,13 +69,19 @@ the name exists on screen, it is simply never wired to the role that needs it.
 
 ### Fix
 
-Not yet applied (the test phase deliberately changes no product code). Give `BottomSheet` an
-optional `title`/`aria-label`, or generate an id for the header node and set
-`slotProps.paper['aria-labelledby']`. `FormSheet` and `ConfirmSheet` already receive the title as a
-string, so they can forward it with no API change at the call sites.
+`BottomSheet` now takes a **required** `title: string` and sets it as the paper's `aria-label`.
+Required, not optional, deliberately: an optional prop fixes the ten sheets that exist today and
+does nothing about the eleventh. With it required, an unnamed sheet no longer type-checks — `tsc`
+passing is the proof that every call site is named.
 
-`src/test/axe.ts` exports `SHEET_KNOWN_ISSUES` tolerating exactly this rule id in the sheet tests;
-every other axe rule stays live. Deleting that entry is how the fix gets verified.
+`FormSheet` and `ConfirmSheet` forward the title they already receive, so their call sites are
+unchanged. The eight direct callers each state a name; the two date sheets (whose header is a month
+navigator, not a title) describe what the sheet is FOR — "Seleccionar fecha", "Seleccionar rango de
+fechas" — which is a better name than echoing the visible month.
+
+`SHEET_KNOWN_ISSUES` is deleted from `src/test/axe.ts`: the sheet tests now run axe with no
+tolerated rules, and `getByRole('dialog', { name })` is asserted directly for BottomSheet,
+FormSheet and ConfirmSheet.
 
 ---
 

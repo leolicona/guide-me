@@ -72,6 +72,7 @@ export function ExtraDraftSheet({
     <BottomSheet
       open={open}
       onClose={onClose}
+      title={initial ? 'Editar extra' : 'Nuevo extra'}
       header={
         <Typography variant="h6" sx={{ px: 2, pb: 1 }}>
           {initial ? 'Editar extra' : 'Nuevo extra'}

@@ -41,7 +41,7 @@ export function PosCategorySheet({
   )
 
   return (
-    <BottomSheet open={open} onClose={onClose} header={header} footer={footer}>
+    <BottomSheet open={open} onClose={onClose} title="Categorías" header={header} footer={footer}>
       <Box sx={{ px: 3, pb: 2, display: 'flex', flexWrap: 'wrap', gap: 1 }}>
         {/* "Todas" clears the filter; each category toggles independently. */}
         <ButtonBase onClick={onClear} sx={filterChipSx(active.length === 0)}>

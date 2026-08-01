@@ -37,15 +37,3 @@ export async function expectNoA11yViolations(
   expect(summary).toEqual([])
 }
 
-/** Every sheet inherits BottomSheet's unnamed `role="dialog"` — docs/BUGS.md BUG-021. */
-export const SHEET_KNOWN_ISSUES = { 'aria-dialog-name': 'BUG-021' }
-
-/**
- * A submitting sheet additionally replaces its button label with a bare spinner, leaving a
- * critically unnamed button and an unnamed progressbar — docs/BUGS.md BUG-022.
- */
-export const BUSY_SHEET_KNOWN_ISSUES = {
-  ...SHEET_KNOWN_ISSUES,
-  'button-name': 'BUG-022',
-  'aria-progressbar-name': 'BUG-022',
-}

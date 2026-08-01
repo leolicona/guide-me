@@ -181,6 +181,7 @@ export function UnitDraftSheet({
     <BottomSheet
       open={open}
       onClose={onClose}
+      title={mode === 'edit' ? 'Editar unidad' : mode === 'duplicate' ? 'Duplicar tipo' : 'Nueva unidad'}
       header={
         <Typography variant="h6" sx={{ px: 2, pb: 1 }}>
           {mode === 'edit' ? 'Editar unidad' : mode === 'duplicate' ? 'Duplicar tipo' : 'Nueva unidad'}

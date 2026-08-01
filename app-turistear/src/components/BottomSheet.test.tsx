@@ -1,10 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
 import { renderWithProviders, screen, userEvent } from '../test/renderWithProviders'
-import {
-  expectNoA11yViolations,
-  SHEET_KNOWN_ISSUES,
-  BUSY_SHEET_KNOWN_ISSUES,
-} from '../test/axe'
+import { expectNoA11yViolations } from '../test/axe'
 import { BottomSheet } from './BottomSheet'
 import { ConfirmSheet } from './ConfirmSheet'
 import { FormSheet } from './FormSheet'
@@ -15,7 +11,7 @@ describe('BottomSheet', () => {
   // asserting a MUI implementation detail that is not true.
   it('hides its content while closed', () => {
     renderWithProviders(
-      <BottomSheet open={false} onClose={() => {}}>
+      <BottomSheet open={false} onClose={() => {}} title="Filtros">
         Contenido
       </BottomSheet>,
     )
@@ -24,7 +20,7 @@ describe('BottomSheet', () => {
 
   it('renders header, body and footer when open', () => {
     renderWithProviders(
-      <BottomSheet open onClose={() => {}} header={<h2>Título</h2>} footer={<button type="button">Aplicar</button>}>
+      <BottomSheet open onClose={() => {}} title="Título" header={<h2>Título</h2>} footer={<button type="button">Aplicar</button>}>
         Cuerpo
       </BottomSheet>,
     )
@@ -36,7 +32,7 @@ describe('BottomSheet', () => {
   it('closes from the labelled close control — a one-handed target, not just the backdrop', async () => {
     const onClose = vi.fn()
     renderWithProviders(
-      <BottomSheet open onClose={onClose}>
+      <BottomSheet open onClose={onClose} title="Filtros">
         Cuerpo
       </BottomSheet>,
     )
@@ -47,7 +43,7 @@ describe('BottomSheet', () => {
   it('closes on Escape', async () => {
     const onClose = vi.fn()
     renderWithProviders(
-      <BottomSheet open onClose={onClose}>
+      <BottomSheet open onClose={onClose} title="Filtros">
         Cuerpo
       </BottomSheet>,
     )
@@ -55,13 +51,24 @@ describe('BottomSheet', () => {
     expect(onClose).toHaveBeenCalled()
   })
 
-  it('has no accessibility violations', async () => {
+  // BUG-021 — the sheet is the canonical overlay, so an unnamed dialog here was an unnamed
+  // dialog everywhere. `title` is REQUIRED, which is what stops it coming back.
+  it('names its dialog, so a screen reader announces more than "dialog"', () => {
     renderWithProviders(
-      <BottomSheet open onClose={() => {}} header={<h2>Filtros</h2>}>
+      <BottomSheet open onClose={() => {}} title="Filtros" header={<h2>Filtros</h2>}>
         Cuerpo
       </BottomSheet>,
     )
-    await expectNoA11yViolations(document.body, SHEET_KNOWN_ISSUES)
+    expect(screen.getByRole('dialog', { name: 'Filtros' })).toBeInTheDocument()
+  })
+
+  it('has no accessibility violations', async () => {
+    renderWithProviders(
+      <BottomSheet open onClose={() => {}} title="Filtros" header={<h2>Filtros</h2>}>
+        Cuerpo
+      </BottomSheet>,
+    )
+    await expectNoA11yViolations(document.body)
   })
 })
 
@@ -73,6 +80,11 @@ describe('ConfirmSheet', () => {
     confirmLabel: 'Sí, cancelar',
     onConfirm: vi.fn(),
   }
+
+  it('names its dialog with the question it asks (BUG-021)', () => {
+    renderWithProviders(<ConfirmSheet {...props} onClose={vi.fn()} onConfirm={vi.fn()} />)
+    expect(screen.getByRole('dialog', { name: '¿Cancelar el folio?' })).toBeInTheDocument()
+  })
 
   it('asks the question and offers confirm over cancel', () => {
     renderWithProviders(<ConfirmSheet {...props} onClose={vi.fn()} onConfirm={vi.fn()} />)
@@ -93,22 +105,19 @@ describe('ConfirmSheet', () => {
     const onClose = vi.fn()
     renderWithProviders(<ConfirmSheet {...props} busy onClose={onClose} onConfirm={onConfirm} />)
 
-    // While busy the confirm label is REPLACED by a spinner, so it can no longer be queried by
-    // name — see the busy-state a11y test below (docs/BUGS.md BUG-022).
-    const buttons = screen.getAllByRole('button')
-    const confirm = buttons.find((b) => b.querySelector('.MuiCircularProgress-root'))
-    expect(confirm).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Sí, cancelar' })).toBeDisabled()
     expect(screen.getByRole('button', { name: 'Cancelar' })).toBeDisabled()
     expect(onClose).not.toHaveBeenCalled()
     expect(onConfirm).not.toHaveBeenCalled()
   })
 
-  it('loses the confirm button\'s accessible name while busy (known gap, BUG-022)', async () => {
+  // BUG-022 — the spinner replaces the label, so the name has to be stated explicitly or the
+  // control goes silent mid-submit. axe rated the old behaviour CRITICAL.
+  it('keeps its name and announces itself busy while submitting', async () => {
     renderWithProviders(<ConfirmSheet {...props} busy onClose={vi.fn()} onConfirm={vi.fn()} />)
-    // The spinner replaces the label outright, leaving a control a screen reader cannot name.
-    expect(screen.queryByRole('button', { name: 'Sí, cancelar' })).not.toBeInTheDocument()
-    // axe agrees, and rates it CRITICAL: "Buttons must have discernible text".
-    await expectNoA11yViolations(document.body, BUSY_SHEET_KNOWN_ISSUES)
+    const confirm = screen.getByRole('button', { name: 'Sí, cancelar' })
+    expect(confirm).toHaveAttribute('aria-busy', 'true')
+    await expectNoA11yViolations(document.body)
   })
 
   it('hides the confirm button in terminal-error mode, leaving only a way out', () => {
@@ -144,7 +153,7 @@ describe('ConfirmSheet', () => {
         description="Se liberarán los lugares."
       />,
     )
-    await expectNoA11yViolations(document.body, SHEET_KNOWN_ISSUES)
+    await expectNoA11yViolations(document.body)
   })
 })
 
@@ -155,6 +164,15 @@ describe('FormSheet', () => {
     title: 'Editar agente',
     submitLabel: 'Guardar',
   }
+
+  it('names its dialog with the form title (BUG-021)', () => {
+    renderWithProviders(
+      <FormSheet {...base} onClose={vi.fn()} onSubmit={vi.fn()}>
+        <input aria-label="Nombre" />
+      </FormSheet>,
+    )
+    expect(screen.getByRole('dialog', { name: 'Editar agente' })).toBeInTheDocument()
+  })
 
   it('submits the form when the FOOTER button is pressed, though it sits outside the form', async () => {
     // The footer button is linked by `form={id}`, not nesting. If that link breaks, the sheet
@@ -188,10 +206,9 @@ describe('FormSheet', () => {
         <input aria-label="Nombre" />
       </FormSheet>,
     )
-    const submit = screen.getAllByRole('button').find((b) => b.getAttribute('type') === 'submit')
+    const submit = screen.getByRole('button', { name: 'Guardar' })
     expect(submit).toBeDisabled()
-    // …and it is no longer findable by its label, because the spinner replaced it (BUG-022).
-    expect(screen.queryByRole('button', { name: 'Guardar' })).not.toBeInTheDocument()
+    expect(submit).toHaveAttribute('aria-busy', 'true')
   })
 
   it('blocks submit when the draft is invalid, independently of busy', () => {
@@ -235,6 +252,6 @@ describe('FormSheet', () => {
         <input aria-label="Nombre" />
       </FormSheet>,
     )
-    await expectNoA11yViolations(document.body, SHEET_KNOWN_ISSUES)
+    await expectNoA11yViolations(document.body)
   })
 })

@@ -5,6 +5,15 @@ import CloseRounded from '@mui/icons-material/CloseRounded'
 interface BottomSheetProps {
   open: boolean
   onClose: () => void
+  /**
+   * Accessible name for the sheet (BUG-021). REQUIRED, not optional: an overlay with
+   * `role="dialog"` and no name announces as bare "dialog", and every sheet in this product went
+   * out that way because the title lived in an opaque `header` node nobody wired to the role.
+   * A required prop makes that unrepresentable rather than merely fixed. Usually the same words
+   * the header shows; for a sheet whose header is a control strip (a month navigator), describe
+   * what the sheet is FOR.
+   */
+  title: string
   /** Fixed region below the puller (e.g. a title or month navigation). */
   header?: ReactNode
   /** Fixed region pinned to the bottom (e.g. an Apply button). */
@@ -26,6 +35,7 @@ interface BottomSheetProps {
 export function BottomSheet({
   open,
   onClose,
+  title,
   header,
   footer,
   children,
@@ -46,6 +56,7 @@ export function BottomSheet({
       sx={{ zIndex: (theme) => theme.zIndex.modal + 1 }}
       slotProps={{
         paper: {
+          'aria-label': title,
           sx: {
             borderTopLeftRadius: 'var(--radius-xl, 20px)',
             borderTopRightRadius: 'var(--radius-xl, 20px)',
