@@ -264,7 +264,7 @@ Then no `portal_link` in the response resolves to org B's token.
 
 ### US-AG49 — the same card on the seller's own list
 
-**S-10 — The byline follows the audience** *(specified; not automatically covered — see DoD)*
+**S-10 — The byline follows the audience**
 Given a folio sold by agent *Ana* through affiliate operator *Luis*
 When the admin opens `/folios` the byline reads `Ana`
 And when the seller opens `/history` it reads `Luis`
@@ -278,19 +278,21 @@ And on a direct sale `/history` shows no byline and no placeholder dash.
       `api-turistear/test/folios/folio-list-scanability.test.ts` (11 cases)
 - [x] Cross-org isolation **S-8, S-9** using `seedTwoOrgs`
 - [x] Card derivations **S-1…S-6, S-11** in `app-turistear/src/features/folios/folioCardState.test.ts`
-      (34 cases) — the repo's first frontend unit tests, establishing `docs/TESTING.md` **Tier 1**
-      (Vitest, no DOM). Wired into CI as `pnpm test:app`
+      (34 cases) — `docs/TESTING.md` **Tier 1** (pure logic, no DOM), running on the harness PR #50
+      landed while this branch was open. This feature adds tests, not testing infrastructure
 - [x] `folioCustomerLabel()` helper + `FolioCard` shared by `/folios` and `/history`
 - [x] Visual verification at 390px and 1280px on both `/folios` and `/history`, all nine states
 - [x] `FolioCard` accessibility: `aria-label` on the checkmarks, link region and action button as
       two separate focus stops
 - [x] `SPEC.md`: US-A82 + US-AG49 stories, *Features by Phase* line, glossary entry for **Riel de estado**
 - [x] `TECH_DEBT.md`: `Sin nombre` on the three remaining surfaces; `/api/folios` still unpaginated
-- [ ] **S-10 (byline by audience) is NOT automatically covered.** It is a component render, which
-      `docs/TESTING.md` routes to Tier 3 (Vitest + Testing Library) — a tier this PR deliberately
-      does not stand up, because the DOM/RTL/MSW setup is a testing platform of its own and does not
-      belong inside a card redesign. The two call sites are three lines each and type-checked;
-      the assertion lands with Tier 3.
+- [x] **S-10 (byline by audience)** in `app-turistear/src/features/folios/components/FolioCard.test.tsx`
+      (8 cases) — `docs/TESTING.md` **Tier 3**. This box was written unticked, on the reasoning that
+      standing up a DOM/RTL/MSW platform did not belong inside a card redesign. PR #50 landed that
+      platform while this branch was open, so the reason expired and the box is now ticked rather
+      than excused. The suite also asserts what the pure functions cannot reach: that the link region
+      and the action button are **separate** controls (D10), and that each checkmark announces its
+      meaning (D11).
 
 ## Deferred — and why each is safe to defer
 
