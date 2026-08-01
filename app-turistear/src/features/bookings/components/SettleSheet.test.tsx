@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest'
 import { http, HttpResponse } from 'msw'
 import { server } from '../../../test/server'
 import { renderWithProviders, screen, userEvent, waitFor } from '../../../test/renderWithProviders'
-import { expectNoA11yViolations, SHEET_KNOWN_ISSUES } from '../../../test/axe'
+import { expectNoA11yViolations } from '../../../test/axe'
 import { SettleSheet } from './SettleSheet'
 
 // US-LG03. The labels asserted here are the SAME strings e2e/settle-breakdown.spec.ts queries, on
@@ -141,8 +141,8 @@ describe('SettleSheet', () => {
     expect(onClose).not.toHaveBeenCalled()
   })
 
-  it('has no accessibility violations beyond the tracked sheet defect', async () => {
+  it('has no accessibility violations', async () => {
     renderWithProviders(<SettleSheet {...props} onClose={vi.fn()} />)
-    await expectNoA11yViolations(document.body, SHEET_KNOWN_ISSUES)
+    await expectNoA11yViolations(document.body)
   })
 })

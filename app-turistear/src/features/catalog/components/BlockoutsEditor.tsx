@@ -52,6 +52,7 @@ export function BlockoutsEditor({ serviceId, unitId, unitName, open, onClose }: 
     <BottomSheet
       open={open}
       onClose={onClose}
+      title={`Bloqueos · ${unitName}`}
       header={
         <Typography variant="h6" sx={{ px: 2, pb: 1 }}>
           Bloqueos · {unitName}
