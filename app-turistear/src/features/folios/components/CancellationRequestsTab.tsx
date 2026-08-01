@@ -30,6 +30,7 @@ import type { CancellationRequest, CancellationRequestStatus } from '../types'
 import { formatMoney } from '../../catalog/types'
 import { ROUTES } from '../../../config/routes'
 import { useOrgDateFormatter } from '../../organization'
+import { FilterStrip } from '../../filters'
 
 const REQUEST_COLOR: Record<CancellationRequestStatus, 'warning' | 'success' | 'error'> = {
   pending: 'warning',
@@ -83,18 +84,21 @@ export function CancellationRequestsTab() {
 
   return (
     <Box>
+        {/* BUG-023 — the filter row is wider than a phone. Contained here so the scroll stays
+            inside the row instead of dragging the whole page sideways. */}
+      <FilterStrip sx={{ mb: 3 }}>
       <ToggleButtonGroup
         size="small"
         exclusive
         value={filter}
         onChange={(_, v) => v && setFilter(v)}
-        sx={{ mb: 3 }}
       >
         <ToggleButton value="pending">Pendientes</ToggleButton>
         <ToggleButton value="approved">Aprobadas</ToggleButton>
         <ToggleButton value="rejected">Rechazadas</ToggleButton>
         <ToggleButton value="all">Todas</ToggleButton>
       </ToggleButtonGroup>
+      </FilterStrip>
 
       {isLoading && (
         <Box sx={{ display: 'flex', justifyContent: 'center', py: 6 }}>
