@@ -2,6 +2,51 @@
 
 This document tracks known technical debt, deferred tasks, and architectural improvements that are planned for future phases.
 
+## 23. `GET /api/folios` Has No Limit, and Now Returns More Per Row — ⚠️ OPEN
+
+**Status:** `listFolios` selects **every folio the organization has ever created** — no `LIMIT`, no
+cursor, no `useInfiniteQuery` anywhere in the app. `folio-list-scanability.spec.md` (US-A82) widens
+each row by roughly 150 bytes (`lines`, `portal_link`, `sale_mode`), so the same unbounded read now
+costs more per folio. Dev holds ~101 folios; the shape of the problem is the org that holds 5,000.
+
+The `undelivered` filter compounds it — it is applied **client-side** over the fully-loaded list
+(`FoliosListPage.tsx:61-68`), so it structurally depends on everything being downloaded.
+
+**Why it was not fixed now:** the scanability PR is a read-widening with no state change, and its
+scope boundary is that reverting it changes not one row. Adding pagination changes the contract for
+every consumer of the list and its five count badges. It also has to be **sequenced with search**:
+the planned client-side search over the loaded list only finds what was downloaded, so pagination
+and server-side search are one decision, not two.
+
+**Action required:** whoever implements folio search server-side. Add a cursor + `total_count` to
+`GET /api/folios` and `GET /api/pos/folios`, convert `useFolios`/`useMyFolios` to
+`useInfiniteQuery`, and move the `undelivered` filter server-side with the rest.
+
+---
+
+## 22. `Sin nombre` Survives on Three Folio Surfaces — ⚠️ OPEN
+
+**Status:** `express-sale.spec.md` **D17** leaves `customer_name` NULL by design, and line 490 of
+that same spec prescribed the fallback — `Cliente · ••1234` — which was never built. US-A82 builds
+it as `folioCustomerLabel()` and adopts it in the shared `FolioCard`, covering `/folios` and
+`/history`. Three surfaces still print the literal `Sin nombre`:
+
+- `pages/FolioDetailPage.tsx`
+- `features/folios/components/QueueRow.tsx` (Reembolsos + Vencidos tabs)
+- `features/folios/components/CancellationRequestsTab.tsx`
+
+So a counter-sold Express folio reads `Cliente ••5678` in the list and `Sin nombre` on its own
+detail page — the same folio, two identities.
+
+**Why it was not fixed now:** scoped deliberately to keep the scanability PR to the two list
+surfaces it redesigns. The helper is shared from the day it lands, so each remaining surface is a
+one-line change.
+
+**Action required:** import `folioCustomerLabel` in the three files above and delete the
+`?? 'Sin nombre'` fallbacks. No server change.
+
+---
+
 ## 21. The API Contract Is Hand-Mirrored Into the Frontend — ⚠️ OPEN
 
 **Status:** the response shapes the frontend expects live in `app-turistear/src/features/*/types.ts`,
