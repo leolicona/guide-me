@@ -6,6 +6,60 @@ Tracks confirmed bugs, root causes, and fixes. Each entry is immutable once clos
 
 ---
 
+## BUG-024 — An Apartado Can Be Opened on a Departure That Has Already Left — ⚠️ OPEN
+
+**Discovered:** 2026-08-02
+**Reporter:** the E2E suite's first real execution — `docs/testing/frontend-testing.plan.md` Phase 5
+**Affected component:** `api-turistear/src/routes/pos/handler.ts:1416-1425` (`confirmSale`, the
+US-A77 creation cutoff)
+**Severity:** Medium — an agent can take a cash deposit against a tour that already departed. The
+folio looks live (`status: booking`, a real balance) but **every settle answers 409
+`BOOKING_EXPIRED`**, so the money is collected against something that can never be completed.
+
+### Symptom
+
+Selling an apartado on a slot whose departure has passed returns `201` and a folio with
+`status: booking`. Its `booking_expires_at` is in the past on arrival. Settling it — by any method —
+fails:
+
+```
+POST /api/pos/folios/:id/settle {"method":"transfer",…}
+  → 409 {"error":{"code":"BOOKING_EXPIRED","message":"Booking has expired"}}
+```
+
+Reproduced against `api-dev` on 2026-08-02 at 19:50Z with a `2026-08-02 14:00` departure: the
+folio was created, and its settle-by landed at `19:45Z` — five minutes before it was sold.
+
+### Root Cause
+
+The guard that should stop this is conditional on policy:
+
+```ts
+if (policy.creationCutoffHours > 0) {
+  const hoursOut = (earliest.epoch - nowSec) / 3600
+  if (hoursOut < policy.creationCutoffHours) throw new ApiError('BOOKING_TOO_LATE', 422, …)
+}
+```
+
+An org that has never configured a creation cutoff sits at `0`, so the whole block is skipped —
+including the part that would have rejected a *negative* `hoursOut`. `bookingExpiryDate` then does
+its job faithfully (`departure − buffer`) and returns an instant already behind us.
+
+The zero default is deliberate for the **sales** cutoff — the comment above it explains that a cash
+walk-in should sell until the last minute. That reasoning covers a completed sale; it does not
+cover a promise to come back and pay for a bus that has gone.
+
+### Fix
+
+Not yet applied — found while running the E2E suite, and this is API behaviour, not the test-harness
+defect that PR shipped. The likely shape is to reject `hoursOut < 0` unconditionally (a departed
+slot is never bookable, at any policy setting) and keep the configurable cutoff as the separate,
+stricter rule it already is. Needs an API test alongside it; `seed.setup.ts` asserts
+`booking_expires_at` is in the future, so the E2E suite now fails loudly rather than silently if
+this ever re-appears through another path.
+
+---
+
 ## BUG-023 — Two Money Queues Are Unreachable on a Phone, and the Filter Row Drags the Page — ✅ FIXED
 
 **Discovered:** 2026-08-01
