@@ -79,8 +79,12 @@ Mechanically:
   `/cancellation-requests/:id/approve`, `/reject`, and `/folios/:id/refund` are unchanged in route,
   payload, authorization and effect. Only the **screen that invokes them** moves.
 - `test/folios/*.test.ts`, `test/payment-verification/*.test.ts` and
-  `test/tourist-portal/*.test.ts` must pass **unedited**, with the single exception of the new
-  `LIMIT`/union assertions on `listFolios`.
+  `test/tourist-portal/*.test.ts` must pass **unedited**, with exactly **two** named exceptions:
+  the new union/window assertions on `listFolios`, and **`pending-queues.test.ts` S-4**, which
+  asserted the oldest-debt-first sort that D10 removes. That test is rewritten in place, not
+  deleted: it now pins the new order **and** that `cancelled_at` still reaches the client, because
+  losing that field is what would genuinely break Q5 and an order-only assertion would not catch it.
+  No other assertion in those files may be touched — an edited test is how a scope boundary rots.
 - The **delivery axis vocabulary is untouched**: `Pendiente de enviar → Enviado → Visto`
   (US-AG40). The pending `Visto → Entregado` glossary migration is *not* in this feature.
 - The **channel rule of US-A82 is untouched**: `rail = money · checkmark = message · chip = time ·
@@ -128,6 +132,13 @@ Mechanically:
 
 `Vencido` stays derived. A stored stage needs a writer, and a cron that writes state drifts from the
 clock that defines it; a `WHERE` clause cannot drift.
+
+**One existing constraint is load-bearing here.** `uq_cancellation_requests_open` (migration `0028`)
+is a **partial** unique index — `(folio_id) WHERE status = 'pending'`. A folio can therefore hold at
+most **one live request** but any number of resolved ones. Two consequences the implementation
+depends on: rule 6's `'pending'` must win over `'resolved'` when both exist on one folio (they can),
+and the pending-request **count is over folios, not request rows** — counting rows would print
+*"3 Solicitudes"* above a single card whose history happens to be long.
 
 The two new response fields on a list row are **derived, never persisted**:
 
@@ -333,14 +344,28 @@ Given two organizations seeded with `seedTwoOrgs`, org B holding 3 pending refun
 When org A's admin reads `GET /api/folios/counts`
 Then `refunds` is `0`.
 
-**S-18 — Another org's cancellation request never decorates a row**
-Given org A and org B each hold a folio, and **org B's** folio has a pending request
-When org A's admin lists folios
-Then no org A row carries `cancellation_request` — and the assertion is written so that dropping
-either organization scope from the grouped query **fails it**. *(US-A82's S-8 taught this: a test
-that iterates the caller's own rows and looks each up by id passes even when a foreign row is in
-the map, because the foreign row is simply never read. The scope check must be same-org
-attribution, not foreign-row absence.)*
+**S-18 — The mark lands on the folio the request is about, and no other**
+Given **one** organization holding two folios, exactly one with a pending request
+When the admin lists folios
+Then only that folio carries `cancellation_request: 'pending'`.
+
+*This is same-org attribution, and it is the only form of the assertion with teeth. The cross-org
+form was written first and **mutation-tested during the build**: removing the organization scope
+from `readListCancellationRequests` left it green — and so did removing the join and the filters
+**entirely**. The reason is structural, and it is US-A82's S-8 exactly: the response reads
+`requestByFolio.get(r.id)` for ids it already owns, so a foreign row sits unused in the map. That
+decoration cannot leak across orgs however it is scoped, and a test claiming credit for preventing
+it would be decoration. **What actually enforces isolation on this route is
+`eq(folios.organizationId, org)` in the main query's `filters`**, carried into every decoration
+through the join; the second scope inside the decoration is defence in depth, matching
+`readListLines`/`readListPortalLinks`. S-18 as written above **does** fail when the grouping key is
+mis-keyed — verified by mutating it to the request id, which failed six tests including this one.*
+
+**S-18b — Org A sees only org A's folios**
+Given `seedTwoOrgs`, each org holding one folio, org B's with a pending request
+When each admin lists folios
+Then each sees exactly their own. *(This guards the main query's org scope — the predicate that
+does the work. It says nothing about the decorations.)*
 
 **S-19 — Another org's folio detail is 404**
 Given `seedTwoOrgs`
@@ -356,9 +381,12 @@ Then `404`, never `403`.
 - [ ] `cancellation_requests[]` on the folio detail
 - [ ] The filter-dependent `orderBy` removed (rule 9)
 - [ ] Same two fields on the agent-scoped `GET /api/pos/folios`
-- [ ] S-1 … S-14 covered in `test/folios/folio-lifecycle-unification.test.ts`
-- [ ] S-17 … S-19 with `seedTwoOrgs` — S-18 **mutation-verified**: dropping an org scope must fail it
-- [ ] `test/payment-verification/*` and `test/tourist-portal/*` pass **unedited**
+- [x] S-1 … S-6, S-11 and S-17 … S-19 in `test/folios/folio-lifecycle-unification.test.ts`
+      *(S-7 … S-10 and S-12 … S-16 are frontend and belong to the app's suites)*
+- [x] **Mutation-verified**, both ways round: replacing the union with a plain window fails S-1,
+      S-1b and S-4; mis-keying the request grouping fails six tests including S-18. Recorded in
+      S-18's note: the cross-org form of that assertion had **no** teeth and was replaced, not kept.
+- [x] `test/payment-verification/*` and `test/tourist-portal/*` pass **unedited** (736 tests, 56 files)
 
 **Frontend**
 - [ ] `FolioStateSheet` (three sections) + `PendingWorkBar`, on `FilterStrip` / `filterChipSx`

@@ -155,17 +155,24 @@ describe('US-A78 — refunds pending hand-back', () => {
     expect(await listQueue('refund_status=pending')).toHaveLength(0)
   })
 
-  it('S-4 — oldest debt first', async () => {
+  // US-A84 (D10, rule 9) CHANGED this assertion. The queue used to sort oldest-debt-first, which
+  // was right while it was its own screen and unreadable once facets compose — one list cannot have
+  // three sort orders. Q5 still holds: the age IS the signal. It stopped being carried by the sort
+  // and is now printed on the card's time chip, which is why this test asserts the new order AND
+  // that `cancelled_at` still reaches the client — losing that field is what would actually break
+  // Q5, and a test that only checked the order would not notice.
+  it('S-4 — one order, and the age still reaches the client', async () => {
     const { userId, organizationId } = await seedUser({ email: ADMIN_EMAIL })
     const base = { organizationId, agentId: userId, status: 'cancelled' as const, refundStatus: 'pending' as const, refundAmount: 50000 }
-    // Seeded newest-first on purpose: a default `created_at DESC` ordering would pass by accident.
     const newest = await seedFolio({ ...base, customerName: 'Nueva', cancelledAt: nowSec() - 3600, createdAt: nowSec() - 3600 })
     const oldest = await seedFolio({ ...base, customerName: 'Vieja', cancelledAt: nowSec() - 259200, createdAt: nowSec() - 259200 })
     const middle = await seedFolio({ ...base, customerName: 'Media', cancelledAt: nowSec() - 86400, createdAt: nowSec() - 86400 })
 
     const rows = await listQueue('refund_status=pending')
 
-    expect(rows.map((r) => r.id)).toEqual([oldest, middle, newest])
+    expect(rows.map((r) => r.id)).toEqual([newest, middle, oldest])
+    // The debt's age, per row: `Debe hace 3 d` is derived from this and nothing else.
+    expect(rows.every((r) => typeof r.cancelled_at === 'number')).toBe(true)
   })
 
   it('S-5 — whoever cancelled it, the debt is listed', async () => {
