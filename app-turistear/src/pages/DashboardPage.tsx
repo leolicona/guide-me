@@ -8,12 +8,7 @@ import SendRounded from '@mui/icons-material/SendRounded'
 import PaymentsRounded from '@mui/icons-material/PaymentsRounded'
 import HourglassBottomRounded from '@mui/icons-material/HourglassBottomRounded'
 import { useCurrentUser } from '../features/auth/CurrentUserContext'
-import {
-  usePendingCancellationCount,
-  usePendingDeliveryCount,
-  usePendingRefundCount,
-  useOverdueBookingCount,
-} from '../features/folios/hooks'
+import { useFolioCounts } from '../features/folios/hooks'
 import { usePendingDropCount } from '../features/cash/hooks'
 import { ROUTES } from '../config/routes'
 
@@ -73,14 +68,16 @@ function QueueCard({ icon: Icon, count, title, emptyHint, pendingHint, to }: Que
 
 export default function DashboardPage() {
   const user = useCurrentUser()
-  // Admin-only route, so both feeds are always enabled here.
-  const { data: pendingCancellationCount = 0 } = usePendingCancellationCount(true)
   const { data: pendingDropCount = 0 } = usePendingDropCount(true)
-  // US-A78/A79 — the two work queues that had no surface at all before this feature.
-  const { data: pendingRefundCount = 0 } = usePendingRefundCount(true)
-  const { data: overdueBookingCount = 0 } = useOverdueBookingCount(true)
-  // US-A80 — paid folios whose tickets never reached the customer (no scan, no WhatsApp).
-  const { data: pendingDeliveryCount = 0 } = usePendingDeliveryCount(true)
+  // US-A84 (D7/D20) — ONE aggregate for all four folio counts, shared with the list's pending-work
+  // bar so the two surfaces cannot show different numbers. Before this, each of these was a full
+  // filtered list fetched to call `.length` — three unbounded reads of `folios` to render `Hoy`,
+  // one of which pulled every paid folio WITH its lines and portal link.
+  const { data: counts } = useFolioCounts(true)
+  const pendingCancellationCount = counts?.cancellation_requests ?? 0
+  const pendingRefundCount = counts?.refunds ?? 0
+  const overdueBookingCount = counts?.overdue ?? 0
+  const pendingDeliveryCount = counts?.undelivered ?? 0
 
   return (
     <Fade in timeout={400}>
@@ -105,7 +102,9 @@ export default function DashboardPage() {
             title="Cancelaciones"
             pendingHint="Solicitudes por revisar en Ventas"
             emptyHint="Sin solicitudes pendientes"
-            to={ROUTES.FOLIOS}
+            // US-A84 — this linked to a BARE /folios: tapping "3 Cancelaciones" landed the admin on
+            // the unfiltered list of every folio, to re-filter by hand. Now it lands on its facet.
+            to={`${ROUTES.FOLIOS}?estado=solicitud`}
           />
           <QueueCard
             icon={AccountBalanceWalletRounded}
@@ -123,7 +122,7 @@ export default function DashboardPage() {
             title="Reembolsos"
             pendingHint="Por entregar al cliente, en Ventas"
             emptyHint="Sin reembolsos pendientes"
-            to={`${ROUTES.FOLIOS}?tab=refunds`}
+            to={`${ROUTES.FOLIOS}?estado=reembolso`}
           />
           {/* US-A79 — holds past their deadline, still sitting on seats. */}
           <QueueCard
@@ -132,7 +131,7 @@ export default function DashboardPage() {
             title="Apartados vencidos"
             pendingHint="Sin liquidar, en Ventas"
             emptyHint="Sin apartados vencidos"
-            to={`${ROUTES.FOLIOS}?tab=overdue`}
+            to={`${ROUTES.FOLIOS}?estado=vencido`}
           />
           {/* US-A80 — the pending-delivery queue: a customer who walked away without scanning
               still gets their ticket (the one-tap WhatsApp in Ventas clears it). */}
@@ -142,7 +141,8 @@ export default function DashboardPage() {
             title="Boletos"
             pendingHint="Boletos sin entregar en Ventas"
             emptyHint="Todos los boletos entregados"
-            to={ROUTES.FOLIOS}
+            // US-A84 — the second bare link. Same fix.
+            to={`${ROUTES.FOLIOS}?estado=sin_enviar`}
           />
         </Stack>
       </Box>

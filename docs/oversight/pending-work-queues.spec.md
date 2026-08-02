@@ -2,6 +2,13 @@
 
 > Process: `docs/PROCESS.md`. Stories **US-A78** (refunds pending hand-back) and **US-A79**
 > (apartados past their settle deadline).
+>
+> **Q3 and Q9 are superseded by `docs/oversight/folio-lifecycle-unification.spec.md` (US-A84).**
+> The two queues stop being tabs and become facets of one folio list; `?tab=` becomes `?estado=`.
+> Everything else here still holds — in particular **Q5** (the age is the signal, now printed on
+> the card's time chip rather than carried by the sort order), **Q6** (confirming a refund needs
+> the customer's PIN and stays on the folio detail) and **Q8** (the clock is read in an effect,
+> never in a render body).
 
 ## Context
 

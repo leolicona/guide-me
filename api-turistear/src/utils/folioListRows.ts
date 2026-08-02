@@ -10,7 +10,7 @@
 
 import { and, asc, eq, type SQL } from 'drizzle-orm'
 import type { Db } from '../db/client'
-import { folioAccessTokens, folioLines, folios } from '../db/schema'
+import { cancellationRequests, folioAccessTokens, folioLines, folios } from '../db/schema'
 
 /** The lean line shape the card and `renderItinerary()` share (spec D14). */
 export interface FolioListLine {
@@ -95,5 +95,35 @@ export const readListPortalLinks = async (
 
   const byFolio = new Map<string, string>()
   for (const r of rows) byFolio.set(r.folioId, `${apiBaseUrl}/portal/${r.token}`)
+  return byFolio
+}
+
+/** US-A84 rule 6 — what a folio's cancellation requests amount to, for the row. */
+export type CancellationRequestMark = 'pending' | 'resolved'
+
+/**
+ * The cancellation-request mark per folio (US-A84 rule 6): `'pending'` when ANY request is still
+ * pending, `'resolved'` when the folio has requests but none pending, absent when it has none.
+ *
+ * `'pending'` wins regardless of row order — a folio can hold a rejected request and a live one at
+ * the same time, and the live one is the whole reason this field exists. Same double org scope and
+ * same filter-through-join as the two decorations above: never an `IN (...)` of returned ids.
+ */
+export const readListCancellationRequests = async (
+  db: Db,
+  org: string,
+  filters: SQL[],
+): Promise<Map<string, CancellationRequestMark>> => {
+  const rows = await db
+    .select({ folioId: cancellationRequests.folioId, status: cancellationRequests.status })
+    .from(cancellationRequests)
+    .innerJoin(folios, eq(cancellationRequests.folioId, folios.id))
+    .where(and(eq(cancellationRequests.organizationId, org), ...filters))
+
+  const byFolio = new Map<string, CancellationRequestMark>()
+  for (const r of rows) {
+    if (r.status === 'pending') byFolio.set(r.folioId, 'pending')
+    else if (!byFolio.has(r.folioId)) byFolio.set(r.folioId, 'resolved')
+  }
   return byFolio
 }

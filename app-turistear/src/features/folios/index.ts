@@ -5,3 +5,7 @@ export { FolioStatusChip } from './components/FolioStatusChip'
 export { FolioCard } from './components/FolioCard'
 export { MessageWhatsAppButton } from './components/MessageWhatsAppButton'
 export * from './folioCardState'
+// US-A84 — the facet model and the two surfaces the unified list is built from.
+export * from './folioFacets'
+export { FolioStateSheet } from './components/FolioStateSheet'
+export { PendingWorkBar } from './components/PendingWorkBar'

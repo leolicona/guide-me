@@ -10,6 +10,7 @@ import {
   confirmRefund,
   getFolioDetail,
   listCancellationRequests,
+  listFolioCounts,
   listFolios,
   markTicketsSentAdmin,
   rejectCancellationRequest,
@@ -36,6 +37,9 @@ const validationHook = (result: { success: boolean }) => {
 foliosRouter.use('*', authMiddleware, requireRole('admin'))
 
 foliosRouter.get('/', listFolios)
+
+// US-A84 — the pending-work counts, as one aggregate. Literal, so it is registered before /:id.
+foliosRouter.get('/counts', listFolioCounts)
 
 // US-T04 — tourist cancellation requests (review queue + approve/reject). Literal routes
 // registered BEFORE /:id so the param route can never shadow them.

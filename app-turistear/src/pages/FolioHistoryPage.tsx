@@ -11,7 +11,7 @@ import {
 } from '@mui/material'
 import { useMyFolios } from '../features/pos/hooks'
 import { deliveryState } from '../features/pos/delivery'
-import { FolioCard, useFolioSoldAt } from '../features/folios'
+import { FolioCard, useFolioSoldAt, useNowSeconds } from '../features/folios'
 import type { FolioStatus } from '../features/pos/types'
 import { ROUTES } from '../config/routes'
 import { FilterStrip } from '../features/filters'
@@ -25,6 +25,8 @@ type Filter = 'all' | FolioStatus | 'undelivered'
 export default function FolioHistoryPage() {
   // US-A82 D6 — the compressed org-local sale time ("hoy 14:32"), not the full stamp.
   const soldAt = useFolioSoldAt()
+  // US-A84 D19 — the clock for the card's age labels, read in an effect and refreshed every minute.
+  const now = useNowSeconds()
   const [filter, setFilter] = useState<Filter>('all')
   const { data: rows, isLoading, isError } = useMyFolios(
     filter === 'all' || filter === 'undelivered' ? {} : { status: filter },
@@ -88,6 +90,7 @@ export default function FolioHistoryPage() {
                 to={ROUTES.HISTORY_DETAIL.replace(':id', f.id)}
                 byline={f.operator_name}
                 soldAt={soldAt(f.created_at)}
+                nowSeconds={now}
                 surface="seller"
               />
             ))}

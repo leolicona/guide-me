@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   folioAction,
+  folioTimeChip,
   folioCustomerLabel,
   folioDeliveryMark,
   folioMoneyAxis,
@@ -316,5 +317,130 @@ describe('S-1 — the title says what was sold', () => {
     // title rather than crashing the whole list.
     expect(folioSoldSummary(undefined)).toEqual({ name: null, when: '', more: 0 })
     expect(folioSoldSummary([])).toEqual({ name: null, when: '', more: 0 })
+  })
+})
+
+// --- US-A84 -------------------------------------------------------------------------------------
+
+describe('S-8/S-9 — the button ladder, blocking-first', () => {
+  const base = {
+    status: 'paid' as const,
+    deliverable: true,
+    portal_link: 'https://x/portal/t',
+    tickets_sent_at: null,
+    tickets_viewed_at: null,
+  }
+
+  // Each row adds ONE higher-priority job to a folio that already has a lower one, so a ladder
+  // built in the wrong order fails on the row that introduces the inversion — not on all of them.
+  const cases: Array<[string, Parameters<typeof folioAction>[0], string]> = [
+    ['nothing pending → the resting verb', { ...base, tickets_sent_at: 1, tickets_viewed_at: 1 }, 'message'],
+    ['undelivered → tickets', base, 'tickets'],
+    [
+      'S-9 — unverified payment outranks delivery',
+      { ...base, deliverable: false, payment_verification: 'pending' },
+      'verify',
+    ],
+    [
+      'a refund owed outranks nothing else on a cancelled folio',
+      { status: 'cancelled', refund_status: 'pending' },
+      'refund',
+    ],
+    [
+      'a live request outranks an unverified payment',
+      { ...base, payment_verification: 'pending', cancellation_request: 'pending' },
+      'request',
+    ],
+    [
+      'S-8 — a live request outranks an overdue hold',
+      { status: 'booking', booking_expires_at: 1, cancellation_request: 'pending' },
+      'request',
+    ],
+  ]
+
+  it.each(cases)('%s', (_label, folio, expected) => {
+    expect(folioAction(folio, { urgent: true })).toBe(expected)
+  })
+
+  // D15 — the line between the two audiences is CAPABILITY, not information. The seller sees the
+  // state on their card (the rail, the chip); they are never offered a verb they cannot press.
+  it('S-16 — a seller is never offered an admin verb', () => {
+    // An unverified transfer has NO portal link: `issuePortalLink` is gated on the money clearing
+    // (`pos/handler.ts:1833`), so the folio is off the delivery axis entirely. Seeding one WITH a
+    // link would test a state the system cannot produce.
+    const stuck = {
+      status: 'paid' as const,
+      deliverable: false,
+      portal_link: null,
+      payment_verification: 'pending' as const,
+    }
+    expect(folioAction(stuck, { urgent: false, surface: 'admin' })).toBe('verify')
+    expect(folioAction(stuck, { urgent: false, surface: 'seller' })).toBe('message')
+
+    const owed = { status: 'cancelled' as const, refund_status: 'pending' as const }
+    expect(folioAction(owed, { urgent: false, surface: 'seller' })).toBe('message')
+
+    const asked = { ...base, cancellation_request: 'pending' as const }
+    // The seller still SEES the state (rail, chip) — they are simply not handed the decision.
+    expect(folioAction(asked, { urgent: false, surface: 'seller' })).not.toBe('request')
+  })
+
+  // A rejected payment leaves its stale 'pending' flag on a cancelled folio (US-A67). Offering
+  // `Verificar y enviar` there would verify a sale that no longer exists.
+  it('a cancelled folio is never offered verification', () => {
+    const rejected = { status: 'cancelled' as const, payment_verification: 'pending' as const }
+    expect(folioAction(rejected, { urgent: false })).toBe('message')
+  })
+})
+
+describe('S-10 — the time chip states which clock is running', () => {
+  const now = 1_000_000
+
+  it('a passed deadline says how long ago, in error tone', () => {
+    const chip = folioTimeChip(
+      { status: 'booking', booking_expires_at: now - 50 * 3600 },
+      now,
+    )
+    // It used to read the static word `Vencido`, in amber. A passed deadline is not a warning about
+    // the future; it is a fact about the past.
+    expect(chip).toEqual({ label: 'Venció hace 2 d', tone: 'error' })
+  })
+
+  it('a live hold counts down, amber only inside 24 h', () => {
+    expect(folioTimeChip({ status: 'booking', booking_expires_at: now + 3 * 3600 }, now)).toEqual({
+      label: 'Vence en 3 h',
+      tone: 'warning',
+    })
+    expect(folioTimeChip({ status: 'booking', booking_expires_at: now + 96 * 3600 }, now)).toEqual({
+      label: 'Vence en 4 d',
+      tone: 'default',
+    })
+  })
+
+  it('an owed refund shows the age of the DEBT, not of the hold', () => {
+    // D10 — this is where Q5's signal went when the queues lost their own sort order. If this
+    // stopped rendering, the refund queue's whole reason to exist would become invisible again.
+    expect(
+      folioTimeChip(
+        { status: 'cancelled', refund_status: 'pending', cancelled_at: now - 8 * 86400 },
+        now,
+      ),
+    ).toEqual({ label: 'Debe hace 8 d', tone: 'error' })
+  })
+
+  it('D19 — an unresolved clock states the fact without inventing an age', () => {
+    // `useNowSeconds` returns null on first render. Printing "hace 0 min" there would be a wrong
+    // screen, not a cosmetic one (Q8).
+    expect(folioTimeChip({ status: 'booking', booking_expires_at: now }, null)).toEqual({
+      label: 'Apartado',
+      tone: 'default',
+    })
+    expect(
+      folioTimeChip({ status: 'cancelled', refund_status: 'pending', cancelled_at: now }, null),
+    ).toEqual({ label: 'Reembolso pendiente', tone: 'error' })
+  })
+
+  it('a settled sale has no time chip at all', () => {
+    expect(folioTimeChip({ status: 'paid' }, now)).toBeNull()
   })
 })

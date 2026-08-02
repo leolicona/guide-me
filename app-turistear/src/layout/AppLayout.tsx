@@ -21,7 +21,7 @@ import TodayRounded from '@mui/icons-material/TodayRounded'
 import { useCurrentUser } from '../features/auth/CurrentUserContext'
 import { usePendingAckCount, usePendingDropCount } from '../features/cash/hooks'
 import { usePendingDeliveryCount } from '../features/pos/hooks'
-import { usePendingCancellationCount, usePendingVerificationCount } from '../features/folios/hooks'
+import { useFolioCounts } from '../features/folios/hooks'
 import { ROUTES } from '../config/routes'
 import { AccountMenu } from './AccountMenu'
 import { TopBar } from './TopBar'
@@ -82,13 +82,12 @@ export function AppLayout() {
   // US-AG27/AG28 — admin money-moves awaiting the agent's signature, surfaced on the agent's
   // Caja destination. Agents only.
   const { data: pendingAckCount = 0 } = usePendingAckCount(user.role === 'agent')
-  // US-T04 — tourists' cancellation requests awaiting review, surfaced on the admin's Ventas
-  // destination. Admins only.
-  const { data: pendingCancellationCount = 0 } = usePendingCancellationCount(
-    user.role === 'admin',
-  )
-  // US-A67 — electronic payments awaiting verification, also surfaced on the admin's Ventas badge.
-  const { data: pendingVerificationCount = 0 } = usePendingVerificationCount(user.role === 'admin')
+  // US-T04/US-A67 — requests awaiting review and payments awaiting verification, on the admin's
+  // Ventas badge. US-A84 (D7): one aggregate, shared with `Hoy` and the list's pending-work bar,
+  // where these were two more full-list fetches whose only use was `.length`.
+  const { data: folioCounts } = useFolioCounts(user.role === 'admin')
+  const pendingCancellationCount = folioCounts?.cancellation_requests ?? 0
+  const pendingVerificationCount = folioCounts?.verification ?? 0
   // US-UX06 — agent cash drops awaiting confirmation, surfaced on the admin's Caja destination.
   // Admins only; the admin's own (self-authorized) drops never count.
   const { data: pendingDropCount = 0 } = usePendingDropCount(user.role === 'admin')

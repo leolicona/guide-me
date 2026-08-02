@@ -50,7 +50,15 @@ export interface FolioListItem {
   portal_link?: string | null
   // US-AG45 D17 — 'express' folios carry no customer_name; never infer the mode from a null name.
   sale_mode?: 'standard' | 'express'
+  // US-A84 — the two states the folio row could not carry before. 'pending' = a customer is waiting
+  // on an answer; 'resolved' = requests exist but none live (the `Con solicitud` facet).
+  cancellation_request?: CancellationRequestMark | null
+  // Derived server-side from `booking_expires_at`, never stored (apartado-stages S7).
+  overdue?: boolean
 }
+
+// US-A84 rule 6 — what a folio's cancellation requests amount to, for the row.
+export type CancellationRequestMark = 'pending' | 'resolved'
 
 export interface FolioLineExtra {
   id: string
@@ -127,6 +135,21 @@ export interface FolioDetail {
   tickets_viewed_at?: number | null
   created_at: number
   lines: FolioDetailLine[]
+  // US-A84 rule 7 — the absorbed Solicitudes history, newest first. This is the ONLY surface that
+  // can carry a rejected request: rejecting it left the folio untouched, so nothing else records it.
+  cancellation_requests?: FolioCancellationRequest[]
+}
+
+// One row of a folio's own request history (US-A84 D2). Leaner than `CancellationRequest`, which
+// carries folio context the detail page already has.
+export interface FolioCancellationRequest {
+  id: string
+  status: CancellationRequestStatus
+  reason: string | null
+  resolution_note: string | null
+  resolved_by: string | null
+  resolved_at: number | null
+  created_at: number
 }
 
 export interface FolioFilters {
