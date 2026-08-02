@@ -85,6 +85,12 @@ Mechanically:
   deleted: it now pins the new order **and** that `cancelled_at` still reaches the client, because
   losing that field is what would genuinely break Q5 and an order-only assertion would not catch it.
   No other assertion in those files may be touched — an edited test is how a scope boundary rots.
+- On the frontend, **`FoliosListPage.test.tsx` is rewritten**, because the page it tests is. Its two
+  tab assertions go with the tabs. **BUG-023's guard survives and grows**: the defect was never
+  tab-specific — *a control row wider than the viewport with nothing owning the overflow* — and this
+  screen now has **two** control rows, so both are asserted to sit inside `FilterStrip`. The new
+  pending-work bar is the more likely of the two to be built without the wrapper, which is why it
+  gets its own case.
 - The **delivery axis vocabulary is untouched**: `Pendiente de enviar → Enviado → Visto`
   (US-AG40). The pending `Visto → Entregado` glossary migration is *not* in this feature.
 - The **channel rule of US-A82 is untouched**: `rail = money · checkmark = message · chip = time ·
@@ -389,15 +395,21 @@ Then `404`, never `403`.
 - [x] `test/payment-verification/*` and `test/tourist-portal/*` pass **unedited** (736 tests, 56 files)
 
 **Frontend**
-- [ ] `FolioStateSheet` (three sections) + `PendingWorkBar`, on `FilterStrip` / `filterChipSx`
-- [ ] `folioAction()` → D12's ladder; `folioTimeChip()` with `nowSeconds` injected (D19)
-- [ ] `FoliosListPage` — tabs deleted, facets, banner, `?estado=` as state, `?tab=` redirect
-- [ ] `FolioDetailPage` — reject payment, approve/reject request, request history, in `ConfirmSheet`
-- [ ] `FolioHistoryPage` — extended card, no banner
-- [ ] `DashboardPage` — `/counts`, and facet links on all four folio cards
-- [ ] Five components deleted
-- [ ] Unit tests for the ladder and the chip; component tests for the facet composition
-- [ ] **Verified visually at 320 / 390 / 1280px** before the PR — US-A82 shipped four defects no test could see
+- [x] `folioFacets.ts` — the facet model, the `?estado=` contract, the matcher
+- [x] `FolioStateSheet` (three sections) + `PendingWorkBar`, on `FilterStrip` / `filterChipSx`
+- [x] `folioAction()` → D12's ladder; `folioTimeChip()` with `nowSeconds` injected (D19)
+- [x] `FoliosListPage` — tabs deleted, facets, banner, `?estado=` as state, `?tab=` redirect
+- [x] `FolioWorkActions` on the detail — reject payment, approve/reject request, request history,
+      in `ConfirmSheet`/`FormSheet` (ending four MUI `Dialog`s the design system forbids)
+- [x] `VerifyAndSendButton` — the card's verb, lifted out of the deleted tab
+- [x] `FolioHistoryPage` — extended card, no banner
+- [x] `DashboardPage` + `AppLayout` — `/counts`, and facet links on all four folio cards
+- [x] Five components deleted (`PaymentVerificationTab`, `CancellationRequestsTab`,
+      `PendingRefundsTab`, `OverdueBookingsTab`, `QueueRow`)
+- [x] Unit tests for the ladder, the chip and the facet model; page tests for the bar and the URL
+      (415 tests, 23 files; `tsc -b` clean)
+- [ ] **Verified visually at 320 / 390 / 1280px** before the PR — US-A82 shipped four defects no
+      test could see, and jsdom has no layout engine to find them in
 
 **Documentation**
 - [ ] `SPEC.md`: US-A84 + US-AG50, the *Features by Phase* line, and the glossary terms

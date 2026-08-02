@@ -34,11 +34,11 @@ async function expectsFolioListRefresh(useAction: () => { fire: () => void }) {
   )
   const { wrapper } = withProviders()
   const { result } = renderHook(() => ({ list: useFolios(), action: useAction() }), { wrapper })
-  await waitFor(() => expect(result.current.list.data?.[0].status).toBe('booking'))
+  await waitFor(() => expect(result.current.list.data?.folios[0].status).toBe('booking'))
 
   result.current.action.fire()
 
-  await waitFor(() => expect(result.current.list.data?.[0].status).toBe('paid'))
+  await waitFor(() => expect(result.current.list.data?.folios[0].status).toBe('paid'))
 }
 
 describe('booking actions invalidate the admin folio namespace', () => {

@@ -1,10 +1,13 @@
 import { Link as RouterLink } from 'react-router-dom'
-import { Box, Card, CardActionArea, CardActions, CardContent, Chip, Divider, Stack, Typography } from '@mui/material'
+import { Box, Button, Card, CardActionArea, CardActions, CardContent, Chip, Divider, Stack, Typography } from '@mui/material'
 import DoneRounded from '@mui/icons-material/Done'
 import DoneAllRounded from '@mui/icons-material/DoneAll'
+import EventBusyRounded from '@mui/icons-material/EventBusyRounded'
+import PaymentsRounded from '@mui/icons-material/PaymentsRounded'
 import { MoneyText } from '../../../components'
-import { BookingWhatsAppButton, TicketWhatsAppButton, isUrgentBooking, venceLabel } from '../../bookings'
+import { BookingWhatsAppButton, TicketWhatsAppButton, isUrgentBooking } from '../../bookings'
 import { MessageWhatsAppButton } from './MessageWhatsAppButton'
+import { VerifyAndSendButton } from './VerifyAndSendButton'
 import {
   folioAction,
   folioCustomerIdentity,
@@ -12,11 +15,13 @@ import {
   folioDeliveryMark,
   folioMoneyAxis,
   folioSoldSummary,
+  folioTimeChip,
   type DeliveryMark,
   type MoneyReading,
   type RailTone,
+  type TimeChipTone,
 } from '../folioCardState'
-import type { FolioStatus, RefundStatus } from '../types'
+import type { CancellationRequestMark, FolioStatus, RefundStatus } from '../types'
 import type { FolioListLine, PaymentVerification } from '../../pos/types'
 
 // US-A82/US-AG49 — the one folio card, shared by the admin list (/folios) and the seller's own
@@ -132,6 +137,18 @@ export interface FolioCardFolio {
   tickets_sent_at?: number | null
   tickets_viewed_at?: number | null
   lines?: FolioListLine[]
+  // US-A84 — the two states the row could not carry before, and the debt's clock.
+  cancellation_request?: CancellationRequestMark | null
+  cancelled_at?: number | null
+}
+
+/** US-A84 — the time channel's tone, mapped to MUI's chip colours. `default` is the grey resting
+ *  state; a passed deadline or an owed refund is a fact about the past, so it reads ERROR rather
+ *  than the amber `venceLabel` used to draw it in. */
+const CHIP_COLOR: Record<TimeChipTone, 'default' | 'warning' | 'error'> = {
+  default: 'default',
+  warning: 'warning',
+  error: 'error',
 }
 
 export interface FolioCardProps {
@@ -143,17 +160,32 @@ export interface FolioCardProps {
   byline?: string | null
   /** Org-local sale timestamp, already formatted by the page's `useOrgDateFormatter`. */
   soldAt: string
-  /** `admin` marks the send through the admin endpoint; `seller` through the POS one. */
+  /**
+   * US-A84 D19 — the current time, resolved in an EFFECT by the page's `useNowSeconds` and passed
+   * in. Never read from `Date.now()` inside this render: the chip now says *how long ago*, and a
+   * booth tablet left open all morning would print a dead number. `null` until it resolves.
+   */
+  nowSeconds?: number | null
+  /** `admin` marks the send through the admin endpoint; `seller` through the POS one. It also
+   *  decides which VERBS are offered: US-A84 D15 draws the audience line at capability. */
   surface?: 'admin' | 'seller'
 }
 
-export function FolioCard({ folio, to, byline, soldAt, surface = 'admin' }: FolioCardProps) {
+export function FolioCard({
+  folio,
+  to,
+  byline,
+  soldAt,
+  nowSeconds = null,
+  surface = 'admin',
+}: FolioCardProps) {
   const { rail, reading } = folioMoneyAxis(folio)
   const sold = folioSoldSummary(folio.lines)
   const mark = folioDeliveryMark(folio)
   const isBooking = folio.status === 'booking'
   const urgent = isBooking && isUrgentBooking(folio.booking_expires_at)
-  const action = folioAction(folio, { urgent })
+  const action = folioAction(folio, { urgent, surface })
+  const timeChip = folioTimeChip(folio, nowSeconds)
 
   const title = sold.name
     ? [sold.name, sold.when, sold.more > 0 ? `+${sold.more}` : ''].filter(Boolean).join(' · ')
@@ -208,12 +240,16 @@ export function FolioCard({ folio, to, byline, soldAt, surface = 'admin' }: Foli
               Ref. {folio.payment_reference}
             </Typography>
           )}
-          {isBooking && folio.booking_expires_at != null && (
+          {/* The time channel (D1). One chip, whichever clock this folio is running against: the
+              hold's deadline, or — once cancelled with money owed — the age of the debt. US-A84
+              D10 moved that age here from the queues' sort order, so it survives a list that has
+              exactly one order. */}
+          {timeChip && (
             <Chip
               size="small"
               variant="outlined"
-              color={urgent ? 'warning' : 'default'}
-              label={venceLabel(folio.booking_expires_at)}
+              color={CHIP_COLOR[timeChip.tone]}
+              label={timeChip.label}
               sx={{ mt: 0.5, display: 'flex', width: 'fit-content' }}
             />
           )}
@@ -228,8 +264,36 @@ export function FolioCard({ folio, to, byline, soldAt, surface = 'admin' }: Foli
           </Stack>
         </CardContent>
       </CardActionArea>
+      {/* US-A84 D12 — exactly one verb, and it is the first BLOCKING job. `request` and `refund`
+          navigate to the detail rather than acting here: approving a cancellation and confirming a
+          refund against the customer's PIN both need the full folio in front of you, and a money
+          action one tap from a list is how the wrong one gets confirmed (Q6). */}
       <CardActions sx={{ px: 2, pb: 2, pt: 0 }}>
-        {action === 'tickets' ? (
+        {action === 'request' ? (
+          <Button
+            component={RouterLink}
+            to={to}
+            variant="contained"
+            disableElevation
+            color="error"
+            startIcon={<EventBusyRounded />}
+          >
+            Revisar solicitud
+          </Button>
+        ) : action === 'verify' ? (
+          <VerifyAndSendButton folio={{ ...folio, lines: folio.lines ?? [] }} />
+        ) : action === 'refund' ? (
+          <Button
+            component={RouterLink}
+            to={to}
+            variant="contained"
+            disableElevation
+            color="error"
+            startIcon={<PaymentsRounded />}
+          >
+            Confirmar reembolso
+          </Button>
+        ) : action === 'tickets' ? (
           <TicketWhatsAppButton
             variant="card"
             surface={surface}

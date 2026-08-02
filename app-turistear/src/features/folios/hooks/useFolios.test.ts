@@ -3,14 +3,12 @@ import { http, HttpResponse } from 'msw'
 import { renderHook, waitFor } from '@testing-library/react'
 import { server } from '../../../test/server'
 import { withProviders } from '../../../test/renderWithProviders'
-import { aFolio, aCancellationRequest } from '../../../test/handlers/folios'
+import { aFolio, aCancellationRequest, aFolioCounts } from '../../../test/handlers/folios'
 import {
   useFolios,
   useFolio,
-  usePendingVerificationCount,
-  usePendingRefundCount,
-  useOverdueBookingCount,
-  usePendingCancellationCount,
+  useFolioCounts,
+  useCancellationRequests,
   useCancelFolio,
   useApproveCancellationRequest,
 } from './useFolios'
@@ -104,58 +102,52 @@ describe('useFolio', () => {
   })
 })
 
-// Each badge is a `select` over a shared query. The risk is not the arithmetic — it is a badge
-// counting the WRONG queue, which reads as "nothing to do" while work piles up.
-describe('the oversight badge feeds', () => {
-  const countFor = (filterCheck: (params: URLSearchParams) => boolean, folios: unknown[]) =>
+// US-A84 (D7) — the five badge feeds became ONE aggregate. What these tests guard is no longer the
+// arithmetic (the server counts now) but the two properties the collapse was for: the counts come
+// from the dedicated endpoint rather than a list, and every surface reads the SAME cache entry, so
+// `Hoy` and the list's pending-work bar cannot show different numbers.
+describe('useFolioCounts', () => {
+  it('reads the aggregate endpoint, not a folio list', async () => {
+    let listHits = 0
     server.use(
-      http.get('/api/folios', ({ request }) => {
-        const params = new URL(request.url).searchParams
-        return HttpResponse.json({ folios: filterCheck(params) ? folios : [] })
+      http.get('/api/folios', () => {
+        listHits += 1
+        return HttpResponse.json({ folios: [aFolio()], window_days: 30 })
       }),
+      http.get('/api/folios/counts', () => HttpResponse.json(aFolioCounts({ refunds: 2 }))),
     )
-
-  it('counts only folios awaiting payment verification (US-A67)', async () => {
-    countFor((p) => p.get('verification') === 'pending', [aFolio(), aFolio({ id: 'folio-2' })])
     const { wrapper } = withProviders()
-    const { result } = renderHook(() => usePendingVerificationCount(true), { wrapper })
-    await waitFor(() => expect(result.current.data).toBe(2))
+    const { result } = renderHook(() => useFolioCounts(true), { wrapper })
+
+    await waitFor(() => expect(result.current.data?.refunds).toBe(2))
+    // The whole point: five badges used to cost five full list reads, one of which pulled every
+    // paid folio WITH its lines and portal link to produce a single integer.
+    expect(listHits).toBe(0)
   })
 
-  it('counts only refunds still owed (US-A78)', async () => {
-    countFor((p) => p.get('refund_status') === 'pending', [aFolio()])
-    const { wrapper } = withProviders()
-    const { result } = renderHook(() => usePendingRefundCount(true), { wrapper })
-    await waitFor(() => expect(result.current.data).toBe(1))
-  })
-
-  it('counts only overdue apartados (US-A79)', async () => {
-    countFor((p) => p.get('overdue') === 'true', [aFolio(), aFolio({ id: 'f2' }), aFolio({ id: 'f3' })])
-    const { wrapper } = withProviders()
-    const { result } = renderHook(() => useOverdueBookingCount(true), { wrapper })
-    await waitFor(() => expect(result.current.data).toBe(3))
-  })
-
-  it('counts pending cancellation requests from their own endpoint', async () => {
+  it('every consumer shares one cache entry, so two surfaces cannot disagree', async () => {
+    let countHits = 0
     server.use(
-      http.get('/api/folios/cancellation-requests', ({ request }) => {
-        expect(new URL(request.url).searchParams.get('status')).toBe('pending')
-        return HttpResponse.json({ requests: [aCancellationRequest(), aCancellationRequest({ id: 'r2' })] })
+      http.get('/api/folios/counts', () => {
+        countHits += 1
+        return HttpResponse.json(aFolioCounts({ overdue: 3 }))
       }),
     )
     const { wrapper } = withProviders()
-    const { result } = renderHook(() => usePendingCancellationCount(true), { wrapper })
-    await waitFor(() => expect(result.current.data).toBe(2))
+    // Two independent consumers — `Hoy`'s cards and the list's bar, in miniature.
+    const { result } = renderHook(
+      () => ({ hoy: useFolioCounts(true), bar: useFolioCounts(true) }),
+      { wrapper },
+    )
+
+    await waitFor(() => expect(result.current.hoy.data?.overdue).toBe(3))
+    expect(result.current.bar.data?.overdue).toBe(3)
+    expect(countHits).toBe(1)
   })
 
-  it.each([
-    ['verification', usePendingVerificationCount],
-    ['refund', usePendingRefundCount],
-    ['overdue', useOverdueBookingCount],
-    ['cancellation', usePendingCancellationCount],
-  ])('the %s badge does not fetch when disabled', (_label, hook) => {
+  it('does not fetch when disabled — a seller never asks for admin counts', () => {
     const { wrapper } = withProviders()
-    const { result } = renderHook(() => hook(false), { wrapper })
+    const { result } = renderHook(() => useFolioCounts(false), { wrapper })
     expect(result.current.fetchStatus).toBe('idle')
   })
 })
@@ -175,7 +167,7 @@ describe('mutations refresh the folio surface', () => {
     const { result } = renderHook(() => ({ list: useFolios(), cancel: useCancelFolio() }), {
       wrapper,
     })
-    await waitFor(() => expect(result.current.list.data?.[0].status).toBe('paid'))
+    await waitFor(() => expect(result.current.list.data?.folios[0].status).toBe('paid'))
 
     result.current.cancel.mutate({ id: 'folio-1', reason: 'Cliente no llegó' })
 
@@ -185,7 +177,7 @@ describe('mutations refresh the folio surface', () => {
       folio: { status: 'cancelled' },
       cancellation: { refund: 120_000, retention: 30_000, reversed_commission: 15_000 },
     })
-    await waitFor(() => expect(result.current.list.data?.[0].status).toBe('cancelled'))
+    await waitFor(() => expect(result.current.list.data?.folios[0].status).toBe('cancelled'))
   })
 
   it('useApproveCancellationRequest refreshes folios AND the request queue — one key covers both', async () => {
@@ -198,15 +190,15 @@ describe('mutations refresh the folio surface', () => {
     )
     const { wrapper } = withProviders()
     const { result } = renderHook(
-      () => ({ queue: usePendingCancellationCount(true), approve: useApproveCancellationRequest() }),
+      () => ({ queue: useCancellationRequests('pending'), approve: useApproveCancellationRequest() }),
       { wrapper },
     )
-    await waitFor(() => expect(result.current.queue.data).toBe(1))
+    await waitFor(() => expect(result.current.queue.data).toHaveLength(1))
 
     result.current.approve.mutate({ id: 'req-1' })
 
     // The requests key is nested under ['folios'], so invalidating the parent clears both.
-    await waitFor(() => expect(result.current.queue.data).toBe(0))
+    await waitFor(() => expect(result.current.queue.data).toHaveLength(0))
   })
 
   it('surfaces a rejected cancellation as an error, leaving the folio untouched', async () => {

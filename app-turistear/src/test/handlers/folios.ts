@@ -24,8 +24,21 @@ export const aCancellationRequest = (over: Record<string, unknown> = {}) => ({
   ...over,
 })
 
+/** US-A84 — the pending-work counts, all zero by default so a test opts INTO having work. */
+export const aFolioCounts = (over: Partial<Record<string, number>> = {}) => ({
+  verification: 0,
+  cancellation_requests: 0,
+  refunds: 0,
+  overdue: 0,
+  undelivered: 0,
+  ...over,
+})
+
 export const folioHandlers = [
-  http.get('/api/folios', () => HttpResponse.json({ folios: [aFolio()] })),
+  // US-A84 — `window_days` rides along with the rows: the list is a union, and the screen says so.
+  http.get('/api/folios', () => HttpResponse.json({ folios: [aFolio()], window_days: 30 })),
+  // Registered BEFORE `/api/folios/:id` so the literal route is not swallowed by the param one.
+  http.get('/api/folios/counts', () => HttpResponse.json(aFolioCounts())),
   http.get('/api/folios/cancellation-requests', () =>
     HttpResponse.json({ requests: [aCancellationRequest()] }),
   ),

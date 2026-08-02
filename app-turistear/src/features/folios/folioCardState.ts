@@ -117,10 +117,16 @@ export function folioDeliveryMark(folio: Parameters<typeof deliveryState>[0]): D
   return 'none'
 }
 
-// --- The work axis: the single button (D7 · D8) --------------------------------------------------
+// --- The work axis: the single button (D7 · D8 · US-A84 D12) -------------------------------------
 
-/** `tickets`/`reminder` are pending jobs and render filled; `message` is the neutral resting verb. */
-export type FolioAction = 'tickets' | 'reminder' | 'message'
+/**
+ * The verbs the single button can carry. `message` is the neutral resting verb; everything else is
+ * a pending job and renders filled.
+ *
+ * `request`/`verify`/`refund` are ADMIN verbs — US-A84 D15 draws the audience line at capability,
+ * so `folioAction` is told which surface is asking rather than guessing from the data.
+ */
+export type FolioAction = 'request' | 'verify' | 'refund' | 'tickets' | 'reminder' | 'message'
 
 /**
  * Exactly one action per card, and its verb is the folio's first pending job.
@@ -128,17 +134,100 @@ export type FolioAction = 'tickets' | 'reminder' | 'message'
  * Why the specific and the generic verb never coexist (D7): were both offered, a seller would send
  * the portal link through the generic button, `tickets_sent_at` would never be written, and the
  * folio would sit in the undelivered queue forever — a queue that grows from correct behaviour.
+ *
+ * US-A84 D12 — the ladder is BLOCKING-FIRST, because two jobs can now land on one folio (an overdue
+ * hold whose customer has asked to cancel). Reviewing the request can make everything below it
+ * moot; an unverified payment makes delivery impossible (`deliverable` is false), so offering
+ * `Enviar boletos` there would be a button that cannot work. Ordering by age instead would make the
+ * same card change its verb on its own, which nobody can plan around.
  */
 export function folioAction(
   folio: Parameters<typeof deliveryState>[0] & {
     status: 'paid' | 'booking' | 'cancelled'
     booking_expires_at?: number | null
+    payment_verification?: 'not_required' | 'pending' | 'verified'
+    refund_status?: 'none' | 'pending' | 'refunded'
+    cancellation_request?: 'pending' | 'resolved' | null
   },
-  opts: { urgent: boolean },
+  opts: { urgent: boolean; surface?: 'admin' | 'seller' },
 ): FolioAction {
+  if (opts.surface !== 'seller') {
+    // 1 — a customer is waiting on an answer, and the answer changes the rest.
+    if (folio.cancellation_request === 'pending') return 'request'
+    // 2 — money the company does not hold yet, blocking delivery downstream.
+    if (folio.status !== 'cancelled' && folio.payment_verification === 'pending') return 'verify'
+    // 3 — money the company owes and has not handed back.
+    if (folio.refund_status === 'pending') return 'refund'
+  }
   if (folio.status === 'paid' && deliveryState(folio) === 'pending') return 'tickets'
   if (folio.status === 'booking' && opts.urgent) return 'reminder'
   return 'message'
+}
+
+// --- The time axis: the chip (D1 · US-A84 D10 · D19) ---------------------------------------------
+
+export type TimeChipTone = 'default' | 'warning' | 'error'
+
+export interface TimeChip {
+  label: string
+  tone: TimeChipTone
+}
+
+const HOUR = 3600
+const DAY = 24 * HOUR
+
+/** "hace 40 min" · "hace 5 h" · "hace 3 d" — coarse on purpose. An exact timestamp answers a
+ *  question nobody asked; the reader wants to know whether this is old. */
+const ago = (seconds: number): string => {
+  const s = Math.max(0, seconds)
+  if (s < HOUR) return `${Math.max(1, Math.floor(s / 60))} min`
+  if (s < DAY) return `${Math.floor(s / HOUR)} h`
+  return `${Math.floor(s / DAY)} d`
+}
+
+/**
+ * The card's time channel — ONE chip, whichever clock this folio is actually running against.
+ *
+ * `nowSeconds` is an ARGUMENT, never `Date.now()` read inside a render (D19). `venceLabel` did
+ * exactly that (`bookingUrgency.ts:11`), which was harmless while the label was the static word
+ * `Vencido` and is not once it says *how long ago*: a booth tablet left open all morning would
+ * print a dead number, and Q5 of `pending-work-queues.spec.md` already ruled that a stale age is a
+ * wrong screen rather than a cosmetic one. `null` ⇒ the clock has not resolved yet, so the chip
+ * states the fact without the age instead of guessing zero.
+ *
+ * The refund debt outranks the hold because a cancelled folio has no live hold to report.
+ */
+export function folioTimeChip(
+  folio: {
+    status: 'paid' | 'booking' | 'cancelled'
+    booking_expires_at?: number | null
+    cancelled_at?: number | null
+    refund_status?: 'none' | 'pending' | 'refunded'
+  },
+  nowSeconds: number | null,
+): TimeChip | null {
+  if (folio.refund_status === 'pending') {
+    const since = nowSeconds !== null && folio.cancelled_at != null ? nowSeconds - folio.cancelled_at : null
+    return { label: since === null ? 'Reembolso pendiente' : `Debe hace ${ago(since)}`, tone: 'error' }
+  }
+
+  if (folio.status !== 'booking' || folio.booking_expires_at == null) return null
+
+  const expires = folio.booking_expires_at
+  if (nowSeconds === null) return { label: 'Apartado', tone: 'default' }
+
+  // US-A84 — `Vencido` was ALREADY on this card (`venceLabel`), silent about the age and drawn
+  // amber. A passed deadline is not a warning about the future; it is a fact about the past.
+  if (expires <= nowSeconds) return { label: `Venció hace ${ago(nowSeconds - expires)}`, tone: 'error' }
+
+  const hours = (expires - nowSeconds) / HOUR
+  const label =
+    hours < 1
+      ? `Vence en ${Math.round(hours * 60)} min`
+      : hours < 24
+        ? `Vence en ${Math.round(hours)} h`
+        : `Vence en ${Math.round(hours / 24)} d`
+  return { label, tone: hours < 24 ? 'warning' : 'default' }
 }
 
 // --- The sale time, compressed (D6) --------------------------------------------------------------
