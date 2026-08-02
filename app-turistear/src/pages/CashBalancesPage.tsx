@@ -46,6 +46,7 @@ import type { BalanceListItem, DropStatus } from '../features/cash/types'
 import { formatMoney, amountToCents, centsToAmount } from '../features/catalog/types'
 import { ROUTES } from '../config/routes'
 import { MoneyText, StatusChip, InfoPopover } from '../components'
+import { FilterStrip } from '../features/filters'
 
 const DROP_COLOR: Record<DropStatus, 'warning' | 'success' | 'error'> = {
   pending: 'warning',
@@ -513,12 +514,14 @@ function DropsTab() {
 
   return (
     <Box>
+        {/* BUG-023 — the filter row is wider than a phone. Contained here so the scroll stays
+            inside the row instead of dragging the whole page sideways. */}
+      <FilterStrip sx={{ mb: 3 }}>
       <ToggleButtonGroup
         size="small"
         exclusive
         value={filter}
         onChange={(_, v) => v && setFilter(v)}
-        sx={{ mb: 3 }}
       >
         <ToggleButton value="pending">Pendientes</ToggleButton>
         <ToggleButton value="confirmed">Confirmadas</ToggleButton>
@@ -526,6 +529,7 @@ function DropsTab() {
         <ToggleButton value="disputed">En disputa</ToggleButton>
         <ToggleButton value="all">Todas</ToggleButton>
       </ToggleButtonGroup>
+      </FilterStrip>
 
       {isLoading && (
         <Box sx={{ display: 'flex', justifyContent: 'center', py: 6 }}>

@@ -6,6 +6,84 @@ Tracks confirmed bugs, root causes, and fixes. Each entry is immutable once clos
 
 ---
 
+## BUG-023 — Two Money Queues Are Unreachable on a Phone, and the Filter Row Drags the Page — ✅ FIXED
+
+**Discovered:** 2026-08-01
+**Fixed:** 2026-08-01
+**Reporter:** manual testing of `/folios` on a narrow viewport
+**Affected:** `app-turistear/src/pages/FoliosListPage.tsx`,
+`app-turistear/src/pages/FolioHistoryPage.tsx`,
+`app-turistear/src/pages/CashBalancesPage.tsx`,
+`app-turistear/src/features/folios/components/CancellationRequestsTab.tsx`
+**Severity:** High — one half hides a money queue from the device the booth actually uses; the other
+moves the page out from under a finger mid-interaction.
+
+### Symptom
+
+Two faces of one defect, both on *Ventas*.
+
+**1. Reembolsos and Vencidos cannot be reached below ~600px.** The five tabs measure **569px**
+against a **358px** scroller. `<Tabs>` used the default `variant="standard"`, whose scroller is
+`overflow-x: hidden` with no scroll buttons — so the two rightmost tabs are clipped with no arrows,
+no touch scroll and no indication they exist. Their count badges are invisible too.
+
+| Tab | Right edge at 390px | Reachable |
+|---|---|---|
+| Folios · Por verificar · Solicitudes | ≤ 359 | yes |
+| **Reembolsos** | 484 | **no** |
+| **Vencidos** | 585 | **no** |
+
+These are US-A78 and US-A79: cash the company owes customers, and holds sitting on seats with money
+still owed. They shipped and had never worked on a phone.
+
+**2. Applying a status filter drags the whole page sideways.** The `ToggleButtonGroup` measures
+**397px** and handled no overflow, so below ~412px the *document* became wider than the viewport.
+Clicking a button whose right edge sat outside made the browser scroll it into view — taking the
+page, and the `Ventas` heading, with it.
+
+| Viewport | scrollX after the click | `Ventas` heading x |
+|---|---|---|
+| 320px | 0 → **77** | 16 → **−61** *(off screen)* |
+| 360px | 0 → 37 | 16 → −21 |
+| 390px | 0 → 7 | 16 → 9 |
+| 412px+ | 0 | 16 *(no defect)* |
+
+The reporter attributed it to the *Cancelado* button; measurement showed the trigger is whichever
+button is clipped at that width — at 320px, `Cancelado` ends at x=316 and is exactly that button.
+
+### Root Cause
+
+One cause, two rows: **a control row wider than the viewport with nothing owning the overflow.**
+Where the row itself clips (`Tabs`), content becomes unreachable. Where it does not (the toggle
+group), the overflow escalates to the document and the browser's scroll-into-view on focus moves
+everything.
+
+`allowScrollButtonsMobile` is the load-bearing half of the tab fix: MUI hides the arrows on mobile
+by default, which is precisely the width where they are the only way through.
+
+### Fix
+
+- `<Tabs variant="scrollable" scrollButtons="auto" allowScrollButtonsMobile>`.
+- Every status-filter row wrapped in `FilterStrip` — the existing design-system piece
+  (`features/filters`) already used by `/pos` and Reportes, which owns the horizontal scroll and
+  bleeds to the edge on mobile. Applied to all four rows carrying four or more options, not only
+  the reported one: the same defect was present on the seller's *Ventas*, on the *Solicitudes* tab
+  of this very screen, and on *Caja* (five options, longer labels).
+
+### Verification
+
+Measured in Chromium at 320 / 360 / 390px, before and after: document overflow **77 / 37 / 7 → 0**,
+`scrollX` stays 0, the heading stays at x=16, and *Vencidos* is in view and clickable at every
+width.
+
+`FoliosListPage.test.tsx` guards the regression at Tier 1. What it can prove is stated in the file
+rather than implied: jsdom has no layout engine, so the overflow itself is unprovable there and was
+measured in a browser instead. The test asserts the props that make the rows scrollable are still
+present — deleting `variant="scrollable"` is a one-character edit that silently restores the bug.
+Confirmed by mutation: removing either fix fails its own case and nothing else.
+
+---
+
 ## BUG-022 — A Submitting Sheet's Button Loses Its Accessible Name — ✅ FIXED
 
 **Discovered:** 2026-07-31

@@ -39,6 +39,7 @@ import {
   venceLabel,
 } from '../features/bookings'
 import { MoneyText } from '../components'
+import { FilterStrip } from '../features/filters'
 import { ROUTES } from '../config/routes'
 import { deliveryState } from '../features/pos/delivery'
 
@@ -69,12 +70,19 @@ function FoliosTab() {
 
   return (
     <Box>
+        {/* BUG-023, second half — the same root cause one row down. This group measures 397px, so
+            below ~412px it makes the DOCUMENT wider than the viewport. Clicking a button whose
+            right edge sits outside then makes the browser scroll it into view, dragging the whole
+            page sideways: measured at 320px, the "Ventas" heading went from x=16 to x=-61.
+            Containing the scroll here keeps it inside the row, where it belongs. The strip is
+            edge-bleeding on mobile so a pill can sit flush, matching the filter rows in /pos and
+            Reportes (`filterStripSx`). */}
+        <FilterStrip sx={{ mb: 3 }}>
         <ToggleButtonGroup
           size="small"
           exclusive
           value={filter}
           onChange={(_, v) => v && setFilter(v)}
-          sx={{ mb: 3 }}
         >
           <ToggleButton value="all">Todos</ToggleButton>
           <ToggleButton value="paid">Pagado</ToggleButton>
@@ -82,6 +90,7 @@ function FoliosTab() {
           <ToggleButton value="cancelled">Cancelado</ToggleButton>
           <ToggleButton value="undelivered">Sin entregar</ToggleButton>
         </ToggleButtonGroup>
+        </FilterStrip>
 
         {isLoading && (
           <Box sx={{ display: 'flex', justifyContent: 'center', py: 6 }}>
@@ -224,7 +233,21 @@ export default function FoliosListPage() {
           Ventas
         </Typography>
 
-        <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ mb: 3 }}>
+        {/* BUG-023 — five tabs measure 569px against a 358px scroller on a phone, and the default
+            `standard` variant clips the overflow with `overflow-x: hidden` and no scroll buttons.
+            Reembolsos and Vencidos were therefore UNREACHABLE below ~600px: no arrows, no touch
+            scroll, and their count badges invisible too — two money queues (US-A78/A79) that
+            shipped and never worked on the device the booth actually uses.
+            `allowScrollButtonsMobile` is the load-bearing half: MUI hides the arrows on mobile by
+            default, which is precisely where they are the only way through. */}
+        <Tabs
+          value={tab}
+          onChange={(_, v) => setTab(v)}
+          variant="scrollable"
+          scrollButtons="auto"
+          allowScrollButtonsMobile
+          sx={{ mb: 3 }}
+        >
           <Tab label="Folios" />
           <Tab
             label={

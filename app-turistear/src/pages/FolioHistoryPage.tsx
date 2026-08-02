@@ -28,6 +28,7 @@ import { FolioStatusChip } from '../features/folios'
 import type { FolioStatus } from '../features/pos/types'
 import { MoneyText } from '../components'
 import { ROUTES } from '../config/routes'
+import { FilterStrip } from '../features/filters'
 
 const DATE_FMT: Intl.DateTimeFormatOptions = {
   year: 'numeric',
@@ -62,12 +63,14 @@ export default function FolioHistoryPage() {
           Ventas
         </Typography>
 
+        {/* BUG-023 — the filter row is wider than a phone. Contained here so the scroll stays
+            inside the row instead of dragging the whole page sideways. */}
+        <FilterStrip sx={{ mb: 3 }}>
         <ToggleButtonGroup
           size="small"
           exclusive
           value={filter}
           onChange={(_, v) => v && setFilter(v)}
-          sx={{ mb: 3 }}
         >
           <ToggleButton value="all">Todos</ToggleButton>
           <ToggleButton value="paid">Pagado</ToggleButton>
@@ -75,6 +78,7 @@ export default function FolioHistoryPage() {
           <ToggleButton value="cancelled">Cancelado</ToggleButton>
           <ToggleButton value="undelivered">Sin entregar</ToggleButton>
         </ToggleButtonGroup>
+        </FilterStrip>
 
         {isLoading && (
           <Box sx={{ display: 'flex', justifyContent: 'center', py: 6 }}>
