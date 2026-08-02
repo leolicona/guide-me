@@ -6,6 +6,8 @@ export interface SeededFixture {
   /** False when the caller supplied E2E_FOLIO_ID — teardown then leaves it alone. */
   seeded: boolean
   serviceName?: string
+  /** The departure this apartado holds, `YYYY-MM-DD HH:MM` — what the settle deadline derives from. */
+  departsAt?: string
   total?: number
   amountPaid?: number
   balance?: number

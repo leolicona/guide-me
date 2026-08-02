@@ -17,7 +17,7 @@ auth ──▶ seed ──▶ chromium ──▶ cleanup
 | Project | File | What it does |
 |---|---|---|
 | `auth` | `setup/auth.setup.ts` | Signs the agent and the admin in **through the API** and saves cookies to `.auth/*.json`. Works across origins because the API sets its session cookies on `.turistearya.com` (`COOKIE_DOMAIN`), so a session minted at `api-dev` is sent to `app-dev`. |
-| `seed` | `setup/seed.setup.ts` | Picks the cheapest bookable tour with availability and creates an **apartado with a cash deposit**, writing `.auth/fixture.json`. |
+| `seed` | `setup/seed.setup.ts` | Picks the cheapest bookable tour with a departure **at least 2 days out** and creates an **apartado with a cash deposit**, writing `.auth/fixture.json`. It then asserts the folio's `booking_expires_at` is still ahead — see *A fixture the journey can actually settle* below. |
 | `chromium` | `*.spec.ts` | The journeys, already signed in as the agent. |
 | `cleanup` | `teardown/cleanup.teardown.ts` | Cancels the seeded folio. Never fails the run — a stale folio in dev is untidy, not a regression. |
 
@@ -26,6 +26,16 @@ reports green while testing nothing, which is how the previous version of this s
 to catch anything.
 
 `workers: 1` — the seeded apartado is shared mutable state (one balance, settled once).
+
+### A fixture the journey can actually settle
+
+A booking's settle-by instant comes from the **departure** (`bookingExpiryDate` in the API:
+departure − the org's pre-departure buffer), not from when it was sold. The catalog still lists
+today's already-departed times, so "first slot with seats left" can hand back this morning's — and
+the resulting folio is *born expired*: `status: booking`, a real balance, and a settle that answers
+409 `BOOKING_EXPIRED`. That is what the suite's first real run hit, and why the seed now requires a
+departure two days out and asserts the release timestamp is in the future before writing the
+fixture. The API-side gap that lets such a folio be created at all is BUG-024.
 
 ## What you provide
 

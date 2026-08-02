@@ -37,8 +37,29 @@ setup('seed an apartado with a cash deposit', async () => {
   const detailRes = await ctx.get(`/api/pos/services/${candidate.id}`)
   expect(detailRes.ok(), `service detail failed: ${detailRes.status()}`).toBeTruthy()
   const detail = (await detailRes.json()).service
-  const slot = (detail.slots ?? []).find((s: { remaining: number }) => s.remaining > 0)
-  expect(slot, `no slot with remaining capacity on ${detail.name}`).toBeTruthy()
+
+  // The slot must be comfortably in the FUTURE, not merely "has seats left".
+  //
+  // A booking's release timestamp is derived from the DEPARTURE, not from when it was sold
+  // (`bookingExpiryDate` in api pos/handler.ts: departure − the org's pre-departure buffer). The
+  // catalog still lists today's already-departed times, so the old `find(s => s.remaining > 0)`
+  // happily picked this morning's 14:00 and produced a folio that was born expired — `status:
+  // booking` with a real balance, but every settle answering 409 BOOKING_EXPIRED. Nothing in the
+  // seed noticed, because an expired apartado still looks like an apartado.
+  //
+  // Two days of margin rather than one: the buffer is subtracted from the departure, slots come
+  // back naive (`date` + `start_time`) in the ORG's time zone, and we do not know that zone here —
+  // so a single day of headroom can be eaten by the buffer and the zone together.
+  const MARGIN_DAYS = 2
+  const earliestDate = new Date(Date.now() + MARGIN_DAYS * 86_400_000).toISOString().slice(0, 10)
+  const slot = (detail.slots ?? []).find(
+    (s: { remaining: number; date: string }) => s.remaining > 0 && s.date >= earliestDate,
+  )
+  expect(
+    slot,
+    `no slot on ${detail.name} with seats left departing on or after ${earliestDate} — ` +
+      `dev needs future availability seeded for the E2E suite to have anything to settle`,
+  ).toBeTruthy()
 
   const total: number = detail.base_price
 
@@ -64,10 +85,23 @@ setup('seed an apartado with a cash deposit', async () => {
   expect(folio.status, 'the seeded folio is not a live apartado').toBe('booking')
   expect(folio.total - folio.amount_paid, 'the seeded apartado has no balance to settle').toBeGreaterThan(0)
 
+  // `status: booking` and a balance are NOT enough to prove the fixture is usable — an expired
+  // apartado has both, and only says so when settle answers 409. Assert the release timestamp is
+  // still ahead of us, so a bad slot choice (or an org buffer wider than MARGIN_DAYS) fails HERE,
+  // naming the cause, instead of surfacing later as a journey that cannot find "Por verificar".
+  const expiresAt = folio.booking_expires_at ? folio.booking_expires_at * 1000 : null
+  expect(expiresAt, 'the seeded apartado has no release timestamp').toBeTruthy()
+  expect(
+    expiresAt! - Date.now(),
+    `the seeded apartado is already expired (settle-by ${new Date(expiresAt!).toISOString()}) — ` +
+      `it was seeded onto ${slot.date} ${slot.start_time}, too close to or past departure`,
+  ).toBeGreaterThan(0)
+
   const fixture: SeededFixture = {
     folioId: folio.id,
     seeded: true,
     serviceName: detail.name,
+    departsAt: `${slot.date} ${slot.start_time}`,
     total: folio.total,
     amountPaid: folio.amount_paid,
     balance: folio.total - folio.amount_paid,
