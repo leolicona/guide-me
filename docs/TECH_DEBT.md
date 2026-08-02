@@ -18,9 +18,28 @@ every consumer of the list and its five count badges. It also has to be **sequen
 the planned client-side search over the loaded list only finds what was downloaded, so pagination
 and server-side search are one decision, not two.
 
-**Action required:** whoever implements folio search server-side. Add a cursor + `total_count` to
-`GET /api/folios` and `GET /api/pos/folios`, convert `useFolios`/`useMyFolios` to
-`useInfiniteQuery`, and move the `undelivered` filter server-side with the rest.
+**Worse than the entry above states.** The five count badges do not count — each fetches the whole
+filtered list and calls `.length` in the browser (`useFolios.ts:35-77`), and `usePendingDeliveryCount`
+downloads *every paid folio with its lines and portal link* to produce one integer. Measured per
+load: `/folios` fires **4** unbounded `folios` reads, `/dashboard` fires **3**.
+
+**Bounded, not closed, by `folio-lifecycle-unification.spec.md` (US-A84).** That feature caps the
+read with a **union** — all folios with pending work regardless of age, plus the last 30 days of
+everything else (D8/D9) — and replaces the five counting reads with one `GET /api/folios/counts`
+doing real `COUNT(*)`. That removes the unbounded *growth*: the payload is now proportional to
+30 days of sales plus the open work, not to the organization's entire history.
+
+**What remains open after US-A84:** there is still no cursor and no `total_count`, so an
+organization selling several hundred folios a day loads a large first page. Filtering also stays
+client-side by design (US-A84 rule 8), which is safe only because the union makes the loaded set
+complete for every pending-work facet — a future move to server-side faceting must not quietly drop
+that guarantee.
+
+**Action required:** whoever finds a real org where 30 days of sales is too large a payload. Add a
+cursor + `total_count` to `GET /api/folios` and `GET /api/pos/folios`, convert
+`useFolios`/`useMyFolios` to `useInfiniteQuery`, and move faceting server-side **together** — a
+partial page under client-side facets produces filters that silently under-report, which is the
+failure US-A84 D8 exists to prevent.
 
 ---
 
