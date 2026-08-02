@@ -2,6 +2,28 @@
 
 This document tracks known technical debt, deferred tasks, and architectural improvements that are planned for future phases.
 
+## 24. Two Date Vocabularies: `useOrgDateFormatter` Follows the BROWSER's Locale — ⚠️ OPEN
+
+**Status:** `useOrgDateFormatter` formats with `toLocaleString(undefined, { timeZone: tz, ...opts })`
+(`useOrgDateFormatter.ts:16`). The **time zone** is the organization's, correctly — but the
+**locale** is `undefined`, meaning whatever the browser is set to. On a device set to English, every
+admin screen that uses it prints `Aug 2, 10:52 AM` inside otherwise-Spanish copy.
+
+Meanwhile `folioSoldAtLabel` (US-A82 **D16**) pins `'es-MX'` deliberately, because a mixed-language
+row was one of the four defects that shipped and were only caught by rendering. So the app now has
+**two date vocabularies**, and which one a screen speaks depends on which helper it happened to use.
+
+**Found:** rendering `FolioWorkActions` (US-A84) at 390px in a browser defaulting to `en-US`. It is
+**not a regression** — the deleted `CancellationRequestsTab` formatted identically — and it was left
+alone rather than pinned in one new component, which would have made the split three-way instead of
+two.
+
+**Action required:** pin the locale inside `useOrgDateFormatter` (one argument), then re-render the
+admin screens that use it — Caja, Reportes, the folio detail, the affiliate surfaces — because
+`month: 'short'` in Spanish is a different width and some of those rows are tight.
+
+---
+
 ## 23. `GET /api/folios` Has No Limit, and Now Returns More Per Row — ⚠️ OPEN
 
 **Status:** `listFolios` selects **every folio the organization has ever created** — no `LIMIT`, no

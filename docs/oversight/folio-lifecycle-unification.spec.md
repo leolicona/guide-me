@@ -408,8 +408,31 @@ Then `404`, never `403`.
       `PendingRefundsTab`, `OverdueBookingsTab`, `QueueRow`)
 - [x] Unit tests for the ladder, the chip and the facet model; page tests for the bar and the URL
       (415 tests, 23 files; `tsc -b` clean)
-- [ ] **Verified visually at 320 / 390 / 1280px** before the PR — US-A82 shipped four defects no
-      test could see, and jsdom has no layout engine to find them in
+- [x] **Verified visually at 320 / 390 / 1280px** — US-A82 shipped four defects no test could see,
+      and jsdom has no layout engine to find them in. Measured in Chromium against the real
+      components and the real theme:
+
+      | Width | Document overflow | `window.scrollX` | Console errors |
+      |---|---|---|---|
+      | 320 | 0 | 0 | 0 |
+      | 390 | 0 | 0 | 0 |
+      | 1280 | 0 | 0 | 0 |
+
+      The pending-work bar measures **597px** with all five queues non-empty — wider than a phone,
+      which is the shape of BUG-023. The difference is that it **scrolls inside itself**: at 320px
+      the last pill comes fully into view at `scrollLeft 277` while the document overflow and the
+      page's own `scrollX` both stay at **0**. That is precisely what `variant="standard"` tabs
+      could not do, and why the row is contained rather than clipped.
+
+      **One defect found and fixed:** a live cancellation request rendered TWICE on the detail —
+      once as work, once as the first row of the history, with the same reason under each. Fixed by
+      making the history strictly the RESOLVED requests, and pinned by
+      `FolioWorkActions.test.tsx`, verified to fail against the pre-fix component.
+
+      **One defect found and deliberately not fixed here:** `useOrgDateFormatter` follows the
+      *browser's* locale, so on an English device the detail prints `Aug 2, 10:52 AM` inside Spanish
+      copy. It is not a regression — the deleted tab formatted identically — and pinning it in one
+      new component would have made the split three-way. Recorded as **TECH_DEBT #24**.
 
 **Documentation**
 - [ ] `SPEC.md`: US-A84 + US-AG50, the *Features by Phase* line, and the glossary terms

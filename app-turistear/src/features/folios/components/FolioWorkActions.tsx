@@ -61,10 +61,14 @@ export function FolioWorkActions({ folio }: { folio: FolioDetail }) {
 
   const requests = folio.cancellation_requests ?? []
   const pending = requests.find((r) => r.status === 'pending')
+  // The live request is already presented above, in full, as WORK. Repeating it in the history
+  // below put the same request on screen twice, with the same reason under each — a defect no test
+  // could have found, and one that only showed up when the component was actually rendered.
+  const resolved = requests.filter((r) => r.status !== 'pending')
   const awaitingVerification =
     folio.payment_verification === 'pending' && folio.status !== 'cancelled'
 
-  if (!pending && !awaitingVerification && requests.length === 0) return null
+  if (!pending && !awaitingVerification && resolved.length === 0) return null
 
   return (
     <>
@@ -138,13 +142,13 @@ export function FolioWorkActions({ folio }: { folio: FolioDetail }) {
       {/* US-A84 rule 7 — the absorbed history. This is the ONLY surface that can carry a rejected
           request: rejecting it left the folio untouched, so nothing else on the record shows it
           ever happened. */}
-      {requests.length > 0 && (
+      {resolved.length > 0 && (
         <SectionCard>
           <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 1 }}>
-            Solicitudes de cancelación
+            Historial de solicitudes
           </Typography>
           <Stack spacing={1.5}>
-            {requests.map((r) => (
+            {resolved.map((r) => (
               <Box key={r.id}>
                 <Typography variant="body2" sx={{ fontWeight: 600 }}>
                   {REQUEST_LABEL[r.status] ?? r.status} · {formatDate(r.created_at)}
