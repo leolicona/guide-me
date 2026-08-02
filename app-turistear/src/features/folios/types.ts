@@ -2,7 +2,7 @@
 // integer minor units (centavos) — render with the helpers in features/catalog/types.
 // Spec: docs/cancellation/total-folio-cancellation.spec.md
 
-import type { PaymentMethod, PaymentVerification } from '../pos/types'
+import type { FolioListLine, PaymentMethod, PaymentVerification } from '../pos/types'
 
 export type FolioStatus = 'paid' | 'booking' | 'cancelled'
 
@@ -44,6 +44,12 @@ export interface FolioListItem {
   // US-A78 — the debt. 'pending' = cancelled, money owed, nobody confirmed the hand-back.
   refund_status?: RefundStatus
   refund_amount?: number
+  // US-A82 — what was sold (the card's title) and the {itinerary} the ticket send renders.
+  lines?: FolioListLine[]
+  // US-A82 — the portal link the card's ticket send needs; null until the money clears.
+  portal_link?: string | null
+  // US-AG45 D17 — 'express' folios carry no customer_name; never infer the mode from a null name.
+  sale_mode?: 'standard' | 'express'
 }
 
 export interface FolioLineExtra {

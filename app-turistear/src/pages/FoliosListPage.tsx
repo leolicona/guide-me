@@ -1,18 +1,13 @@
 import { useState } from 'react'
-import { Link as RouterLink, useSearchParams } from 'react-router-dom'
+import { useSearchParams } from 'react-router-dom'
 import {
   Box,
   Typography,
   Badge,
-  Card,
-  CardActionArea,
-  CardContent,
   CircularProgress,
   Alert,
   Fade,
   Stack,
-  Divider,
-  Chip,
   Tab,
   Tabs,
   ToggleButton,
@@ -24,32 +19,17 @@ import {
   usePendingVerificationCount,
   usePendingRefundCount,
   useOverdueBookingCount,
-  FolioStatusChip,
+  FolioCard,
+  useFolioSoldAt,
 } from '../features/folios'
-import { useOrgDateFormatter } from '../features/organization'
 import type { FolioStatus } from '../features/folios'
 import { CancellationRequestsTab } from '../features/folios/components/CancellationRequestsTab'
 import { PaymentVerificationTab } from '../features/folios/components/PaymentVerificationTab'
 import { PendingRefundsTab } from '../features/folios/components/PendingRefundsTab'
 import { OverdueBookingsTab } from '../features/folios/components/OverdueBookingsTab'
-import {
-  BookingWhatsAppButton,
-  DeliveryBadge,
-  isUrgentBooking,
-  venceLabel,
-} from '../features/bookings'
-import { MoneyText } from '../components'
 import { FilterStrip } from '../features/filters'
 import { ROUTES } from '../config/routes'
 import { deliveryState } from '../features/pos/delivery'
-
-const DATE_FMT: Intl.DateTimeFormatOptions = {
-  year: 'numeric',
-  month: 'short',
-  day: 'numeric',
-  hour: '2-digit',
-  minute: '2-digit',
-}
 
 // US-A80 — 'undelivered' is a client-side view over the loaded list: folios still
 // `● Pendiente de enviar` on the delivery axis (paid, portal link issued, never sent/seen).
@@ -57,7 +37,8 @@ type Filter = 'all' | FolioStatus | 'undelivered'
 
 // The browse-and-cancel list (US-A21), unchanged — now one tab of the Folios screen.
 function FoliosTab() {
-  const formatDate = useOrgDateFormatter(DATE_FMT) // US-A66 — org-local audit timestamps
+  // US-A82 D6 — the compressed org-local sale time ("hoy 14:32"), not the full stamp.
+  const soldAt = useFolioSoldAt()
   const [filter, setFilter] = useState<Filter>('all')
   const { data: rows, isLoading, isError } = useFolios(
     filter === 'all' || filter === 'undelivered' ? {} : { status: filter },
@@ -105,94 +86,18 @@ function FoliosTab() {
 
         {folios && folios.length > 0 && (
           <Stack spacing={2}>
-            {folios.map((f) => {
-              // US-AG07.3/D5 — apartado affordances integrated into the admin card too:
-              // urgency accent, countdown, pending balance + the WhatsApp recovery button.
-              const isBooking = f.status === 'booking'
-              const urgent = isBooking && isUrgentBooking(f.booking_expires_at)
-              return (
-                <Card
-                  key={f.id}
-                  variant="outlined"
-                  sx={
-                    isBooking
-                      ? {
-                          borderLeftWidth: 4,
-                          borderLeftColor: urgent ? 'warning.main' : 'divider',
-                        }
-                      : undefined
-                  }
-                >
-                  <CardActionArea
-                    component={RouterLink}
-                    to={ROUTES.FOLIO_DETAIL.replace(':id', f.id)}
-                  >
-                    <CardContent>
-                      <Stack
-                        direction="row"
-                        spacing={1}
-                        sx={{ justifyContent: 'space-between', alignItems: 'flex-start' }}
-                      >
-                        <Box sx={{ minWidth: 0 }}>
-                          <Typography variant="subtitle1" noWrap>
-                            {f.customer_name ?? 'Sin nombre'}
-                          </Typography>
-                          <Typography variant="caption" color="text.secondary">
-                            {formatDate(f.created_at)} · {f.agent.name}
-                          </Typography>
-                          {isBooking && f.booking_expires_at != null && (
-                            <Chip
-                              size="small"
-                              variant="outlined"
-                              color={urgent ? 'warning' : 'default'}
-                              label={venceLabel(f.booking_expires_at)}
-                              sx={{ mt: 0.5, display: 'flex', width: 'fit-content' }}
-                            />
-                          )}
-                        </Box>
-                        {/* Status chip + WhatsApp sit side by side in one cluster — never overlap. */}
-                        <Stack
-                          direction="row"
-                          spacing={0.5}
-                          sx={{ alignItems: 'center', flexShrink: 0 }}
-                        >
-                          <FolioStatusChip status={f.status} />
-                          {/* whatsapp-qr-delivery — admin oversight of undelivered tickets. */}
-                          <DeliveryBadge folio={f} />
-                          {isBooking && <BookingWhatsAppButton folio={f} />}
-                        </Stack>
-                      </Stack>
-                      <Divider sx={{ my: 1.5 }} />
-                      <Stack direction="row" spacing={3}>
-                        <Box>
-                          <Typography variant="caption" color="text.secondary">Total</Typography>
-                          <MoneyText cents={f.total} variant="body2" sx={{ display: 'block' }} />
-                        </Box>
-                        <Box>
-                          <Typography variant="caption" color="text.secondary">
-                            {isBooking ? 'Anticipo' : 'Pagado'}
-                          </Typography>
-                          <MoneyText cents={f.amount_paid} variant="body2" sx={{ display: 'block' }} />
-                        </Box>
-                        {isBooking && (
-                          <Box>
-                            <Typography variant="caption" color="text.secondary">
-                              Saldo pendiente
-                            </Typography>
-                            {/* Owed by the customer — neutral ink, not teal (teal = action). */}
-                            <MoneyText
-                              cents={f.pending_balance ?? f.total - f.amount_paid}
-                              variant="body2"
-                              sx={{ display: 'block' }}
-                            />
-                          </Box>
-                        )}
-                      </Stack>
-                    </CardContent>
-                  </CardActionArea>
-                </Card>
-              )
-            })}
+            {/* US-A82 — one shared card (docs/oversight/folio-list-scanability.spec.md D13). The
+                admin byline names the AGENT: this is the reconciliation the admin does. */}
+            {folios.map((f) => (
+              <FolioCard
+                key={f.id}
+                folio={f}
+                to={ROUTES.FOLIO_DETAIL.replace(':id', f.id)}
+                byline={f.agent.name}
+                soldAt={soldAt(f.created_at)}
+                surface="admin"
+              />
+            ))}
           </Stack>
         )}
     </Box>

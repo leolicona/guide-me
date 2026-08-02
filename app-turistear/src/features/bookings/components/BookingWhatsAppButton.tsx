@@ -1,4 +1,4 @@
-import { IconButton, Tooltip } from '@mui/material'
+import { Button, IconButton, Tooltip } from '@mui/material'
 import WhatsAppIcon from '@mui/icons-material/WhatsApp'
 import { useClaimReminder } from '../hooks/useBookingActions'
 import { useMyOrganization } from '../../organization'
@@ -21,7 +21,15 @@ export interface ReminderTarget {
 // dedicated dashboard). The pre-flight atomic claim (D6) runs BEFORE opening WhatsApp so two
 // viewers never both send: open only if this caller won the claim; a loser gets a non-blocking
 // ¿Reenviar? (force re-claim). The icon dims once a reminder has been sent.
-export function BookingWhatsAppButton({ folio }: { folio: ReminderTarget }) {
+export function BookingWhatsAppButton({
+  folio,
+  variant = 'icon',
+}: {
+  folio: ReminderTarget
+  /** `icon` = the legacy inline affordance. `card` = the labelled button US-A82 puts on FolioCard,
+   *  where it is a SIBLING of the link region (D10) and can therefore be a real <button>. */
+  variant?: 'icon' | 'card'
+}) {
   const { data: me } = useMe()
   const { data: org } = useMyOrganization()
   const reminder = useClaimReminder()
@@ -66,6 +74,28 @@ export function BookingWhatsAppButton({ folio }: { folio: ReminderTarget }) {
           }
         },
       },
+    )
+  }
+
+  // US-A82 D8 — on the card the pending job is a FILLED button with a specific verb; weight and
+  // verb carry "there is work here", because presence no longer can (a card always has a button).
+  // Teal, not the icon variant's success green: in this system green is a state and teal is action
+  // (D9), and a green button on a green rail re-merges the two channels the redesign separated.
+  if (variant === 'card') {
+    return (
+      // NOT fullWidth: on a 1280px list a full-bleed teal bar per pending apartado is a wall of
+      // accent, and the design system reserves teal precisely so it keeps meaning something. The
+      // button earns attention from its FILL against the plain-text resting verb (D8), not from
+      // its width — and every other card button is content-width, so a stretched one reads as a
+      // different kind of control.
+      <Button
+        variant="contained"
+        startIcon={<WhatsAppIcon />}
+        disabled={reminder.isPending || !folio.customer_phone}
+        onClick={onClick}
+      >
+        {reminded ? 'Recordar de nuevo' : 'Recordar saldo'}
+      </Button>
     )
   }
 
