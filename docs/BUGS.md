@@ -6,6 +6,91 @@ Tracks confirmed bugs, root causes, and fixes. Each entry is immutable once clos
 
 ---
 
+## BUG-025 — A Zoned Service Becomes Unsellable Once It Has 100 Sellable Slots — ⚠️ OPEN
+
+**Discovered:** 2026-08-03
+**Reporter:** the first real E2E run — GitHub Actions run `30838104788`, dispatched from `main`
+minutes after the release put `e2e.yml` there
+**Affected component:** `api-turistear/src/routes/pos/handler.ts:555-583` (`getPosService`, the
+US-A64 per-zone availability query)
+**Severity:** High — an agent opening the service gets `500 INTERNAL_ERROR` and **the service
+cannot be sold at all**. It is not a degraded view: the POS detail screen is the only way in.
+Progressive and silent: every zoned service works fine until the day its slot count crosses 100,
+then breaks permanently and without any change being deployed.
+
+### Symptom
+
+`GET /api/pos/services/:id` returns `500 {"error":{"code":"INTERNAL_ERROR"}}` for
+`La ruta de la montaña` (`836cedc3-ca26-4be1-824f-f5b2a295abd9`) in dev. 17 other services on the
+same org return `200`.
+
+The endpoint accepts a `to` window, which makes the boundary directly measurable:
+
+| `?to=` | slots returned | status |
+|---|---|---|
+| +98 d | 99 | `200` |
+| +99 d | — | **`500`** |
+
+99 slots pass, 100 fail. The POS sends no `to`, so the real window is unbounded and the failure is
+permanent rather than intermittent.
+
+### Root Cause
+
+The per-zone availability query binds **one D1 parameter per slot**:
+
+```ts
+.where(
+  and(
+    eq(slotZones.organizationId, agent.organizationId),   // 1 bound parameter
+    inArray(slotZones.slotId, slotRows.map((s) => s.id)), // + 1 per slot
+  ),
+)
+```
+
+**D1 caps a query at 100 bound parameters.** With `organizationId` taking one, 99 slots fits exactly
+and the 100th overflows — which is the boundary measured above, to the row.
+
+A controlled comparison across the org's tours isolates it to this query, not to slot volume and
+not to zones:
+
+| Service | `zones_enabled` | Slots | Result |
+|---|---|---|---|
+| Tour nocturno centro | `false` | **197** | `200` |
+| La ruta del Barro | `true` | 42 | `200` |
+| La ruta del pulque | `false` | 84 | `200` |
+| **La ruta de la montaña** | **`true`** | **≥ 100** | **`500`** |
+
+197 slots without zones is fine; 42 slots with zones is fine. Only *zoned* **and** *≥100 slots*
+fails — the `inArray` is the sole path that scales its parameter count with the slot list.
+
+The other list-shaped reads in this handler are bounded by `serviceId` rather than by an id array,
+so this is the only query in `getPosService` with the exposure. **`confirmSale` and the other
+zone-aware paths should be audited for the same pattern before this closes.**
+
+### Fix
+
+Not yet applied. Two candidates, and they are not mutually exclusive:
+
+1. **Bound the slot window server-side.** A POS screen has no use for 197 departures; a default
+   horizon (with `to` still able to narrow it) fixes the root cause for every query in the handler
+   at once and shrinks a response that is already too large.
+2. **Chunk the `inArray`** into batches of ≤ 90 ids and merge the results. Mechanical, and correct
+   regardless of what the window ends up being — but it only fixes this one query.
+
+(1) is the better primary fix; (2) is the safety net for whatever window is chosen. Either needs an
+API test that seeds ≥ 100 sellable slots on a zoned service — the exact case no existing test
+covers, which is why this shipped.
+
+### Why it was not caught sooner
+
+Nothing in Tiers 1–3 can see it: it needs a real D1, a zoned service, and a hundred rows of
+accumulated calendar. The E2E seed found it by accident of drift — its previous pick
+(`La ruta del pulque`) had lost availability, so "cheapest bookable tour" moved on to the next
+service, which happened to be this one. The seed failing loudly there was **correct**; a fallback
+to the next candidate would have hidden a service nobody can sell.
+
+---
+
 ## BUG-024 — An Apartado Can Be Opened on a Departure That Has Already Left — ⚠️ OPEN
 
 **Discovered:** 2026-08-02
