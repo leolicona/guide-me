@@ -6,6 +6,288 @@ Tracks confirmed bugs, root causes, and fixes. Each entry is immutable once clos
 
 ---
 
+## BUG-024 — An Apartado Can Be Opened on a Departure That Has Already Left — ⚠️ OPEN
+
+**Discovered:** 2026-08-02
+**Reporter:** the E2E suite's first real execution — `docs/testing/frontend-testing.plan.md` Phase 5
+**Affected component:** `api-turistear/src/routes/pos/handler.ts:1416-1425` (`confirmSale`, the
+US-A77 creation cutoff)
+**Severity:** Medium — an agent can take a cash deposit against a tour that already departed. The
+folio looks live (`status: booking`, a real balance) but **every settle answers 409
+`BOOKING_EXPIRED`**, so the money is collected against something that can never be completed.
+
+### Symptom
+
+Selling an apartado on a slot whose departure has passed returns `201` and a folio with
+`status: booking`. Its `booking_expires_at` is in the past on arrival. Settling it — by any method —
+fails:
+
+```
+POST /api/pos/folios/:id/settle {"method":"transfer",…}
+  → 409 {"error":{"code":"BOOKING_EXPIRED","message":"Booking has expired"}}
+```
+
+Reproduced against `api-dev` on 2026-08-02 at 19:50Z with a `2026-08-02 14:00` departure: the
+folio was created, and its settle-by landed at `19:45Z` — five minutes before it was sold.
+
+### Root Cause
+
+The guard that should stop this is conditional on policy:
+
+```ts
+if (policy.creationCutoffHours > 0) {
+  const hoursOut = (earliest.epoch - nowSec) / 3600
+  if (hoursOut < policy.creationCutoffHours) throw new ApiError('BOOKING_TOO_LATE', 422, …)
+}
+```
+
+An org that has never configured a creation cutoff sits at `0`, so the whole block is skipped —
+including the part that would have rejected a *negative* `hoursOut`. `bookingExpiryDate` then does
+its job faithfully (`departure − buffer`) and returns an instant already behind us.
+
+The zero default is deliberate for the **sales** cutoff — the comment above it explains that a cash
+walk-in should sell until the last minute. That reasoning covers a completed sale; it does not
+cover a promise to come back and pay for a bus that has gone.
+
+### Fix
+
+Not yet applied — found while running the E2E suite, and this is API behaviour, not the test-harness
+defect that PR shipped. The likely shape is to reject `hoursOut < 0` unconditionally (a departed
+slot is never bookable, at any policy setting) and keep the configurable cutoff as the separate,
+stricter rule it already is. Needs an API test alongside it; `seed.setup.ts` asserts
+`booking_expires_at` is in the future, so the E2E suite now fails loudly rather than silently if
+this ever re-appears through another path.
+
+---
+
+## BUG-023 — Two Money Queues Are Unreachable on a Phone, and the Filter Row Drags the Page — ✅ FIXED
+
+**Discovered:** 2026-08-01
+**Fixed:** 2026-08-01
+**Reporter:** manual testing of `/folios` on a narrow viewport
+**Affected:** `app-turistear/src/pages/FoliosListPage.tsx`,
+`app-turistear/src/pages/FolioHistoryPage.tsx`,
+`app-turistear/src/pages/CashBalancesPage.tsx`,
+`app-turistear/src/features/folios/components/CancellationRequestsTab.tsx`
+**Severity:** High — one half hides a money queue from the device the booth actually uses; the other
+moves the page out from under a finger mid-interaction.
+
+### Symptom
+
+Two faces of one defect, both on *Ventas*.
+
+**1. Reembolsos and Vencidos cannot be reached below ~600px.** The five tabs measure **569px**
+against a **358px** scroller. `<Tabs>` used the default `variant="standard"`, whose scroller is
+`overflow-x: hidden` with no scroll buttons — so the two rightmost tabs are clipped with no arrows,
+no touch scroll and no indication they exist. Their count badges are invisible too.
+
+| Tab | Right edge at 390px | Reachable |
+|---|---|---|
+| Folios · Por verificar · Solicitudes | ≤ 359 | yes |
+| **Reembolsos** | 484 | **no** |
+| **Vencidos** | 585 | **no** |
+
+These are US-A78 and US-A79: cash the company owes customers, and holds sitting on seats with money
+still owed. They shipped and had never worked on a phone.
+
+**2. Applying a status filter drags the whole page sideways.** The `ToggleButtonGroup` measures
+**397px** and handled no overflow, so below ~412px the *document* became wider than the viewport.
+Clicking a button whose right edge sat outside made the browser scroll it into view — taking the
+page, and the `Ventas` heading, with it.
+
+| Viewport | scrollX after the click | `Ventas` heading x |
+|---|---|---|
+| 320px | 0 → **77** | 16 → **−61** *(off screen)* |
+| 360px | 0 → 37 | 16 → −21 |
+| 390px | 0 → 7 | 16 → 9 |
+| 412px+ | 0 | 16 *(no defect)* |
+
+The reporter attributed it to the *Cancelado* button; measurement showed the trigger is whichever
+button is clipped at that width — at 320px, `Cancelado` ends at x=316 and is exactly that button.
+
+### Root Cause
+
+One cause, two rows: **a control row wider than the viewport with nothing owning the overflow.**
+Where the row itself clips (`Tabs`), content becomes unreachable. Where it does not (the toggle
+group), the overflow escalates to the document and the browser's scroll-into-view on focus moves
+everything.
+
+`allowScrollButtonsMobile` is the load-bearing half of the tab fix: MUI hides the arrows on mobile
+by default, which is precisely the width where they are the only way through.
+
+### Fix
+
+- `<Tabs variant="scrollable" scrollButtons="auto" allowScrollButtonsMobile>`.
+- Every status-filter row wrapped in `FilterStrip` — the existing design-system piece
+  (`features/filters`) already used by `/pos` and Reportes, which owns the horizontal scroll and
+  bleeds to the edge on mobile. Applied to all four rows carrying four or more options, not only
+  the reported one: the same defect was present on the seller's *Ventas*, on the *Solicitudes* tab
+  of this very screen, and on *Caja* (five options, longer labels).
+
+### Verification
+
+Measured in Chromium at 320 / 360 / 390px, before and after: document overflow **77 / 37 / 7 → 0**,
+`scrollX` stays 0, the heading stays at x=16, and *Vencidos* is in view and clickable at every
+width.
+
+`FoliosListPage.test.tsx` guards the regression at Tier 1. What it can prove is stated in the file
+rather than implied: jsdom has no layout engine, so the overflow itself is unprovable there and was
+measured in a browser instead. The test asserts the props that make the rows scrollable are still
+present — deleting `variant="scrollable"` is a one-character edit that silently restores the bug.
+Confirmed by mutation: removing either fix fails its own case and nothing else.
+
+---
+
+## BUG-022 — A Submitting Sheet's Button Loses Its Accessible Name — ✅ FIXED
+
+**Discovered:** 2026-07-31
+**Fixed:** 2026-08-01
+**Reporter:** the frontend test harness — axe, `docs/testing/frontend-testing.plan.md` Phase 4
+**Affected component:** `app-turistear/src/components/FormSheet.tsx:66-68`,
+`app-turistear/src/components/ConfirmSheet.tsx:64-66`
+**Severity:** Low–Medium — transient (only while a mutation is in flight), but axe rates
+`button-name` **critical**, and it lands at the exact moment a screen-reader user needs to know
+what is happening.
+
+### Symptom
+
+While `busy`, both sheets render `{busy ? <CircularProgress /> : label}` — the label is *replaced*,
+not supplemented. The control becomes a `<button>` with no text at all, and the spinner is an
+unnamed `role="progressbar"`. axe reports two violations: `button-name` (critical) and
+`aria-progressbar-name`.
+
+Testing Library cannot find the control by name at all during submit, which is how it surfaced.
+
+### Root Cause
+
+The spinner was treated as a visual state swap. For a sighted user it is, because the button's
+position and disabled styling carry the meaning; for a screen-reader user the entire label
+disappears, and a disabled unnamed button announces as nothing useful.
+
+### Fix
+
+The spinner swap stays (it is the right visual), but the name is now stated rather than implied:
+both buttons carry `aria-label={submitLabel}` / `aria-label={confirmLabel}` plus `aria-busy`, and
+the `CircularProgress` is marked `aria-hidden` — the button already announces that it is busy, so a
+second, unnamed progressbar inside it was noise as well as a violation.
+
+`BUSY_SHEET_KNOWN_ISSUES` is deleted from `src/test/axe.ts`, which is what verifies the fix: the
+sheet tests now run axe with **no tolerated rules**. `BottomSheet.test.tsx` asserts the confirm and
+submit buttons are still findable by name while busy, and carry `aria-busy="true"` — the assertion
+that used to pin the defect now pins the fix.
+
+---
+
+## BUG-021 — Every Bottom Sheet Is an Unnamed Dialog — ✅ FIXED
+
+**Discovered:** 2026-07-31
+**Fixed:** 2026-08-01
+**Reporter:** the frontend test harness — axe, `docs/testing/frontend-testing.plan.md` Phase 4
+**Affected component:** `app-turistear/src/components/BottomSheet.tsx`
+**Severity:** Medium — `BottomSheet` is the canonical overlay, so this affects **every** sheet in
+the product: settle, cancel, cash drop, every FormSheet and ConfirmSheet, the POS day picker.
+
+### Symptom
+
+The sheet's paper carries `role="dialog"` + `aria-modal="true"` with no accessible name. A screen
+reader announces "dialog" and nothing else, even though the sheet always has a visible title
+directly beneath. axe: `aria-dialog-name`, impact **serious**.
+
+### Root Cause
+
+`BottomSheet` accepts `header` as an opaque `ReactNode` and never relates it to the dialog element.
+`FormSheet` and `ConfirmSheet` both pass a `<Typography variant="h6">` title through that slot — so
+the name exists on screen, it is simply never wired to the role that needs it.
+
+### Fix
+
+`BottomSheet` now takes a **required** `title: string` and sets it as the paper's `aria-label`.
+Required, not optional, deliberately: an optional prop fixes the ten sheets that exist today and
+does nothing about the eleventh. With it required, an unnamed sheet no longer type-checks — `tsc`
+passing is the proof that every call site is named.
+
+`FormSheet` and `ConfirmSheet` forward the title they already receive, so their call sites are
+unchanged. The eight direct callers each state a name; the two date sheets (whose header is a month
+navigator, not a title) describe what the sheet is FOR — "Seleccionar fecha", "Seleccionar rango de
+fechas" — which is a better name than echoing the visible month.
+
+`SHEET_KNOWN_ISSUES` is deleted from `src/test/axe.ts`: the sheet tests now run axe with no
+tolerated rules, and `getByRole('dialog', { name })` is asserted directly for BottomSheet,
+FormSheet and ConfirmSheet.
+
+---
+
+## BUG-020 — A Ticket WhatsApp Link Is Built for Phone Numbers That Cannot Be Dialled — ⚠️ OPEN
+
+**Discovered:** 2026-07-31
+**Reporter:** the frontend test harness — `docs/testing/frontend-testing.plan.md` Phase 1
+**Affected component:** `app-turistear/src/features/pos/delivery.ts:106-110` (`ticketWhatsAppUrl`)
+**Severity:** Low — the agent taps *Enviar*, WhatsApp opens on a dead number, and the tourist never
+receives the portal link. Silent: nothing in the UI says the send failed.
+
+### Symptom
+
+A folio whose `customer_phone` holds a partial number (`123`, a half-typed `998 12`) still renders
+an active WhatsApp send button, and tapping it opens `wa.me/123` — which resolves to nothing.
+
+### Root Cause
+
+`normalizePhone` returns **both** `e164` and `valid` (E.164 plausibility: 11–15 digits), and
+`isSendablePhone` exists precisely to express the gate. But `ticketWhatsAppUrl` guards on the
+wrong one:
+
+```ts
+const phone = normalizePhone(ctx.folio.customer_phone).e164
+if (!phone) return null      // ← "any digits at all", not "dialable"
+```
+
+So it rejects only a phone with *zero* digits. Anything from one digit up produces a link. The
+checkout's own gate uses `isSendablePhone`, so the two paths disagree about what "sendable" means.
+
+### Fix
+
+Not yet applied — found while writing tests, and fixing it inside the test PR would have mixed a
+behaviour change into a phase that deliberately touches no product code. The fix is one line
+(guard on `.valid` instead of `.e164`) plus a decision about what the folio UI should show for an
+unusable number. `delivery.test.ts` pins the current behaviour with a comment pointing here; that
+expectation flips to `toBeNull()` when this closes.
+
+---
+
+## BUG-019 — The "Invalid Calendar Date" Check Accepts 31 February — ⚠️ OPEN
+
+**Discovered:** 2026-07-31
+**Reporter:** the frontend test harness — `docs/testing/frontend-testing.plan.md` Phase 1
+**Affected component:** `app-turistear/src/features/schedules/schemas.ts:4-11` (`dateStr`)
+**Severity:** Low — reachable only by typing a date rather than picking one, but it sends a date
+the calendar does not have to an API that will store it verbatim.
+
+### Symptom
+
+`slotFormSchema` and `scheduleFormSchema` accept `2026-02-31`, `2026-02-30` and `2026-04-31`. The
+field shows no error and the value is posted as-is.
+
+### Root Cause
+
+The refine is meant to be the guard behind the regex:
+
+```ts
+.refine((s) => !Number.isNaN(Date.parse(`${s}T00:00:00Z`)), 'Fecha de calendario inválida')
+```
+
+`Date.parse` rejects an out-of-range **month** (`2026-13-01` → `NaN`) but silently **rolls over**
+an out-of-range **day**: `Date.parse('2026-02-31T00:00:00Z')` is a valid timestamp — 3 March 2026.
+So the check catches roughly half of what its message promises, and the half it misses is the half
+a human actually types.
+
+### Fix
+
+Not yet applied (same reason as BUG-019 — the test phase changes no product code). The fix is to
+compare the parsed date back to its input, e.g. reject when
+`new Date(\`${s}T00:00:00Z\`).toISOString().slice(0, 10) !== s`. Note the same pattern appears in
+`features/catalog/schemas.ts`, whose `dateStr` has **no** refine at all — worth fixing together.
+`schedules/schemas.test.ts` pins the current behaviour with a comment pointing here.
+
 ## BUG-018 — A Single Mis-Scan Makes a Ticket Permanently Non-Refundable, and Nothing Can Un-Redeem It — ⚠️ OPEN
 
 **Discovered:** 2026-07-31

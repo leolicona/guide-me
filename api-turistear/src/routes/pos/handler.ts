@@ -54,6 +54,11 @@ import {
   depositMethodSql,
   readFolioPayments,
 } from '../../utils/folioPayments'
+import {
+  readListCancellationRequests,
+  readListLines,
+  readListPortalLinks,
+} from '../../utils/folioListRows'
 // D20 — the agent apartado cancel shares the admin path's commit, so the two cannot price the same
 // folio differently. Reaching across routes is deliberate: the alternative is a second copy of the
 // release + reversal logic, which is exactly what this replaced.
@@ -3346,11 +3351,21 @@ export const listAgentFolios = async (c: PosContext) => {
       paymentMethod: displayMethodSql,
       paymentVerification: folios.paymentVerification,
       operatorName: affiliateOperators.name,
+      saleMode: folios.saleMode,
     })
     .from(folios)
     .leftJoin(affiliateOperators, eq(folios.operatorId, affiliateOperators.id))
     .where(and(...filters))
     .orderBy(desc(folios.createdAt))
+
+  // US-AG49 — same decorations as the admin list; `filters` here is already caller-scoped to this
+  // seller's own folios, so the join inherits that scope.
+  const now = new Date()
+  const [linesByFolio, portalLinkByFolio, requestByFolio] = await Promise.all([
+    readListLines(db, org, filters),
+    readListPortalLinks(db, org, filters, c.env.API_BASE_URL),
+    readListCancellationRequests(db, org, filters),
+  ])
 
   return c.json({
     folios: rows.map((r) => ({
@@ -3386,6 +3401,19 @@ export const listAgentFolios = async (c: PosContext) => {
       reminder_sent_by: r.reminderSentBy,
       // US-AF13 — "Vendido por: {name}" (null ⇒ the manager/agent sold directly).
       operator_name: r.operatorName ?? null,
+      // US-AG49 — the seller's list renders the SAME FolioCard as the admin's, so it needs the
+      // same three decorations (docs/oversight/folio-list-scanability.spec.md D13/D14).
+      sale_mode: r.saleMode,
+      portal_link: portalLinkByFolio.get(r.id) ?? null,
+      lines: linesByFolio.get(r.id) ?? [],
+      // US-AG50 — the seller sees the state of their OWN sale: that a customer asked to cancel it,
+      // and that their apartado's deadline passed. Information, not capability — no admin verb
+      // follows from either field on this surface (US-A84 D15).
+      cancellation_request: requestByFolio.get(r.id) ?? null,
+      overdue:
+        r.status === 'booking' &&
+        r.bookingExpiresAt != null &&
+        r.bookingExpiresAt.getTime() < now.getTime(),
     })),
   })
 }

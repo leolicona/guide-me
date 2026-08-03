@@ -15,7 +15,17 @@ import type { CancellationQuote } from '../features/organization/types'
 // the admin role (enforced server-side). Money is integer minor units.
 
 // US-A21 — list folios in the org (find one to cancel). Optional status/date/agent filters.
-export const listFolios = async (filters: FolioFilters = {}): Promise<FolioListItem[]> => {
+//
+// US-A84 — the response now states the load window (`window_days`) beside the rows: the list is
+// bounded by a union (all pending work at any age, plus the last N days), and a screen that shows a
+// subset must SAY so rather than imply completeness. `null` ⇒ an explicit date filter replaced the
+// window.
+export interface FolioListPage {
+  folios: FolioListItem[]
+  window_days: number | null
+}
+
+export const listFolios = async (filters: FolioFilters = {}): Promise<FolioListPage> => {
   const params = new URLSearchParams()
   if (filters.status) params.set('status', filters.status)
   if (filters.date) params.set('date', filters.date)
@@ -24,9 +34,27 @@ export const listFolios = async (filters: FolioFilters = {}): Promise<FolioListI
   if (filters.refundStatus) params.set('refund_status', filters.refundStatus)
   if (filters.overdue) params.set('overdue', 'true')
   const qs = params.toString()
-  const res = await request<{ folios: FolioListItem[] }>(`/api/folios${qs ? `?${qs}` : ''}`)
-  return res.folios
+  const res = await request<{ folios: FolioListItem[]; window_days?: number | null }>(
+    `/api/folios${qs ? `?${qs}` : ''}`,
+  )
+  return { folios: res.folios, window_days: res.window_days ?? null }
 }
+
+// US-A84 (D7) — the pending-work counts, as ONE aggregate over the WHOLE organization.
+//
+// Replaces five badges that each downloaded a full filtered list to call `.length` in the browser.
+// Because these are real `COUNT(*)` and ignore the list's window, the banner and `Hoy` can promise
+// a number the filtered list will actually deliver (S-4).
+export interface FolioCounts {
+  verification: number
+  cancellation_requests: number
+  refunds: number
+  overdue: number
+  undelivered: number
+}
+
+export const getFolioCounts = (): Promise<FolioCounts> =>
+  request<FolioCounts>('/api/folios/counts')
 
 // US-A21 — one folio's detail (confirm before cancelling), plus what cancelling it right now
 // would cost when the org has a cancellation policy (`cancellation_quote`, null otherwise).

@@ -23,6 +23,7 @@ import {
 } from '@mui/material'
 import ArrowBackRounded from '@mui/icons-material/ArrowBackRounded'
 import { useFolio, useCancelFolio, useConfirmRefund, FolioStatusChip } from '../features/folios'
+import { FolioWorkActions } from '../features/folios/components/FolioWorkActions'
 import type { FolioDetail } from '../features/folios/types'
 import { useOrgDateFormatter } from '../features/organization'
 import type { CancellationQuote } from '../features/organization/types'
@@ -171,6 +172,10 @@ export default function FolioDetailPage() {
               </Alert>
             )}
             <ExpiredBookingBanner folio={folio} />
+
+            {/* US-A84 (D14) — the work this folio needs, and the cancellation-request history that
+                the absorbed Solicitudes tab used to hold. Renders nothing when there is neither. */}
+            <FolioWorkActions folio={folio} />
 
             {/* US-A23 / US-T05 — the open refund obligation: the client reads their PIN in
                 the portal and hands it over to receive the cash; confirming here closes

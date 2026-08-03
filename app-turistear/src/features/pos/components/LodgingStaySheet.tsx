@@ -205,6 +205,7 @@ export function LodgingStaySheet({
     <BottomSheet
       open={!!target}
       onClose={onClose}
+      title={target?.name ?? 'Estancia'}
       header={
         <Box sx={{ px: 2, pb: 1 }}>
           <Typography variant="h6">{target?.name}</Typography>

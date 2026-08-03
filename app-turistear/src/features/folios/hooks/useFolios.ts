@@ -4,11 +4,11 @@ import {
   cancelFolio,
   confirmRefund,
   getFolio,
+  getFolioCounts,
   listCancellationRequests,
   listFolios,
   rejectCancellationRequest,
 } from '../../../services/foliosService'
-import { deliveryState } from '../../pos/delivery'
 import type {
   ApproveCancellationRequestInput,
   CancellationRequestStatus,
@@ -20,60 +20,26 @@ import type {
 const FOLIOS_KEY = ['folios'] as const
 
 // US-A21 — admin folio list (find one to cancel).
+//
+// US-A84 — ONE list read now serves the whole screen. The five queue hooks that used to sit beside
+// it (`usePendingVerificationCount`, `usePendingDeliveryCount`, `usePendingRefundCount`,
+// `useOverdueBookingCount`, `usePendingRefunds`, `useOverdueBookings`) are gone: each fetched a
+// full filtered list — `usePendingDeliveryCount` pulled every paid folio WITH its lines and portal
+// link — only to call `.length`. Their job is `useFolioCounts` below, in one aggregate.
 export const useFolios = (filters: FolioFilters = {}) =>
   useQuery({
     queryKey: [...FOLIOS_KEY, filters],
     queryFn: () => listFolios(filters),
   })
 
-// US-A67 — the admin "Por verificar" queue: electronic payments awaiting verification.
-export const usePendingVerificationFolios = () =>
-  useFolios({ verification: 'pending' })
-
-// US-A67 — badge feed for the Folios nav (admins only — pass `enabled`). Shares the pending-queue
-// cache with the "Por verificar" tab, so it adds no extra request when both mount.
-export const usePendingVerificationCount = (enabled: boolean) =>
+// US-A84 (D7/D20) — the pending-work counts. Shared by the list's banner and `Hoy`'s cards, which
+// is what makes the two surfaces structurally incapable of showing different numbers. They read the
+// WHOLE organization, never the loaded window, so a count always matches the list its pill opens.
+export const useFolioCounts = (enabled = true) =>
   useQuery({
-    queryKey: [...FOLIOS_KEY, { verification: 'pending' }] as const,
-    queryFn: () => listFolios({ verification: 'pending' }),
+    queryKey: [...FOLIOS_KEY, 'counts'] as const,
+    queryFn: getFolioCounts,
     enabled,
-    select: (folios) => folios.length,
-  })
-
-// US-A80 (express-sale D23) — the pending-delivery queue count: PAID folios whose tickets were
-// never sent nor seen. Shares the paid-list cache with FoliosListPage; counted client-side off
-// the delivery axis (a folio leaves the queue the moment a tourist's camera-scan fires the
-// /t beacon or a seller taps WhatsApp).
-export const usePendingDeliveryCount = (enabled: boolean) =>
-  useQuery({
-    queryKey: [...FOLIOS_KEY, { status: 'paid' }] as const,
-    queryFn: () => listFolios({ status: 'paid' }),
-    enabled,
-    select: (folios) => folios.filter((f) => deliveryState(f) === 'pending').length,
-  })
-
-// US-A78 (docs/oversight/pending-work-queues.spec.md) — refunds still owed. The server orders
-// them OLDEST FIRST: the count alone is not the signal, the age of the debt is.
-export const usePendingRefunds = () => useFolios({ refundStatus: 'pending' })
-
-export const usePendingRefundCount = (enabled: boolean) =>
-  useQuery({
-    queryKey: [...FOLIOS_KEY, { refundStatus: 'pending' }] as const,
-    queryFn: () => listFolios({ refundStatus: 'pending' }),
-    enabled,
-    select: (folios) => folios.length,
-  })
-
-// US-A79 — apartados past their settle deadline, most overdue first. Derived server-side from
-// `booking_expires_at`, never stored (apartado-stages S7).
-export const useOverdueBookings = () => useFolios({ overdue: true })
-
-export const useOverdueBookingCount = (enabled: boolean) =>
-  useQuery({
-    queryKey: [...FOLIOS_KEY, { overdue: true }] as const,
-    queryFn: () => listFolios({ overdue: true }),
-    enabled,
-    select: (folios) => folios.length,
   })
 
 // US-A21 — one folio's detail.
@@ -99,22 +65,15 @@ export const useCancelFolio = () => {
 const REQUESTS_KEY = [...FOLIOS_KEY, 'cancellation-requests'] as const
 
 // US-T04 — the admin review queue (defaults to pending).
+//
+// US-A84 — no surface lists requests any more; this stays because the approve/reject mutations
+// invalidate it and because a folio's own history now arrives on its detail (rule 7).
 export const useCancellationRequests = (
   status: CancellationRequestStatus | 'all' = 'pending',
 ) =>
   useQuery({
     queryKey: [...REQUESTS_KEY, status],
     queryFn: () => listCancellationRequests(status),
-  })
-
-// Badge feed for the Folios nav destination (admins only — pass `enabled`). Shares the
-// pending-queue cache with FoliosListPage, so it adds no extra request when both mount.
-export const usePendingCancellationCount = (enabled: boolean) =>
-  useQuery({
-    queryKey: [...REQUESTS_KEY, 'pending'] as const,
-    queryFn: () => listCancellationRequests('pending'),
-    enabled,
-    select: (requests) => requests.length,
   })
 
 // US-T04 → US-A21 — approve a request: cancels the folio + opens the refund (PIN issued

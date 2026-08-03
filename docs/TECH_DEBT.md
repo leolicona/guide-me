@@ -2,6 +2,92 @@
 
 This document tracks known technical debt, deferred tasks, and architectural improvements that are planned for future phases.
 
+## 24. Two Date Vocabularies: `useOrgDateFormatter` Follows the BROWSER's Locale — ⚠️ OPEN
+
+**Status:** `useOrgDateFormatter` formats with `toLocaleString(undefined, { timeZone: tz, ...opts })`
+(`useOrgDateFormatter.ts:16`). The **time zone** is the organization's, correctly — but the
+**locale** is `undefined`, meaning whatever the browser is set to. On a device set to English, every
+admin screen that uses it prints `Aug 2, 10:52 AM` inside otherwise-Spanish copy.
+
+Meanwhile `folioSoldAtLabel` (US-A82 **D16**) pins `'es-MX'` deliberately, because a mixed-language
+row was one of the four defects that shipped and were only caught by rendering. So the app now has
+**two date vocabularies**, and which one a screen speaks depends on which helper it happened to use.
+
+**Found:** rendering `FolioWorkActions` (US-A84) at 390px in a browser defaulting to `en-US`. It is
+**not a regression** — the deleted `CancellationRequestsTab` formatted identically — and it was left
+alone rather than pinned in one new component, which would have made the split three-way instead of
+two.
+
+**Action required:** pin the locale inside `useOrgDateFormatter` (one argument), then re-render the
+admin screens that use it — Caja, Reportes, the folio detail, the affiliate surfaces — because
+`month: 'short'` in Spanish is a different width and some of those rows are tight.
+
+---
+
+## 23. `GET /api/folios` Has No Limit, and Now Returns More Per Row — ⚠️ OPEN
+
+**Status:** `listFolios` selects **every folio the organization has ever created** — no `LIMIT`, no
+cursor, no `useInfiniteQuery` anywhere in the app. `folio-list-scanability.spec.md` (US-A82) widens
+each row by roughly 150 bytes (`lines`, `portal_link`, `sale_mode`), so the same unbounded read now
+costs more per folio. Dev holds ~101 folios; the shape of the problem is the org that holds 5,000.
+
+The `undelivered` filter compounds it — it is applied **client-side** over the fully-loaded list
+(`FoliosListPage.tsx:61-68`), so it structurally depends on everything being downloaded.
+
+**Why it was not fixed now:** the scanability PR is a read-widening with no state change, and its
+scope boundary is that reverting it changes not one row. Adding pagination changes the contract for
+every consumer of the list and its five count badges. It also has to be **sequenced with search**:
+the planned client-side search over the loaded list only finds what was downloaded, so pagination
+and server-side search are one decision, not two.
+
+**Worse than the entry above states.** The five count badges do not count — each fetches the whole
+filtered list and calls `.length` in the browser (`useFolios.ts:35-77`), and `usePendingDeliveryCount`
+downloads *every paid folio with its lines and portal link* to produce one integer. Measured per
+load: `/folios` fires **4** unbounded `folios` reads, `/dashboard` fires **3**.
+
+**Bounded, not closed, by `folio-lifecycle-unification.spec.md` (US-A84).** That feature caps the
+read with a **union** — all folios with pending work regardless of age, plus the last 30 days of
+everything else (D8/D9) — and replaces the five counting reads with one `GET /api/folios/counts`
+doing real `COUNT(*)`. That removes the unbounded *growth*: the payload is now proportional to
+30 days of sales plus the open work, not to the organization's entire history.
+
+**What remains open after US-A84:** there is still no cursor and no `total_count`, so an
+organization selling several hundred folios a day loads a large first page. Filtering also stays
+client-side by design (US-A84 rule 8), which is safe only because the union makes the loaded set
+complete for every pending-work facet — a future move to server-side faceting must not quietly drop
+that guarantee.
+
+**Action required:** whoever finds a real org where 30 days of sales is too large a payload. Add a
+cursor + `total_count` to `GET /api/folios` and `GET /api/pos/folios`, convert
+`useFolios`/`useMyFolios` to `useInfiniteQuery`, and move faceting server-side **together** — a
+partial page under client-side facets produces filters that silently under-report, which is the
+failure US-A84 D8 exists to prevent.
+
+---
+
+## 22. `Sin nombre` Survives on Three Folio Surfaces — ⚠️ OPEN
+
+**Status:** `express-sale.spec.md` **D17** leaves `customer_name` NULL by design, and line 490 of
+that same spec prescribed the fallback — `Cliente · ••1234` — which was never built. US-A82 builds
+it as `folioCustomerLabel()` and adopts it in the shared `FolioCard`, covering `/folios` and
+`/history`. Three surfaces still print the literal `Sin nombre`:
+
+- `pages/FolioDetailPage.tsx`
+- `features/folios/components/QueueRow.tsx` (Reembolsos + Vencidos tabs)
+- `features/folios/components/CancellationRequestsTab.tsx`
+
+So a counter-sold Express folio reads `Cliente ••5678` in the list and `Sin nombre` on its own
+detail page — the same folio, two identities.
+
+**Why it was not fixed now:** scoped deliberately to keep the scanability PR to the two list
+surfaces it redesigns. The helper is shared from the day it lands, so each remaining surface is a
+one-line change.
+
+**Action required:** import `folioCustomerLabel` in the three files above and delete the
+`?? 'Sin nombre'` fallbacks. No server change.
+
+---
+
 ## 21. The API Contract Is Hand-Mirrored Into the Frontend — ⚠️ OPEN
 
 **Status:** the response shapes the frontend expects live in `app-turistear/src/features/*/types.ts`,

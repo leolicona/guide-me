@@ -48,6 +48,7 @@ export function FormSheet({
     <BottomSheet
       open={open}
       onClose={onClose}
+      title={title}
       maxHeight={maxHeight}
       header={
         <Typography variant="h6" sx={{ px: 2, pb: 1 }}>
@@ -65,8 +66,14 @@ export function FormSheet({
               variant="contained"
               disableElevation
               disabled={busy || disabled}
+              // BUG-022 — the spinner REPLACES the label, so without these the control becomes a
+              // nameless button at the exact moment a screen-reader user needs to know what is
+              // happening. The label is kept as the name; `aria-busy` carries the state; the
+              // spinner itself is decorative, since the button already says it is busy.
+              aria-label={submitLabel}
+              aria-busy={busy}
             >
-              {busy ? <CircularProgress size={22} color="inherit" /> : submitLabel}
+              {busy ? <CircularProgress size={22} color="inherit" aria-hidden /> : submitLabel}
             </Button>
           </Box>
         </>

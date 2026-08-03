@@ -1,6 +1,6 @@
 import type { Context } from 'hono'
 import type { BatchItem } from 'drizzle-orm/batch'
-import { and, asc, desc, eq, isNotNull, lt, ne, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, isNotNull, lt, ne, sql, type SQL } from 'drizzle-orm'
 import { getDb, type Db } from '../../db/client'
 import {
   accommodationReservations,
@@ -29,6 +29,20 @@ import {
 } from '../../services/resend'
 import { generateRefundPin } from '../../utils/portal'
 import { buildCancellationReversal, displayMethodSql, readFolioPayments } from '../../utils/folioPayments'
+import {
+  readListCancellationRequests,
+  readListLines,
+  readListPortalLinks,
+} from '../../utils/folioListRows'
+import {
+  DEFAULT_WINDOW_DAYS,
+  listWindowFilter,
+  overdueFilter,
+  refundPendingFilter,
+  requestPendingFilter,
+  undeliveredFilter,
+  verificationPendingFilter,
+} from '../../utils/folioPendingWork'
 import {
   computeCancellationRefund,
   resolvePolicy,
@@ -112,6 +126,28 @@ const readFolio = async (db: Db, org: string, folioId: string, apiBaseUrl?: stri
       .limit(1)
     if (tokenRows[0]) portalLink = `${apiBaseUrl}/portal/${tokenRows[0].token}`
   }
+
+  // US-A84 rule 7 — this folio's cancellation-request history, newest first. This is where the
+  // absorbed *Solicitudes* tab actually lands (D2): a rejected request never changed the folio, so
+  // the folio it was about is the only surface that can carry it. One folio, one cheap read.
+  const requestRows = await db
+    .select({
+      id: cancellationRequests.id,
+      status: cancellationRequests.status,
+      reason: cancellationRequests.reason,
+      resolutionNote: cancellationRequests.resolutionNote,
+      resolvedBy: cancellationRequests.resolvedBy,
+      resolvedAt: cancellationRequests.resolvedAt,
+      createdAt: cancellationRequests.createdAt,
+    })
+    .from(cancellationRequests)
+    .where(
+      and(
+        eq(cancellationRequests.folioId, folioId),
+        eq(cancellationRequests.organizationId, org),
+      ),
+    )
+    .orderBy(desc(cancellationRequests.createdAt))
 
   const lineRows = await db
     .select({
@@ -204,6 +240,17 @@ const readFolio = async (db: Db, org: string, folioId: string, apiBaseUrl?: stri
     tickets_viewed_at: tsOrNull(folio.ticketsViewedAt),
     created_at: Math.floor(folio.createdAt.getTime() / 1000),
     payments,
+    // US-A84 rule 7 — the absorbed request history (newest first). Empty for the vast majority of
+    // folios, which is why it costs nothing to always send it.
+    cancellation_requests: requestRows.map((r) => ({
+      id: r.id,
+      status: r.status,
+      reason: r.reason,
+      resolution_note: r.resolutionNote,
+      resolved_by: r.resolvedBy,
+      resolved_at: tsOrNull(r.resolvedAt),
+      created_at: Math.floor(r.createdAt.getTime() / 1000),
+    })),
     lines: lineRows.map((line) => ({
       id: line.id,
       line_type: line.lineType,
@@ -238,6 +285,11 @@ const readFolio = async (db: Db, org: string, folioId: string, apiBaseUrl?: stri
 // US-A21 — list folios in the caller's org (find one to cancel). A lean row shape:
 // enough to identify a folio, not a sales dashboard (that is the occupancy-dashboard
 // feature). Optional `status` / `date` (created_at UTC day) / `agent_id` filters.
+//
+// US-A84 — the read is now BOUNDED, by a union rather than a page: every folio with pending work
+// at any age, plus the last N org-local days of everything else. The union half is what lets the
+// client filter in memory honestly — a facet computed over a partial set would answer about the
+// rows that happened to load and present it as the answer about the organization (D8).
 export const listFolios = async (c: FoliosContext) => {
   const admin = c.get('user')
   const org = admin.organizationId
@@ -275,29 +327,31 @@ export const listFolios = async (c: FoliosContext) => {
   }
   if (agentQ) filters.push(eq(folios.agentId, agentQ))
 
-  // US-A78 — refunds still owed. Ordered OLDEST FIRST (spec Q5): the count alone is not the signal,
-  // the age of the debt is. Unknown values fall through to "no filter", matching `status` above.
-  const wantsPendingRefunds = refundStatusQ === 'pending'
-  if (wantsPendingRefunds || refundStatusQ === 'none' || refundStatusQ === 'refunded') {
+  // US-A78 — refunds still owed. Unknown values fall through to "no filter", matching `status`.
+  if (refundStatusQ === 'pending' || refundStatusQ === 'none' || refundStatusQ === 'refunded') {
     filters.push(eq(folios.refundStatus, refundStatusQ))
   }
   // US-A79 — apartados past their settle deadline. DERIVED here, never stored.
-  const wantsOverdue = overdueQ === 'true'
-  if (wantsOverdue) {
-    filters.push(
-      eq(folios.status, 'booking'),
-      isNotNull(folios.bookingExpiresAt),
-      lt(folios.bookingExpiresAt, new Date()),
-    )
+  const now = new Date()
+  if (overdueQ === 'true') filters.push(overdueFilter(now))
+
+  // US-A84 rule 1/2 — the union. An explicit `date` filter REPLACES the window: the caller has
+  // named the days they want, and applying both would let a range reach into the past and silently
+  // return nothing. Every other filter composes with the union rather than replacing it.
+  const windowDays = DEFAULT_WINDOW_DAYS
+  if (!dateQ) {
+    const [orgRow] = await db
+      .select({ tz: organizations.timezone })
+      .from(organizations)
+      .where(eq(organizations.id, org))
+      .limit(1)
+    filters.push(listWindowFilter(db, org, orgRow?.tz ?? 'UTC', windowDays, now))
   }
 
-  // Each queue reads by its own clock: the refund debt by how long it has been owed, the expired
-  // hold by how long it has been sitting on seats. Everything else keeps the newest-first list.
-  const order = wantsPendingRefunds
-    ? asc(folios.cancelledAt)
-    : wantsOverdue
-      ? asc(folios.bookingExpiresAt)
-      : desc(folios.createdAt)
+  // US-A84 rule 9 — ONE order, always. The queues used to sort by their own clock (refund debt by
+  // age, hold by how long it has sat), which was right when each was its own screen and unreadable
+  // once facets compose. Q5's signal — the age — moves onto the card's time chip instead (D10).
+  const order = desc(folios.createdAt)
 
   const rows = await db
     .select({
@@ -327,6 +381,8 @@ export const listFolios = async (c: FoliosContext) => {
       // could not show what is owed without a second read per folio.
       refundStatus: folios.refundStatus,
       refundAmount: folios.refundAmount,
+      // US-A82 — no surface may infer Express from a null name (business rule 4).
+      saleMode: folios.saleMode,
     })
     .from(folios)
     .innerJoin(users, eq(folios.agentId, users.id))
@@ -334,7 +390,18 @@ export const listFolios = async (c: FoliosContext) => {
     .where(and(...filters))
     .orderBy(order)
 
+  // US-A82/US-A84 — the card names what was sold, sends the ticket from the list, and marks the
+  // folios a customer is waiting on. All three decorations re-apply `filters` through a join rather
+  // than an id list (see folioListRows).
+  const [linesByFolio, portalLinkByFolio, requestByFolio] = await Promise.all([
+    readListLines(db, org, filters),
+    readListPortalLinks(db, org, filters, c.env.API_BASE_URL),
+    readListCancellationRequests(db, org, filters),
+  ])
+
   return c.json({
+    // US-A84 — what the list covers, so the UI can SAY so rather than imply completeness.
+    window_days: dateQ ? null : windowDays,
     folios: rows.map((r) => ({
       id: r.id,
       agent: { id: r.agentId, name: r.agentName },
@@ -365,7 +432,63 @@ export const listFolios = async (c: FoliosContext) => {
       // US-A78 — 'pending' = cancelled, money owed, nobody confirmed the hand-back.
       refund_status: r.refundStatus,
       refund_amount: r.refundAmount,
+      // US-A82 — what was sold (card title + the WhatsApp {itinerary}), the link the ticket send
+      // needs, and the sale mode a null customer_name must never be used to infer.
+      sale_mode: r.saleMode,
+      portal_link: portalLinkByFolio.get(r.id) ?? null,
+      lines: linesByFolio.get(r.id) ?? [],
+      // US-A84 rule 6 — 'pending' ⇒ a customer is waiting on an answer (the card's first verb);
+      // 'resolved' ⇒ requests exist but none live (the `Con solicitud` facet); null ⇒ none.
+      cancellation_request: requestByFolio.get(r.id) ?? null,
+      // US-A84 — the same predicate `?overdue=true` applies, surfaced per row so the card's time
+      // chip does not have to re-derive the deadline against a clock the client owns.
+      overdue:
+        r.status === 'booking' &&
+        r.bookingExpiresAt != null &&
+        r.bookingExpiresAt.getTime() < now.getTime(),
     })),
+  })
+}
+
+// US-A84 (D7) — the pending-work counts, as ONE aggregate.
+//
+// Replaces five badges that each downloaded a whole filtered list to call `.length` in the browser
+// (`useFolios.ts`) — `/folios` fired four unbounded reads per load and `/dashboard` three, one of
+// which pulled every paid folio WITH its lines and portal link to produce a single integer.
+//
+// The counts describe the WHOLE organization and never the loaded window (rule 4). That is what
+// lets the list be bounded without the banner lying: `Hoy` says 2 refunds, the destination shows 2,
+// even when one was cancelled eight months ago (S-3/S-4).
+export const listFolioCounts = async (c: FoliosContext) => {
+  const admin = c.get('user')
+  const org = admin.organizationId
+  const db = getDb(c.env)
+  const now = new Date()
+
+  const countWhere = async (predicate: SQL): Promise<number> => {
+    const [row] = await db
+      .select({ n: sql<number>`count(*)` })
+      .from(folios)
+      .where(and(eq(folios.organizationId, org), predicate))
+    return row?.n ?? 0
+  }
+
+  const [verification, refunds, overdue, undelivered, requests] = await Promise.all([
+    countWhere(verificationPendingFilter()),
+    countWhere(refundPendingFilter()),
+    countWhere(overdueFilter(now)),
+    countWhere(undeliveredFilter()),
+    // Counted over FOLIOS, not over requests: two pending requests on one folio are one folio to
+    // act on, and the pill reads "1 Solicitud" beside a list that shows one row.
+    countWhere(requestPendingFilter(db, org)),
+  ])
+
+  return c.json({
+    verification,
+    cancellation_requests: requests,
+    refunds,
+    overdue,
+    undelivered,
   })
 }
 

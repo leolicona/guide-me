@@ -258,6 +258,19 @@ export interface Folio {
 
 export type ReminderStatus = 'none' | 'sent'
 
+/** US-A82/US-AG49 — the lean line a LIST row carries: enough to title the card and to render the
+ *  WhatsApp `{itinerary}` without a second request. Structurally an `ItineraryLine`. */
+export interface FolioListLine {
+  service_name: string
+  line_type: 'slot' | 'stay'
+  slot_date: string | null
+  slot_start_time: string | null
+  check_in: string | null
+  check_out: string | null
+  guests: number | null
+  quantity: number
+}
+
 // US-AG20 / US-AG07.3 — lean row for the agent's own folio history & the Apartados dashboard.
 export interface FolioHistoryItem {
   id: string
@@ -286,4 +299,10 @@ export interface FolioHistoryItem {
   payment_verification?: PaymentVerification
   /** US-AF13 — "Vendido por: {name}" (null if the manager/agent sold directly). */
   operator_name?: string | null
+  /** US-AG49 — what was sold (card title) and the {itinerary} the ticket send renders. */
+  lines?: FolioListLine[]
+  /** US-AG49 — the portal link the card's ticket send needs; null before the money clears. */
+  portal_link?: string | null
+  /** US-AG45 — 'express' has no customer_name by design (D17); never inferred from a null name. */
+  sale_mode?: 'standard' | 'express'
 }

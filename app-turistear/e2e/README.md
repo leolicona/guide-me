@@ -1,58 +1,92 @@
-# E2E walkthrough — paid-ledger settle flow (US-LG03 / US-LG08)
+# E2E journeys
 
-A Playwright walkthrough that verifies the reported fix **through the UI, against a deployed
-environment**: an agent settles a booking's balance by a *different* method than the deposit
-(cash deposit → transfer balance), an admin verifies the electronic payment, and the folio then
-reads as a **Mixto** collection with a per-payment **breakdown** (deposit vs balance).
+Playwright drives a real browser against a **deployed** environment (defaults to `app-dev`). These
+journeys cross the browser/API boundary in ways the Vitest tiers structurally cannot — cookies,
+redirects, SPA navigation, the camera path. Everything else belongs one tier down; see
+[`docs/TESTING.md`](../../docs/TESTING.md).
 
-## ⚠️ Prerequisite: the stack must be deployed
+**Not a merge gate.** `verify` runs `test:app` (Vitest) on every PR in seconds. This suite runs
+nightly, on demand, and on any PR labelled `e2e` — `.github/workflows/e2e.yml`.
 
-`app-dev.turistearya.com` deploys from **`develop`**. As of writing, the paid-ledger stack is **not
-yet on `develop`** (the PRs #19–#25 are merged down the branch chain, not into `develop`), so the
-new UI — the settle method picker, `Mixto`, the breakdown — **is not live on app-dev yet**. Merge
-the stack into `develop` (which triggers the dev deploy) before running this, or point
-`E2E_BASE_URL` at an environment that already has it.
+## The suite seeds its own data
 
-## What you provide (never committed)
+```
+auth ──▶ seed ──▶ chromium ──▶ cleanup
+```
 
-Credentials and the target folio come from **environment variables** — the spec never hardcodes a
-password, and Playwright types them at runtime:
+| Project | File | What it does |
+|---|---|---|
+| `auth` | `setup/auth.setup.ts` | Signs the agent and the admin in **through the API** and saves cookies to `.auth/*.json`. Works across origins because the API sets its session cookies on `.turistearya.com` (`COOKIE_DOMAIN`), so a session minted at `api-dev` is sent to `app-dev`. |
+| `seed` | `setup/seed.setup.ts` | Picks the cheapest bookable tour with a departure **at least 2 days out** and creates an **apartado with a cash deposit**, writing `.auth/fixture.json`. It then asserts the folio's `booking_expires_at` is still ahead — see *A fixture the journey can actually settle* below. |
+| `chromium` | `*.spec.ts` | The journeys, already signed in as the agent. |
+| `cleanup` | `teardown/cleanup.teardown.ts` | Cancels the seeded folio. Never fails the run — a stale folio in dev is untidy, not a regression. |
+
+Nothing skips. If credentials are missing the run **fails loudly**: a suite that silently skips
+reports green while testing nothing, which is how the previous version of this spec managed never
+to catch anything.
+
+`workers: 1` — the seeded apartado is shared mutable state (one balance, settled once).
+
+### A fixture the journey can actually settle
+
+A booking's settle-by instant comes from the **departure** (`bookingExpiryDate` in the API:
+departure − the org's pre-departure buffer), not from when it was sold. The catalog still lists
+today's already-departed times, so "first slot with seats left" can hand back this morning's — and
+the resulting folio is *born expired*: `status: booking`, a real balance, and a settle that answers
+409 `BOOKING_EXPIRED`. That is what the suite's first real run hit, and why the seed now requires a
+departure two days out and asserts the release timestamp is in the future before writing the
+fixture. The API-side gap that lets such a folio be created at all is BUG-024.
+
+## What you provide
+
+Credentials come from the environment and are never committed; only cookies are persisted.
 
 | Var | Meaning |
 |---|---|
-| `E2E_AGENT_EMAIL` / `E2E_AGENT_PASSWORD` | the agent/operator who **owns** the booking |
-| `E2E_ADMIN_EMAIL` / `E2E_ADMIN_PASSWORD` | an admin (verifies the transfer payment) |
-| `E2E_FOLIO_ID` | a **live booking (apartado)** folio, collected with a **cash deposit** |
+| `E2E_AGENT_EMAIL` / `E2E_AGENT_PASSWORD` | the agent/operator who owns the seeded booking |
+| `E2E_ADMIN_EMAIL` / `E2E_ADMIN_PASSWORD` | an admin (verifies the transfer, runs teardown) |
 | `E2E_BASE_URL` | optional; defaults to `https://app-dev.turistearya.com` |
+| `E2E_API_BASE` | optional; defaults to `https://api-dev.turistearya.com` |
+| `E2E_FOLIO_ID` | optional **escape hatch** — reproduce against a specific existing apartado instead of seeding. Teardown leaves a caller-supplied folio alone. |
 
-Without `E2E_FOLIO_ID` the walkthrough **skips** (create an apartado first — reserve a service with
-a down payment — and pass its id).
+In CI these come from the `dev` GitHub environment's secrets.
 
 ## Run
 
 ```bash
 # from app-turistear/
-E2E_BASE_URL=https://app-dev.turistearya.com \
 E2E_AGENT_EMAIL=... E2E_AGENT_PASSWORD=... \
 E2E_ADMIN_EMAIL=... E2E_ADMIN_PASSWORD=... \
-E2E_FOLIO_ID=<live-booking-folio-id> \
-pnpm test:e2e            # headless
+pnpm test:e2e            # headless — seeds, runs, cleans up
 # pnpm test:e2e:headed   # watch it drive the browser
 # pnpm test:e2e:report   # open the HTML report (trace/video on failure)
 ```
 
-First-time only, install the browser: `npx playwright install chromium`.
+First time only: `pnpm exec playwright install chromium`.
 
-## What it checks
+Run the whole suite, not a single spec in isolation — a spec run alone has no seeded fixture and
+`seededFixture()` will say so.
 
-1. **Agent** opens `/pos/folio/:id` → **Liquidar saldo** → picks **Transferencia** + reference →
-   **Cobrar y liquidar**. The folio flips to paid and shows **Por verificar** (QR deferred).
-2. **Admin** opens `/folios/:id` → **Verificar** the electronic payment.
-3. **Agent** re-reads the folio → **Desglose de pagos** lists **Efectivo** (deposit) and
-   **Transferencia** (balance) as separate movements.
+## The journeys
 
-## Tuning
+| Spec | Covers |
+|---|---|
+| `settle-breakdown.spec.ts` | US-LG03 / US-LG08 — an agent settles a balance **by transfer** (a different method than the cash deposit), an admin verifies the electronic payment, and the folio reads as **Mixto** with a per-payment **Desglose de pagos**. |
 
-The admin **Verificar** step's exact control/label depends on the admin folio-detail UI — adjust the
-selector in `settle-breakdown.spec.ts` if your environment differs. Traces, screenshots, and video
-are captured on failure under `e2e/.report/`.
+Four more are planned — login → POS sale → settle, cancellation with refund, QR scan → redeem, and
+cash drop → admin verify (`docs/TESTING.md` § Playwright), one PR each.
+
+## When a selector breaks
+
+The labels these journeys query (`Cobrar y liquidar`, `Referencia de la transferencia`, …) are also
+asserted by `src/features/bookings/components/SettleSheet.test.tsx`. A rename should turn that test
+red first — in milliseconds, against no deployed environment. If a journey fails on a selector but
+the component test is green, the label is fine and the page is not.
+
+## History
+
+This suite used to be a single spec that `test.skip`ped unless a human created an apartado by hand
+and passed `E2E_FOLIO_ID`, and pointed at an environment that did not yet have the paid-ledger
+stack. It verified the US-LG03 fix once and then gated nothing. The `auth`/`seed`/`cleanup`
+projects above are the old `save-auth.mjs`, `create-apartado.mjs` and `refresh.mjs` folded into the
+run itself — one path instead of two.
