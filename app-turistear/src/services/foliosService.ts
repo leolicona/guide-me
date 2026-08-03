@@ -23,6 +23,9 @@ import type { CancellationQuote } from '../features/organization/types'
 export interface FolioListPage {
   folios: FolioListItem[]
   window_days: number | null
+  /** US-A83 D6 — the server capped a query at 50 and there were more. A cap that does not
+   *  announce itself reports "these are the matches" when it means "these are the first 50". */
+  truncated: boolean
 }
 
 export const listFolios = async (filters: FolioFilters = {}): Promise<FolioListPage> => {
@@ -33,11 +36,21 @@ export const listFolios = async (filters: FolioFilters = {}): Promise<FolioListP
   if (filters.verification) params.set('verification', filters.verification)
   if (filters.refundStatus) params.set('refund_status', filters.refundStatus)
   if (filters.overdue) params.set('overdue', 'true')
+  // US-A83 — the three filters that reach PAST the load window (D11/D12).
+  if (filters.from) params.set('from', filters.from)
+  if (filters.to) params.set('to', filters.to)
+  if (filters.q) params.set('q', filters.q)
   const qs = params.toString()
-  const res = await request<{ folios: FolioListItem[]; window_days?: number | null }>(
-    `/api/folios${qs ? `?${qs}` : ''}`,
-  )
-  return { folios: res.folios, window_days: res.window_days ?? null }
+  const res = await request<{
+    folios: FolioListItem[]
+    window_days?: number | null
+    truncated?: boolean
+  }>(`/api/folios${qs ? `?${qs}` : ''}`)
+  return {
+    folios: res.folios,
+    window_days: res.window_days ?? null,
+    truncated: res.truncated ?? false,
+  }
 }
 
 // US-A84 (D7) — the pending-work counts, as ONE aggregate over the WHOLE organization.

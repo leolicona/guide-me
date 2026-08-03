@@ -26,10 +26,13 @@ const FOLIOS_KEY = ['folios'] as const
 // `useOverdueBookingCount`, `usePendingRefunds`, `useOverdueBookings`) are gone: each fetched a
 // full filtered list — `usePendingDeliveryCount` pulled every paid folio WITH its lines and portal
 // link — only to call `.length`. Their job is `useFolioCounts` below, in one aggregate.
-export const useFolios = (filters: FolioFilters = {}) =>
+// US-A83 — `enabled` exists for the search fallback: the second read only fires when the local pass
+// found nothing, so the common case still costs exactly one request.
+export const useFolios = (filters: FolioFilters = {}, enabled = true) =>
   useQuery({
     queryKey: [...FOLIOS_KEY, filters],
     queryFn: () => listFolios(filters),
+    enabled,
   })
 
 // US-A84 (D7/D20) — the pending-work counts. Shared by the list's banner and `Hoy`'s cards, which

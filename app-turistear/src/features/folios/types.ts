@@ -162,6 +162,11 @@ export interface FolioFilters {
   refundStatus?: RefundStatus
   // US-A79 — apartados past `booking_expires_at`. Derived server-side, never stored.
   overdue?: boolean
+  // US-A83 — the two filters that reach past the load window: an inclusive ORG-LOCAL day range…
+  from?: string
+  to?: string
+  // …and the free-text query, matched against the same five fields the client matches locally.
+  q?: string
 }
 
 // --- Tourist cancellation requests + refund tracking (US-T04/T05, US-A23) ---

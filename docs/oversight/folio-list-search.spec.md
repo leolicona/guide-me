@@ -227,19 +227,30 @@ kept as defence in depth, matching the decorations, and **isolation on this rout
 ## Definition of Done
 
 **Backend**
-- [ ] `from`/`to` org-local; `date` re-expressed as their alias, UTC arithmetic deleted
-- [ ] `q` — the five fields, the `replace()` accent chain (D7), the 2-char floor, the 50 cap
-- [ ] `truncated` in the response; `window_days` null whenever a date or query narrows
-- [ ] S-1…S-9 in `test/folios/folio-list-search.test.ts`
-- [ ] S-12 with `seedTwoOrgs`, mutation-verified
-- [ ] `folio-lifecycle-unification.test.ts` passes **unedited**
+- [x] `from`/`to` org-local; `date` re-expressed as their alias, UTC arithmetic deleted
+- [x] `q` — the five fields, the `replace()` accent chain (D7), the 2-char floor, the 50 cap
+- [x] `truncated` in the response; `window_days` null whenever a date or query narrows
+- [x] S-1…S-9 in `test/folios/folio-list-search.test.ts` (755 tests, 57 files)
+- [x] S-12 with `seedTwoOrgs`, **mutation-verified** — and the redundant scope reported, not claimed
+- [x] `folio-lifecycle-unification.test.ts` passes **unedited**
 
 **Frontend**
-- [ ] `folioSearch.ts` + tests (the five fields, the normalisation, the floor)
-- [ ] `FolioSearchField`, the date pills, the fallback and its label
-- [ ] URL contract `?q=`/`?desde=`/`?hasta=`; pending-work pill clears them (D13)
-- [ ] Empty state names every active filter
-- [ ] **Verified visually at 320 / 390 / 1280px** — the strip now carries four pills plus a field
+- [x] `folioSearch.ts` + tests (the five fields, the normalisation, the floor)
+- [x] `FolioSearchField`, the date pills, the fallback and its label
+- [x] URL contract `?q=`/`?desde=`/`?hasta=`; pending-work pill clears them (D13)
+- [x] Empty state names every active filter
+- [x] 442 tests, 25 files; `tsc -b` clean
+- [x] **Verified visually at 320 / 390 / 1280px** — document overflow **0**, `scrollX` **0**, console
+      errors **0** at every width, with the search field, four pills and the pending-work bar all
+      present. **Two defects found by looking, neither visible to a test:**
+      1. Computing a date preset before `useNowSeconds` resolved threw
+         `RangeError: Invalid time value` and took the whole page down **on first paint**. The
+         presets now render only once the org's clock is known.
+      2. With the fallback showing history, the footer still read *"Últimos 30 días…"* directly
+         under a banner saying the opposite — **two statements about scope contradicting each other
+         on one screen**, because the footer read the base query's `window_days` rather than the
+         rows actually displayed. Both faces are now pinned by tests verified to fail against the
+         pre-fix component.
 
 **Documentation**
 - [ ] `SPEC.md`: US-A83, the *Features by Phase* line, glossary
@@ -261,6 +272,13 @@ by `?date=` for the **6th**; it now answers for the **5th**, which is the day th
 No stored data changes — only which rows a query returns.
 
 ## Open
+
+**A note on how two of these tests were caught lying.** `/todo el historial/` matched *both* the
+loading line (*"Buscando en todo el historial…"*) and the result banner (*"Resultados de todo el
+historial…"*), so two assertions passed against the **spinner** and never saw a result at all — one
+of them survived a mutation that should have killed it. The matchers now name the banner
+specifically. Worth recording because an ambiguous matcher is the quietest way a suite can grow
+tests that assert nothing.
 
 | Question | The smallest change that would answer it |
 |---|---|
