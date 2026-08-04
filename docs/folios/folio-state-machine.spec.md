@@ -93,7 +93,7 @@ Concretely:
 |---|---|---|
 | **D1** | **`status` does not grow. The folio has six orthogonal axes**: money (`status`) · clearance (`payment_verification`) · delivery (`tickets_sent_at`/`tickets_viewed_at`) · debt (`refund_status`) · hold stage (derived) · **fulfilment (new, derived)**. | An enum is one answer; a folio needs six at once. Collapsing them means either naming the cartesian product (3×3×3×3 = 81 values) or losing information — and losing information is what produced the `(reembolsado)` defect. Axes also compose: adding the sixth costs the other five nothing. |
 | **D2** | **Fulfilment lives on the LINE**, with a roll-up on the folio. | The cancellation engine already prices per line (`LineOutcome`, `cancellationPolicy.ts:172`) and `redeemed_count` is per line. A folio with Isla Mujeres on Tuesday (scanned) and Chichén on Thursday (nobody came) has no single truth; a folio-level rule would have to lie about one of them. |
-| **D3** | Values: **`pending` · `partial` · `fulfilled` · `no_show`**. | Without `partial`, two friends who did not board vanish from the report and the wasted seat — the whole point of the axis — stays invisible. |
+| **D3** | Values: **`pending` · `partial` · `fulfilled` · `no_show`**. | Without `partial`, two friends who did not board vanish from the report and the wasted seat — the whole point of the axis — stays invisible. *(Reachable only under `qr_redemption_mode = 'per_pass'`, the default — see **D24**.)* |
 | **D4** | **Fulfilment is DERIVED, never stored.** No column, no migration, no cron. | *(Reverses the recommendation given during the interview.)* Enumerating who would write it turned up nobody: all four values fall out of `redeemed_count`, `quantity` and the line's snapshotted departure. This is `apartado-stages.spec.md` **S7** again — *a stored stage needs a writer, and a cron that writes state drifts from the clock that defines it*. Deriving also makes D5 free. |
 | **D5** | **A scan always wins.** A passenger who boards after the grace instant is redeemed normally and the folio stops being a no-show. | Nothing to revert, because nothing was written. The scanner is the only party that knows whether someone showed up; a cron that had already stamped `no_show` would be asserting the opposite of an observation. |
 | **D6** *(withdrawn)* | ~~**The no-show margin reuses `booking_grace_offset_minutes`, negative.** No new setting.~~ | **Withdrawn by D22.** That field already drives **two** clocks: it is the `tourBuffer` that fixes `booking_expires_at` for a near-departure sale, and it is where stage ② ends and the auto-cancellation fires (`pos/handler.ts:724-733`). An org setting it to −30 to mean *"half an hour past departure counts as a no-show"* would simultaneously move **every apartado's auto-cancellation to half an hour after departure**. One field, three clocks — the exact coupling `apartado-stages.spec.md` S1 refused when it gave apartados their own creation cutoff instead of reusing `sales_cutoff_offset_minutes`: *"one number cannot serve both."* |
@@ -112,6 +112,8 @@ Concretely:
 | **D19** | **Most events are action-tails, so the outbox is smaller than it looks.** Only `booking_grace_entered` and `departure_reminder` are clock-produced; of those only the reminder scales with volume (one per departure per day). | Worth stating so the engine is not oversold. **Six of the eight** messages leave as the tail of a tap someone was already making (D12); they did not need a notification engine, they needed the action to have a tail. The engine earns its place on the seventh. |
 | **D20** | **Every operation is notified to the customer in writing, by WhatsApp.** No exception among the eight events. Email is emitted **additionally** whenever there is one — reinforcement, never a substitute. | *(User decision, superseding D18.)* Written notice is what prevents a dispute and what makes the arithmetic transparent; a channel chosen by how much it costs us is a channel chosen against the customer. The cost objection also turns out to be small: six of the eight are action-tails, so the message rides a gesture already being made. **The boundary is the operation and the money** — it does not extend to the Phase 4 review request, which is marketing, is clock-produced, scales with volume, and protects nobody. |
 | **D21** | **What the outbox proves is that we sent, not that they received.** A drained WhatsApp row records `sent_by` + `sent_at` — a human's claim. | Stated so D20's protection is not overestimated. It is evidence of diligence, not of delivery. The repo already knows the difference: `tickets_viewed_at` is a real first-view beacon from the portal, which is why the delivery axis shows `✓✓ Visto` only where a column backs it (`folio-list-scanability.spec.md`). Giving the receipt the same beacon is listed under *Open*. |
+| **D24** | **`qr_redemption_mode = 'all_passes'` makes `partial` unreachable, and the report says so.** The wasted-seat report states, per organization, which question it is answering. | Found while auditing the settings, not while designing: one scan in that mode sets `redeemed_count = quantity` outright (`tickets/handler.ts:133`). So a party of four where **two** boarded is scanned once and reads **`fulfilled`** — four passes counted as used, two people aboard, and the wasted seat is invisible **by configuration**. `all_passes` is a gate-throughput choice and it costs exactly the data US-A85 exists to produce; an org cannot have both. Stating it is the whole decision, because the alternative is a report that quietly means *"nobody came vs everybody came"* for one org and *"how many of the four"* for another, under one title. D3 keeps `partial` — it is correct and reachable for every `per_pass` org, which is the default. |
+| **D25** | **Eight events need eight message templates; two exist.** Phase 3 ships a **shipped default for all eight** and keeps **only `wa_ticket_template` and `wa_reminder_template` editable** — the two that already are. | The templates are the org's outbound voice, so every new message needs one. But eight editable templates is a settings screen nobody finishes, and six of the eight are transactional statements of fact (*your transfer cleared*, *your sale was cancelled*, *here is your refund receipt*) where wording is not where an operator differentiates. Same reasoning that gave `wa_*_template` a null default meaning "use the shipped one" (`whatsapp-qr-delivery.spec.md` D10): make the good default free, make editing opt-in. Widening later is one nullable column per template. |
 | **D17** | **Phase 1 carries no story ID.** It is registered as two bug fixes plus a glossary migration in `SPEC.md`. | `PROCESS.md` reserves an ID for an **observable capability**. "The same state is called the same thing everywhere" is a defect being repaired, not a capability being added; minting a story for it would make the index claim a feature shipped. |
 
 ---
@@ -312,6 +314,13 @@ Paid folios whose lines reached `no_show`, grouped by service and departure: sea
 redeemed, seats wasted, and the money they represent. Dates are **org-local days**, matching the
 vocabulary the folio list already uses.
 
+The response carries **`redemption_mode`**, and the screen states what the numbers mean (D24):
+
+| `qr_redemption_mode` | What the report can distinguish |
+|---|---|
+| `per_pass` *(default)* | seat by seat — *"two of four boarded"* |
+| `all_passes` | **only** *"the party came"* vs *"nobody came"* — a partial boarding reads as fully used |
+
 ### `GET /api/notifications?status=pending&channel=whatsapp`  *(admin)*
 
 The outbox. Ordered oldest first.
@@ -408,6 +417,13 @@ Given the folio of S-4, already reading `no_show`
 When the scanner redeems 4 passes
 Then the next read returns `fulfilled`, with **no reversal endpoint called and no row updated other
 than `redeemed_count`**.
+
+**S-6b — `all_passes` cannot see a partial, and the report admits it**
+Given an org with `qr_redemption_mode = 'all_passes'` and a line of `quantity = 4`
+When one scan redeems it
+Then `redeemed_count = 4` and `fulfillment = 'fulfilled'` — **`partial` is unreachable** (D24).
+And the wasted-seat response carries `redemption_mode = 'all_passes'`, so the screen states that a
+partial boarding is counted as fully used.
 
 **S-7 — Worst case wins, and `fulfilled` does not mask a pending tour**
 Given a folio with line A `fulfilled` and line B `pending` (departs Thursday)
@@ -512,7 +528,8 @@ join removed — see `folio-lifecycle-unification.spec.md` S-18.)*
 - [ ] `/settings` input beside *Cierre de ventas*, same *Antes / Después* control, with the
       `NO_SHOW_MARGIN_TOO_EARLY` validation mirrored in the form
 - [ ] `fulfillment` on list rows, detail, and per line
-- [ ] `GET /api/reports/wasted-seats`
+- [ ] `GET /api/reports/wasted-seats`, carrying `redemption_mode`, with the screen stating what
+      the numbers can distinguish (D24)
 - [ ] S-4 … S-10 (incl. S-4b) in `test/folios/folio-fulfillment.test.ts`; unit coverage in `folioFulfillment.unit.test.ts`
 - [ ] S-18 cross-org, **mutation-verified**
 - [ ] Card chip + `Sin usar` facet + per-line detail
@@ -522,6 +539,7 @@ join removed — see `folio-lifecycle-unification.spec.md` S-18.)*
 
 - [ ] `notifications` table + the unique guard (migration `0059`)
 - [ ] The eight events emit rows; the existing inline sends are re-homed onto it, unchanged
+- [ ] A shipped default template per event; **only the two existing templates stay editable** (D25)
 - [ ] `refund_completed` chains onto the PIN confirm and states paid / returned / retained (D20)
 - [ ] Email drain (scheduled) with retry; WhatsApp drain endpoint
 - [ ] Refund confirm chains into the WhatsApp hand-off (S-11)
@@ -570,12 +588,41 @@ join removed — see `folio-lifecycle-unification.spec.md` S-18.)*
 
 ---
 
+## Settings audit — what this spec leans on, and what it found
+
+Every column on `organizations`, checked for a real consumer. Three rows are not about this feature
+and are recorded because the audit found them, not to widen the scope.
+
+| Setting | In `/settings` | Read by code | Under this spec |
+|---|---|---|---|
+| `timezone` | ✅ | 11 sites | **load-bearing** — D23 and S-9 resolve through it |
+| `booking_min_down_payment_pct` | ✅ | yes | untouched |
+| `booking_pre_departure_buffer_hours` | ✅ | yes | untouched — the ①→② boundary |
+| `booking_creation_cutoff_hours` | ✅ | yes | untouched |
+| `sales_cutoff_offset_minutes` | ✅ | yes | **gains a role**: it bounds D23's validation |
+| `booking_grace_offset_minutes` | ✅ | yes | untouched — **and D6's withdrawal keeps it that way** |
+| `lodging_weekend_days` | ✅ | yes | untouched |
+| `wa_ticket_template` · `wa_reminder_template` | ✅ | frontend | **central in Phase 3** — and short by six (D25) |
+| `qr_redemption_mode` | ✅ | yes | **collides with the fulfilment axis** (D24) |
+| `cancellation_policy` | ✅ | yes | untouched |
+| `ack_window_hours` | ❌ **no UI** | yes (`cash/handler.ts:48`) | works, but no admin can change it. Out of scope. |
+| `agent_cancellation_enabled` | ❌ | **nothing** | correct: US-A73 is registered *"Not yet built — the switch is not surfaced until the endpoint exists"*. Reserved, not rotten. |
+| `booking_hold_days` | ❌ | **nothing — inert** | **dead configuration.** Still in the `PATCH /api/organizations` contract, still loaded into `BookingPolicy.holdDays`, never read: *"the former createdAt + holdDays cap was removed… `holdDays` is retained inert"* (`pos/handler.ts:722`). Out of scope — see below. |
+| `lodging_free_cancel_days` · `lodging_cancel_penalty_pct` | tombstone | nothing | **retired correctly**, and the model to copy: no longer editable, and an org that had them configured is told, on the screen where it would go looking, that the ladder governs stays now (`SettingsPage.tsx:488`). |
+
+**The pattern worth naming:** this repo already knows how to retire a setting honestly — stop
+accepting it, and tell the orgs that set it where the behaviour went. `booking_hold_days` never got
+that treatment, which is the difference between a retired setting and a lying one.
+
+---
+
 ## Open
 
 | Question | The smallest change that answers it |
 |---|---|
 | Should a `no_show` folio still be cancellable by an admin? | Today it can be, and the ladder gives it 0% — so the outcome is already right. Blocking it would need one guard in `cancelFolio`; leave it until someone reports being confused. |
 | Does the wasted-seat report belong on the dashboard rather than under Reports? | A dashboard card is one component; the endpoint is the same either way. Decide when Phase 2's numbers exist and are worth looking at. |
+| Should `all_passes` orgs get a way to record how many actually boarded? | It is the only way they see a partial (D24), and it means a count on the scan screen instead of one tap — which is the throughput they chose `all_passes` to get. Worth asking an operator before building. |
 | Should the refund receipt be a portal page with a view beacon, like the ticket? | It would turn D21's *we sent it* into *they opened it* — real evidence, on the one message where a dispute is most likely. The machinery exists (`/t/:token` and `tickets_viewed_at`). Deliberately not scoped here: it is a second surface, not a notification. |
 | Should the customer see **why** the retention was that amount? | The receipt states *retained 1,200*; the ladder that decided it is snapshotted on the folio (`cancellation_policy_snapshot`) and shown nowhere. How much policy a tourist should be shown is a product decision, not a consequence of anything in this spec. |
 | Should the T−24h reminder respect a per-service opt-out? | One boolean on `services`. Only worth it if an org runs a service where the reminder is noise (an open-ended pass, say). |
