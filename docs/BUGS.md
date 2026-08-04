@@ -6,6 +6,120 @@ Tracks confirmed bugs, root causes, and fixes. Each entry is immutable once clos
 
 ---
 
+## BUG-025 — A Zoned Service Becomes Unsellable Once It Has 100 Sellable Slots — ⚠️ OPEN
+
+**Discovered:** 2026-08-03
+**Reporter:** the first real E2E run — GitHub Actions run `30838104788`, dispatched from `main`
+minutes after the release put `e2e.yml` there
+**Affected component:** `api-turistear/src/routes/pos/handler.ts:555-583` (`getPosService`, the
+US-A64 per-zone availability query)
+**Severity:** Medium — **latent, not currently breaking sales.** `to` is optional in the contract,
+and omitting it on a zoned service with ≥100 sellable slots is a hard `500`. Today the only caller
+that omits it is the E2E seed; both POS callers bound the window to 1–3 days and work fine (see
+*Who is actually affected*). The exposure is that the endpoint is unsafe for any consumer that
+takes the documented default — a report, a script, an integration, or a new screen — and it fails
+as a `500 INTERNAL_ERROR` that names nothing.
+
+*(Originally filed as High on the assumption that the POS opened the service unbounded. It does
+not. Corrected before this entry was merged — the evidence is in* Who is actually affected *below.)*
+
+### Symptom
+
+`GET /api/pos/services/:id` returns `500 {"error":{"code":"INTERNAL_ERROR"}}` for
+`La ruta de la montaña` (`836cedc3-ca26-4be1-824f-f5b2a295abd9`) in dev. 17 other services on the
+same org return `200`.
+
+The endpoint accepts a `to` window, which makes the boundary directly measurable:
+
+| `?to=` | slots returned | status |
+|---|---|---|
+| +98 d | 99 | `200` |
+| +99 d | — | **`500`** |
+
+99 slots pass, 100 fail.
+
+### Who is actually affected
+
+**Not the POS.** Both frontend callers always bound the window, so neither can reach the limit:
+
+| Caller | Window | Result |
+|---|---|---|
+| `ServiceSheet.tsx:54-59` — no date picked | 3 days `[start, start+2]` | `200`, 3 slots |
+| `ServiceSheet.tsx:54-59` — explicit date | 1 day | `200`, 1 slot |
+| `ServiceSheet.tsx:54-59` — Express (US-AG45 D5) | 1 day (today) | `200`, 1 slot |
+| `PosServicePage.tsx:28-31` | 1 or 3 days, same rule | `200` |
+| `e2e/setup/seed.setup.ts:37` | **none** | **`500`** |
+
+Verified against the failing service in dev by replaying each call shape. An agent can open
+`La ruta de la montaña` and sell it normally.
+
+So the defect is **latent**: `to` is documented as optional, and the one caller that takes that
+default is the E2E seed. The risk is the next consumer that does the same — a report, an export, a
+script, a new screen — and gets a `500` that names nothing. `getPosService(id, range?)` makes the
+range optional at the client layer too, so nothing stops it.
+
+### Root Cause
+
+The per-zone availability query binds **one D1 parameter per slot**:
+
+```ts
+.where(
+  and(
+    eq(slotZones.organizationId, agent.organizationId),   // 1 bound parameter
+    inArray(slotZones.slotId, slotRows.map((s) => s.id)), // + 1 per slot
+  ),
+)
+```
+
+**D1 caps a query at 100 bound parameters.** With `organizationId` taking one, 99 slots fits exactly
+and the 100th overflows — which is the boundary measured above, to the row.
+
+A controlled comparison across the org's tours isolates it to this query, not to slot volume and
+not to zones:
+
+| Service | `zones_enabled` | Slots | Result |
+|---|---|---|---|
+| Tour nocturno centro | `false` | **197** | `200` |
+| La ruta del Barro | `true` | 42 | `200` |
+| La ruta del pulque | `false` | 84 | `200` |
+| **La ruta de la montaña** | **`true`** | **≥ 100** | **`500`** |
+
+197 slots without zones is fine; 42 slots with zones is fine. Only *zoned* **and** *≥100 slots*
+fails — the `inArray` is the sole path that scales its parameter count with the slot list.
+
+The other list-shaped reads in this handler are bounded by `serviceId` rather than by an id array,
+so this is the only query in `getPosService` with the exposure. **`confirmSale` and the other
+zone-aware paths should be audited for the same pattern before this closes.**
+
+### Fix
+
+Not yet applied. Two candidates, and they are not mutually exclusive:
+
+1. **Give `to` a bounded default server-side.** This is the real fix now that the blast radius is
+   known: the failure is entirely about what happens when the caller *omits* the window, so a
+   default horizon makes the documented default safe. It also shrinks a response that is already
+   too large — 197 departures serve no screen.
+2. **Chunk the `inArray`** into batches of ≤ 90 ids and merge the results. Mechanical, and correct
+   regardless of what the window ends up being — but it only fixes this one query.
+
+(1) is the better primary fix; (2) is the safety net for whatever window is chosen. Either needs an
+API test that seeds ≥ 100 sellable slots on a zoned service — the exact case no existing test
+covers, which is why this shipped.
+
+### Why it was not caught sooner
+
+Nothing in Tiers 1–3 can see it: it needs a real D1, a zoned service, and a hundred rows of
+accumulated calendar. The E2E seed found it by accident of drift — its previous pick
+(`La ruta del pulque`) had lost availability, so "cheapest bookable tour" moved on to the next
+service, which happened to be this one.
+
+The seed found it precisely **because** it calls the endpoint the way no screen does — without a
+window. That is worth keeping: a test that only replays the UI's own call shape can only ever find
+the bugs the UI already exercises. The seed should still pass a window (it needs one departure, not
+a year of them), but the discovery came from a caller that took the contract at its word.
+
+---
+
 ## BUG-024 — An Apartado Can Be Opened on a Departure That Has Already Left — ⚠️ OPEN
 
 **Discovered:** 2026-08-02
