@@ -34,10 +34,6 @@ setup('seed an apartado with a cash deposit', async () => {
     .sort((a, b) => a.base_price - b.base_price)[0]
   expect(candidate, 'no bookable tour with availability in this environment').toBeTruthy()
 
-  const detailRes = await ctx.get(`/api/pos/services/${candidate.id}`)
-  expect(detailRes.ok(), `service detail failed: ${detailRes.status()}`).toBeTruthy()
-  const detail = (await detailRes.json()).service
-
   // The slot must be comfortably in the FUTURE, not merely "has seats left".
   //
   // A booking's release timestamp is derived from the DEPARTURE, not from when it was sold
@@ -51,13 +47,42 @@ setup('seed an apartado with a cash deposit', async () => {
   // back naive (`date` + `start_time`) in the ORG's time zone, and we do not know that zone here —
   // so a single day of headroom can be eaten by the buffer and the zone together.
   const MARGIN_DAYS = 2
-  const earliestDate = new Date(Date.now() + MARGIN_DAYS * 86_400_000).toISOString().slice(0, 10)
+  // Two weeks is plenty to find one departure on any real schedule — including a weekly tour —
+  // while staying far below the limit described below.
+  const WINDOW_DAYS = 14
+  const dateIn = (days: number) =>
+    new Date(Date.now() + days * 86_400_000).toISOString().slice(0, 10)
+  const earliestDate = dateIn(MARGIN_DAYS)
+  const latestDate = dateIn(MARGIN_DAYS + WINDOW_DAYS)
+
+  // Ask for a BOUNDED window. The seed needs exactly one bookable departure, not the service's
+  // whole calendar, so the window is what it should always have been — but there is also a hard
+  // reason: omitting `to` makes this request 500 on a ZONED service once it has ≥100 sellable
+  // slots (BUG-025 — `getPosService` binds one D1 parameter per slot and D1 caps a query at 100).
+  //
+  // This does NOT fix that bug and is not a workaround pretending to be one: the endpoint is still
+  // unsafe for any caller that takes the documented `to`-is-optional default. It stops the nightly
+  // from being blocked by a defect it has already reported. **The regression test for BUG-025
+  // belongs in the API suite** — seeding ≥100 sellable slots on a zoned service — because after
+  // this change nothing in the E2E suite exercises the unbounded call any more.
+  const detailRes = await ctx.get(
+    `/api/pos/services/${candidate.id}?from=${earliestDate}&to=${latestDate}`,
+  )
+  expect(
+    detailRes.ok(),
+    `service detail failed for ${candidate.id} (${earliestDate}…${latestDate}): ` +
+      `${detailRes.status()} ${await detailRes.text()}`,
+  ).toBeTruthy()
+  const detail = (await detailRes.json()).service
+
+  // `from` already excludes anything earlier, but the check stays explicit: it is the invariant the
+  // fixture depends on, and it should be visible here rather than inferred from a query string.
   const slot = (detail.slots ?? []).find(
     (s: { remaining: number; date: string }) => s.remaining > 0 && s.date >= earliestDate,
   )
   expect(
     slot,
-    `no slot on ${detail.name} with seats left departing on or after ${earliestDate} — ` +
+    `no slot on ${detail.name} with seats left between ${earliestDate} and ${latestDate} — ` +
       `dev needs future availability seeded for the E2E suite to have anything to settle`,
   ).toBeTruthy()
 
