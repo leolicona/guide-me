@@ -8,6 +8,11 @@ dist-ssr/
 
 # Wrangler cache/build directory
 .wrangler/
+# Clone-wide local D1 replica: every worktree symlinks api-turistear/.wrangler here
+# (api-turistear/scripts/local-db.mjs).
+.wrangler-shared/
+# The worktree-local state that db:migrate:local parks aside when it takes over the link.
+.wrangler.worktree-local/
 
 # Environment files
 .env

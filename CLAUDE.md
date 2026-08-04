@@ -12,12 +12,19 @@ The project uses `pnpm` workspaces. Commands can be run from the root.
 
 ## Commands
 
+> **Running the app locally for the first time in a worktree: read `docs/DEVELOPMENT.md`.**
+> `pnpm dev` alone is not enough — without `.dev.vars` the login returns **200 and no session**,
+> because `wrangler.jsonc` pins the cookie to `.turistearya.com` and auth lives in an external
+> Worker reached by a service binding that does not exist locally. `pnpm db:migrate:local` also
+> links the worktree to the clone-wide local database, so data survives switching branches.
+
 ### Workspace-level (Run from root)
 
 ```bash
-pnpm dev:api       # Start local dev server for API
-pnpm dev:app       # Start local dev server for App
+pnpm dev:api       # Start local dev server for API (port 5173)
+pnpm dev:app       # Start local dev server for App (port 5174 — proxies /api to 5173)
 pnpm dev           # Start both dev servers in parallel
+pnpm seed:local    # Seed the local D1: an admin you can log in as + sample sales
 pnpm build:api     # Build API for production
 pnpm build:app     # Build App for production
 pnpm deploy:api    # Deploy API to Cloudflare Workers
