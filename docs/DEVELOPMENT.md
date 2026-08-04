@@ -4,10 +4,11 @@ Three commands from a worktree root, then log in and click. This document exists
 three would otherwise fail in ways that look like something else entirely.
 
 ```bash
-cp api-turistear/.dev.vars.example api-turistear/.dev.vars   # once per worktree
-pnpm --filter api-turistear db:migrate:local                  # once per worktree
-pnpm --filter api-turistear seed:local                        # creates the admin + sample data
-pnpm dev                                                      # both servers
+pnpm install                                     # a fresh worktree has no node_modules
+cp api-turistear/.dev.vars.example api-turistear/.dev.vars
+pnpm db:migrate:local                            # links this worktree to the shared DB, migrates it
+pnpm seed:local                                  # only if the shared DB is empty
+pnpm dev
 ```
 
 | | |
@@ -92,9 +93,50 @@ Not misconfiguration — the intended signal:
 
 ---
 
-## One local database per worktree
+## One local database for the whole clone
 
-`.wrangler/` lives inside `api-turistear/` and is git-ignored, so **every worktree has its own
-SQLite replica**. Migrating and seeding is per-worktree; nothing you do in one leaks into another,
-and a fresh worktree starts empty. That is usually what you want when validating a branch — but it
-does mean the two commands above are per-worktree, not per-machine.
+Miniflare's default is `api-turistear/.wrangler`, which sits **inside the worktree** — so every
+branch used to get its own empty database, and a sale you created while validating one branch was
+invisible from the next. The local database is a development fixture; it belongs to the clone, not
+to the branch.
+
+`pnpm db:migrate:local` fixes that before migrating: it replaces `api-turistear/.wrangler` with a
+**symlink** to `<clone>/.wrangler-shared` (git-ignored). Run it once per worktree; seed once per
+clone.
+
+If the worktree already had a real `.wrangler` directory, it is **moved aside** to
+`.wrangler.worktree-local` rather than deleted — it may hold the only copy of data you cared about.
+
+### Why a symlink and not `--persist-to`
+
+The obvious fix is to point both tools at a shared path: `--persist-to` for the wrangler CLI,
+`persistState: { path }` for `@cloudflare/vite-plugin`. **It was tried and it does not work** — the
+two do not agree on the layout underneath, and the dev server dies before serving a request:
+
+```
+Fatal uncaught kj::Exception: SENTRY_DO SQLite failed;
+table _cf_ALARM has 3 columns but 2 values were supplied
+```
+
+Deleting the Durable Object state does not help; the plugin recreates it and fails identically.
+The symlink sidesteps the negotiation entirely: both tools keep writing to their own default path,
+and the filesystem makes it one place.
+
+### When you switch to a branch with a new migration
+
+Run `pnpm db:migrate:local` again. Migrations here are additive by policy, so coming *back* to an
+older branch is harmless — the extra column is simply unused. A destructive migration would not be,
+and the recovery is `rm -rf <clone>/.wrangler-shared` followed by migrate + seed.
+
+### Why not just point local at the dev database?
+
+Tempting, and wrong. `guideme-db` (dev) is **shared, writable state**: the deployed dev app runs
+against it and so does the nightly E2E suite, which seeds an apartado and settles it. A local
+experiment — a cancellation, a void, a re-seed — would land in the same rows, and a local run racing
+the E2E suite is a genuinely confusing failure to debug.
+
+It also breaks migrations: a branch with a new one would either not apply it (the code expects
+columns that do not exist) or apply an unreviewed migration to shared dev.
+
+Use the deployed **app-dev** site when you want real data. Use local when you want to *change*
+things, which is what validating a branch means.

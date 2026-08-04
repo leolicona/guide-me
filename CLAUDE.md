@@ -15,8 +15,8 @@ The project uses `pnpm` workspaces. Commands can be run from the root.
 > **Running the app locally for the first time in a worktree: read `docs/DEVELOPMENT.md`.**
 > `pnpm dev` alone is not enough — without `.dev.vars` the login returns **200 and no session**,
 > because `wrangler.jsonc` pins the cookie to `.turistearya.com` and auth lives in an external
-> Worker reached by a service binding that does not exist locally. Three commands fix both; they
-> are per-worktree, since each worktree has its own D1 replica.
+> Worker reached by a service binding that does not exist locally. `pnpm db:migrate:local` also
+> links the worktree to the clone-wide local database, so data survives switching branches.
 
 ### Workspace-level (Run from root)
 

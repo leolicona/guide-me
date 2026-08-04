@@ -8,6 +8,9 @@ dist-ssr/
 
 # Wrangler cache/build directory
 .wrangler/
+# Clone-wide local D1 replica: every worktree symlinks api-turistear/.wrangler here
+# (api-turistear/scripts/local-db.mjs).
+.wrangler-shared/
 
 # Environment files
 .env
