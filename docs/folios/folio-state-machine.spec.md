@@ -96,7 +96,8 @@ Concretely:
 | **D3** | Values: **`pending` · `partial` · `fulfilled` · `no_show`**. | Without `partial`, two friends who did not board vanish from the report and the wasted seat — the whole point of the axis — stays invisible. |
 | **D4** | **Fulfilment is DERIVED, never stored.** No column, no migration, no cron. | *(Reverses the recommendation given during the interview.)* Enumerating who would write it turned up nobody: all four values fall out of `redeemed_count`, `quantity` and the line's snapshotted departure. This is `apartado-stages.spec.md` **S7** again — *a stored stage needs a writer, and a cron that writes state drifts from the clock that defines it*. Deriving also makes D5 free. |
 | **D5** | **A scan always wins.** A passenger who boards after the grace instant is redeemed normally and the folio stops being a no-show. | Nothing to revert, because nothing was written. The scanner is the only party that knows whether someone showed up; a cron that had already stamped `no_show` would be asserting the opposite of an observation. |
-| **D6** | **The no-show margin reuses `booking_grace_offset_minutes`, negative.** No new setting. | It is already signed (±240) and already means *"minutes relative to departure, negative = after"* (`apartado-stages.spec.md` S3). A second field would configure a distinction that does not change the number. |
+| **D6** *(withdrawn)* | ~~**The no-show margin reuses `booking_grace_offset_minutes`, negative.** No new setting.~~ | **Withdrawn by D22.** That field already drives **two** clocks: it is the `tourBuffer` that fixes `booking_expires_at` for a near-departure sale, and it is where stage ② ends and the auto-cancellation fires (`pos/handler.ts:724-733`). An org setting it to −30 to mean *"half an hour past departure counts as a no-show"* would simultaneously move **every apartado's auto-cancellation to half an hour after departure**. One field, three clocks — the exact coupling `apartado-stages.spec.md` S1 refused when it gave apartados their own creation cutoff instead of reusing `sales_cutoff_offset_minutes`: *"one number cannot serve both."* |
+| **D22** | **The no-show margin is a constant — `NO_SHOW_MARGIN_MINUTES = 120` — not a setting.** A line reads `no_show` two hours after its departure with nothing redeemed. | Replaces D6. **A constant, because nothing depends on the number**: fulfilment is a *reading*, never an input to money (rule 7), so unlike every existing time setting there is no outcome to tune. **Two hours, because zero flickers**: a 09:00 departure boarding 08:50–09:10 would read `no_show` for ten minutes before the scans land. D5 heals it either way, but a label that is briefly wrong on the list is worth avoiding for free. If an org ever needs its own, it is one nullable column — and it must be its **own** column, which is the whole content of D6's withdrawal. |
 | **D7** | **Roll-up: the worst case wins**, ordered `no_show > partial > pending > fulfilled`. | Same rule as the action ladder (blocking first). `fulfilled` ranks **last** deliberately: a folio is consumed only when there is nothing left to consume — ordering it above `pending` would label a folio "Consumido" while one of its tours has not departed. A folio reading "Consumido" is a folio nobody opens, which is exactly how a wasted seat stays hidden. |
 | **D8** | **The word "Reserva" is retired from the product.** Three terms: **Apartado** (partial payment, balance owed) · **Pagado** (paid in full) · **Por verificar** (money received, not confirmed). | "Reserva" describes what apartado *and* pagado both do — both block inventory — so it distinguishes nothing, and it is already used for both meanings in shipped UI. Retiring it is cheaper than defining it. |
 | **D9** | **"Por verificar" is not a stage before apartado/pagado.** A transfer sale is created as apartado or pagado and **decrements seats immediately** (`pos/handler.ts:1642`); what is withheld is the **QR**, not the inventory. | Stating it the other way would be a spec that contradicts the code. The honest description is a clearance axis over a folio that already exists. |
@@ -128,14 +129,16 @@ export type Fulfillment = 'pending' | 'partial' | 'fulfilled' | 'no_show'
 
 // departureEpoch() is the one already in cancellationPolicy.ts — a tour line's snapshotted
 // date+time, a stay line's check-in at 00:00 org-local. Both through the org's zone, never UTC.
-export const lineFulfillment = (line, tz, graceMinutes, nowEpoch): Fulfillment => {
+export const NO_SHOW_MARGIN_MINUTES = 120
+
+export const lineFulfillment = (line, tz, nowEpoch): Fulfillment => {
   if (line.redeemedCount >= line.quantity) return 'fulfilled'
   if (line.redeemedCount > 0)              return 'partial'
   const departed = departureEpoch(line, tz)
-  //  grace is SIGNED like booking_grace_offset_minutes: + = before departure, − = after.
-  //  A no-show margin is naturally negative (D6); a positive value simply means the org
-  //  declares the seat lost before the boat leaves, which is their call.
-  if (departed !== null && nowEpoch > departed - graceMinutes * 60) return 'no_show'
+  //  D22 — a CONSTANT, deliberately not booking_grace_offset_minutes: that field already fixes
+  //  `booking_expires_at` for a near-departure sale AND fires the auto-cancellation, so borrowing
+  //  it would move every apartado's release instant whenever someone tuned the no-show margin.
+  if (departed !== null && nowEpoch > departed + NO_SHOW_MARGIN_MINUTES * 60) return 'no_show'
   return 'pending'
 }
 
@@ -232,7 +235,9 @@ the one message an org should be able to switch off.
 1. `folios.status` accepts exactly `paid` · `booking` · `cancelled`. **Unchanged by this feature.**
 2. Fulfilment is **never persisted and never accepted from a request body**. It is computed on read.
 3. A line's fulfilment reads `redeemed_count` against `quantity` and the line's own snapshotted
-   departure, resolved in the **organization's** time zone.
+   departure, resolved in the **organization's** time zone, plus the fixed
+   `NO_SHOW_MARGIN_MINUTES = 120` (D22). **No organization setting is an input** — in particular not
+   `booking_grace_offset_minutes`, which governs when an apartado is released.
 4. A line with no readable departure is `pending`, never `no_show`.
 5. The folio's fulfilment is the worst of its lines, ordered `no_show > partial > pending >
    fulfilled` (D7).
@@ -360,9 +365,17 @@ Then the card reads "(reembolsado)" with the refunded amount, unchanged.
 
 **S-4 — Nobody boarded, the departure has passed**
 Given a `paid` folio with one line, `quantity = 4`, `redeemed_count = 0`, departing 3 hours ago
-And the org's `booking_grace_offset_minutes` resolves a margin of −15
 When the folio is read
 Then `fulfillment = 'no_show'` — and `folios.status` is still `'paid'`.
+And given the same line departing **1 hour** ago
+Then `fulfillment = 'pending'` — inside the 120-minute margin (D22).
+
+**S-4b — Tuning the apartado release does not move the no-show line**
+Given two orgs identical but for `booking_grace_offset_minutes` (+15 and −30)
+And each has a `paid` folio departing 3 hours ago with nothing redeemed
+Then **both** read `no_show`, and neither org's `booking_expires_at` arithmetic is consulted.
+*(This is the assertion D6's withdrawal exists for: it fails the moment anyone re-couples the two
+clocks.)*
 
 **S-5 — Two of four boarded**
 Given the same line with `redeemed_count = 2`
@@ -475,7 +488,7 @@ join removed — see `folio-lifecycle-unification.spec.md` S-18.)*
 - [ ] `utils/folioFulfillment.ts` — pure, injected clock, no db
 - [ ] `fulfillment` on list rows, detail, and per line
 - [ ] `GET /api/reports/wasted-seats`
-- [ ] S-4 … S-10 in `test/folios/folio-fulfillment.test.ts`; unit coverage in `folioFulfillment.unit.test.ts`
+- [ ] S-4 … S-10 (incl. S-4b) in `test/folios/folio-fulfillment.test.ts`; unit coverage in `folioFulfillment.unit.test.ts`
 - [ ] S-18 cross-org, **mutation-verified**
 - [ ] Card chip + `Sin usar` facet + per-line detail
 - [ ] `SPEC.md`: US-A85 already registered — verify its text still matches what shipped
@@ -535,6 +548,7 @@ join removed — see `folio-lifecycle-unification.spec.md` S-18.)*
 |---|---|
 | Should a `no_show` folio still be cancellable by an admin? | Today it can be, and the ladder gives it 0% — so the outcome is already right. Blocking it would need one guard in `cancelFolio`; leave it until someone reports being confused. |
 | Does the wasted-seat report belong on the dashboard rather than under Reports? | A dashboard card is one component; the endpoint is the same either way. Decide when Phase 2's numbers exist and are worth looking at. |
+| Should an org be able to tune its own no-show margin? | One nullable column, defaulting to the D22 constant — and it must be its **own** column, never `booking_grace_offset_minutes`. Worth doing only when an operator asks; nothing depends on the number. |
 | Should the refund receipt be a portal page with a view beacon, like the ticket? | It would turn D21's *we sent it* into *they opened it* — real evidence, on the one message where a dispute is most likely. The machinery exists (`/t/:token` and `tickets_viewed_at`). Deliberately not scoped here: it is a second surface, not a notification. |
 | Should the customer see **why** the retention was that amount? | The receipt states *retained 1,200*; the ladder that decided it is snapshotted on the folio (`cancellation_policy_snapshot`) and shown nowhere. How much policy a tourist should be shown is a product decision, not a consequence of anything in this spec. |
 | Should the T−24h reminder respect a per-service opt-out? | One boolean on `services`. Only worth it if an org runs a service where the reminder is noise (an open-ended pass, say). |
