@@ -104,9 +104,11 @@ Concretely:
 | **D11** | **Commissions are not withheld until consumption.** | *(Interview decision.)* Clawback already covers the real risk — a sale that gets undone. The residual risk, a customer who pays and does not come, ends **in the company's favour** (terminal tier retains 100%); paying commission there is correct. Withholding would be a ledger redesign — caja, cash-drop, affiliate balance — not a state change. |
 | **D12** | **Notifications split by origin, and only one of them is a queue.** *Action-tail*: a human acted, so the message leaves as the last step of that same tap. *Clock-produced*: a cron made it, so it needs a surface. | An action-tail message can never accumulate — it is born and consumed in one gesture. Treating both as one inbox would invent a backlog for the half that cannot have one. |
 | **D13** | **The seller gets no inbox.** Action-tails chain onto the button they belong to; clock-produced work arrives as a **rung on the existing action ladder** (`folioCardState.ts`). The admin gets the full outbox as an oversight view. | `US-AG50` decided the seller sees *"the card, not the admin's work queue — no pending-work bar and no verb I am not allowed to press"*. The pattern is already proven: `VerifyAndSendButton.tsx:68` verifies and sends in one tap, and the stage-② reminder is already the `Recordar saldo` rung. |
-| **D14** | **The outbox is channel-agnostic at the producer, not at the drain.** One `notifications` table; the email drain is automatic, the WhatsApp drain is a human tap. | Forced, not chosen (S4). Recording it as two drains keeps the rest of the system blind to the channel, so swapping the WhatsApp drain for an automatic one later touches nobody else. |
+| **D14** | **The outbox is channel-agnostic at the producer, not at the drain.** One `notifications` table; the email drain is automatic, the WhatsApp drain is a human tap. **WhatsApp is the PRIMARY channel and email the reinforcement** — not the other way round. | Forced, not chosen (S4). And the phone is mandatory on every apartado while the email is optional, so "email, falling back to WhatsApp" describes a system where the fallback is the common case. Recording it as two drains keeps the rest of the system blind to the channel, so swapping the WhatsApp drain for an automatic one later touches nobody else. |
 | **D15** | **The WhatsApp Cloud API is out of scope.** | It is a commercial decision (Meta approval, per-conversation cost, template review), not a technical one. D14 makes adopting it a drain swap. |
-| **D16** | **Seven notification events, not ten.** *(§ Notification whitelist.)* | Cut: the ticket delivery on a paid sale (that is the **product**, not a notification, and it already exists); the review request (it *adds* agent work — it belongs to Phase 4 as marketing, not to the core); the refund receipt (the customer is standing in front of the agent holding the cash — though D12's chaining gives it away for free). |
+| **D16** | **Eight notification events.** *(§ Notification whitelist.)* | Cut: the ticket delivery on a paid sale (that is the **product**, not a notification, and it already exists) and the review request (it *adds* agent work — Phase 4, as marketing, not core). The refund receipt is **kept, but as email only** — see D18. |
+| **D18** | **Act, or remember — the criterion that picks the channel.** A message the customer needs in order to **act** may cost a WhatsApp tap. A message they only need as a **record** goes by email or does not go at all; it may **never** cost a tap. | The tap is the scarce resource, not the message. The refund is the case that makes it concrete: the confirmation *is* the cash in hand plus the PIN, so in the moment a message adds nothing — but afterwards the company holds the entire record (`refunded_at`, `refunded_by`, `refund_amount`, the PIN attempts) and the customer holds cash and nothing else, with no answer anywhere to *"I paid 3,000 and got back 1,800 — where did 1,200 go?"* The ladder's retention is never shown to them. A receipt answers it for free; a WhatsApp tap on every refund would charge the agent for information the customer already lived through. |
+| **D19** | **Most events are action-tails, so the outbox is smaller than it looks.** Only `booking_grace_entered` and `departure_reminder` are clock-produced; of those only the reminder scales with volume (one per departure per day). | Worth stating so the engine is not oversold. Six of eight messages leave as the tail of a tap someone was already making (D12); they did not need a notification engine, they needed the action to have a tail. The engine earns its place on the seventh. |
 | **D17** | **Phase 1 carries no story ID.** It is registered as two bug fixes plus a glossary migration in `SPEC.md`. | `PROCESS.md` reserves an ID for an **observable capability**. "The same state is called the same thing everywhere" is a defect being repaired, not a capability being added; minting a story for it would make the index claim a feature shipped. |
 
 ---
@@ -183,32 +185,41 @@ adds the outbox alongside it; folding the flag into the table is Deferred, below
 
 ---
 
-## Notification whitelist (D16)
+## Notification whitelist (D16, D18, D19)
 
-Seven events. The column that decides inclusion is **which inbound message the absence of this
-notification generates** — because that inbound is the agent's real workload.
+Eight events. Two columns decide each one: **which inbound its absence generates** (that inbound is
+the agent's real workload) and **whether the customer needs it to act or to remember** (D18).
 
-| # | Event | Inbound it prevents | Channel | Exists today |
-|---|---|---|---|---|
-| 1 | `payment_verified` | *"¿ya les llegó mi transferencia?"* — asked repeatedly until answered | email | yes, inline |
-| 2 | `departure_reminder` (T−24h, paid) | *"¿a qué hora? ¿dónde? ¿qué llevo?"* | email · WhatsApp | **new** |
-| 3 | `booking_created` | *"¿cuánto debo y hasta cuándo?"* | email | yes, inline |
-| 4 | `booking_grace_entered` (stage ②) | prevents losing the sale, not a message | email · WhatsApp | yes (sweep) |
-| 5 | `cancellation_approved` | *"¿ya me la cancelaron?"* | email | yes, inline |
-| 6 | `payment_rejected` | — **obligatory**: their sale was cancelled | email | yes, inline |
-| 7 | `booking_expired` | — **obligatory**: they lost their spot and their deposit | email | yes (sweep) |
+| # | Event | Origin | Act / Remember | Channel | Extra tap | Exists today |
+|---|---|---|---|---|---|---|
+| 1 | `booking_created` | action-tail | act — *"¿cuánto debo y hasta cuándo?"* | WhatsApp + email | **no** | partly (email) |
+| 2 | `tickets_delivered` | action-tail | act — it is the product | WhatsApp + email | **no** | yes |
+| 3 | `payment_verified` | action-tail | act — *"¿ya les llegó mi transferencia?"* | WhatsApp + email | **no** | yes (inline) |
+| 4 | `cancellation_approved` | action-tail | act — *"¿ya me la cancelaron?"* | WhatsApp + email | **no** | yes (inline) |
+| 5 | `payment_rejected` | action-tail | act — **obligatory**, their sale was cancelled | WhatsApp + email | **no** | yes (inline) |
+| 6 | `booking_grace_entered` | **clock** | act — their spots are about to go | WhatsApp + email | 1 | yes (sweep) |
+| 7 | `departure_reminder` (T−24h, paid) | **clock** | act — *"¿a qué hora? ¿dónde? ¿qué llevo?"* | WhatsApp + email | **1 per departure** | **new** |
+| 8 | `refund_completed` | action-tail | **remember** — the receipt | **email only** | **never** | **new** |
 
-6 and 7 earn their place by obligation, not by saving work: without them the complaint arrives
-anyway, later and more expensive.
+Row 2 is listed for completeness: ticket delivery already exists and is the **product**, not a
+notification. It is re-homed onto the outbox in Phase 3 without changing behaviour.
 
-**Channel policy per event:** email when `customer_email` is present; otherwise a WhatsApp row for a
-human to drain. Both may be emitted for events 2 and 4.
+**Only rows 6 and 7 are produced by a clock**, and only row 7 scales with volume — an operator with
+40 departures a day pays 40 taps for it. That single row is where `customer_email` changes the
+economics, and it is the honest justification for the engine (D19).
 
-**Not in the whitelist, and why:** ticket delivery on a paid sale is the product, not a notification;
-the review request adds agent work rather than removing it (Phase 4); the refund receipt is handed
-over in person — though D12 gives it away free, since the WhatsApp window opens after the PIN.
+**Row 8 is the D18 case.** The refund is confirmed by cash in hand and a PIN; the customer needs no
+message in the moment. Afterwards they hold cash and no record, and the retention arithmetic —
+*paid 3,000, received 1,800* — is shown to them nowhere. The receipt states it. It is emitted as
+email only, and when there is no email on file **nothing is sent**: an accepted loss, because the
+alternative charges a tap on every refund for content the customer already lived through.
 
----
+**Channel policy.** WhatsApp is emitted for every `act` row (the phone is always present); email is
+emitted **additionally** whenever `customer_email` is set. For the one `remember` row, email is the
+only channel and its absence is `skipped`, not `failed`.
+
+**Not in the whitelist:** the review request at T+2h — it *adds* a tap rather than removing one. It
+is marketing, it is legitimate, and it lands in Phase 4 labelled as such.
 
 ## Business rules (enforced server-side)
 
@@ -230,7 +241,11 @@ over in person — though D12 gives it away free, since the WhatsApp window open
 10. The email drain retries a `failed` row; it does not mark it `sent` until the provider accepts.
 11. A WhatsApp row is marked `sent` only when a **human confirms the tap**, and records `sent_by`.
     The frontend mirrors nothing here — the row is the record.
-12. Every outbox read and write is filtered by `organization_id`.
+12. A `remember` event (D18) emits **email only**. A WhatsApp row for one is a bug, not a
+    configuration: with no email on file the row is `skipped` and nothing reaches the customer.
+13. The refund receipt states what was **paid**, what was **returned** and what was **retained** —
+    the only place the ladder's arithmetic is ever shown to the customer.
+14. Every outbox read and write is filtered by `organization_id`.
 
 ---
 
@@ -406,6 +421,13 @@ and the next drain retries it.
 When an admin posts `/api/notifications/:id/sent` for an `email` row
 Then `422 NOTIFICATION_NOT_DRAINABLE`.
 
+**S-16b — A receipt never costs a tap**
+Given a refund confirmed on a folio whose customer has **no** email
+Then **no `whatsapp` row is written for `refund_completed`** and the `email` row is `skipped`.
+And given the same folio **with** an email
+Then one `email` row is written, carrying what was paid, what was returned and what was retained —
+and still no `whatsapp` row.
+
 ### Multitenancy isolation (required)
 
 **S-17 — Another org's outbox row is invisible**
@@ -446,7 +468,8 @@ join removed — see `folio-lifecycle-unification.spec.md` S-18.)*
 ### Phase 3 — the outbox *(migration `0058` · `feat/notification-outbox`)*
 
 - [ ] `notifications` table + the unique guard
-- [ ] The seven events emit rows; the six existing inline sends are re-homed onto it
+- [ ] The eight events emit rows; the existing inline sends are re-homed onto it, unchanged
+- [ ] `refund_completed` is email-only and states paid / returned / retained (D18)
 - [ ] Email drain (scheduled) with retry; WhatsApp drain endpoint
 - [ ] Refund confirm chains into the WhatsApp hand-off (S-11)
 - [ ] S-12 … S-17
@@ -465,7 +488,7 @@ join removed — see `folio-lifecycle-unification.spec.md` S-18.)*
 
 | What | Why it can wait |
 |---|---|
-| **Making `customer_email` required at checkout** | The highest-leverage change for reducing the agent's taps, and the one this spec does not make. It is a POS decision with its own friction cost on a walk-up sale, and it belongs to whoever owns the checkout — not to a state-machine spec. **This is the real lever; recorded here so it is not mistaken for something this feature delivered.** |
+| **Making `customer_email` required at checkout** | Sharper than it first looked (D19): six of the eight messages are action-tails that cost no extra tap, so the email only changes the economics of **`departure_reminder`** — the one event that scales with volume — and it is the only channel for the **receipt** (row 8). It stays a POS decision with its own friction cost on a walk-up sale, and it belongs to whoever owns the checkout. **Recorded here so it is not mistaken for something this feature delivered.** |
 | **Folding `reminder_status` into the outbox** | It works, it guards correctly, and the outbox's unique index gives the same property for new events. Merging them is a migration that buys tidiness, not behaviour. |
 | **A stored fulfilment snapshot** | Only needed if March's no-show count must be immutable against a later change to the grace setting. The precedent is already in the repo (`cancellation_policy_snapshot`): snapshot the margin on the line, not a column a cron writes. One decision away. |
 | **WhatsApp Cloud API** | D14 makes it a drain swap. Nothing else changes. |
