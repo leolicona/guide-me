@@ -1,0 +1,39 @@
+# Local-only overrides for `pnpm dev` (git-ignored — see .gitignore:15).
+# These take precedence over the `vars` block in wrangler.jsonc.
+#
+# Two of them are the difference between a login that works and one that silently does nothing;
+# both are explained in docs/DEVELOPMENT.md.
+
+# 1. THE COOKIE DOMAIN MUST BE EMPTY.
+#    wrangler.jsonc sets `.turistearya.com`, and a browser refuses a cookie whose Domain does not
+#    match the host it came from. On localhost the login call returns 200, the session cookie is
+#    dropped on the floor, and the next request is a 401 — which looks like "wrong password".
+#    Empty ⇒ `c.env.COOKIE_DOMAIN || undefined` ⇒ a host-only cookie on localhost.
+COOKIE_DOMAIN=
+
+# 2. THE AUTH SERVICE OVER HTTPS INSTEAD OF THE SERVICE BINDING.
+#    Password hashing, verification and JWT minting all live in the `agnostic-auth` Worker, reached
+#    in production through a service binding. That binding does not exist locally, so `src/services/
+#    agnosticAuth.ts` looks for this URL first (the escape hatch was already in the code).
+DEV_AUTH_SERVICE_URL=https://agnostic-auth.leolicona-dev.workers.dev
+
+AGNOSTIC_AUTH_APP_ID=guide-me
+
+# Local origins. `API_BASE_URL` is what portal links and QR codes are built from, so leaving it
+# pointing at production would make a locally-created ticket resolve to the live site.
+API_BASE_URL=http://localhost:5173
+APP_BASE_URL=http://localhost:5174
+CORS_ORIGIN=http://localhost:5173,http://localhost:5174
+
+# HMAC secret for QR tokens and operator shift sessions. Any value works locally; it only has to be
+# stable, or previously-issued local QRs stop verifying.
+QR_SECRET=change-me-any-stable-local-value
+
+# Deliberately invalid: nothing local should be sending real email. Any endpoint that tries
+# (register, invites, cancellation notices) will fail with a 502 from Resend — that is the intended
+# signal, not a misconfiguration. `pnpm seed:local` exists precisely so account creation never
+# needs the email path.
+RESEND_API_KEY=local-dev-no-email
+RESEND_FROM=no-reply@localhost
+
+SESSION_REFRESH_TTL_SECONDS=5184000
