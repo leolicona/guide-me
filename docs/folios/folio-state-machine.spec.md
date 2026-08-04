@@ -106,9 +106,11 @@ Concretely:
 | **D13** | **The seller gets no inbox.** Action-tails chain onto the button they belong to; clock-produced work arrives as a **rung on the existing action ladder** (`folioCardState.ts`). The admin gets the full outbox as an oversight view. | `US-AG50` decided the seller sees *"the card, not the admin's work queue — no pending-work bar and no verb I am not allowed to press"*. The pattern is already proven: `VerifyAndSendButton.tsx:68` verifies and sends in one tap, and the stage-② reminder is already the `Recordar saldo` rung. |
 | **D14** | **The outbox is channel-agnostic at the producer, not at the drain.** One `notifications` table; the email drain is automatic, the WhatsApp drain is a human tap. **WhatsApp is the PRIMARY channel and email the reinforcement** — not the other way round. | Forced, not chosen (S4). And the phone is mandatory on every apartado while the email is optional, so "email, falling back to WhatsApp" describes a system where the fallback is the common case. Recording it as two drains keeps the rest of the system blind to the channel, so swapping the WhatsApp drain for an automatic one later touches nobody else. |
 | **D15** | **The WhatsApp Cloud API is out of scope.** | It is a commercial decision (Meta approval, per-conversation cost, template review), not a technical one. D14 makes adopting it a drain swap. |
-| **D16** | **Eight notification events.** *(§ Notification whitelist.)* | Cut: the ticket delivery on a paid sale (that is the **product**, not a notification, and it already exists) and the review request (it *adds* agent work — Phase 4, as marketing, not core). The refund receipt is **kept, but as email only** — see D18. |
-| **D18** | **Act, or remember — the criterion that picks the channel.** A message the customer needs in order to **act** may cost a WhatsApp tap. A message they only need as a **record** goes by email or does not go at all; it may **never** cost a tap. | The tap is the scarce resource, not the message. The refund is the case that makes it concrete: the confirmation *is* the cash in hand plus the PIN, so in the moment a message adds nothing — but afterwards the company holds the entire record (`refunded_at`, `refunded_by`, `refund_amount`, the PIN attempts) and the customer holds cash and nothing else, with no answer anywhere to *"I paid 3,000 and got back 1,800 — where did 1,200 go?"* The ladder's retention is never shown to them. A receipt answers it for free; a WhatsApp tap on every refund would charge the agent for information the customer already lived through. |
-| **D19** | **Most events are action-tails, so the outbox is smaller than it looks.** Only `booking_grace_entered` and `departure_reminder` are clock-produced; of those only the reminder scales with volume (one per departure per day). | Worth stating so the engine is not oversold. Six of eight messages leave as the tail of a tap someone was already making (D12); they did not need a notification engine, they needed the action to have a tail. The engine earns its place on the seventh. |
+| **D16** | **Eight notification events.** *(§ Notification whitelist.)* | Cut: the ticket delivery on a paid sale (that is the **product**, not a notification, and it already exists) and the review request (it *adds* agent work — Phase 4, as marketing, not core). The refund receipt is **kept** — see D20. |
+| **D18** *(withdrawn)* | ~~**Act, or remember — the criterion that picks the channel.** A record-only message goes by email or not at all and may never cost a WhatsApp tap.~~ | **Withdrawn by D20.** Two errors. First, it priced the wrong thing: the refund receipt is itself an **action-tail** (D12) — the agent has just confirmed the PIN, so the message chains onto that same gesture instead of queueing. One app-switch on an operation that happens rarely is not the per-sale tap the decision was defending against. Second, it excluded the one message most worth having in writing: cash, handed over in person, with a retention the customer does not understand. |
+| **D19** | **Most events are action-tails, so the outbox is smaller than it looks.** Only `booking_grace_entered` and `departure_reminder` are clock-produced; of those only the reminder scales with volume (one per departure per day). | Worth stating so the engine is not oversold. **Six of the eight** messages leave as the tail of a tap someone was already making (D12); they did not need a notification engine, they needed the action to have a tail. The engine earns its place on the seventh. |
+| **D20** | **Every operation is notified to the customer in writing, by WhatsApp.** No exception among the eight events. Email is emitted **additionally** whenever there is one — reinforcement, never a substitute. | *(User decision, superseding D18.)* Written notice is what prevents a dispute and what makes the arithmetic transparent; a channel chosen by how much it costs us is a channel chosen against the customer. The cost objection also turns out to be small: six of the eight are action-tails, so the message rides a gesture already being made. **The boundary is the operation and the money** — it does not extend to the Phase 4 review request, which is marketing, is clock-produced, scales with volume, and protects nobody. |
+| **D21** | **What the outbox proves is that we sent, not that they received.** A drained WhatsApp row records `sent_by` + `sent_at` — a human's claim. | Stated so D20's protection is not overestimated. It is evidence of diligence, not of delivery. The repo already knows the difference: `tickets_viewed_at` is a real first-view beacon from the portal, which is why the delivery axis shows `✓✓ Visto` only where a column backs it (`folio-list-scanability.spec.md`). Giving the receipt the same beacon is listed under *Open*. |
 | **D17** | **Phase 1 carries no story ID.** It is registered as two bug fixes plus a glossary migration in `SPEC.md`. | `PROCESS.md` reserves an ID for an **observable capability**. "The same state is called the same thing everywhere" is a defect being repaired, not a capability being added; minting a story for it would make the index claim a feature shipped. |
 
 ---
@@ -185,21 +187,22 @@ adds the outbox alongside it; folding the flag into the table is Deferred, below
 
 ---
 
-## Notification whitelist (D16, D18, D19)
+## Notification whitelist (D16, D19, D20)
 
-Eight events. Two columns decide each one: **which inbound its absence generates** (that inbound is
-the agent's real workload) and **whether the customer needs it to act or to remember** (D18).
+Eight events. **All eight are written to the customer by WhatsApp (D20)**; email is emitted
+additionally whenever `customer_email` is set. What varies is only the **origin** — which decides
+whether the message rides a gesture already being made, or costs a tap of its own.
 
-| # | Event | Origin | Act / Remember | Channel | Extra tap | Exists today |
-|---|---|---|---|---|---|---|
-| 1 | `booking_created` | action-tail | act — *"¿cuánto debo y hasta cuándo?"* | WhatsApp + email | **no** | partly (email) |
-| 2 | `tickets_delivered` | action-tail | act — it is the product | WhatsApp + email | **no** | yes |
-| 3 | `payment_verified` | action-tail | act — *"¿ya les llegó mi transferencia?"* | WhatsApp + email | **no** | yes (inline) |
-| 4 | `cancellation_approved` | action-tail | act — *"¿ya me la cancelaron?"* | WhatsApp + email | **no** | yes (inline) |
-| 5 | `payment_rejected` | action-tail | act — **obligatory**, their sale was cancelled | WhatsApp + email | **no** | yes (inline) |
-| 6 | `booking_grace_entered` | **clock** | act — their spots are about to go | WhatsApp + email | 1 | yes (sweep) |
-| 7 | `departure_reminder` (T−24h, paid) | **clock** | act — *"¿a qué hora? ¿dónde? ¿qué llevo?"* | WhatsApp + email | **1 per departure** | **new** |
-| 8 | `refund_completed` | action-tail | **remember** — the receipt | **email only** | **never** | **new** |
+| # | Event | Origin | Why it is sent | Extra tap | Exists today |
+|---|---|---|---|---|---|
+| 1 | `booking_created` | action-tail | *"¿cuánto debo y hasta cuándo?"* | **no** | partly (email) |
+| 2 | `tickets_delivered` | action-tail | it is the product | **no** | yes |
+| 3 | `payment_verified` | action-tail | *"¿ya les llegó mi transferencia?"* | **no** | yes (inline) |
+| 4 | `cancellation_approved` | action-tail | *"¿ya me la cancelaron?"* | **no** | yes (inline) |
+| 5 | `payment_rejected` | action-tail | **obligatory** — their sale was cancelled | **no** | yes (inline) |
+| 6 | `booking_grace_entered` | **clock** | their spots are about to be released | 1 | yes (sweep) |
+| 7 | `departure_reminder` (T−24h, paid) | **clock** | *"¿a qué hora? ¿dónde? ¿qué llevo?"* | **1 per departure** | **new** |
+| 8 | `refund_completed` | action-tail | the receipt — paid / returned / **retained** | **no** | **new** |
 
 Row 2 is listed for completeness: ticket delivery already exists and is the **product**, not a
 notification. It is re-homed onto the outbox in Phase 3 without changing behaviour.
@@ -208,18 +211,21 @@ notification. It is re-homed onto the outbox in Phase 3 without changing behavio
 40 departures a day pays 40 taps for it. That single row is where `customer_email` changes the
 economics, and it is the honest justification for the engine (D19).
 
-**Row 8 is the D18 case.** The refund is confirmed by cash in hand and a PIN; the customer needs no
-message in the moment. Afterwards they hold cash and no record, and the retention arithmetic —
-*paid 3,000, received 1,800* — is shown to them nowhere. The receipt states it. It is emitted as
-email only, and when there is no email on file **nothing is sent**: an accepted loss, because the
-alternative charges a tap on every refund for content the customer already lived through.
+**Row 8 is the case D20 settles.** The refund is confirmed by cash in hand and a PIN, so nothing is
+needed *in the moment* — which is why an earlier draft (D18, withdrawn) left it off WhatsApp. That
+was wrong twice over: it is an **action-tail**, so it rides the tap the agent is already making, and
+it is the single most litigable moment in the product — cash, in person, no receipt, and a retention
+the customer does not understand. *Paid 3,000, received 1,800, where did 1,200 go?* is answered
+nowhere else. The receipt answers it, in writing, on the channel the customer actually reads.
 
-**Channel policy.** WhatsApp is emitted for every `act` row (the phone is always present); email is
-emitted **additionally** whenever `customer_email` is set. For the one `remember` row, email is the
-only channel and its absence is `skipped`, not `failed`.
+**Channel policy.** WhatsApp for all eight (the phone is always present — it is mandatory on every
+apartado). Email **additionally** whenever `customer_email` is set; its absence is `skipped`, never
+`failed`. Email is reinforcement and a durable copy, never a substitute for the written notice.
 
-**Not in the whitelist:** the review request at T+2h — it *adds* a tap rather than removing one. It
-is marketing, it is legitimate, and it lands in Phase 4 labelled as such.
+**Not in the whitelist, and the boundary of D20:** the review request at T+2h. D20 covers **the
+operation and the money**; a review request is marketing, is produced by a clock, scales with
+volume, and protects nobody from a dispute. It lands in Phase 4 labelled as marketing, and it is
+the one message an org should be able to switch off.
 
 ## Business rules (enforced server-side)
 
@@ -241,11 +247,14 @@ is marketing, it is legitimate, and it lands in Phase 4 labelled as such.
 10. The email drain retries a `failed` row; it does not mark it `sent` until the provider accepts.
 11. A WhatsApp row is marked `sent` only when a **human confirms the tap**, and records `sent_by`.
     The frontend mirrors nothing here — the row is the record.
-12. A `remember` event (D18) emits **email only**. A WhatsApp row for one is a bug, not a
-    configuration: with no email on file the row is `skipped` and nothing reaches the customer.
+12. **Every one of the eight events emits a `whatsapp` row** (D20). An event that emits only email
+    is a bug, not a configuration. The `email` row is emitted additionally and is `skipped` — never
+    `failed` — when there is no address on file.
 13. The refund receipt states what was **paid**, what was **returned** and what was **retained** —
     the only place the ladder's arithmetic is ever shown to the customer.
-14. Every outbox read and write is filtered by `organization_id`.
+14. A drained `whatsapp` row records `sent_by` and `sent_at`. It asserts that a human sent it, **not
+    that the customer received it** (D21); no code may read it as delivery.
+15. Every outbox read and write is filtered by `organization_id`.
 
 ---
 
@@ -421,12 +430,18 @@ and the next drain retries it.
 When an admin posts `/api/notifications/:id/sent` for an `email` row
 Then `422 NOTIFICATION_NOT_DRAINABLE`.
 
-**S-16b — A receipt never costs a tap**
+**S-16b — Every operation is written to the customer**
 Given a refund confirmed on a folio whose customer has **no** email
-Then **no `whatsapp` row is written for `refund_completed`** and the `email` row is `skipped`.
-And given the same folio **with** an email
-Then one `email` row is written, carrying what was paid, what was returned and what was retained —
-and still no `whatsapp` row.
+Then a `whatsapp` row is written `pending` for `refund_completed`, and the `email` row is `skipped`
+— never `failed`.
+And its content states what was **paid**, what was **returned** and what was **retained**.
+*(The assertion that must fail if someone re-applies the withdrawn D18: there is a `whatsapp` row
+for a customer with no email.)*
+
+**S-16c — Sent is not received**
+Given a drained `whatsapp` row
+Then the folio's delivery axis is **unchanged** — `tickets_viewed_at` is the only thing that may
+render `✓✓ Visto`, and no outbox row may set it (D21).
 
 ### Multitenancy isolation (required)
 
@@ -469,7 +484,7 @@ join removed — see `folio-lifecycle-unification.spec.md` S-18.)*
 
 - [ ] `notifications` table + the unique guard
 - [ ] The eight events emit rows; the existing inline sends are re-homed onto it, unchanged
-- [ ] `refund_completed` is email-only and states paid / returned / retained (D18)
+- [ ] `refund_completed` chains onto the PIN confirm and states paid / returned / retained (D20)
 - [ ] Email drain (scheduled) with retry; WhatsApp drain endpoint
 - [ ] Refund confirm chains into the WhatsApp hand-off (S-11)
 - [ ] S-12 … S-17
@@ -488,7 +503,7 @@ join removed — see `folio-lifecycle-unification.spec.md` S-18.)*
 
 | What | Why it can wait |
 |---|---|
-| **Making `customer_email` required at checkout** | Sharper than it first looked (D19): six of the eight messages are action-tails that cost no extra tap, so the email only changes the economics of **`departure_reminder`** — the one event that scales with volume — and it is the only channel for the **receipt** (row 8). It stays a POS decision with its own friction cost on a walk-up sale, and it belongs to whoever owns the checkout. **Recorded here so it is not mistaken for something this feature delivered.** |
+| **Making `customer_email` required at checkout** | Smaller than it first looked. Under D20 the written notice always goes by WhatsApp, so the email is a **durable second copy**, not the thing that makes a customer reachable; and D19 shows six of eight messages cost no extra tap anyway. It still improves **`departure_reminder`** — the one event that scales with volume — by letting it send itself. A POS decision with its own friction cost on a walk-up sale, belonging to whoever owns the checkout. |
 | **Folding `reminder_status` into the outbox** | It works, it guards correctly, and the outbox's unique index gives the same property for new events. Merging them is a migration that buys tidiness, not behaviour. |
 | **A stored fulfilment snapshot** | Only needed if March's no-show count must be immutable against a later change to the grace setting. The precedent is already in the repo (`cancellation_policy_snapshot`): snapshot the margin on the line, not a column a cron writes. One decision away. |
 | **WhatsApp Cloud API** | D14 makes it a drain swap. Nothing else changes. |
@@ -520,4 +535,6 @@ join removed — see `folio-lifecycle-unification.spec.md` S-18.)*
 |---|---|
 | Should a `no_show` folio still be cancellable by an admin? | Today it can be, and the ladder gives it 0% — so the outcome is already right. Blocking it would need one guard in `cancelFolio`; leave it until someone reports being confused. |
 | Does the wasted-seat report belong on the dashboard rather than under Reports? | A dashboard card is one component; the endpoint is the same either way. Decide when Phase 2's numbers exist and are worth looking at. |
+| Should the refund receipt be a portal page with a view beacon, like the ticket? | It would turn D21's *we sent it* into *they opened it* — real evidence, on the one message where a dispute is most likely. The machinery exists (`/t/:token` and `tickets_viewed_at`). Deliberately not scoped here: it is a second surface, not a notification. |
+| Should the customer see **why** the retention was that amount? | The receipt states *retained 1,200*; the ladder that decided it is snapshotted on the folio (`cancellation_policy_snapshot`) and shown nowhere. How much policy a tourist should be shown is a product decision, not a consequence of anything in this spec. |
 | Should the T−24h reminder respect a per-service opt-out? | One boolean on `services`. Only worth it if an org runs a service where the reminder is noise (an open-ended pass, say). |
