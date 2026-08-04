@@ -13,3 +13,5 @@ export {
 export { useFolioSoldAt } from './useFolioSoldAt'
 // US-A84 (D19) — the clock the card's age labels read, refreshed in an effect and never in render.
 export { useNowSeconds } from './useNowSeconds'
+// US-A83 (D4) — holds the query still for the SERVER fallback; the local pass is not debounced.
+export { useDebouncedValue } from './useDebouncedValue'

@@ -8,4 +8,7 @@ export * from './folioCardState'
 // US-A84 — the facet model and the two surfaces the unified list is built from.
 export * from './folioFacets'
 export { FolioStateSheet } from './components/FolioStateSheet'
+export { FolioSearchField } from './components/FolioSearchField'
+// US-A83 — the local search, mirroring the server's `?q=` field-for-field.
+export * from './folioSearch'
 export { PendingWorkBar } from './components/PendingWorkBar'

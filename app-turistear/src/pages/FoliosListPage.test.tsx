@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll } from 'vitest'
+import { describe, it, expect, beforeEach } from 'vitest'
 import { http, HttpResponse } from 'msw'
 import { server } from '../test/server'
 import { aFolio, aFolioCounts } from '../test/handlers/folios'
@@ -19,9 +19,11 @@ import FoliosListPage from './FoliosListPage'
 // that the containing element still owns the overflow: dropping `FilterStrip` is a small edit that
 // silently restores the bug.
 
-// The cards' WhatsApp buttons read the session and the org to build their message.
-// `onUnhandledRequest: 'error'` means an unstubbed call fails the test rather than warning.
-beforeAll(() => {
+// The cards' WhatsApp buttons read the session and the org to build their message, and the date
+// presets read the org's ZONE. Registered in `beforeEach`, not `beforeAll`: MSW resets handlers
+// after every test, so a `beforeAll` registration survives exactly one of them — which is how the
+// first tests in this file passed while the later ones failed on an unhandled `/organizations/me`.
+beforeEach(() => {
   server.use(
     http.get('/api/auth/me', () =>
       HttpResponse.json({ user: { id: 'u1', name: 'Ana', email: 'ana@x.com', role: 'admin' } }),
@@ -148,6 +150,209 @@ describe('US-A84 — the URL is the state', () => {
 
     // An empty list that says only "no hay folios" reads as "there are no sales" — which is how a
     // filter left on by accident becomes a bug report about missing data.
-    expect(await screen.findByText(/No hay folios en Cancelado/)).toBeInTheDocument()
+    //
+    // US-A83 D15 CHANGED the wording: with three filter axes the message names all of them, so
+    // "No hay folios en X" became "Sin resultados para X · Y · Z". The assertion moved with it
+    // rather than being deleted — what it guards is that the FACET is named, not the phrasing.
+    expect(await screen.findByText(/Sin resultados para Cancelado/)).toBeInTheDocument()
+  })
+})
+
+describe('US-A83 — finding one sale', () => {
+  const twoFolios = () =>
+    withFolios([
+      aFolio({ id: 'isla', customer_name: 'María Fernández', lines: [{ service_name: 'Tour Isla Mujeres', quantity: 2 }] }),
+      aFolio({ id: 'otro', customer_name: 'Pedro', lines: [{ service_name: 'Chichén Itzá', quantity: 1 }] }),
+    ])
+
+  it('filters locally as you type, over the service name', async () => {
+    twoFolios()
+    const user = userEvent.setup()
+    renderWithProviders(<FoliosListPage />)
+    await screen.findByText(/Tour Isla Mujeres/)
+
+    await user.type(screen.getByRole('textbox', { name: 'Buscar folios' }), 'isla')
+
+    await waitFor(() => expect(screen.queryByText(/Chichén/)).toBeNull())
+    expect(screen.getByText(/Tour Isla Mujeres/)).toBeInTheDocument()
+  })
+
+  it('S-6 — when nothing matches locally, the server is asked and the screen SAYS so', async () => {
+    let asked: string | null = null
+    twoFolios()
+    server.use(
+      http.get('/api/folios', ({ request }) => {
+        const q = new URL(request.url).searchParams.get('q')
+        if (!q) {
+          return HttpResponse.json({
+            folios: [aFolio({ id: 'isla', customer_name: 'María', lines: [] })],
+            window_days: 30,
+          })
+        }
+        asked = q
+        return HttpResponse.json({
+          folios: [aFolio({ id: 'viejo', customer_name: 'Leo Licona', lines: [] })],
+          window_days: null,
+          truncated: false,
+        })
+      }),
+    )
+    const user = userEvent.setup()
+    renderWithProviders(<FoliosListPage />)
+    await screen.findByRole('textbox', { name: 'Buscar folios' })
+
+    await user.type(screen.getByRole('textbox', { name: 'Buscar folios' }), 'leo')
+
+    // The window bounds the DEFAULT read; it must not bound what is findable (D4). And the label is
+    // what keeps the window honest once it can be crossed (D5) — otherwise the same screen shows
+    // "everything recent" and "everything ever" with no way to tell which.
+    await waitFor(() => expect(screen.getByText(/Leo Licona/)).toBeInTheDocument(), { timeout: 3000 })
+    expect(asked).toBe('leo')
+    expect(screen.getByText(/Resultados de todo el historial/)).toBeInTheDocument()
+  })
+
+  it('S-7 — a capped fallback says it capped', async () => {
+    twoFolios()
+    server.use(
+      http.get('/api/folios', ({ request }) =>
+        new URL(request.url).searchParams.get('q')
+          ? HttpResponse.json({
+              folios: [aFolio({ id: 'viejo', customer_name: 'Leo', lines: [] })],
+              window_days: null,
+              truncated: true,
+            })
+          : HttpResponse.json({ folios: [aFolio({ id: 'a', customer_name: 'Ana', lines: [] })], window_days: 30 }),
+      ),
+    )
+    const user = userEvent.setup()
+    renderWithProviders(<FoliosListPage />)
+    await screen.findByRole('textbox', { name: 'Buscar folios' })
+
+    await user.type(screen.getByRole('textbox', { name: 'Buscar folios' }), 'leo')
+
+    await waitFor(() => expect(screen.getByText(/50 más recientes/)).toBeInTheDocument(), {
+      timeout: 3000,
+    })
+  })
+
+  it('S-5 — one character asks the server nothing and hides nothing', async () => {
+    let queries = 0
+    twoFolios()
+    server.use(
+      http.get('/api/folios', ({ request }) => {
+        if (new URL(request.url).searchParams.get('q')) queries += 1
+        return HttpResponse.json({
+          folios: [aFolio({ id: 'isla', customer_name: 'María', lines: [] })],
+          window_days: 30,
+        })
+      }),
+    )
+    const user = userEvent.setup()
+    renderWithProviders(<FoliosListPage />)
+    await screen.findByRole('textbox', { name: 'Buscar folios' })
+
+    await user.type(screen.getByRole('textbox', { name: 'Buscar folios' }), 'a')
+
+    // Below the floor the list is untouched: the first keystroke must not empty the screen.
+    await waitFor(() => expect(screen.getByText(/María/)).toBeInTheDocument())
+    expect(queries).toBe(0)
+  })
+
+  it('S-11 — the empty state names the QUERY as well as the facet', async () => {
+    withFolios([aFolio({ id: 'a', status: 'paid', customer_name: 'Ana', lines: [] })])
+    server.use(
+      http.get('/api/folios', ({ request }) =>
+        new URL(request.url).searchParams.get('q')
+          ? HttpResponse.json({ folios: [], window_days: null, truncated: false })
+          : HttpResponse.json({
+              folios: [aFolio({ id: 'a', status: 'paid', customer_name: 'Ana', lines: [] })],
+              window_days: 30,
+            }),
+      ),
+    )
+    renderWithProviders(<FoliosListPage />, { initialEntries: ['/folios?q=zzz&estado=cancelado'] })
+
+    // Naming one filter and hiding the other is how a user removes the wrong one (D15). Asserted
+    // as ONE message rather than two matches, because "Cancelado" also names the Estado pill.
+    await waitFor(
+      () => expect(screen.getByText(/Sin resultados para «zzz» · Cancelado/)).toBeInTheDocument(),
+      { timeout: 3000 },
+    )
+  })
+
+  it('S-10 — a pending-work pill clears the query and the range', async () => {
+    withCounts({ refunds: 1 })
+    withFolios([
+      aFolio({ id: 'owed', status: 'cancelled', refund_status: 'pending', refund_amount: 5000, lines: [] }),
+    ])
+    const user = userEvent.setup()
+    renderWithProviders(<FoliosListPage />, {
+      initialEntries: ['/folios?q=leo&desde=2026-01-01&hasta=2026-01-31'],
+    })
+
+    await user.click(await screen.findByRole('button', { name: /1 Reembolso/ }))
+
+    // D13 — the banner's one promise is that its count equals what its pill shows (US-A84 S-4).
+    // Intersecting it with a leftover query breaks that silently: "1 Reembolso" leading to zero rows.
+    await waitFor(() =>
+      expect(screen.getByRole('textbox', { name: 'Buscar folios' })).toHaveValue(''),
+    )
+    expect(screen.getByRole('button', { name: 'Reembolso' })).toBeInTheDocument()
+  })
+
+  it('the date presets render once the ORG’s clock is known, and read its zone', async () => {
+    twoFolios()
+    renderWithProviders(<FoliosListPage />)
+
+    // `useNowSeconds` resolves in an EFFECT, and computing a preset against an empty day threw
+    // `RangeError: Invalid time value` and took the whole page down on first paint during this
+    // build. This asserts the OUTCOME, not the pre-effect frame: RTL wraps `render` in `act()`,
+    // which flushes effects before it returns, so the frame where `today` is null is not observable
+    // here. The guard is proven by the crash it fixed, not by this line.
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Hoy' })).toBeInTheDocument())
+    expect(screen.getByRole('button', { name: 'Ayer' })).toBeInTheDocument()
+  })
+})
+
+describe('US-A83 — the screen states ONE scope at a time', () => {
+  it('the window footer disappears once the fallback left the window', async () => {
+    withFolios([aFolio({ id: 'a', customer_name: 'Ana', lines: [] })])
+    server.use(
+      http.get('/api/folios', ({ request }) =>
+        new URL(request.url).searchParams.get('q')
+          ? HttpResponse.json({
+              folios: [aFolio({ id: 'viejo', customer_name: 'Leo', lines: [] })],
+              window_days: null,
+              truncated: false,
+            })
+          : HttpResponse.json({
+              folios: [aFolio({ id: 'a', customer_name: 'Ana', lines: [] })],
+              window_days: 30,
+            }),
+      ),
+    )
+    const user = userEvent.setup()
+    renderWithProviders(<FoliosListPage />)
+    await screen.findByText(/Últimos 30 días/)
+
+    await user.type(screen.getByRole('textbox', { name: 'Buscar folios' }), 'leo')
+
+    // The footer used to read `data.window_days` — the BASE read — so it kept claiming
+    // "últimos 30 días" directly under a banner saying the opposite. Two statements about scope,
+    // contradicting each other on one screen. Only found by rendering it.
+    await waitFor(() => expect(screen.getByText(/Resultados de todo el historial/)).toBeInTheDocument(), {
+      timeout: 3000,
+    })
+    expect(screen.queryByText(/más todo lo que tiene trabajo pendiente/)).toBeNull()
+  })
+
+  it('the window footer disappears while a date range is applied', async () => {
+    withFolios([aFolio({ id: 'a', customer_name: 'Ana', lines: [] })])
+    renderWithProviders(<FoliosListPage />, {
+      initialEntries: ['/folios?desde=2026-01-01&hasta=2026-01-31'],
+    })
+
+    await screen.findByText(/Ana/)
+    expect(screen.queryByText(/Últimos 30 días/)).toBeNull()
   })
 })

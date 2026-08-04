@@ -1,6 +1,6 @@
 import type { Context } from 'hono'
 import type { BatchItem } from 'drizzle-orm/batch'
-import { and, asc, desc, eq, isNotNull, lt, ne, sql, type SQL } from 'drizzle-orm'
+import { and, asc, desc, eq, inArray, isNotNull, lt, ne, sql, type SQL } from 'drizzle-orm'
 import { getDb, type Db } from '../../db/client'
 import {
   accommodationReservations,
@@ -43,6 +43,14 @@ import {
   undeliveredFilter,
   verificationPendingFilter,
 } from '../../utils/folioPendingWork'
+import {
+  asDay,
+  dateRangeFilter,
+  MIN_QUERY_LENGTH,
+  normalizeQuery,
+  searchFilter,
+  SEARCH_LIMIT,
+} from '../../utils/folioSearch'
 import {
   computeCancellationRefund,
   resolvePolicy,
@@ -305,6 +313,16 @@ export const listFolios = async (c: FoliosContext) => {
   // writer and a cron that writes state drifts from the clock that defines it (apartado-stages S7).
   const refundStatusQ = c.req.query('refund_status')
   const overdueQ = c.req.query('overdue')
+  // US-A83 — the two ways to reach PAST the load window: a date range, and a free-text query.
+  // `date` is now an alias for a one-day range (D10), so there is exactly one implementation of
+  // "which day is this" — the previous `strftime(… 'unixepoch')` compared a UTC day, which for an
+  // org at UTC−5 answered for tomorrow from 19:00 local, the busiest hours of a beach counter.
+  const dayQ = asDay(dateQ)
+  const fromQ = asDay(c.req.query('from')) ?? dayQ
+  const toQ = asDay(c.req.query('to')) ?? dayQ
+  const normalizedQ = normalizeQuery(c.req.query('q') ?? '')
+  const hasQuery = normalizedQ.length >= MIN_QUERY_LENGTH
+  const hasDateFilter = !!(fromQ || toQ)
 
   const filters = [eq(folios.organizationId, org)]
   if (statusQ === 'paid' || statusQ === 'booking' || statusQ === 'cancelled') {
@@ -320,11 +338,6 @@ export const listFolios = async (c: FoliosContext) => {
     // cancels the folio (its stale 'pending' flag stays), so exclude cancelled to drop it out.
     if (verificationQ === 'pending') filters.push(ne(folios.status, 'cancelled'))
   }
-  if (dateQ) {
-    filters.push(
-      sql`strftime('%Y-%m-%d', ${folios.createdAt}, 'unixepoch') = ${dateQ}`,
-    )
-  }
   if (agentQ) filters.push(eq(folios.agentId, agentQ))
 
   // US-A78 — refunds still owed. Unknown values fall through to "no filter", matching `status`.
@@ -335,17 +348,29 @@ export const listFolios = async (c: FoliosContext) => {
   const now = new Date()
   if (overdueQ === 'true') filters.push(overdueFilter(now))
 
-  // US-A84 rule 1/2 — the union. An explicit `date` filter REPLACES the window: the caller has
-  // named the days they want, and applying both would let a range reach into the past and silently
-  // return nothing. Every other filter composes with the union rather than replacing it.
+  // The org's zone decides every calendar boundary on this route — the window (US-A84 rule 2) and,
+  // since US-A83, the range too.
+  const [orgRow] = await db
+    .select({ tz: organizations.timezone })
+    .from(organizations)
+    .where(eq(organizations.id, org))
+    .limit(1)
+  const tz = orgRow?.tz ?? 'UTC'
+
+  // US-A83 rule 1 — an inclusive org-local range over `created_at`.
+  const range = dateRangeFilter(tz, fromQ, toQ)
+  if (range) filters.push(range)
+  // US-A83 rule 4 — the five fields a folio gets described by.
+  if (hasQuery) filters.push(searchFilter(db, org, normalizedQ))
+
+  // US-A84 rule 1/2 — the union, UNLESS the caller narrowed deliberately. A date range or a query
+  // REPLACES the window (US-A83 D11/D12): the caller has named what they want, and applying both
+  // would let a search reach into the past and silently return nothing — which is a search with a
+  // hidden date filter, exactly what the fallback exists to remove.
   const windowDays = DEFAULT_WINDOW_DAYS
-  if (!dateQ) {
-    const [orgRow] = await db
-      .select({ tz: organizations.timezone })
-      .from(organizations)
-      .where(eq(organizations.id, org))
-      .limit(1)
-    filters.push(listWindowFilter(db, org, orgRow?.tz ?? 'UTC', windowDays, now))
+  const windowed = !hasDateFilter && !hasQuery
+  if (windowed) {
+    filters.push(listWindowFilter(db, org, tz, windowDays, now))
   }
 
   // US-A84 rule 9 — ONE order, always. The queues used to sort by their own clock (refund debt by
@@ -389,20 +414,39 @@ export const listFolios = async (c: FoliosContext) => {
     .leftJoin(affiliateOperators, eq(folios.operatorId, affiliateOperators.id))
     .where(and(...filters))
     .orderBy(order)
+    // US-A83 D6 — a query is an unindexed scan over the whole history, so it gets a ceiling. One
+    // extra row is fetched purely to learn whether there were more, without a second COUNT.
+    .limit(hasQuery ? SEARCH_LIMIT + 1 : -1)
+
+  const truncated = hasQuery && rows.length > SEARCH_LIMIT
+  const page = truncated ? rows.slice(0, SEARCH_LIMIT) : rows
 
   // US-A82/US-A84 — the card names what was sold, sends the ticket from the list, and marks the
-  // folios a customer is waiting on. All three decorations re-apply `filters` through a join rather
-  // than an id list (see folioListRows).
+  // folios a customer is waiting on.
+  //
+  // The decorations normally re-apply `filters` through a join rather than an id list, because D1
+  // caps bound parameters and this list is otherwise unbounded (see folioListRows). A SEARCH is the
+  // one case where that reverses: the result is capped at 50, so an id list is exactly 50
+  // parameters — while re-applying the filters would fetch lines for every folio the query matched
+  // and then discard all but the page.
+  const decorationFilters = hasQuery
+    ? [eq(folios.organizationId, org), inArray(folios.id, page.map((r) => r.id))]
+    : filters
   const [linesByFolio, portalLinkByFolio, requestByFolio] = await Promise.all([
-    readListLines(db, org, filters),
-    readListPortalLinks(db, org, filters, c.env.API_BASE_URL),
-    readListCancellationRequests(db, org, filters),
+    readListLines(db, org, decorationFilters),
+    readListPortalLinks(db, org, decorationFilters, c.env.API_BASE_URL),
+    readListCancellationRequests(db, org, decorationFilters),
   ])
 
   return c.json({
     // US-A84 — what the list covers, so the UI can SAY so rather than imply completeness.
-    window_days: dateQ ? null : windowDays,
-    folios: rows.map((r) => ({
+    // US-A83 — null once a range or a query replaced the window: the list is no longer "the last
+    // N days", and saying it is would be the same false claim of completeness in reverse.
+    window_days: windowed ? windowDays : null,
+    // US-A83 D6 — a cap that does not announce itself reports "these are the matches" when it
+    // means "these are the first 50".
+    truncated,
+    folios: page.map((r) => ({
       id: r.id,
       agent: { id: r.agentId, name: r.agentName },
       customer_name: r.customerName,
