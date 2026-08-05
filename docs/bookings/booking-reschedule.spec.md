@@ -286,6 +286,17 @@ credit with its expiry — in `MoneyText`, semantic colour, never teal.
 **A closed apartado with a credit** carries it on the card's money axis, so the seller sees it
 without opening the folio: the customer standing in front of them is the one it belongs to.
 
+**And that visibility is load-bearing while the credit cannot be spent** (see *Deferred*). Until the
+checkout applies it automatically, the way an agent honours a credit is the **manual discount** they
+already have — bounded by the service's minimum price, recorded, auditable. That is the *flat-tire
+rule* with an audit trail rather than an invisible exception, and it is why the figure has to be on
+the card rather than one tap away: an agent who cannot see the credit cannot decide to honour it.
+
+**With a limit that must be stated to the agent, not discovered by them:** the discount floor is the
+service's **minimum price**, so a large credit **may not be fully honourable** that way. The sheet
+shows both numbers — the credit and how much of it the discount can actually cover — because the
+alternative is a seller promising a customer something the form will refuse.
+
 ---
 
 ## Scenarios
@@ -449,7 +460,7 @@ scope may make the line's redundant, exactly as it did in `folio-state-machine.s
 | What | Why it can wait |
 |---|---|
 | **Rescheduling to a different SERVICE** | It requires re-quoting, and a deposit that silently over- or under-covers a new price is exactly the kind of quiet money bug this spec's Scope boundary exists to prevent. Same-service covers the case the counter actually has: *"can I come Sunday instead?"* |
-| **Spending the credit** | Phase 2 grants and expires it; applying it to a new sale is the checkout's problem, not the apartado's. Recorded openly: **until that ships, the credit is a promise the product cannot yet honour**, which is why D8's default of zero matters — no organization is handed an obligation it cannot discharge. |
+| **Spending the credit automatically** | Phase 2 grants and expires it; applying it to a new sale is the checkout's problem, not the apartado's. **The interim mechanism is not nothing**: the credit is shown on the card, and the agent's existing manual discount — bounded by the minimum price — is how they honour it, with a record. Recorded openly all the same: **until the checkout applies it, the credit is a promise the product honours by hand**, which is why D8's default of zero matters — no organization is handed an obligation it cannot discharge. |
 | **Rescheduling a lodging stay** | Nights are a per-night guard rather than a slot; the shape differs enough to deserve its own scenarios instead of an `if`. |
 | **Per-line release (US-A22)** | D18. The sweep cancels a multi-service apartado whole at the earliest departure's grace. Rescheduling the near service resolves the case without opening partial cancellation — whose real blocker is that `amount_paid` and `total` live on the folio, so a half-released folio has no defined balance. |
 | **Transferring the folio to another person** | *"No puedo ir, que vaya mi hermano"* is a different operation — it changes who, not when — and it touches identity and the QR. |
