@@ -36,6 +36,7 @@ import {
 } from '../../utils/qr'
 import { generatePortalToken, portalTokenExpiry } from '../../utils/portal'
 import { naiveEpoch, orgToday, orgWallClockMinute } from '../../utils/tz'
+import { folioFulfillment } from '../../utils/folioFulfillment'
 import {
   nightsBetween,
   parseCsvInts,
@@ -3355,8 +3356,20 @@ export const listAgentFolios = async (c: PosContext) => {
   // US-AG49 — same decorations as the admin list; `filters` here is already caller-scoped to this
   // seller's own folios, so the join inherits that scope.
   const now = new Date()
+  // US-A85/US-AG50 — the seller reads the same fulfilment as the admin. Same derivation, same
+  // clock, same margin: the line between the two audiences is capability, never information.
+  const [fulfillmentOrg] = await db
+    .select({ tz: organizations.timezone, noShowMargin: organizations.noShowMarginMinutes })
+    .from(organizations)
+    .where(eq(organizations.id, org))
+    .limit(1)
+  const fulfillmentCtx = {
+    tz: fulfillmentOrg?.tz ?? 'America/Mexico_City',
+    marginMinutes: fulfillmentOrg?.noShowMargin ?? 0,
+    nowEpoch: Math.floor(now.getTime() / 1000),
+  }
   const [linesByFolio, portalLinkByFolio, requestByFolio] = await Promise.all([
-    readListLines(db, org, filters),
+    readListLines(db, org, filters, fulfillmentCtx),
     readListPortalLinks(db, org, filters, c.env.API_BASE_URL),
     readListCancellationRequests(db, org, filters),
   ])
@@ -3400,6 +3413,9 @@ export const listAgentFolios = async (c: PosContext) => {
       sale_mode: r.saleMode,
       portal_link: portalLinkByFolio.get(r.id) ?? null,
       lines: linesByFolio.get(r.id) ?? [],
+      fulfillment: folioFulfillment(
+        (linesByFolio.get(r.id) ?? []).map((l) => l.fulfillment),
+      ),
       // US-AG50 — the seller sees the state of their OWN sale: that a customer asked to cancel it,
       // and that their apartado's deadline passed. Information, not capability — no admin verb
       // follows from either field on this surface (US-A84 D15).

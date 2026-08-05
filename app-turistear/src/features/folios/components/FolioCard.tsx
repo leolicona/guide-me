@@ -21,7 +21,7 @@ import {
   type RailTone,
   type TimeChipTone,
 } from '../folioCardState'
-import type { CancellationRequestMark, FolioStatus, RefundStatus } from '../types'
+import type { CancellationRequestMark, FolioStatus, Fulfillment, RefundStatus } from '../types'
 import type { FolioListLine, PaymentVerification } from '../../pos/types'
 
 // US-A82/US-AG49 — the one folio card, shared by the admin list (/folios) and the seller's own
@@ -140,6 +140,8 @@ export interface FolioCardFolio {
   reminder_sent_at?: number | null
   payment_verification?: PaymentVerification
   refund_status?: RefundStatus
+  /** US-A85 — the folio's roll-up; the time chip renders it once the departure has passed. */
+  fulfillment?: Fulfillment
   refund_amount?: number | null
   payment_reference?: string | null
   deliverable?: boolean

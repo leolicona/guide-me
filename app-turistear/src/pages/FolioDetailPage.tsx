@@ -50,6 +50,21 @@ const DATE_FMT: Intl.DateTimeFormatOptions = {
   minute: '2-digit',
 }
 
+// US-A85 — what a line says about whether it was used. Functional color only, and only when there
+// is something to say: a line still ahead of its departure says nothing, because "not used yet" is
+// not a fact about the sale. Never teal (it carries no state meaning).
+const lineFulfillmentNote = (line: { fulfillment?: string; quantity: number; redeemed_count?: number }) => {
+  if (line.fulfillment === 'no_show') return { text: 'Nadie usó estos lugares', color: 'error.main' }
+  if (line.fulfillment === 'partial') {
+    return {
+      text: `Usaron ${line.redeemed_count ?? 0} de ${line.quantity}`,
+      color: 'warning.main',
+    }
+  }
+  if (line.fulfillment === 'fulfilled') return { text: 'Usado', color: 'success.main' }
+  return null
+}
+
 export default function FolioDetailPage() {
   const formatDate = useOrgDateFormatter(DATE_FMT) // US-A66 — org-local audit timestamps
   const { id } = useParams<{ id: string }>()
@@ -223,6 +238,17 @@ export default function FolioDetailPage() {
                         <Typography variant="caption" color="text.secondary">
                           {folioLineMeta(line)} · {formatMoney(line.unit_price)}
                         </Typography>
+                        {/* US-A85 (D2) — fulfilment lives on the LINE, and the detail is the only
+                            place the breakdown can be read: "the Tuesday tour was used, nobody came
+                            to Thursday's". The card shows only the worst of them. */}
+                        {lineFulfillmentNote(line) && (
+                          <Typography
+                            variant="caption"
+                            sx={{ display: 'block', color: lineFulfillmentNote(line)!.color, fontWeight: 600 }}
+                          >
+                            {lineFulfillmentNote(line)!.text}
+                          </Typography>
+                        )}
                         {line.extras.map((e) => (
                           <Typography
                             key={e.id}

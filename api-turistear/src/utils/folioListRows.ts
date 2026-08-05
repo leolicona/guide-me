@@ -11,9 +11,11 @@
 import { and, asc, eq, type SQL } from 'drizzle-orm'
 import type { Db } from '../db/client'
 import { cancellationRequests, folioAccessTokens, folioLines, folios } from '../db/schema'
+import { lineFulfillment, type Fulfillment } from './folioFulfillment'
 
 /** The lean line shape the card and `renderItinerary()` share (spec D14). */
 export interface FolioListLine {
+  id: string
   service_name: string
   line_type: 'slot' | 'stay'
   slot_date: string | null
@@ -22,6 +24,11 @@ export interface FolioListLine {
   check_out: string | null
   guests: number | null
   quantity: number
+  // US-A85 — the two counts the fulfilment axis is DERIVED from. Carried on the line rather than
+  // rolled up server-side into a single number, so the same row can answer "how many boarded" and
+  // "which line was it" without a second read (D2: fulfilment lives on the line).
+  redeemed_count: number
+  fulfillment: Fulfillment
 }
 
 /**
@@ -35,9 +42,12 @@ export const readListLines = async (
   db: Db,
   org: string,
   filters: SQL[],
+  /** US-A85 — the org's clock and no-show margin, so each line can carry its own reading. */
+  fulfillmentCtx: { tz: string; marginMinutes: number; nowEpoch: number },
 ): Promise<Map<string, FolioListLine[]>> => {
   const rows = await db
     .select({
+      id: folioLines.id,
       folioId: folioLines.folioId,
       serviceName: folioLines.serviceName,
       lineType: folioLines.lineType,
@@ -47,6 +57,7 @@ export const readListLines = async (
       checkOut: folioLines.checkOut,
       guests: folioLines.guests,
       quantity: folioLines.quantity,
+      redeemedCount: folioLines.redeemedCount,
     })
     .from(folioLines)
     .innerJoin(folios, eq(folioLines.folioId, folios.id))
@@ -57,6 +68,7 @@ export const readListLines = async (
   for (const r of rows) {
     const list = byFolio.get(r.folioId) ?? []
     list.push({
+      id: r.id,
       service_name: r.serviceName,
       line_type: r.lineType,
       slot_date: r.slotDate,
@@ -65,6 +77,22 @@ export const readListLines = async (
       check_out: r.checkOut,
       guests: r.guests,
       quantity: r.quantity,
+      redeemed_count: r.redeemedCount,
+      fulfillment: lineFulfillment(
+        {
+          lineId: r.id,
+          lineType: r.lineType,
+          slotDate: r.slotDate,
+          slotStartTime: r.slotStartTime,
+          checkIn: r.checkIn,
+          lineTotal: 0, // unused by the reading; the ladder is the only thing that prices
+          quantity: r.quantity,
+          redeemedCount: r.redeemedCount,
+        },
+        fulfillmentCtx.tz,
+        fulfillmentCtx.marginMinutes,
+        fulfillmentCtx.nowEpoch,
+      ),
     })
     byFolio.set(r.folioId, list)
   }

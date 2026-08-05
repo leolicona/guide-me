@@ -4,8 +4,12 @@ import { authMiddleware } from '../../middleware/auth'
 import { requireRole } from '../../middleware/role'
 import { ApiError } from '../../types/errors'
 import type { AppVariables } from '../../types/context'
-import { exportCommissionReport, getCommissionReport } from './handler'
-import { commissionExportQuerySchema, commissionReportQuerySchema } from './schema'
+import { exportCommissionReport, getCommissionReport, getWastedSeatsReport } from './handler'
+import {
+  commissionExportQuerySchema,
+  commissionReportQuerySchema,
+  wastedSeatsQuerySchema,
+} from './schema'
 
 // Commission & settlement report by period (US-A17/A18/A20). Admin-only, org-scoped, read-only:
 // a date-range query over folios + cash drops + payouts. Spec: docs/reports/commission-report.spec.md.
@@ -35,6 +39,15 @@ reports.get(
   admin,
   zValidator('query', commissionExportQuerySchema, validationHook),
   exportCommissionReport,
+)
+
+// US-A85 — seats sold, held against capacity, and used by nobody
+// (docs/folios/folio-state-machine.spec.md). Read-only; no column, no cron, no state change.
+reports.get(
+  '/wasted-seats',
+  admin,
+  zValidator('query', wastedSeatsQuerySchema, validationHook),
+  getWastedSeatsReport,
 )
 
 export default reports

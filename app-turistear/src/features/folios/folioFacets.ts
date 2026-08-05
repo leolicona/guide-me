@@ -30,6 +30,7 @@ export type FacetKey =
   | 'solicitud'
   | 'reembolso'
   | 'vencido'
+  | 'sin_usar'
   | 'con_solicitud'
 
 interface FacetDef {
@@ -76,6 +77,16 @@ export const FACETS: FacetDef[] = [
     match: (f) => f.refund_status === 'pending',
   },
   { key: 'vencido', section: 'pendiente', label: 'Vencido', match: (f) => f.overdue === true },
+  {
+    // US-A85 — the wasted seat, findable. Deliberately in `pendiente` even though nothing can be
+    // DONE about a departed seat: the section is where an admin looks for what needs their
+    // attention, and a tour that left with empty paid-for seats is exactly that — just as
+    // information rather than as a verb.
+    key: 'sin_usar',
+    section: 'pendiente',
+    label: 'Sin usar',
+    match: (f) => f.fulfillment === 'no_show' || f.fulfillment === 'partial',
+  },
   {
     key: 'con_solicitud',
     section: 'pendiente',

@@ -547,17 +547,28 @@ join removed — see `folio-lifecycle-unification.spec.md` S-18.)*
 
 ### Phase 2 — the fulfilment axis *(migration `0058` · `feat/folio-fulfillment`)*
 
-- [ ] Migration `0058` — `organizations.no_show_margin_minutes` (D23)
-- [ ] `utils/folioFulfillment.ts` — pure, injected clock and margin, no db
-- [ ] `/settings` input beside *Cierre de ventas*, same *Antes / Después* control, with the
-      `NO_SHOW_MARGIN_TOO_EARLY` validation mirrored in the form
-- [ ] `fulfillment` on list rows, detail, and per line
-- [ ] `GET /api/reports/wasted-seats`, carrying `redemption_mode`, with the screen stating what
-      the numbers can distinguish (D24)
-- [ ] S-4 … S-10 (incl. S-4b) in `test/folios/folio-fulfillment.test.ts`; unit coverage in `folioFulfillment.unit.test.ts`
-- [ ] S-18 cross-org, **mutation-verified**
-- [ ] Card chip + `Sin usar` facet + per-line detail
-- [ ] `SPEC.md`: US-A85 already registered — verify its text still matches what shipped
+- [x] Migration `0058` — `organizations.no_show_margin_minutes` (D23)
+- [x] `utils/folioFulfillment.ts` — pure, injected clock and margin, no db
+- [x] `/settings` input beside *Cierre de ventas* (**"Marcar como no usado"**), same
+      *Antes / Después* control, with the `NO_SHOW_MARGIN_TOO_EARLY` validation mirrored in the form
+- [x] `fulfillment` on `/api/folios`, `/api/pos/folios` (US-AG50 — the seller reads the same
+      axis), the detail, and per line
+- [x] `GET /api/reports/wasted-seats`, carrying `redemption_mode` + `resolution` (D24)
+- [x] S-4 … S-10 (incl. S-4b, S-4c, S-4d, S-6b) in `test/folios/folio-fulfillment.test.ts` (21);
+      17 unit assertions in `folioFulfillment.unit.test.ts`
+- [x] S-18 cross-org, **mutation-verified — and the result is recorded honestly in the test**:
+      it goes red only when BOTH org predicates are removed. Either one alone suffices, because a
+      `folio_line`'s `organization_id` always equals its folio's, so the test proves the query is
+      org-scoped but **cannot prove which predicate does the work**. The second is defence in depth
+      that no test here justifies (same shape as US-A84's S-18, which passed with the scope removed
+      *and* with the join removed)
+- [x] Card chip (`Sin usar` / `Parcialmente usado`, on the EXISTING time channel — no fourth
+      channel) + `Sin usar` facet in *Pendiente* + per-line note on the detail
+- [x] **Frontend scenarios, which this spec originally lacked** — the DoD asked for the rendering
+      and named no test for it. Twelve assertions added across `folioCardState.test.ts`,
+      `folioFacets.test.ts` and `FolioCard.test.tsx`, all six behavioural ones mutation-verified
+      (deleting the chip branch and neutering the facet predicate turns exactly those red)
+- [x] `SPEC.md`: US-A85 registered in #61; text still matches what shipped
 
 ### Phase 3 — the outbox *(migration `0059` · `feat/notification-outbox`)*
 

@@ -34,6 +34,11 @@ export const updateOrganizationSchema = z.object({
   // The coherence rule (`>= booking_pre_departure_buffer_hours` when set) is enforced below, where
   // both values are in scope.
   booking_creation_cutoff_hours: z.number().int().min(0).max(720).optional(),
+  // US-A85 (docs/folios/folio-state-machine.spec.md, D23) — when a departed line with nothing
+  // redeemed starts reading as a no-show. SIGNED like `sales_cutoff_offset_minutes` and
+  // `booking_grace_offset_minutes`, same ±4h bound: + = before departure, − = after.
+  // The coherence rule against the sales cutoff is enforced in the handler, where both are in scope.
+  no_show_margin_minutes: z.number().int().min(-240).max(240).optional(),
   // Lodging settings (docs/lodging/accommodation-stays.spec.md §2.5). Weekend days as ISO
   // weekday ints (0=Sun … 6=Sat), distinct; free-cancel window in days; penalty percent.
   lodging_weekend_days: z
