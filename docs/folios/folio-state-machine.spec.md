@@ -114,6 +114,7 @@ Concretely:
 | **D21** | **What the outbox proves is that we sent, not that they received.** A drained WhatsApp row records `sent_by` + `sent_at` — a human's claim. | Stated so D20's protection is not overestimated. It is evidence of diligence, not of delivery. The repo already knows the difference: `tickets_viewed_at` is a real first-view beacon from the portal, which is why the delivery axis shows `✓✓ Visto` only where a column backs it (`folio-list-scanability.spec.md`). Giving the receipt the same beacon is listed under *Open*. |
 | **D24** | **`qr_redemption_mode = 'all_passes'` makes `partial` unreachable, and the report says so.** The wasted-seat report states, per organization, which question it is answering. | Found while auditing the settings, not while designing: one scan in that mode sets `redeemed_count = quantity` outright (`tickets/handler.ts:133`). So a party of four where **two** boarded is scanned once and reads **`fulfilled`** — four passes counted as used, two people aboard, and the wasted seat is invisible **by configuration**. `all_passes` is a gate-throughput choice and it costs exactly the data US-A85 exists to produce; an org cannot have both. Stating it is the whole decision, because the alternative is a report that quietly means *"nobody came vs everybody came"* for one org and *"how many of the four"* for another, under one title. D3 keeps `partial` — it is correct and reachable for every `per_pass` org, which is the default. |
 | **D25** | **Eight events need eight message templates; two exist.** Phase 3 ships a **shipped default for all eight** and keeps **only `wa_ticket_template` and `wa_reminder_template` editable** — the two that already are. | The templates are the org's outbound voice, so every new message needs one. But eight editable templates is a settings screen nobody finishes, and six of the eight are transactional statements of fact (*your transfer cleared*, *your sale was cancelled*, *here is your refund receipt*) where wording is not where an operator differentiates. Same reasoning that gave `wa_*_template` a null default meaning "use the shipped one" (`whatsapp-qr-delivery.spec.md` D10): make the good default free, make editing opt-in. Widening later is one nullable column per template. |
+| **D26** | **Draining the `tickets_delivered` row is what stamps `tickets_sent_at`.** One code path writes both; the outbox never carries a second copy of a fact the folio already owns. **The outbox has no `viewed_at` column.** | Re-homing the existing sends onto the outbox (Phase 3) creates two records of one tap — the folio's delivery axis and the row's `sent_at` — and two records of one fact drift. Making the drain the single writer means they cannot disagree, because there is one write. Symmetrically, **reading** stays on `tickets_viewed_at` where it already lives: a `viewed_at` on the outbox would be a second home for the same beacon, and it would sit **null for seven of eight events by unmeasurability, not by non-reading** — the exact distinction `folio-list-scanability.spec.md` protected when it refused a grey `✓✓` for a delivery nobody measures. |
 | **D17** | **Phase 1 carries no story ID.** It is registered as two bug fixes plus a glossary migration in `SPEC.md`. | `PROCESS.md` reserves an ID for an **observable capability**. "The same state is called the same thing everywhere" is a defect being repaired, not a capability being added; minting a story for it would make the index claim a feature shipped. |
 
 ---
@@ -186,6 +187,9 @@ CREATE TABLE notifications (
   last_error       TEXT,
   sent_at          INTEGER,
   sent_by          TEXT REFERENCES users(id),   -- null for an automatic send
+  -- Deliberately NO `viewed_at` (D26). Reading is measured only where a beacon exists — today
+  -- `folios.tickets_viewed_at`, for the tickets alone. A column here would be a second home for
+  -- that fact, and null for seven of eight events by unmeasurability rather than by non-reading.
   created_at       INTEGER NOT NULL DEFAULT (unixepoch())
 );
 
@@ -272,6 +276,12 @@ the one message an org should be able to switch off.
     the only place the ladder's arithmetic is ever shown to the customer.
 14. A drained `whatsapp` row records `sent_by` and `sent_at`. It asserts that a human sent it, **not
     that the customer received it** (D21); no code may read it as delivery.
+14b. Draining the `tickets_delivered` row is the **only** writer of `folios.tickets_sent_at` (D26).
+    There is one write; the two records cannot diverge.
+14c. **Reading is recorded in exactly one place per event, and only where a beacon exists.** Today
+    that is `tickets_viewed_at`, for the tickets alone. The outbox has **no** `viewed_at`: a null
+    would mean *not measurable* for seven of eight events, and no surface may render it as
+    *not read*.
 15. Every outbox read and write is filtered by `organization_id`.
 
 ---
@@ -490,9 +500,16 @@ And its content states what was **paid**, what was **returned** and what was **r
 for a customer with no email.)*
 
 **S-16c — Sent is not received**
-Given a drained `whatsapp` row
+Given a drained `whatsapp` row for any event **other than** `tickets_delivered`
 Then the folio's delivery axis is **unchanged** — `tickets_viewed_at` is the only thing that may
 render `✓✓ Visto`, and no outbox row may set it (D21).
+
+**S-16d — One tap, one write, two records that cannot disagree**
+Given the `tickets_delivered` row is drained
+Then `folios.tickets_sent_at` is stamped by **that same write** (D26), the card shows `✓ Enviado`,
+and re-reading both gives the same instant.
+*(The mutation this must catch: a second code path that stamps `tickets_sent_at` on its own, which
+is how the two records start drifting.)*
 
 ### Multitenancy isolation (required)
 
@@ -538,7 +555,8 @@ join removed — see `folio-lifecycle-unification.spec.md` S-18.)*
 ### Phase 3 — the outbox *(migration `0059` · `feat/notification-outbox`)*
 
 - [ ] `notifications` table + the unique guard (migration `0059`)
-- [ ] The eight events emit rows; the existing inline sends are re-homed onto it, unchanged
+- [ ] The eight events emit rows; the existing inline sends are re-homed onto it, unchanged —
+      with the `tickets_delivered` drain as the **only** writer of `tickets_sent_at` (D26)
 - [ ] A shipped default template per event; **only the two existing templates stay editable** (D25)
 - [ ] `refund_completed` chains onto the PIN confirm and states paid / returned / retained (D20)
 - [ ] Email drain (scheduled) with retry; WhatsApp drain endpoint
