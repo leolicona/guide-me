@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
+  FACETS,
   facetLabels,
   facetPillLabel,
   matchesFacets,
@@ -121,5 +122,12 @@ describe('the pill states the filter without opening the sheet', () => {
   it('lists the names for the empty state', () => {
     // An empty list must name what it filtered by, or it reads as "there are no sales".
     expect(facetLabels(['reembolso', 'pagado'])).toEqual(['Pagado', 'Reembolso'])
+  })
+
+  // S-1 / BUG-026 — the facet strip said "Reserva" for the same status the card called "Apartado".
+  it('S-1 — the booking facet is labelled Apartado', () => {
+    expect(facetLabels(['reserva'])).toEqual(['Apartado'])
+    expect(facetPillLabel(['reserva'])).toBe('Apartado')
+    expect(FACETS.some((f) => f.label === 'Reserva')).toBe(false)
   })
 })

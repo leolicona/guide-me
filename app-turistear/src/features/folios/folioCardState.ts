@@ -58,6 +58,8 @@ export type MoneyReading =
   | { kind: 'owing'; paid: number; total: number }
   | { kind: 'refundOwed'; cents: number }
   | { kind: 'refundSettled'; cents: number }
+  /** Cancelled and never owed anything back — the ladder retained everything (BUG-027). */
+  | { kind: 'refundNone'; cents: number }
 
 export interface MoneyAxis {
   rail: RailTone
@@ -80,10 +82,21 @@ export function folioMoneyAxis(folio: {
   refund_status?: 'none' | 'pending' | 'refunded'
   refund_amount?: number | null
 }): MoneyAxis {
+  // A cancelled folio has THREE money readings, not two (BUG-027). `refund_status = 'none'` means
+  // the ladder retained everything and the customer received nothing — the US-A76 case, where a
+  // 30% deposit against a 50% retention refunds nothing (`folios/handler.ts` cancelFolioPriced).
+  // Folding it into `refundSettled` made the card claim money went back that the company kept.
   if (folio.status === 'cancelled') {
-    return folio.refund_status === 'pending'
-      ? { rail: 'error', reading: { kind: 'refundOwed', cents: folio.refund_amount ?? 0 } }
-      : { rail: 'error', reading: { kind: 'refundSettled', cents: folio.total } }
+    if (folio.refund_status === 'pending') {
+      return { rail: 'error', reading: { kind: 'refundOwed', cents: folio.refund_amount ?? 0 } }
+    }
+    if (folio.refund_status === 'refunded') {
+      return {
+        rail: 'error',
+        reading: { kind: 'refundSettled', cents: folio.refund_amount ?? folio.total },
+      }
+    }
+    return { rail: 'error', reading: { kind: 'refundNone', cents: folio.amount_paid } }
   }
   if (folio.status === 'booking') {
     return {

@@ -6,6 +6,109 @@ Tracks confirmed bugs, root causes, and fixes. Each entry is immutable once clos
 
 ---
 
+## BUG-027 — A Cancellation That Refunded Nothing Renders As "(reembolsado)" — ✅ FIXED
+
+**Discovered:** 2026-08-01, while enumerating every reachable folio case for a lifecycle table
+**Affected component:** `app-turistear/src/features/folios/folioCardState.ts` (`folioMoneyAxis`)
+and its renderer `components/FolioCard.tsx`
+**Severity:** Medium — a factual misstatement about money, on the reconciliation screen
+
+### Symptom
+
+A cancelled folio with `refund_status = 'none'` rendered **"$1,500.00 (reembolsado)"**. Nothing was
+refunded. The organization kept every peso.
+
+### Root cause
+
+The money axis asked **one** question where there are **three** answers:
+
+```ts
+folio.refund_status === 'pending'
+  ? { kind: 'refundOwed',    cents: folio.refund_amount ?? 0 }
+  : { kind: 'refundSettled', cents: folio.total }   // ← 'none' lands here too
+```
+
+`refund_status` has three values and only two were distinguished, so *never owed* was rendered with
+the label belonging to *paid back*. `'none'` on a cancelled folio is set by `cancelFolioPriced`
+(`routes/folios/handler.ts:809-815`) when the ladder's retention consumed everything collected —
+the case **US-A76 documents by name**: *a 30% deposit against a 50% retention refunds nothing*. Any
+org on the inherited default ladder produces it at the terminal tier, so it was not an edge case.
+
+The figure was wrong too: it printed `folio.total`, not what the customer actually paid. An
+apartado cancelled after a 90,000 deposit on a 300,000 sale claimed 300,000 had gone back.
+
+### Fix
+
+Three readings for the three states, and each figure is the sum it is about:
+
+| `refund_status` | Reading | Figure |
+|---|---|---|
+| `pending` | `refundOwed` — *Reembolsar* | `refund_amount` — the debt |
+| `refunded` | `refundSettled` — *(reembolsado)* | `refund_amount` — what went back |
+| `none` | **`refundNone`** — *(sin reembolso)* | `amount_paid` — what the retention came out of |
+
+The screen-reader label moves with it (`Pagado, sin reembolso`), because the caption alone is not
+state when the figure reads as an ordinary amount.
+
+### Tests
+
+`folioCardState.test.ts` (S-2, S-2b, S-2c) and `components/FolioCard.test.tsx` (rendered S-2/S-3).
+**Mutation-verified:** collapsing the branch back to two readings turns exactly these red.
+
+### Related changes
+
+Shipped with **BUG-026** — the other label that lied — as Phase 1 of
+`docs/folios/folio-state-machine.spec.md`.
+
+---
+
+## BUG-026 — The Same Status Is Called Two Different Things — ✅ FIXED
+
+**Discovered:** 2026-08-04, by the settings/vocabulary audit behind
+`docs/folios/folio-state-machine.spec.md`
+**Affected component:** `FolioStatusChip.tsx:9` vs `folioCardState.ts:217`, plus
+`folioFacets.ts:46` and `FolioHistoryPage.tsx:58`
+**Severity:** Low technically, **Medium in the product** — the vocabulary is the model the user
+builds in their head
+
+### Symptom
+
+`status = 'booking'` rendered as two different words on screens a seller sees in the same session:
+
+| Surface | Said |
+|---|---|
+| `FolioStatusChip` (folio detail, history detail) | **"Reserva"** |
+| `folioTimeChip` (the list card) | **"Apartado"** |
+| The facet strip | **"Reserva"** |
+| The history toggle | **"Reservas"** |
+
+### Root cause
+
+No decision was ever made about the word. Each surface picked one, and both were defensible in
+isolation — which is exactly how a vocabulary rots without anyone doing anything wrong.
+
+The deeper problem is that **"Reserva" does not distinguish anything**: an apartado and a paid
+folio *both* hold inventory. The word names the property they share, so it can only ever be
+ambiguous.
+
+### Fix
+
+The word is **retired**, not disambiguated (`folio-state-machine.spec.md` D8). Three terms:
+
+- **Apartado** — partial payment, balance owed
+- **Pagado** — paid in full
+- **Por verificar** — money received, not confirmed against the bank
+
+All four surfaces now say *Apartado* / *Apartados*. `SPEC.md`'s glossary carries the retirement.
+
+### Tests
+
+`FolioCard.test.tsx` (S-1, the chip and the card together — they must agree, since disagreeing was
+the defect) and `folioFacets.test.ts` (S-1, incl. `FACETS.some(f => f.label === 'Reserva') === false`).
+**Mutation-verified.**
+
+---
+
 ## BUG-028 — Two Org Settings the API Accepts and Nothing Obeys — ✅ FIXED
 
 **Discovered:** 2026-08-04

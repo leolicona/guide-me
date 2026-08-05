@@ -129,6 +129,45 @@ describe('S-5 — a cancelled folio reads as a debt, or as settled', () => {
       }).reading,
     ).toEqual({ kind: 'refundSettled', cents: 240000 })
   })
+
+  // BUG-027 / S-2 — a cancelled folio has THREE money readings. `refund_status = 'none'` means the
+  // ladder retained everything and the customer got nothing back; it used to fall into
+  // `refundSettled`, so the card read "$1,500 (reembolsado)" about money the company kept.
+  it('S-2 — a cancellation that refunded nothing does not claim it refunded', () => {
+    expect(
+      folioMoneyAxis({
+        status: 'cancelled',
+        total: 150000,
+        amount_paid: 150000,
+        refund_status: 'none',
+        refund_amount: 0,
+      }).reading,
+    ).toEqual({ kind: 'refundNone', cents: 150000 })
+  })
+
+  // The reachable shape of the US-A76 case: a 30% deposit against a terminal tier. The figure is
+  // what was COLLECTED (90,000), not the folio total — nobody is owed the other 210,000 and the
+  // customer never paid it.
+  it('S-2b — an apartado cancelled with nothing left over reads the deposit, not the total', () => {
+    expect(
+      folioMoneyAxis({
+        status: 'cancelled',
+        total: 300000,
+        amount_paid: 90000,
+        refund_status: 'none',
+        refund_amount: 0,
+      }).reading,
+    ).toEqual({ kind: 'refundNone', cents: 90000 })
+  })
+
+  it('S-2c — all three cancelled readings are distinct', () => {
+    const base = { status: 'cancelled' as const, total: 150000, amount_paid: 150000 }
+    const kinds = (['pending', 'refunded', 'none'] as const).map(
+      (refund_status) =>
+        folioMoneyAxis({ ...base, refund_status, refund_amount: 150000 }).reading.kind,
+    )
+    expect(new Set(kinds).size).toBe(3)
+  })
 })
 
 describe('S-4 — the message axis: two marks, never three', () => {

@@ -43,7 +43,7 @@ interface FacetDef {
 // globally unique; encoding the section too would be a second copy that can disagree with the first.
 export const FACETS: FacetDef[] = [
   { key: 'pagado', section: 'pago', label: 'Pagado', match: (f) => f.status === 'paid' },
-  { key: 'reserva', section: 'pago', label: 'Reserva', match: (f) => f.status === 'booking' },
+  { key: 'reserva', section: 'pago', label: 'Apartado', match: (f) => f.status === 'booking' },
   { key: 'cancelado', section: 'pago', label: 'Cancelado', match: (f) => f.status === 'cancelled' },
 
   {
