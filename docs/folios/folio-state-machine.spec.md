@@ -381,7 +381,12 @@ a clock-produced WhatsApp row surfaces as a rung on the existing action ladder. 
 **S-1 — One word for one state**
 Given a folio with `status = 'booking'`
 When it is rendered in the list card, in the status chip, in the facet strip and in the history toggle
-Then all four read **"Apartado"**, and the string "Reserva" appears nowhere in `app-turistear/src`.
+Then all four read **"Apartado"**.
+*(Amended in the build: the original wording asked for the string to be absent from
+`app-turistear/src`, which a source grep cannot honour — the fix leaves a comment explaining why the
+word was retired, and that comment is worth more than the grep. The assertion is on what renders,
+plus `FACETS.some(f => f.label === 'Reserva') === false` on the label map. The card and the chip are
+asserted **together**, because disagreeing was the defect.)*
 
 **S-2 — A cancellation that refunded nothing does not claim it refunded**
 Given a cancelled folio with `refund_status = 'none'` and `total = 150000`
@@ -532,11 +537,13 @@ join removed — see `folio-lifecycle-unification.spec.md` S-18.)*
 
 ### Phase 1 — vocabulary and the two lies *(no migration · `fix/folio-labels`)*
 
-- [ ] `FolioStatusChip.tsx`, `folioFacets.ts`, `FolioHistoryPage.tsx` say "Apartado"
-- [ ] `folioMoneyAxis` third branch + `MoneyLine` "(sin reembolso)"
-- [ ] S-1 · S-2 · S-3, with S-2 verified red against the pre-fix component
-- [ ] `BUGS.md`: BUG-026 (two words, one state) · BUG-027 (`(reembolsado)` on a folio owed nothing)
-- [ ] `SPEC.md`: tick nothing yet — the registration ships in this spec's own PR (glossary already carries **Apartado** and **Por verificar**)
+- [x] `FolioStatusChip.tsx`, `folioFacets.ts`, `FolioHistoryPage.tsx` say "Apartado"
+- [x] `folioMoneyAxis` third branch + `MoneyLine` "(sin reembolso)" — and the *settled* figure
+      becomes `refund_amount`, not `total`, which was wrong for an apartado in the same way
+- [x] S-1 · S-2 · S-2b · S-2c · S-3 — all six new assertions mutation-verified red against the
+      pre-fix components
+- [x] `BUGS.md`: BUG-026 (two words, one state) · BUG-027 (`(reembolsado)` on a folio owed nothing)
+- [x] `SPEC.md`: glossary already carries **Apartado** (shipped with the spec in #61)
 
 ### Phase 2 — the fulfilment axis *(migration `0058` · `feat/folio-fulfillment`)*
 

@@ -86,8 +86,18 @@ function MoneyLine({ reading }: { reading: MoneyReading }) {
     case 'refundSettled':
       return (
         <Stack direction="row" spacing={1} sx={{ alignItems: 'baseline', minWidth: 0 }}>
-          <MoneyText cents={reading.cents} variant="h6" sx={{ color: 'text.secondary' }} srLabel="Total" />
+          <MoneyText cents={reading.cents} variant="h6" sx={{ color: 'text.secondary' }} srLabel="Reembolsado" />
           {caption('(reembolsado)')}
+        </Stack>
+      )
+    // BUG-027 — cancelled and owed nothing back. It used to render here as "(reembolsado)", about
+    // money the organization kept. The figure is what the customer PAID, because that is the sum
+    // the retention was taken out of; the caption is what happened to it.
+    case 'refundNone':
+      return (
+        <Stack direction="row" spacing={1} sx={{ alignItems: 'baseline', minWidth: 0 }}>
+          <MoneyText cents={reading.cents} variant="h6" sx={{ color: 'text.secondary' }} srLabel="Pagado, sin reembolso" />
+          {caption('(sin reembolso)')}
         </Stack>
       )
   }
