@@ -572,16 +572,28 @@ join removed — see `folio-lifecycle-unification.spec.md` S-18.)*
 
 ### Phase 3 — the outbox *(migration `0059` · `feat/notification-outbox`)*
 
-- [ ] `notifications` table + the unique guard (migration `0059`)
-- [ ] The eight events emit rows; the existing inline sends are re-homed onto it, unchanged —
-      with the `tickets_delivered` drain as the **only** writer of `tickets_sent_at` (D26)
-- [ ] A shipped default template per event; **only the two existing templates stay editable** (D25)
+- [x] `notifications` table + the unique guard (migration `0059`)
+- [x] Seven of the eight events emit rows; the `tickets_delivered` drain is the **only** writer of
+      `tickets_sent_at` (D26). `departure_reminder` is emitted by **Phase 4**, where its clock lives
+- [x] The inline sends are re-homed **for recording**: each now stamps `sent` or `failed` with its
+      error instead of vanishing into a `console.error`
+- [x] A shipped default template per event; **only the two existing templates stay editable** (D25)
 - [ ] `refund_completed` chains onto the PIN confirm and states paid / returned / retained (D20)
-- [ ] Email drain (scheduled) with retry; WhatsApp drain endpoint
-- [ ] Refund confirm chains into the WhatsApp hand-off (S-11)
-- [ ] S-12 … S-17
-- [ ] Admin outbox view; **seller gets nothing new** (S-12)
-- [ ] `SPEC.md`: US-AG51 / US-A86 already registered — verify their text still matches what shipped
+- [x] WhatsApp drain endpoint (`POST /api/notifications/:id/sent`) + the admin list
+- [ ] **Email RETRY — deliberately not built, and the reason is recorded.** Each of the six emails
+      assembles a different payload (ticket lines + QR + portal link, the apartado's expiry, the
+      cancellation outcome). Every one IS reconstructible from the folio, so the retry is bounded
+      work — but doing it badly would put six working, tested email paths at risk to buy a retry for
+      an outage that has happened once. What ships is the part that matters: an outage is
+      **recorded** as `failed` with its error, the WhatsApp half is a real drainable queue, and the
+      unique guard makes a re-run unable to duplicate. Moved to *Deferred*
+- [x] Refund confirm chains into the WhatsApp hand-off (S-11), with the message as a pure, tested
+      function (`refundReceipt.ts`) so its three figures are assertable without a page
+- [x] S-12 … S-17 + S-16b/c/d, in `test/folios/notification-outbox.test.ts` (11). D26's single
+      writer and the cross-org 404 are **mutation-verified**
+- [x] Admin outbox view at `/mensajes` (6 rendered assertions, mutation-verified); **seller gets
+      nothing new** — `GET /api/notifications` is admin-only and S-12 pins the 403
+- [x] `SPEC.md`: US-AG51 / US-A86 registered in #61; text still matches what shipped
 
 ### Phase 4 — the two new notices *(no migration · `feat/folio-reminders`)*
 
@@ -596,6 +608,7 @@ join removed — see `folio-lifecycle-unification.spec.md` S-18.)*
 | What | Why it can wait |
 |---|---|
 | **Making `customer_email` required at checkout** | Smaller than it first looked. Under D20 the written notice always goes by WhatsApp, so the email is a **durable second copy**, not the thing that makes a customer reachable; and D19 shows six of eight messages cost no extra tap anyway. It still improves **`departure_reminder`** — the one event that scales with volume — by letting it send itself. A POS decision with its own friction cost on a walk-up sale, belonging to whoever owns the checkout. |
+| **Automatic retry of a failed email** | The outbox RECORDS the failure with its error today; what it does not do is rebuild the payload and resend. Six emails, six different payloads — all reconstructible from the folio, so this is bounded work rather than an open question. Deferring it keeps six working, tested email paths untouched while the outbox's other three guarantees ship. |
 | **Folding `reminder_status` into the outbox** | It works, it guards correctly, and the outbox's unique index gives the same property for new events. Merging them is a migration that buys tidiness, not behaviour. |
 | **A stored fulfilment snapshot** | Only needed if March's no-show count must be immutable against a later change to the grace setting. The precedent is already in the repo (`cancellation_policy_snapshot`): snapshot the margin on the line, not a column a cron writes. One decision away. |
 | **WhatsApp Cloud API** | D14 makes it a drain swap. Nothing else changes. |

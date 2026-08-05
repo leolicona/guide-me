@@ -37,6 +37,7 @@ import {
 import { generatePortalToken, portalTokenExpiry } from '../../utils/portal'
 import { naiveEpoch, orgToday, orgWallClockMinute } from '../../utils/tz'
 import { folioFulfillment } from '../../utils/folioFulfillment'
+import { emitNotification } from '../../utils/notifications'
 import {
   nightsBetween,
   parseCsvInts,
@@ -1869,6 +1870,15 @@ export const confirmSale = async (c: PosContext) => {
     }
   }
 
+  // US-A86 — the two events a completed sale produces. An apartado gets its terms; a cleared sale
+  // gets its tickets. Both are ACTION-TAILS: the agent is standing with the customer, so the
+  // message rides the tap they already made (D12/D19).
+  await emitNotification(db, {
+    organizationId: org,
+    folioId,
+    event: isBooking ? 'booking_created' : 'tickets_delivered',
+    hasEmail: !!input.customer_email,
+  })
   return c.json(
     {
       folio: {
@@ -2526,6 +2536,14 @@ export const verifyPayment = async (c: PosContext) => {
       verifyPaymentRows,
     ])
     const out = await readFolio(db, org, folio.agentId, id, c.env.QR_SECRET, c.env.API_BASE_URL)
+    // US-A86 — the inbound this prevents is the most repeated one in the product: "¿ya les llegó
+    // mi transferencia?", asked until somebody answers it.
+    await emitNotification(db, {
+      organizationId: org,
+      folioId: id,
+      event: 'payment_verified',
+      hasEmail: !!out?.customer_email,
+    })
     return c.json({ folio: out })
   }
 
@@ -2638,6 +2656,16 @@ export const verifyPayment = async (c: PosContext) => {
   )
 
   const out = await readFolio(db, org, folio.agentId, id, c.env.QR_SECRET, c.env.API_BASE_URL)
+  // US-A86 — the money cleared AND the tickets exist now, so both events are real: one answers
+  // "¿ya les llegó mi transferencia?", the other IS the product.
+  await emitNotification(db, {
+    organizationId: org, folioId: id, event: 'payment_verified',
+    hasEmail: !!out?.customer_email,
+  })
+  await emitNotification(db, {
+    organizationId: org, folioId: id, event: 'tickets_delivered',
+    hasEmail: !!out?.customer_email,
+  })
   return c.json({ folio: out })
 }
 
@@ -2738,6 +2766,12 @@ export const rejectPayment = async (c: PosContext) => {
   await db.batch(statements as [BatchItem<'sqlite'>, ...BatchItem<'sqlite'>[]])
 
   const out = await readFolio(db, org, folio.agentId, id, c.env.QR_SECRET, c.env.API_BASE_URL)
+  // US-A86 — obligatory rather than useful: their sale was cancelled because we could not confirm
+  // the money. Without it the complaint arrives anyway, later and more expensive.
+  await emitNotification(db, {
+    organizationId: org, folioId: id, event: 'payment_rejected',
+    hasEmail: !!out?.customer_email,
+  })
   return c.json({ folio: out ?? { id, status: 'cancelled' } })
 }
 

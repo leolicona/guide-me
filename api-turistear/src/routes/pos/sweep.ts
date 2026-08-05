@@ -4,6 +4,7 @@ import { folioLines, folios, organizations } from '../../db/schema'
 import { cancelFolioPriced } from '../folios/handler'
 import { sendBookingReminderEmail } from '../../services/resend'
 import { naiveEpoch } from '../../utils/tz'
+import { emitNotification, recordEmailOutcome } from '../../utils/notifications'
 
 // US-AG07 (P3) / US-A77 — the apartado sweep, run every 15 minutes by the scheduled Worker
 // (src/index.tsx).
@@ -138,7 +139,20 @@ export async function sweepExpiredBookings(env: CloudflareBindings): Promise<Swe
 
       // Still inside the grace window: this folio has just entered stage ②. Tell the customer their
       // spots are about to go, once.
-      if (folio.reminderStatus !== 'none' || !folio.customerEmail || !env.RESEND_API_KEY) continue
+      if (folio.reminderStatus !== 'none') continue
+
+      // US-A86 (D20) — the outbox row is written for EVERY folio entering ②, whether or not there
+      // is an address: this is one of only two clock-produced events (D19), and the customer who
+      // left no email is precisely the one who most needs the WhatsApp a seller will tap. Written
+      // BEFORE the email is attempted, so an outage cannot make the event disappear.
+      await emitNotification(db, {
+        organizationId: folio.organizationId,
+        folioId: folio.id,
+        event: 'booking_grace_entered',
+        hasEmail: !!folio.customerEmail,
+      })
+
+      if (!folio.customerEmail || !env.RESEND_API_KEY) continue
 
       // The send has its OWN guard, separate from the per-folio one. A Resend outage is not a
       // failed folio: the apartado is fine, it advanced to ② by the clock alone, and nothing about
@@ -162,8 +176,17 @@ export async function sweepExpiredBookings(env: CloudflareBindings): Promise<Swe
         })
       } catch (err) {
         console.error('[sweep] reminder email failed', folio.id, err)
+        // Recorded rather than only logged (US-A86): the row keeps the error and stays visible in
+        // the admin's outbox, so a provider's bad afternoon is a fact somebody can see.
+        await recordEmailOutcome(db, folio.organizationId, folio.id, 'booking_grace_entered', {
+          ok: false,
+          error: String(err),
+        })
         continue
       }
+      await recordEmailOutcome(db, folio.organizationId, folio.id, 'booking_grace_entered', {
+        ok: true,
+      })
 
       await db
         .update(folios)

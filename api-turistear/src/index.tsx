@@ -15,6 +15,7 @@ import portalRouter from './routes/portal'
 import posRouter from './routes/pos'
 import { sweepExpiredBookings } from './routes/pos/sweep'
 import reportsRouter from './routes/reports'
+import notificationsRouter from './routes/notifications'
 import servicesRouter from './routes/services'
 import ticketRouter from './routes/ticket'
 import ticketsRouter from './routes/tickets'
@@ -47,6 +48,7 @@ app.route('/api/folios', foliosRouter)
 app.route('/api/tickets', ticketsRouter)
 app.route('/api/cash', cashRouter)
 app.route('/api/reports', reportsRouter)
+app.route('/api/notifications', notificationsRouter)
 app.route('/api/affiliate/operators', managerOperatorsRouter)
 app.route('/api/operator', operatorAccessRouter)
 

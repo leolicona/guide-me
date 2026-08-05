@@ -32,6 +32,7 @@ const FolioHistoryPage = lazy(() => import('./pages/FolioHistoryPage'))
 const FolioHistoryDetailPage = lazy(() => import('./pages/FolioHistoryDetailPage'))
 const ScannerPage = lazy(() => import('./pages/ScannerPage'))
 const FoliosListPage = lazy(() => import('./pages/FoliosListPage'))
+const OutboxPage = lazy(() => import('./pages/OutboxPage'))
 const FolioDetailPage = lazy(() => import('./pages/FolioDetailPage'))
 const BalancePage = lazy(() => import('./pages/BalancePage'))
 const CashBalancesPage = lazy(() => import('./pages/CashBalancesPage'))
@@ -198,6 +199,16 @@ function App() {
               element={
                 <RoleGuard role="affiliate">
                   <OperatorsPage />
+                </RoleGuard>
+              }
+            />
+
+            {/* US-A86 — the admin's outbox. Admin-only: the seller has no inbox by design (D13). */}
+            <Route
+              path={ROUTES.OUTBOX}
+              element={
+                <RoleGuard role="admin">
+                  <OutboxPage />
                 </RoleGuard>
               }
             />
