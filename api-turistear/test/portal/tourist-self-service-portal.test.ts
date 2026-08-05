@@ -116,7 +116,7 @@ const getSlotBooked = async (id: string) =>
 
 const getRequestRow = (folioId: string) =>
   env.DB.prepare(
-    `SELECT id, status, reason, resolution_note, resolved_by FROM cancellation_requests WHERE folio_id = ? ORDER BY created_at DESC LIMIT 1`,
+    `SELECT id, status, reason, resolution_note, resolved_by FROM folio_requests WHERE folio_id = ? ORDER BY created_at DESC LIMIT 1`,
   )
     .bind(folioId)
     .first<{
@@ -155,7 +155,7 @@ const requestCancellation = async (token: string, reason?: string) => {
 
 const listRequests = async (email: string, query = '') => {
   const res = await SELF.fetch(
-    `http://api.local/api/folios/cancellation-requests${query ? `?${query}` : ''}`,
+    `http://api.local/api/folios/requests${query ? `?${query}` : ''}`,
     { headers: auth(email) },
   )
   return { status: res.status, json: (await res.json()) as any }
@@ -163,7 +163,7 @@ const listRequests = async (email: string, query = '') => {
 
 const approveRequest = async (email: string, requestId: string, body: Record<string, unknown> = {}) => {
   const res = await SELF.fetch(
-    `http://api.local/api/folios/cancellation-requests/${requestId}/approve`,
+    `http://api.local/api/folios/requests/${requestId}/approve`,
     { method: 'POST', headers: jsonAuth(email), body: JSON.stringify(body) },
   )
   return { status: res.status, json: (await res.json()) as any }
@@ -171,7 +171,7 @@ const approveRequest = async (email: string, requestId: string, body: Record<str
 
 const rejectRequest = async (email: string, requestId: string, body: Record<string, unknown>) => {
   const res = await SELF.fetch(
-    `http://api.local/api/folios/cancellation-requests/${requestId}/reject`,
+    `http://api.local/api/folios/requests/${requestId}/reject`,
     { method: 'POST', headers: jsonAuth(email), body: JSON.stringify(body) },
   )
   return { status: res.status, json: (await res.json()) as any }
@@ -231,9 +231,9 @@ const mockFetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => 
 })
 
 const clearPortalDb = async () => {
-  await env.DB.exec('DELETE FROM cancellation_requests')
   await env.DB.exec('DELETE FROM folio_access_tokens')
   await env.DB.exec('DELETE FROM folio_line_extras')
+  await env.DB.exec('DELETE FROM folio_requests')
   await env.DB.exec('DELETE FROM folio_lines')
   await env.DB.exec('DELETE FROM folio_payments')
   await env.DB.exec('DELETE FROM notifications')
@@ -400,7 +400,7 @@ describe('Tourist Self-Service Portal — magic link, itinerary, cancellation re
 
     // Still exactly one request row for the first folio.
     const count = await env.DB.prepare(
-      `SELECT count(*) AS c FROM cancellation_requests WHERE folio_id = ?`,
+      `SELECT count(*) AS c FROM folio_requests WHERE folio_id = ?`,
     )
       .bind(folioId)
       .first<{ c: number }>()

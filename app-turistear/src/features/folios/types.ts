@@ -45,6 +45,9 @@ export interface FolioListItem {
   operator_name?: string | null
   // US-A78 — the debt. 'pending' = cancelled, money owed, nobody confirmed the hand-back.
   refund_status?: RefundStatus
+  /** US-A87 — what a closed apartado left the customer, and until when. */
+  credit_amount?: number | null
+  credit_expires_at?: number | null
   refund_amount?: number
   // US-A82 — what was sold (the card's title) and the {itinerary} the ticket send renders.
   lines?: FolioListLine[]
@@ -146,7 +149,7 @@ export interface FolioDetail {
   lines: FolioDetailLine[]
   // US-A84 rule 7 — the absorbed Solicitudes history, newest first. This is the ONLY surface that
   // can carry a rejected request: rejecting it left the folio untouched, so nothing else records it.
-  cancellation_requests?: FolioCancellationRequest[]
+  folio_requests?: FolioCancellationRequest[]
 }
 
 // One row of a folio's own request history (US-A84 D2). Leaner than `CancellationRequest`, which

@@ -24,6 +24,7 @@ const orgColumns = {
   bookingPreDepartureBufferHours: organizations.bookingPreDepartureBufferHours,
   bookingCreationCutoffHours: organizations.bookingCreationCutoffHours,
   noShowMarginMinutes: organizations.noShowMarginMinutes,
+  bookingCreditValidDays: organizations.bookingCreditValidDays,
   lodgingWeekendDays: organizations.lodgingWeekendDays,
   lodgingFreeCancelDays: organizations.lodgingFreeCancelDays,
   lodgingCancelPenaltyPct: organizations.lodgingCancelPenaltyPct,
@@ -44,6 +45,7 @@ const serializeOrg = (o: {
   bookingPreDepartureBufferHours: number
   bookingCreationCutoffHours: number
   noShowMarginMinutes: number
+  bookingCreditValidDays: number
   lodgingWeekendDays: string
   lodgingFreeCancelDays: number
   lodgingCancelPenaltyPct: number
@@ -62,6 +64,7 @@ const serializeOrg = (o: {
   booking_pre_departure_buffer_hours: o.bookingPreDepartureBufferHours,
   booking_creation_cutoff_hours: o.bookingCreationCutoffHours,
   no_show_margin_minutes: o.noShowMarginMinutes,
+  booking_credit_valid_days: o.bookingCreditValidDays,
   lodging_weekend_days: o.lodgingWeekendDays
     ? o.lodgingWeekendDays.split(',').map(Number)
     : [],
@@ -176,6 +179,40 @@ export const updateMyOrganization = async (c: OrganizationsContext) => {
       }
     }
   }
+  // US-A87 (D4) — the THIRD coherence rule: the hold release may not precede the sales cutoff.
+  // Releasing an apartado's spots before the slot stops selling them is loss with no beneficiary —
+  // the customer loses the seat and nobody gets it. Both settings are signed the same way
+  // (+ before departure / − after), so "release is not earlier than the close" is simply
+  // `grace <= cutoff`.
+  //
+  //   grace +15, cutoff 0   → 15 <= 0  false → refused. The shipped default, and the defect.
+  //   grace   0, cutoff 0   → accepted. Released exactly as the slot closes.
+  //   grace −30, cutoff 0   → accepted. Released after the close; the seat is worthless anyway.
+  //   grace   0, cutoff −30 → refused. Released while there were still 30 minutes of selling left.
+  if (
+    input.booking_grace_offset_minutes !== undefined ||
+    input.sales_cutoff_offset_minutes !== undefined
+  ) {
+    const [stored] = await db
+      .select({
+        grace: organizations.bookingGraceOffsetMinutes,
+        cutoff: organizations.salesCutoffOffsetMinutes,
+      })
+      .from(organizations)
+      .where(eq(organizations.id, user.organizationId))
+      .limit(1)
+
+    const grace = input.booking_grace_offset_minutes ?? stored?.grace ?? 15
+    const cutoff = input.sales_cutoff_offset_minutes ?? stored?.cutoff ?? 0
+    if (grace > cutoff) {
+      throw new ApiError(
+        'RELEASE_BEFORE_SALES_CUTOFF',
+        422,
+        'La liberación del apartado no puede ocurrir antes del cierre de ventas: liberarías lugares que ya no se pueden vender.',
+      )
+    }
+  }
+
   // US-A85 (D23) — the no-show margin may not mark a customer absent while their seat is still on
   // sale. An org that keeps selling 30 minutes past departure and calls people no-shows at the
   // departure instant would be declaring someone absent BEFORE it sold them their ticket. Both are
@@ -205,6 +242,8 @@ export const updateMyOrganization = async (c: OrganizationsContext) => {
   }
   if (input.no_show_margin_minutes !== undefined)
     updates.noShowMarginMinutes = input.no_show_margin_minutes
+  if (input.booking_credit_valid_days !== undefined)
+    updates.bookingCreditValidDays = input.booking_credit_valid_days
   if (input.lodging_weekend_days !== undefined)
     updates.lodgingWeekendDays = input.lodging_weekend_days.join(',')
   if (input.lodging_free_cancel_days !== undefined)

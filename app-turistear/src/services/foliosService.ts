@@ -60,7 +60,7 @@ export const listFolios = async (filters: FolioFilters = {}): Promise<FolioListP
 // a number the filtered list will actually deliver (S-4).
 export interface FolioCounts {
   verification: number
-  cancellation_requests: number
+  folio_requests: number
   refunds: number
   overdue: number
   undelivered: number
@@ -123,7 +123,7 @@ export const listCancellationRequests = async (
   status: CancellationRequestStatus | 'all' = 'pending',
 ): Promise<CancellationRequest[]> => {
   const res = await request<{ requests: CancellationRequest[] }>(
-    `/api/folios/cancellation-requests?status=${status}`,
+    `/api/folios/requests?status=${status}`,
   )
   return res.requests
 }
@@ -135,7 +135,7 @@ export const approveCancellationRequest = async (
   input: ApproveCancellationRequestInput = {},
 ): Promise<{ request: CancellationRequest; folio: FolioDetail }> =>
   request<{ request: CancellationRequest; folio: FolioDetail }>(
-    `/api/folios/cancellation-requests/${requestId}/approve`,
+    `/api/folios/requests/${requestId}/approve`,
     { method: 'POST', body: JSON.stringify(input) },
   )
 
@@ -145,7 +145,7 @@ export const rejectCancellationRequest = async (
   input: RejectCancellationRequestInput,
 ): Promise<CancellationRequest> => {
   const res = await request<{ request: CancellationRequest }>(
-    `/api/folios/cancellation-requests/${requestId}/reject`,
+    `/api/folios/requests/${requestId}/reject`,
     { method: 'POST', body: JSON.stringify(input) },
   )
   return res.request

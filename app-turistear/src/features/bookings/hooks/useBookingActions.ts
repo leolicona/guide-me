@@ -4,14 +4,14 @@ import {
   claimReminder,
   markTicketsSent,
   markTicketsSentAdmin,
-  reactivateBooking,
   rejectPayment,
+  rescheduleFolio,
   settleBooking,
   verifyPayment,
   type SettlePayload,
 } from '../../../services/bookingsService'
 
-// A booking action mutates a folio and (settle/cancel/reactivate) inventory, so every dependent
+// A booking action mutates a folio and (settle/cancel/reschedule) inventory, so every dependent
 // query must refetch. We invalidate the two folio NAMESPACES by their root keys (TanStack matches
 // by prefix): `['pos']` covers the catalog availability + the agent folio list/detail; `['folios']`
 // covers the admin list/detail. Using the literal roots keeps `features/bookings` free of any
@@ -43,10 +43,39 @@ export function useCancelBooking() {
 }
 
 // US-AG07.5 — reactivate an expired booking when capacity allows.
-export function useReactivateBooking() {
-  const invalidate = useInvalidateBookings()
-  return useMutation({ mutationFn: (id: string) => reactivateBooking(id), onSuccess: invalidate })
+// US-AG52 — reagendar. Invalidates the same keys a settle does: the folio moved dates, so any list
+// showing its departure is stale, and on a paid folio the ticket was re-issued too.
+export interface RescheduleLine {
+  id: string
+  service_name: string
+  slot_date: string | null
+  slot_start_time: string | null
 }
+export interface RescheduleSlot {
+  id: string
+  date: string
+  start_time: string
+  remaining: number
+}
+export interface RescheduleInput {
+  folioId: string
+  moves: { folio_line_id: string; to_slot_id: string }[]
+}
+
+export function useRescheduleFolio() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ folioId, moves }: RescheduleInput) => rescheduleFolio(folioId, moves),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['folios'] })
+      void qc.invalidateQueries({ queryKey: ['pos'] })
+    },
+  })
+}
+
+// `useReactivateBooking` is RETIRED with its endpoint (booking-reschedule.spec.md D3). A call to
+// POST /api/pos/folios/:id/reactivate now returns 404.
+
 
 // US-AG07.3 — claim the WhatsApp reminder (atomic; call BEFORE opening WhatsApp).
 export function useClaimReminder() {

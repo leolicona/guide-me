@@ -138,8 +138,8 @@ const clearDb = async () => {
   for (const t of [
     'folio_line_extras',
     'folio_access_tokens',
-    'cancellation_requests',
     'slot_zones',
+    'folio_requests',
     'folio_lines',
     'folio_payments',
     'notifications',
@@ -160,6 +160,15 @@ beforeEach(async () => {
 afterEach(() => vi.restoreAllMocks())
 
 // ---------------------------------------------------------------------------
+  // RETIRED with US-AG07.5 (docs/bookings/booking-reschedule.spec.md, D3). These scenarios drove the
+  // `/reactivate` endpoint, which cleared `cancelled_at` and left the history asserting an expiry
+  // never happened — after the customer had been told it did. They are DELETED rather than rewritten
+  // against another endpoint: a deletion is the honest form of retiring a capability, and editing
+  // them into something else would hide that one was removed.
+  //
+  // What they covered that still matters — that a re-block obeys the same atomic capacity guard as
+  // a sale — is now covered by the reschedule's destination guard (S-3).
+
 describe('US-A64 §4 — release paths', () => {
   it('Scenario 7 — cancelling releases the zone counter and reconciles the slot', async () => {
     const { organizationId } = await seedUser({ email: AGENT, role: 'agent' })
@@ -188,36 +197,5 @@ describe('US-A64 §4 — release paths', () => {
     expect(await slotBooked(slotId)).toBe(0)
   })
 
-  it('Scenario 16 — un-cancel re-blocks into the same zone', async () => {
-    const { organizationId } = await seedUser({ email: AGENT, role: 'agent' })
-    const { slotId, alto } = await seedZonedService(organizationId)
-    const folioId = await bookZone(slotId, alto, 2)
-    await cancel(folioId)
-    expect(await zoneBooked(slotId, alto)).toBe(0)
 
-    const res = await reactivate(folioId)
-    expect(res.status).toBe(200)
-    expect(await folioStatus(folioId)).toBe('booking')
-    expect(await zoneBooked(slotId, alto)).toBe(2)
-    expect(await slotBooked(slotId)).toBe(2)
-  })
-
-  it('Scenario 17 — un-cancel fails when the zone refilled; nothing changes', async () => {
-    const { organizationId } = await seedUser({ email: AGENT, role: 'agent' })
-    const { slotId, alto, bajo } = await seedZonedService(organizationId)
-    const folioId = await bookZone(slotId, alto, 2) // alto 2/20
-    await cancel(folioId) // alto back to 0
-    // A competing PAID sale fills alto to the brim while this booking was cancelled.
-    await sellPaid(slotId, alto, 20)
-    expect(await zoneBooked(slotId, alto)).toBe(20)
-
-    const res = await reactivate(folioId)
-    expect(res.status).toBe(409)
-    const body = (await res.json()) as { error: { code: string } }
-    expect(body.error.code).toBe('NO_CAPACITY_AVAILABLE')
-    // Untouched: alto stays full, the booking stays cancelled, bajo never moved.
-    expect(await zoneBooked(slotId, alto)).toBe(20)
-    expect(await zoneBooked(slotId, bajo)).toBe(0)
-    expect(await folioStatus(folioId)).toBe('cancelled')
-  })
 })

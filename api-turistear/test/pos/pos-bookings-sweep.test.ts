@@ -80,7 +80,8 @@ const arriveAtGrace = async (folioId: string) => {
 }
 const getFolio = (id: string) =>
   env.DB.prepare(
-    `SELECT status, amount_paid, cancellation_reason, refund_status, cancellation_source, reminder_status
+    `SELECT status, amount_paid, cancellation_reason, refund_status, refund_pin,
+            cancellation_source, reminder_status, credit_amount, credit_expires_at
        FROM folios WHERE id = ?`,
   )
     .bind(id)
@@ -160,6 +161,128 @@ describe('US-A77 — the settle deadline notifies instead of cancelling', () => 
     // away, so the ladder is in its terminal tier and nothing is owed back.
     expect(row.refund_status).toBe('none')
     expect(row.cancellation_source).toBe('system_expiry')
+  })
+
+  // US-T09 — until now the sweep emitted on ENTERING the grace window and emitted nothing when the
+  // hold actually ended, so the customer's last message said their spots were *about to* be
+  // released. They never learned that they were, or that their deposit had become revenue.
+  it('US-T09 — the close is announced, not just the warning', async () => {
+    const { organizationId } = await seedUser({ email: 'agent@empresa.com', role: 'agent' })
+    const serviceId = await seedService(organizationId)
+    const slotId = await seedSlot(organizationId, serviceId)
+    const folioId = await createBooking('agent@empresa.com', slotId)
+    await arriveAtGrace(folioId)
+
+    await sweepExpiredBookings(env)
+
+    const rows = (
+      await env.DB.prepare(
+        `SELECT channel, status FROM notifications
+          WHERE folio_id = ? AND event = 'booking_expired' ORDER BY channel`,
+      ).bind(folioId).all()
+    ).results as Array<{ channel: string; status: string }>
+
+    // D20 — WhatsApp always, email additionally. This fixture carries `c@example.com`, so both are
+    // pending; the no-address case is the next test.
+    expect(rows.map((r) => r.channel)).toEqual(['email', 'whatsapp'])
+    expect(rows.every((r) => r.status === 'pending')).toBe(true)
+  })
+
+  it('US-T09 — with no address on file the WhatsApp row still goes out', async () => {
+    const { organizationId } = await seedUser({ email: 'agent@empresa.com', role: 'agent' })
+    const serviceId = await seedService(organizationId)
+    const slotId = await seedSlot(organizationId, serviceId)
+    const folioId = await createBooking('agent@empresa.com', slotId)
+    await env.DB.prepare(`UPDATE folios SET customer_email = NULL WHERE id = ?`).bind(folioId).run()
+    await arriveAtGrace(folioId)
+
+    await sweepExpiredBookings(env)
+
+    const rows = (
+      await env.DB.prepare(
+        `SELECT channel, status FROM notifications
+          WHERE folio_id = ? AND event = 'booking_expired' ORDER BY channel`,
+      ).bind(folioId).all()
+    ).results as Array<{ channel: string; status: string }>
+
+    // `skipped` is "this channel does not apply", which is a different fact from "the provider
+    // refused" and must not be counted alongside it. The customer is still reached.
+    expect(rows.find((r) => r.channel === 'whatsapp')!.status).toBe('pending')
+    expect(rows.find((r) => r.channel === 'email')!.status).toBe('skipped')
+  })
+
+  // US-A87 (D6/D8) — the credit exists so that raising the terminal tier becomes USABLE. Before it,
+  // a generous tier produced a cash refund somebody had to physically hand to a person who was not
+  // there; now it produces something deliverable to an absent customer.
+  it('US-A87 — a generous terminal tier leaves a CREDIT, not a cash debt', async () => {
+    const { organizationId } = await seedUser({ email: 'agent@empresa.com', role: 'agent' })
+    // A terminal tier of 95%. It has to be that generous, and the reason is worth stating because
+    // it is not obvious and it decides how often credits appear at all:
+    //
+    // the ladder retains a share of what was SOLD, not of what was COLLECTED (engine D3), and the
+    // refund is `max(0, amountPaid − retention)`. This cart is 2 × 150,000 = 300,000 with a 45,000
+    // deposit, so a 40% tier retains 180,000 — more than was ever paid — and leaves NOTHING. That
+    // is US-A76 by name: "a 30% deposit against a 50% retention refunds nothing."
+    //
+    // At 95% the retention is 15,000 and the deposit leaves 30,000 behind.
+    await env.DB.prepare(
+      `UPDATE organizations SET cancellation_policy = ?, booking_credit_valid_days = 30 WHERE id = ?`,
+    )
+      .bind(
+        JSON.stringify({
+          version: 1,
+          tiers: [{ min_hours: null, refund_pct: 95, agent_commission_pct: 100 }],
+        }),
+        organizationId,
+      )
+      .run()
+    const serviceId = await seedService(organizationId)
+    const slotId = await seedSlot(organizationId, serviceId)
+    const folioId = await createBooking('agent@empresa.com', slotId)
+    await arriveAtGrace(folioId)
+
+    await sweepExpiredBookings(env)
+
+    const row = await getFolio(folioId)
+    // 45,000 paid − 15,000 retained.
+    expect(row.credit_amount).toBe(30000)
+    expect(row.credit_expires_at).toBeGreaterThan(Math.floor(Date.now() / 1000))
+    // And NOT a cash obligation: nobody is standing there to receive it, and a refund PIN would be
+    // a debt the customer never asked for.
+    expect(row.refund_status).toBe('none')
+    expect(row.refund_pin).toBeNull()
+  })
+
+  it('US-A87 — the inherited default leaves no credit, and no date on nothing', async () => {
+    const { organizationId } = await seedUser({ email: 'agent@empresa.com', role: 'agent' })
+    const serviceId = await seedService(organizationId)
+    const slotId = await seedSlot(organizationId, serviceId)
+    const folioId = await createBooking('agent@empresa.com', slotId)
+    await arriveAtGrace(folioId)
+
+    await sweepExpiredBookings(env)
+
+    const row = await getFolio(folioId)
+    // US-A76 chose this default deliberately; the credit feature does not make anyone more generous.
+    expect(row.credit_amount).toBe(0)
+    expect(row.credit_expires_at).toBeNull()
+  })
+
+  it('US-T09 — a second run cannot announce the same close twice', async () => {
+    const { organizationId } = await seedUser({ email: 'agent@empresa.com', role: 'agent' })
+    const serviceId = await seedService(organizationId)
+    const slotId = await seedSlot(organizationId, serviceId)
+    const folioId = await createBooking('agent@empresa.com', slotId)
+    await arriveAtGrace(folioId)
+
+    await sweepExpiredBookings(env)
+    await sweepExpiredBookings(env)
+
+    const n = await env.DB.prepare(
+      `SELECT COUNT(*) AS n FROM notifications WHERE folio_id = ? AND event = 'booking_expired'`,
+    ).bind(folioId).first<{ n: number }>()
+    // Two rows — one per channel — never four. The unique index is the guard.
+    expect(n!.n).toBe(2)
   })
 
   it('one broken folio does not abort the run', async () => {

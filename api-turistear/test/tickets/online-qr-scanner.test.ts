@@ -67,11 +67,10 @@ const getRedeemedCount = async (lineId: string) => {
 
 // folio_line_extras → folio_lines → folios → slots → schedules → service_extras → services
 const clearPosDb = async () => {
-  await env.DB.exec('DELETE FROM cancellation_requests')
   await env.DB.exec('DELETE FROM folio_access_tokens')
   await env.DB.exec('DELETE FROM folio_line_extras')
+  await env.DB.exec('DELETE FROM folio_requests')
   await env.DB.exec('DELETE FROM folio_lines')
-  await env.DB.exec('DELETE FROM cancellation_requests')
   await env.DB.exec('DELETE FROM folio_access_tokens')
   await env.DB.exec('DELETE FROM folio_payments')
   await env.DB.exec('DELETE FROM notifications')

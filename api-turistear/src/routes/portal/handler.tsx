@@ -4,7 +4,7 @@ import { renderSVG } from 'uqr'
 import { TicketCard } from '../ticket/card'
 import { getDb, type Db } from '../../db/client'
 import {
-  cancellationRequests,
+  folioRequests,
   folioAccessTokens,
   folioLines,
   folios,
@@ -306,17 +306,17 @@ const loadPortalData = async (
 
   const [request] = await db
     .select({
-      status: cancellationRequests.status,
-      resolutionNote: cancellationRequests.resolutionNote,
+      status: folioRequests.status,
+      resolutionNote: folioRequests.resolutionNote,
     })
-    .from(cancellationRequests)
+    .from(folioRequests)
     .where(
       and(
-        eq(cancellationRequests.folioId, folioId),
-        eq(cancellationRequests.organizationId, org),
+        eq(folioRequests.folioId, folioId),
+        eq(folioRequests.organizationId, org),
       ),
     )
-    .orderBy(desc(cancellationRequests.createdAt))
+    .orderBy(desc(folioRequests.createdAt))
     .limit(1)
 
   return {
@@ -439,13 +439,13 @@ export const submitCancellationRequest = async (c: PortalContext) => {
   }
 
   const [open] = await db
-    .select({ id: cancellationRequests.id })
-    .from(cancellationRequests)
+    .select({ id: folioRequests.id })
+    .from(folioRequests)
     .where(
       and(
-        eq(cancellationRequests.folioId, resolution.folioId),
-        eq(cancellationRequests.organizationId, resolution.organizationId),
-        eq(cancellationRequests.status, 'pending'),
+        eq(folioRequests.folioId, resolution.folioId),
+        eq(folioRequests.organizationId, resolution.organizationId),
+        eq(folioRequests.status, 'pending'),
       ),
     )
     .limit(1)
@@ -458,7 +458,7 @@ export const submitCancellationRequest = async (c: PortalContext) => {
   const reason = rawReason ? rawReason.slice(0, REASON_MAX_LENGTH) : null
 
   try {
-    await db.insert(cancellationRequests).values({
+    await db.insert(folioRequests).values({
       id: crypto.randomUUID(),
       organizationId: resolution.organizationId,
       folioId: resolution.folioId,

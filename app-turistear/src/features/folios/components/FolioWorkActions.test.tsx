@@ -26,7 +26,7 @@ const folio = (over: Partial<FolioDetail> = {}): FolioDetail =>
 describe('US-A84 — the folio detail carries its own work', () => {
   it('shows a live request ONCE — as work, not also as history', () => {
     renderWithProviders(
-      <FolioWorkActions folio={folio({ cancellation_requests: [req({})] })} />,
+      <FolioWorkActions folio={folio({ folio_requests: [req({})] })} />,
     )
 
     expect(screen.getByText('El cliente pidió cancelar')).toBeInTheDocument()
@@ -39,7 +39,7 @@ describe('US-A84 — the folio detail carries its own work', () => {
     renderWithProviders(
       <FolioWorkActions
         folio={folio({
-          cancellation_requests: [
+          folio_requests: [
             req({ id: 'r2', status: 'rejected', resolution_note: 'Fuera de ventana' }),
           ],
         })}

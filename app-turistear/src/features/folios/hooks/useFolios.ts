@@ -65,7 +65,7 @@ export const useCancelFolio = () => {
 
 // --- Tourist cancellation requests + refund tracking (US-T04/T05, US-A23) ---
 
-const REQUESTS_KEY = [...FOLIOS_KEY, 'cancellation-requests'] as const
+const REQUESTS_KEY = [...FOLIOS_KEY, 'requests'] as const
 
 // US-T04 — the admin review queue (defaults to pending).
 //

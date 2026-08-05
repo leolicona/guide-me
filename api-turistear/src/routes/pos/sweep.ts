@@ -67,6 +67,7 @@ export async function sweepExpiredBookings(env: CloudflareBindings): Promise<Swe
       name: organizations.name,
       timezone: organizations.timezone,
       graceOffsetMinutes: organizations.bookingGraceOffsetMinutes,
+      creditValidDays: organizations.bookingCreditValidDays,
     })
     .from(organizations)
     .where(inArray(organizations.id, orgIds))
@@ -121,7 +122,7 @@ export async function sweepExpiredBookings(env: CloudflareBindings): Promise<Swe
           : nowSec
 
       if (nowSec >= graceInstant) {
-        const { won } = await cancelFolioPriced(
+        const { won, outcome } = await cancelFolioPriced(
           db,
           folio.organizationId,
           folio.id,
@@ -133,7 +134,52 @@ export async function sweepExpiredBookings(env: CloudflareBindings): Promise<Swe
             source: 'system_expiry',
           },
         )
-        if (won) result.cancelled++
+        if (won) {
+          result.cancelled++
+
+          // US-A87 (D6/D10) — what the ladder did NOT retain becomes a CREDIT, not cash. Nobody is
+          // standing there to hand cash to: the close is produced by a clock and the customer is
+          // absent by definition, so a refund obligation would create a debt with a PIN nobody
+          // asked for.
+          //
+          // Zero for every organization on the inherited default, whose terminal tier retains 100%
+          // (US-A76). This does not make anyone more generous — it makes that knob USABLE, because
+          // raising it used to produce a cash refund somebody had to physically deliver to a person
+          // who was not there.
+          //
+          // Written only when there IS something to leave: a `credit_expires_at` on a zero credit
+          // is a date on nothing.
+          if (outcome.refund > 0) {
+            await db
+              .update(folios)
+              .set({
+                creditAmount: outcome.refund,
+                creditExpiresAt: new Date(
+                  (nowSec + org.creditValidDays * 86_400) * 1000,
+                ),
+                // The ladder produced a remainder, so the cancellation's own refund bookkeeping
+                // must NOT also open a cash obligation for it — the money is being handed over as
+                // a credit instead. `cancelFolioPriced` set these; this is the one path that
+                // converts them.
+                refundStatus: 'none',
+                refundAmount: 0,
+                refundPin: null,
+                updatedAt: now,
+              })
+              .where(
+                and(eq(folios.id, folio.id), eq(folios.organizationId, folio.organizationId)),
+              )
+          }
+          // US-T09 — the hold actually ended. Emitted AFTER the cancellation won its race, so a
+          // folio somebody else cancelled first is not announced twice; and emitted whether or not
+          // an address exists, because WhatsApp is the channel that always reaches them (D20).
+          await emitNotification(db, {
+            organizationId: folio.organizationId,
+            folioId: folio.id,
+            event: 'booking_expired',
+            hasEmail: !!folio.customerEmail,
+          })
+        }
         continue
       }
 

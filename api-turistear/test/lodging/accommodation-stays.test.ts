@@ -209,6 +209,15 @@ beforeEach(async () => {
 // Engine unit tests (pure — spec §3, scenarios 6/7/10 + D12 quantity math)
 // ============================================================================
 
+  // RETIRED with US-AG07.5 (docs/bookings/booking-reschedule.spec.md, D3). These scenarios drove the
+  // `/reactivate` endpoint, which cleared `cancelled_at` and left the history asserting an expiry
+  // never happened — after the customer had been told it did. They are DELETED rather than rewritten
+  // against another endpoint: a deletion is the honest form of retiring a capability, and editing
+  // them into something else would hide that one was removed.
+  //
+  // What they covered that still matters — that a re-block obeys the same atomic capacity guard as
+  // a sale — is now covered by the reschedule's destination guard (S-3).
+
 describe('lodging engine', () => {
   const unitType: UnitTypeRateInfo = {
     baseRate: 100000,
@@ -912,61 +921,7 @@ describe('POS lodging sale path', () => {
     expect((await sellStay(typeId, '2026-07-10', '2026-07-13', 2)).status).toBe(201)
   })
 
-  it('Sc15 — reactivating a cancelled stay booking re-claims its quantity', async () => {
-    const { serviceId } = await seedLodgingService(orgId)
-    const { typeId } = await seedUnitType({ organizationId: orgId, serviceId, inventoryCount: 1 })
 
-    const booking = await sellStay(typeId, '2026-07-10', '2026-07-13', 2, 1, {
-      down_payment: 150000,
-      customer_name: 'Cliente Test',
-      customer_phone: '+525555555555',
-    })
-    const folioId = ((await booking.json()) as SaleResponse).folio.id
-    await SELF.fetch(`http://api.local/api/pos/folios/${folioId}/cancel`, {
-      method: 'POST',
-      headers: jsonAuth(ADMIN_EMAIL),
-      body: JSON.stringify({ reason: 'temp' }),
-    })
-    expect((await reservationsForFolio(folioId))[0].status).toBe('cancelled')
-
-    const reactivate = await SELF.fetch(`http://api.local/api/pos/folios/${folioId}/reactivate`, {
-      method: 'POST',
-      headers: auth(ADMIN_EMAIL),
-    })
-    expect(reactivate.status).toBe(200)
-    expect((await reservationsForFolio(folioId))[0].status).toBe('active')
-  })
-
-  it('Sc15 — reactivation fails if the inventory was consumed while the booking was cancelled', async () => {
-    const { serviceId } = await seedLodgingService(orgId)
-    const { typeId } = await seedUnitType({ organizationId: orgId, serviceId, inventoryCount: 1 })
-
-    const booking = await sellStay(typeId, '2026-07-10', '2026-07-13', 2, 1, {
-      down_payment: 150000,
-      customer_name: 'Cliente Test',
-      customer_phone: '+525555555555',
-    })
-    const folioId = ((await booking.json()) as SaleResponse).folio.id
-    await SELF.fetch(`http://api.local/api/pos/folios/${folioId}/cancel`, {
-      method: 'POST',
-      headers: jsonAuth(ADMIN_EMAIL),
-      body: JSON.stringify({ reason: 'temp' }),
-    })
-
-    // A competing sale grabs the freed room.
-    expect((await sellStay(typeId, '2026-07-11', '2026-07-12', 2)).status).toBe(201)
-
-    const reactivate = await SELF.fetch(`http://api.local/api/pos/folios/${folioId}/reactivate`, {
-      method: 'POST',
-      headers: auth(ADMIN_EMAIL),
-    })
-    expect(reactivate.status).toBe(409)
-    expect(((await reactivate.json()) as { error: { code: string } }).error.code).toBe(
-      'INSUFFICIENT_INVENTORY',
-    )
-    // The reservation stays cancelled (reactivation rolled back).
-    expect((await reservationsForFolio(folioId))[0].status).toBe('cancelled')
-  })
 
   it('settling a stay booking pays it without stamping a QR on the stay line', async () => {
     const { serviceId } = await seedLodgingService(orgId)

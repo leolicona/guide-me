@@ -535,3 +535,34 @@ describe('US-A85 — a departed folio says whether its seats were used', () => {
     ).toMatch(/Vence en/)
   })
 })
+
+// --- US-A87 — the credit a closed apartado leaves --------------------------------------------
+
+describe('US-A87 — the credit reads first on a closed apartado', () => {
+  const closed = { status: 'cancelled' as const, total: 300000, amount_paid: 90000 }
+
+  it('a credit outranks the "(sin reembolso)" reading', () => {
+    // It is the one thing on this folio a seller can still act on: the customer in front of them
+    // owns it, and an agent who cannot see it cannot decide to honour it.
+    expect(folioMoneyAxis({ ...closed, refund_status: 'none', credit_amount: 30000 }).reading)
+      .toEqual({ kind: 'credit', cents: 30000 })
+  })
+
+  it('no credit keeps the honest "(sin reembolso)" reading', () => {
+    // The inherited default retains 100%, so this is what most closed apartados look like.
+    expect(folioMoneyAxis({ ...closed, refund_status: 'none', credit_amount: 0 }).reading)
+      .toEqual({ kind: 'refundNone', cents: 90000 })
+  })
+
+  it('an unconfirmed refund still outranks a credit — a debt is louder than a balance', () => {
+    expect(
+      folioMoneyAxis({
+        ...closed, refund_status: 'pending', refund_amount: 45000, credit_amount: 30000,
+      }).reading.kind,
+    ).toBe('refundOwed')
+  })
+
+  it('a folio from before the feature is unaffected', () => {
+    expect(folioMoneyAxis({ ...closed, refund_status: 'none' }).reading.kind).toBe('refundNone')
+  })
+})

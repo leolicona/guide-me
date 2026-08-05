@@ -59,7 +59,7 @@ export function FolioWorkActions({ folio }: { folio: FolioDetail }) {
   const [requestNote, setRequestNote] = useState('')
   const [clawback, setClawback] = useState(false)
 
-  const requests = folio.cancellation_requests ?? []
+  const requests = folio.folio_requests ?? []
   const pending = requests.find((r) => r.status === 'pending')
   // The live request is already presented above, in full, as WORK. Repeating it in the history
   // below put the same request on screen twice, with the same reason under each — a defect no test

@@ -183,7 +183,7 @@ describe('mutations refresh the folio surface', () => {
   it('useApproveCancellationRequest refreshes folios AND the request queue — one key covers both', async () => {
     let requestHits = 0
     server.use(
-      http.get('/api/folios/cancellation-requests', () => {
+      http.get('/api/folios/requests', () => {
         requestHits += 1
         return HttpResponse.json({ requests: requestHits === 1 ? [aCancellationRequest()] : [] })
       }),

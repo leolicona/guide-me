@@ -130,6 +130,7 @@ export default function SettingsPage() {
   const [graceMag, setGraceMag] = useState('')
   const [graceDir, setGraceDir] = useState<OffsetDir>('before')
   // US-A85 (D23) — when a departed line with nothing redeemed starts reading as "Sin usar".
+  const [creditDays, setCreditDays] = useState('')
   const [noShowMag, setNoShowMag] = useState('')
   const [noShowDir, setNoShowDir] = useState<OffsetDir>('after')
   const [saved, setSaved] = useState(false)
@@ -157,6 +158,7 @@ export default function SettingsPage() {
     const c = splitOffset(org.sales_cutoff_offset_minutes)
     setCutoffMag(String(c.mag))
     setCutoffDir(c.dir)
+    setCreditDays(String(org.booking_credit_valid_days ?? 90))
     const n = splitOffset(org.no_show_margin_minutes ?? 0)
     setNoShowMag(String(n.mag))
     setNoShowDir(n.dir)
@@ -190,6 +192,9 @@ export default function SettingsPage() {
     m === '' || !Number.isInteger(n) || n < 0 || n > OFFSET_MAX
   const cutoffInvalid = magInvalid(cutoffMag, cutoffMagNum)
   const graceInvalid = magInvalid(graceMag, graceMagNum)
+  const creditDaysNum = Number(creditDays)
+  const creditDaysInvalid =
+    creditDays !== '' && (!Number.isInteger(creditDaysNum) || creditDaysNum < 1 || creditDaysNum > 730)
   const noShowMagNum = Number(noShowMag)
   const noShowInvalid = magInvalid(noShowMag, noShowMagNum)
 
@@ -202,8 +207,22 @@ export default function SettingsPage() {
   // sale — declaring someone a no-show before we sold them their ticket.
   const noShowTooEarly =
     !noShowInvalid && !cutoffInvalid && noShowMag !== '' && noShowSigned > cutoffSigned
+  // US-A87 (D4) — the third coherence rule. Releasing an apartado's spots before the slot stops
+  // selling them hands back seats nobody can buy: the customer loses them and nobody gets them.
+  // EVERY organization ships in violation of this (release +15, cutoff 0), so the message has to
+  // say what to change rather than merely refuse.
+  const releaseTooEarly =
+    !graceInvalid && !cutoffInvalid && graceMag !== '' && graceSigned > cutoffSigned
   const invalid =
-    pctInvalid || bufferInvalid || creationCutoffInvalid || cutoffInvalid || graceInvalid || noShowInvalid || noShowTooEarly
+    pctInvalid ||
+    bufferInvalid ||
+    creationCutoffInvalid ||
+    cutoffInvalid ||
+    graceInvalid ||
+    noShowInvalid ||
+    noShowTooEarly ||
+    releaseTooEarly ||
+    creditDaysInvalid
 
   const dirty =
     !!org &&
@@ -213,7 +232,8 @@ export default function SettingsPage() {
       cutoffHoursNum !== org.booking_creation_cutoff_hours ||
       cutoffSigned !== org.sales_cutoff_offset_minutes ||
       graceSigned !== org.booking_grace_offset_minutes ||
-      noShowSigned !== (org.no_show_margin_minutes ?? 0))
+      noShowSigned !== (org.no_show_margin_minutes ?? 0) ||
+      creditDaysNum !== (org.booking_credit_valid_days ?? 90))
 
   const handleSave = () => {
     update.mutate(
@@ -225,6 +245,7 @@ export default function SettingsPage() {
         sales_cutoff_offset_minutes: cutoffSigned,
         booking_grace_offset_minutes: graceSigned,
         no_show_margin_minutes: noShowSigned,
+        booking_credit_valid_days: creditDaysNum,
       },
       { onSuccess: () => setSaved(true) },
     )
@@ -460,6 +481,36 @@ export default function SettingsPage() {
                   setDir={setNoShowDir}
                   invalid={noShowInvalid}
                 />
+
+                {/* US-A87 (D10) — how long the operator carries a closed apartado's credit. Its own
+                    number: an accounting horizon, not one of the departure clocks. A perpetual
+                    credit is an unbounded liability nobody reconciles. */}
+                <TextField
+                  label="Vigencia del saldo a favor"
+                  type="number"
+                  size="small"
+                  value={creditDays}
+                  onChange={(e) => setCreditDays(e.target.value)}
+                  error={creditDaysInvalid}
+                  helperText={
+                    creditDaysInvalid
+                      ? 'Captura entre 1 y 730 días.'
+                      : 'Cuánto dura el saldo que queda cuando un apartado vence sin liquidarse.'
+                  }
+                  slotProps={{
+                    input: { endAdornment: <InputAdornment position="end">días</InputAdornment> },
+                    htmlInput: { min: 1, max: 730, inputMode: 'numeric' },
+                  }}
+                  sx={{ width: 220 }}
+                />
+
+                {releaseTooEarly && (
+                  <Alert severity="warning">
+                    Con estos valores devolverías los lugares del apartado{' '}
+                    <strong>antes</strong> de dejar de venderlos — nadie podría comprarlos. Pon la
+                    «Liberación de apartado» igual o después del «Cierre de ventas».
+                  </Alert>
+                )}
 
                 {noShowTooEarly && (
                   <Alert severity="warning">

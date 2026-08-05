@@ -447,28 +447,39 @@ scope may make the line's redundant, exactly as it did in `folio-state-machine.s
 
 ### Phase 1 — say what happened, and stop releasing early *(no migration · `fix/apartado-close-honesty`)*
 
-- [ ] D4's coherence rule in `PUT /api/organizations/me` + mirrored in `SettingsPage`
-- [ ] `booking_expired` in the outbox whitelist, emitted by the sweep at the release instant
-- [ ] S-10 (without the credit half) · S-11 · S-13
-- [ ] `pos-bookings-sweep.test.ts` gains the emission assertions; its existing ones unchanged
-- [ ] `SPEC.md`: US-A87, US-T09 partial, glossary
+- [x] D4's coherence rule in `PUT /api/organizations/me` + mirrored in `SettingsPage`
+- [x] `booking_expired` in the outbox whitelist, emitted by the sweep at the release instant
+- [x] S-10 · S-11 · S-13, plus the with/without-address split and the org-zone date
+- [x] `pos-bookings-sweep.test.ts` gains the emission + credit assertions; its existing ones unchanged
+- [x] `SPEC.md`: registered in #67
 
 ### Phase 2 — reschedule, credit, and the retirement *(migration `0060` · `feat/booking-reschedule`)*
 
-- [ ] Migration `0060` — the rename + `kind`/slot columns, the widened index, credit, org setting
-- [ ] **The rename carried through**: `db/schema.ts`, `routes/folios/handler.ts`,
-      `utils/folioPendingWork.ts`, the `/api/folios/requests/…` routes, the frontend types and the
-      `Con solicitud` facet
-- [ ] `POST /api/pos/folios/:id/reschedule` (counter) with all **seven** guards — including 5b, the
-      born-expired check BUG-029 added to the sale path
-- [ ] `POST /portal/:token/reschedule-request` (tourist) + approve/reject branching on `kind`
-- [ ] **Paid folios**: QR re-signed, `tickets_delivered` rows cleared and re-emitted (D16)
-- [ ] The credit written at the close; `booking_expired` carries its figures
-- [ ] **`reactivateBooking` deleted** — endpoint, UI branch, and
-      `test/pos/pos-bookings-reactivate.test.ts` **removed, not rewritten**
-- [ ] S-1 … S-9b (incl. S-5b), S-12, S-14 … S-17; **S-3, S-5b, S-8c and S-9b mutation-verified**
-- [ ] Reschedule sheet (counter + portal) + history + credit on the card and the detail
-- [ ] `SPEC.md`: US-AG52, Features by Phase, glossary; **US-AG07.5 struck through and annotated**
+- [x] Migration `0060` — the rename + `kind`/slot columns, the widened index, credit, org setting
+- [x] **The rename carried through** — 37 files, plus 18 test cleanup helpers reordered: the new
+      `folio_requests.folio_line_id` FK means the table must now be deleted BEFORE `folio_lines`
+- [x] `POST /api/pos/folios/:id/reschedule` (counter) with all **seven** guards — including 5b
+- [ ] **`POST /portal/:token/reschedule-request` (tourist) — NOT BUILT.** The counter origin ships;
+      the portal origin does not. The table, the `kind` column and the one-open-petition index are
+      all in place for it, so this is wiring rather than design — but it is a second surface with
+      its own authorization (a portal token, not a session) and its own approval path, and shipping
+      it half-tested would be worse than shipping it next. **D2's requirement still holds for what
+      ships**: a counter reschedule records the seller in `resolved_by`
+- [x] **Paid folios**: QR re-signed (the payload's `expires_at` came from the OLD departure, so a
+      ticket moved further out would have died before its tour), rows cleared and re-emitted
+- [x] The credit written at the close; `booking_expired` carries its figures
+- [x] **`reactivateBooking` deleted** — 262 lines, the route, the hook, the UI branch and FIVE
+      tests (its own file plus two in lodging and two in zoned capacity), removed with the reason
+      written where they were
+- [x] S-1 … S-9b, S-16, S-17 in `pos-bookings-reschedule.test.ts` (14). **S-3b, S-5b and S-9
+      mutation-verified** — and S-3 as first written did **not** survive its mutation: with one line
+      nothing had been taken before the failure, so the compensation was a no-op. S-3b (two lines,
+      the second full) is the smallest case with teeth
+- [ ] S-8c (one open petition of either kind) — needs the portal origin to be meaningful
+- [ ] S-12, S-14 (the credit horizon's independence) — not written
+- [x] Reschedule sheet (counter) + the credit on the card's money axis + the credit-validity setting
+- [ ] The request **history** on the detail, and the portal sheet — deferred with the portal origin
+- [x] `SPEC.md`: registered and struck through in #67
 
 ---
 

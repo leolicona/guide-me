@@ -57,7 +57,7 @@ describe('BUG-023 — the control rows survive a narrow viewport', () => {
   })
 
   it('the pending-work bar owns its overflow too', async () => {
-    withCounts({ verification: 2, refunds: 1, overdue: 3, undelivered: 4, cancellation_requests: 1 })
+    withCounts({ verification: 2, refunds: 1, overdue: 3, undelivered: 4, folio_requests: 1 })
     renderWithProviders(<FoliosListPage />)
 
     const bar = await screen.findByRole('group', { name: 'Trabajo pendiente' })

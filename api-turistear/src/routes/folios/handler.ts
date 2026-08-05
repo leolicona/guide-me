@@ -5,7 +5,7 @@ import { getDb, type Db } from '../../db/client'
 import {
   accommodationReservations,
   affiliateOperators,
-  cancellationRequests,
+  folioRequests,
   folioAccessTokens,
   folioLineExtras,
   folioLines,
@@ -107,6 +107,8 @@ const readFolio = async (db: Db, org: string, folioId: string, apiBaseUrl?: stri
       // portal-only (spec D6) — the admin learns it from the tourist in person, which is
       // exactly what proves the cash changed hands.
       refundStatus: folios.refundStatus,
+      creditAmount: folios.creditAmount,
+      creditExpiresAt: folios.creditExpiresAt,
       refundAmount: folios.refundAmount,
       refundNote: folios.refundNote,
       refundedAt: folios.refundedAt,
@@ -142,22 +144,22 @@ const readFolio = async (db: Db, org: string, folioId: string, apiBaseUrl?: stri
   // the folio it was about is the only surface that can carry it. One folio, one cheap read.
   const requestRows = await db
     .select({
-      id: cancellationRequests.id,
-      status: cancellationRequests.status,
-      reason: cancellationRequests.reason,
-      resolutionNote: cancellationRequests.resolutionNote,
-      resolvedBy: cancellationRequests.resolvedBy,
-      resolvedAt: cancellationRequests.resolvedAt,
-      createdAt: cancellationRequests.createdAt,
+      id: folioRequests.id,
+      status: folioRequests.status,
+      reason: folioRequests.reason,
+      resolutionNote: folioRequests.resolutionNote,
+      resolvedBy: folioRequests.resolvedBy,
+      resolvedAt: folioRequests.resolvedAt,
+      createdAt: folioRequests.createdAt,
     })
-    .from(cancellationRequests)
+    .from(folioRequests)
     .where(
       and(
-        eq(cancellationRequests.folioId, folioId),
-        eq(cancellationRequests.organizationId, org),
+        eq(folioRequests.folioId, folioId),
+        eq(folioRequests.organizationId, org),
       ),
     )
-    .orderBy(desc(cancellationRequests.createdAt))
+    .orderBy(desc(folioRequests.createdAt))
 
   // US-A85 — fulfilment is derived on read, so the detail resolves the org's clock and margin the
   // same way the list does. One derivation, two callers: they cannot disagree.
@@ -251,6 +253,9 @@ const readFolio = async (db: Db, org: string, folioId: string, apiBaseUrl?: stri
     cancellation_reason: folio.cancellationReason,
     cancellation_clawback: folio.cancellationClawback,
     refund_status: folio.refundStatus,
+    // US-A87 — the credit and its expiry, so the detail can state both.
+    credit_amount: folio.creditAmount,
+    credit_expires_at: tsOrNull(folio.creditExpiresAt),
     refund_amount: folio.refundAmount,
     refund_note: folio.refundNote,
     refunded_at: tsOrNull(folio.refundedAt),
@@ -264,7 +269,7 @@ const readFolio = async (db: Db, org: string, folioId: string, apiBaseUrl?: stri
     payments,
     // US-A84 rule 7 — the absorbed request history (newest first). Empty for the vast majority of
     // folios, which is why it costs nothing to always send it.
-    cancellation_requests: requestRows.map((r) => ({
+    folio_requests: requestRows.map((r) => ({
       id: r.id,
       status: r.status,
       reason: r.reason,
@@ -465,6 +470,8 @@ export const listFolios = async (c: FoliosContext) => {
       // US-A78 — the debt itself. The lean row never carried these, so the pending-refunds queue
       // could not show what is owed without a second read per folio.
       refundStatus: folios.refundStatus,
+      creditAmount: folios.creditAmount,
+      creditExpiresAt: folios.creditExpiresAt,
       refundAmount: folios.refundAmount,
       // US-A82 — no surface may infer Express from a null name (business rule 4).
       saleMode: folios.saleMode,
@@ -536,6 +543,9 @@ export const listFolios = async (c: FoliosContext) => {
       // US-A78 — 'pending' = cancelled, money owed, nobody confirmed the hand-back.
       refund_status: r.refundStatus,
       refund_amount: r.refundAmount,
+      // US-A87 — what a closed apartado left the customer, and until when.
+      credit_amount: r.creditAmount,
+      credit_expires_at: tsOrNull(r.creditExpiresAt),
       // US-A82 — what was sold (card title + the WhatsApp {itinerary}), the link the ticket send
       // needs, and the sale mode a null customer_name must never be used to infer.
       sale_mode: r.saleMode,
@@ -594,7 +604,7 @@ export const listFolioCounts = async (c: FoliosContext) => {
 
   return c.json({
     verification,
-    cancellation_requests: requests,
+    folio_requests: requests,
     refunds,
     overdue,
     undelivered,
@@ -1088,32 +1098,32 @@ export const listCancellationRequests = async (c: FoliosContext) => {
   const db = getDb(c.env)
 
   const statusQ = c.req.query('status')
-  const filters = [eq(cancellationRequests.organizationId, org)]
+  const filters = [eq(folioRequests.organizationId, org)]
   if (statusQ === 'approved' || statusQ === 'rejected' || statusQ === 'pending') {
-    filters.push(eq(cancellationRequests.status, statusQ))
+    filters.push(eq(folioRequests.status, statusQ))
   } else if (statusQ !== 'all') {
-    filters.push(eq(cancellationRequests.status, 'pending'))
+    filters.push(eq(folioRequests.status, 'pending'))
   }
 
   const rows = await db
     .select({
-      id: cancellationRequests.id,
-      folioId: cancellationRequests.folioId,
-      status: cancellationRequests.status,
-      reason: cancellationRequests.reason,
-      resolutionNote: cancellationRequests.resolutionNote,
-      resolvedBy: cancellationRequests.resolvedBy,
-      resolvedAt: cancellationRequests.resolvedAt,
-      createdAt: cancellationRequests.createdAt,
+      id: folioRequests.id,
+      folioId: folioRequests.folioId,
+      status: folioRequests.status,
+      reason: folioRequests.reason,
+      resolutionNote: folioRequests.resolutionNote,
+      resolvedBy: folioRequests.resolvedBy,
+      resolvedAt: folioRequests.resolvedAt,
+      createdAt: folioRequests.createdAt,
       customerName: folios.customerName,
       folioStatus: folios.status,
       total: folios.total,
       amountPaid: folios.amountPaid,
     })
-    .from(cancellationRequests)
-    .innerJoin(folios, eq(cancellationRequests.folioId, folios.id))
+    .from(folioRequests)
+    .innerJoin(folios, eq(folioRequests.folioId, folios.id))
     .where(and(...filters))
-    .orderBy(desc(cancellationRequests.createdAt))
+    .orderBy(desc(folioRequests.createdAt))
 
   return c.json({
     requests: rows.map((r) => ({
@@ -1133,16 +1143,16 @@ export const listCancellationRequests = async (c: FoliosContext) => {
 const loadRequest = async (db: Db, org: string, requestId: string) => {
   const [request] = await db
     .select({
-      id: cancellationRequests.id,
-      folioId: cancellationRequests.folioId,
-      status: cancellationRequests.status,
-      reason: cancellationRequests.reason,
+      id: folioRequests.id,
+      folioId: folioRequests.folioId,
+      status: folioRequests.status,
+      reason: folioRequests.reason,
     })
-    .from(cancellationRequests)
+    .from(folioRequests)
     .where(
       and(
-        eq(cancellationRequests.id, requestId),
-        eq(cancellationRequests.organizationId, org),
+        eq(folioRequests.id, requestId),
+        eq(folioRequests.organizationId, org),
       ),
     )
     .limit(1)
@@ -1217,7 +1227,7 @@ export const approveCancellationRequest = async (c: FoliosContext) => {
   }
 
   await db
-    .update(cancellationRequests)
+    .update(folioRequests)
     .set({
       status: 'approved',
       resolvedBy: admin.userId,
@@ -1226,9 +1236,9 @@ export const approveCancellationRequest = async (c: FoliosContext) => {
     })
     .where(
       and(
-        eq(cancellationRequests.id, requestId),
-        eq(cancellationRequests.organizationId, org),
-        eq(cancellationRequests.status, 'pending'),
+        eq(folioRequests.id, requestId),
+        eq(folioRequests.organizationId, org),
+        eq(folioRequests.status, 'pending'),
       ),
     )
 
@@ -1245,8 +1255,8 @@ export const approveCancellationRequest = async (c: FoliosContext) => {
 
   const [updated] = await db
     .select()
-    .from(cancellationRequests)
-    .where(eq(cancellationRequests.id, requestId))
+    .from(folioRequests)
+    .where(eq(folioRequests.id, requestId))
     .limit(1)
 
   return c.json({
@@ -1272,7 +1282,7 @@ export const rejectCancellationRequest = async (c: FoliosContext) => {
 
   const now = new Date()
   await db
-    .update(cancellationRequests)
+    .update(folioRequests)
     .set({
       status: 'rejected',
       resolutionNote: input.note,
@@ -1282,16 +1292,16 @@ export const rejectCancellationRequest = async (c: FoliosContext) => {
     })
     .where(
       and(
-        eq(cancellationRequests.id, requestId),
-        eq(cancellationRequests.organizationId, org),
-        eq(cancellationRequests.status, 'pending'),
+        eq(folioRequests.id, requestId),
+        eq(folioRequests.organizationId, org),
+        eq(folioRequests.status, 'pending'),
       ),
     )
 
   const [updated] = await db
     .select()
-    .from(cancellationRequests)
-    .where(eq(cancellationRequests.id, requestId))
+    .from(folioRequests)
+    .where(eq(folioRequests.id, requestId))
     .limit(1)
 
   return c.json({ request: updated ? serializeRequest(updated) : null })
@@ -1317,6 +1327,8 @@ export const confirmRefund = async (c: FoliosContext) => {
     .select({
       id: folios.id,
       refundStatus: folios.refundStatus,
+      creditAmount: folios.creditAmount,
+      creditExpiresAt: folios.creditExpiresAt,
       refundPin: folios.refundPin,
       refundPinAttempts: folios.refundPinAttempts,
     })

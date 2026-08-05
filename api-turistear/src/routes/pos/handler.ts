@@ -37,6 +37,11 @@ import {
 import { generatePortalToken, portalTokenExpiry } from '../../utils/portal'
 import { naiveEpoch, orgToday, orgWallClockMinute } from '../../utils/tz'
 import { folioFulfillment } from '../../utils/folioFulfillment'
+import {
+  rescheduleFolio,
+  reissueTicketsAfterReschedule,
+  type RescheduleMove,
+} from './reschedule'
 import { emitNotification } from '../../utils/notifications'
 import {
   nightsBetween,
@@ -759,7 +764,7 @@ interface SignableLine {
 
 // Sign one QR access ticket per line from a server-owned payload (org from context). Shared by
 // the paid path of confirmSale and by settle (US-AG07) — returns the per-line token + UI echo.
-async function signLineTickets(
+export async function signLineTickets(
   env: CloudflareBindings,
   org: string,
   folioId: string,
@@ -3092,266 +3097,64 @@ export const claimReminder = async (c: PosContext) => {
   })
 }
 
-// US-AG07.5 — reactivate an EXPIRED booking (late-arrival contingency, reactivation only this
-// phase). Re-blocks the freed spots IFF effective capacity still allows it (same atomic,
-// compensating decrement + flex margin as confirmSale), flips back to `booking` with a fresh
-// expiry, and the client then settles. If the tour filled up → 409 NO_CAPACITY_AVAILABLE (the UI
-// offers the deferred Reagendar/Cupón). Owner-or-admin scoped; booking-only (it had an expiry).
-export const reactivateBooking = async (c: PosContext) => {
+// US-AG07.5 is RETIRED (docs/bookings/booking-reschedule.spec.md, D3).
+//
+// `reactivateBooking` lived here: it took a folio the system had cancelled — and told the customer
+// it had cancelled — and cleared `cancelled_at`, leaving the history asserting the expiry never
+// happened. It never reset `reminder_status` either, so a reactivated apartado was released a
+// second time in silence: the exact defect `apartado-stages.spec.md` was written to prevent,
+// reopened by the repair.
+//
+// It existed to cover the fifteen minutes between the hold release and the sales cutoff. US-A87's
+// coherence rule (D4) closes that window, so the case it was built for stops existing. A customer
+// who arrives after the hold ended now makes an ordinary sale with their credit applied; one who
+// arrives BEFORE it reschedules, which is `rescheduleFolio` below.
+
+// US-AG52 — reagendar. The guards and the seat arithmetic live in `./reschedule`; this is the HTTP
+// shell: authorize, validate the body, delegate, re-read.
+export const rescheduleBooking = async (c: PosContext) => {
   const agent = c.get('user')
-  const id = c.req.param('id')
-  const db = getDb(c.env)
   const org = agent.organizationId
+  const db = getDb(c.env)
+  const id = c.req.param('id')
 
-  const folioRows = await db
-    .select({ status: folios.status, bookingExpiresAt: folios.bookingExpiresAt })
+  const body = (await c.req.json().catch(() => null)) as { moves?: RescheduleMove[] } | null
+  const moves = body?.moves
+  if (!Array.isArray(moves) || moves.length === 0) {
+    throw new ApiError('VALIDATION_ERROR', 400, 'Indica al menos una línea y su nuevo horario.')
+  }
+
+  // D15 — the folio's own seller, or an admin. Same rule as settle/cancel/reminder; inventing a
+  // different one for this would make the permission model unlearnable.
+  const [owner] = await db
+    .select({ agentId: folios.agentId })
     .from(folios)
-    .where(folioActionFilter(id, agent))
-    .limit(1)
-  const folio = folioRows[0]
-  if (!folio) throw new ApiError('NOT_FOUND', 404, 'Folio not found')
-  if (folio.status !== 'cancelled' || folio.bookingExpiresAt === null) {
-    throw new ApiError('NOT_A_BOOKING', 409, 'Only a cancelled booking can be reactivated')
-  }
-
-  const lineRows = await db
-    .select({
-      slotId: folioLines.slotId,
-      quantity: folioLines.quantity,
-      slotDate: folioLines.slotDate,
-      slotStartTime: folioLines.slotStartTime,
-      zoneId: folioLines.zoneId,
-      isFlexible: services.isFlexible,
-      flexCapacityPct: services.flexCapacityPct,
-    })
-    .from(folioLines)
-    .innerJoin(slots, eq(folioLines.slotId, slots.id))
-    .innerJoin(services, eq(slots.serviceId, services.id))
-    .where(and(eq(folioLines.folioId, id), eq(folioLines.organizationId, org)))
-
-  // Current org policy — drives both the US-A47 sales cutoff guard and the fresh expiry below.
-  const orgRows = await db
-    .select({
-      bookingMinDownPaymentPct: organizations.bookingMinDownPaymentPct,
-      salesCutoffOffsetMinutes: organizations.salesCutoffOffsetMinutes,
-      bookingGraceOffsetMinutes: organizations.bookingGraceOffsetMinutes,
-      bookingPreDepartureBufferHours: organizations.bookingPreDepartureBufferHours,
-      bookingCreationCutoffHours: organizations.bookingCreationCutoffHours,
-      timezone: organizations.timezone,
-    })
-    .from(organizations)
-    .where(eq(organizations.id, org))
-    .limit(1)
-  const policy = resolveBookingPolicy({
-    bookingMinDownPaymentPct: orgRows[0]?.bookingMinDownPaymentPct ?? 0,
-    bookingGraceOffsetMinutes: orgRows[0]?.bookingGraceOffsetMinutes ?? 15,
-    bookingPreDepartureBufferHours: orgRows[0]?.bookingPreDepartureBufferHours ?? 24,
-    bookingCreationCutoffHours: orgRows[0]?.bookingCreationCutoffHours ?? 0,
-  })
-  // US-A66 — the cutoff guard + fresh same-day expiry below resolve in the org's time zone.
-  const tz = orgRows[0]?.timezone ?? 'America/Mexico_City'
-
-  // US-A47 — don't reactivate onto a slot whose departure has passed the sales cutoff (that
-  // would re-create an already-expired booking). Guard BEFORE re-blocking any spots.
-  const reactivateNowSec = Math.floor(Date.now() / 1000)
-  const salesCutoffOffset = orgRows[0]?.salesCutoffOffsetMinutes ?? 0
-  for (const line of lineRows) {
-    if (
-      !isSlotSellable(line.slotDate, line.slotStartTime, reactivateNowSec, salesCutoffOffset, tz)
-    ) {
-      throw new ApiError(
-        'SLOT_CLOSED',
-        409,
-        'This booking’s departure has passed the sales cutoff and cannot be reactivated',
-      )
-    }
-  }
-
-  // Re-decrement each slot atomically with the effective-capacity guard; compensate on failure.
-  // US-A64 — a zoned line re-blocks its OWN zone counter (a competing sale may have filled it while
-  // this booking was cancelled → 409, same as a filled tour); others re-block the raw slot.
-  const applied: { slotId: string; qty: number; zoneId?: string | null }[] = []
-  const revertApplied = async () => {
-    for (const a of applied) {
-      if (a.zoneId) {
-        await db
-          .update(slotZones)
-          .set({ booked: sql`${slotZones.booked} - ${a.qty}`, updatedAt: new Date() })
-          .where(
-            and(
-              eq(slotZones.slotId, a.slotId),
-              eq(slotZones.zoneId, a.zoneId),
-              eq(slotZones.organizationId, org),
-            ),
-          )
-        await reconcileSlotTotals(db, a.slotId)
-      } else {
-        await db
-          .update(slots)
-          .set({ booked: sql`${slots.booked} - ${a.qty}`, updatedAt: new Date() })
-          .where(and(eq(slots.id, a.slotId), eq(slots.organizationId, org)))
-      }
-    }
-  }
-  for (const line of lineRows) {
-    if (line.zoneId) {
-      const decremented = await db
-        .update(slotZones)
-        .set({ booked: sql`${slotZones.booked} + ${line.quantity}`, updatedAt: new Date() })
-        .where(
-          and(
-            eq(slotZones.slotId, line.slotId),
-            eq(slotZones.zoneId, line.zoneId),
-            eq(slotZones.organizationId, org),
-            eq(slotZones.status, 'active'),
-            gte(sql`${slotZones.capacity} - ${slotZones.booked}`, line.quantity),
-          ),
-        )
-        .returning({ id: slotZones.id })
-      if (decremented.length === 0) {
-        await revertApplied()
-        throw new ApiError(
-          'NO_CAPACITY_AVAILABLE',
-          409,
-          'No hay cupo disponible para reactivar este apartado',
-        )
-      }
-      await reconcileSlotTotals(db, line.slotId)
-      applied.push({ slotId: line.slotId, qty: line.quantity, zoneId: line.zoneId })
-      continue
-    }
-
-    const flexMargin =
-      line.isFlexible && line.flexCapacityPct > 0
-        ? sql`((${slots.capacity} * ${line.flexCapacityPct}) / 100)`
-        : sql`0`
-    const decremented = await db
-      .update(slots)
-      .set({ booked: sql`${slots.booked} + ${line.quantity}`, updatedAt: new Date() })
-      .where(
-        and(
-          eq(slots.id, line.slotId),
-          eq(slots.organizationId, org),
-          eq(slots.status, 'active'),
-          gte(sql`${slots.capacity} + ${flexMargin} - ${slots.booked}`, line.quantity),
-        ),
-      )
-      .returning({ id: slots.id })
-
-    if (decremented.length === 0) {
-      await revertApplied()
-      throw new ApiError(
-        'NO_CAPACITY_AVAILABLE',
-        409,
-        'No hay cupo disponible para reactivar este apartado',
-      )
-    }
-    applied.push({ slotId: line.slotId, qty: line.quantity })
-  }
-
-  // Lodging: re-claim each cancelled stay reservation under the SAME per-night count guard as
-  // the sale (D10 — competing bookings may have consumed the inventory while this one was
-  // expired). The lineRows above inner-join slots, so stays are queried separately here. The
-  // guard excludes the row being revived (o.id != ?) and re-checks every night of its range.
-  // On conflict → compensate (revert slots + re-cancel any already-reactivated stays) and 409.
-  const stayReservations = await db
-    .select({
-      id: accommodationReservations.id,
-      unitTypeId: accommodationReservations.unitTypeId,
-      quantity: accommodationReservations.quantity,
-      checkIn: accommodationReservations.checkIn,
-      checkOut: accommodationReservations.checkOut,
-    })
-    .from(accommodationReservations)
-    .where(
-      and(
-        eq(accommodationReservations.folioId, id),
-        eq(accommodationReservations.organizationId, org),
-        eq(accommodationReservations.status, 'cancelled'),
-      ),
-    )
-  const reactivatedReservations: string[] = []
-  for (const r of stayReservations) {
-    const upd = await c.env.DB.prepare(
-      `UPDATE accommodation_reservations
-         SET status = 'active', updated_at = unixepoch()
-       WHERE id = ? AND organization_id = ? AND status = 'cancelled'
-         AND NOT EXISTS (
-           WITH RECURSIVE nights(d) AS (
-             SELECT ?
-             UNION ALL
-             SELECT date(d, '+1 day') FROM nights WHERE date(d, '+1 day') < ?
-           )
-           SELECT 1 FROM nights n
-           WHERE COALESCE((SELECT SUM(o.quantity) FROM accommodation_reservations o
-                           WHERE o.unit_type_id = ? AND o.status = 'active' AND o.id != ?
-                             AND o.check_in <= n.d AND n.d < o.check_out), 0)
-               + COALESCE((SELECT SUM(b.quantity) FROM accommodation_blockouts b
-                           WHERE b.unit_type_id = ?
-                             AND b.start_date <= n.d AND n.d < b.end_date), 0)
-               + ?
-               > (SELECT t.inventory_count FROM accommodation_unit_types t WHERE t.id = ?)
-         )`,
-    )
-      .bind(
-        r.id,
-        org,
-        r.checkIn,
-        r.checkOut,
-        r.unitTypeId,
-        r.id,
-        r.unitTypeId,
-        r.quantity,
-        r.unitTypeId,
-      )
-      .run()
-    if (!upd.meta.changes) {
-      await revertApplied()
-      for (const rid of reactivatedReservations) {
-        await db
-          .update(accommodationReservations)
-          .set({ status: 'cancelled', updatedAt: new Date() })
-          .where(and(eq(accommodationReservations.id, rid), eq(accommodationReservations.organizationId, org)))
-      }
-      throw new ApiError(
-        'INSUFFICIENT_INVENTORY',
-        409,
-        'Esas fechas ya no están disponibles para reactivar el apartado',
-      )
-    }
-    reactivatedReservations.push(r.id)
-  }
-
-  // Fresh expiry from the current org policy (read above) + earliest departure — a slot start or a
-  // stay check-in (midnight), whichever comes first across the cart.
-  const departures: { epoch: number; date: string }[] = [
-    ...lineRows.map((l) => ({ epoch: slotEpoch(l.slotDate, l.slotStartTime, tz), date: l.slotDate })),
-    ...stayReservations.map((r) => ({ epoch: slotEpoch(r.checkIn!, '00:00', tz), date: r.checkIn! })),
-  ]
-  const earliest = departures.reduce(
-    (min, d) => (d.epoch < min.epoch ? d : min),
-    { epoch: Infinity, date: '' },
-  )
-  const bookingExpiresAt = bookingExpiryDate(
-    policy,
-    reactivateNowSec,
-    earliest.epoch,
-  )
-
-  await db
-    .update(folios)
-    .set({
-      status: 'booking',
-      bookingExpiresAt,
-      cancelledAt: null,
-      cancelledBy: null,
-      cancellationReason: null,
-      updatedAt: new Date(),
-    })
     .where(and(eq(folios.id, id), eq(folios.organizationId, org)))
+    .limit(1)
+  if (!owner) throw new ApiError('NOT_FOUND', 404, 'Folio not found')
+  if (agent.role !== 'admin' && owner.agentId !== agent.userId) {
+    throw new ApiError('NOT_FOUND', 404, 'Folio not found')
+  }
 
-  const updated = await readFolio(db, org, agent.userId, id, c.env.QR_SECRET, c.env.API_BASE_URL)
-  return c.json({ folio: updated ?? { id, status: 'booking' } })
+  const { folio, tz } = await rescheduleFolio({
+    db,
+    org,
+    actorId: agent.userId,
+    folioId: id,
+    moves,
+    nowSec: Math.floor(Date.now() / 1000),
+  })
+
+  // D16 — a paid folio's QR names the old slot. Re-mint and re-deliver, or the customer is holding
+  // a ticket for a departure that no longer exists.
+  if (folio.status === 'paid' && folio.paymentVerification !== 'pending') {
+    await reissueTicketsAfterReschedule(
+      db, c.env, org, id, owner.agentId, !!folio.customerEmail, tz,
+    )
+  }
+
+  const out = await readFolio(db, org, owner.agentId, id, c.env.QR_SECRET, c.env.API_BASE_URL)
+  return c.json({ folio: out })
 }
 
 // US-AG20 — the caller agent's own folios (their read-only sales history). Caller-scoped:

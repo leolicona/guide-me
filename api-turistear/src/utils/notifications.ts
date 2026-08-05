@@ -25,6 +25,7 @@ export type NotificationEvent =
   | 'payment_rejected'
   | 'booking_grace_entered'
   | 'departure_reminder'
+  | 'booking_expired'
   | 'refund_completed'
   // Phase 4. Marketing, and labelled as such: it ADDS a tap rather than removing one, so D20's
   // written-notice rule does not reach it — it is the one message an org should be able to switch
@@ -97,6 +98,18 @@ export const EVENTS: Record<NotificationEvent, EventDef> = {
   // most litigable moment in the product: cash, in person, no receipt, and a retention the customer
   // does not understand. "Pagué 3,000 y recibí 1,800, ¿dónde quedaron 1,200?" is answered nowhere
   // else, which is why the amounts are spelled out (business rule 13).
+  // US-T09 — the message the product never sent. The customer's last word from us said their spots
+  // were ABOUT to be released; they never learned that they were, or that their deposit became the
+  // company's revenue. Obligatory rather than useful: without it the complaint arrives anyway,
+  // later and more expensive. The figures are spelled out for the same reason the refund receipt
+  // spells them out — "pagué 900, ¿dónde quedaron?" is answered nowhere else.
+  booking_expired: {
+    origin: 'clock',
+    template:
+      'Hola {customer_name}, tu apartado en {org_name} venció y liberamos los lugares. ' +
+      'Pagaste {amount_paid} y se retuvo {retained_amount} según la política de cancelación.' +
+      '{credit_clause}',
+  },
   review_requested: {
     origin: 'clock',
     template:
@@ -211,6 +224,54 @@ export const recordEmailOutcome = async (
   } catch (err) {
     console.error('[outbox] recording an email outcome failed', event, folioId, err)
   }
+}
+
+/**
+ * The figures a message needs filled in. Only the events that state money carry these; the rest
+ * resolve to nothing and their placeholders are dropped by whoever renders (D25).
+ *
+ * `booking_expired` is the one that matters (US-T09, business rule 14): "pagué 900, ¿dónde
+ * quedaron?" is answered nowhere else in the product, so paid / retained / credit are spelled out —
+ * and when there IS a credit, the date it dies, because a credit the customer discovers already
+ * expired converts goodwill into a grievance (D10).
+ */
+export interface NotificationFigures {
+  amountPaid?: number
+  retainedAmount?: number
+  creditAmount?: number
+  creditExpiresAt?: number | null
+}
+
+const money = (cents: number) =>
+  `$${(cents / 100).toLocaleString('es-MX', { minimumFractionDigits: 2 })}`
+
+const day = (epoch: number, tz: string) =>
+  new Intl.DateTimeFormat('es-MX', {
+    day: 'numeric', month: 'long', timeZone: tz,
+  }).format(new Date(epoch * 1000))
+
+/**
+ * Resolve a template's money placeholders. `{credit_clause}` is a whole sentence rather than a
+ * number, because a zero credit must produce SILENCE — promising a credit that does not exist is
+ * worse than not mentioning one (rule 13).
+ */
+export const renderFigures = (
+  template: string,
+  figures: NotificationFigures,
+  tz: string,
+): string => {
+  const credit = figures.creditAmount ?? 0
+  const clause =
+    credit > 0
+      ? ` Te queda ${money(credit)} a favor${
+          figures.creditExpiresAt ? ` hasta el ${day(figures.creditExpiresAt, tz)}` : ''
+        }.`
+      : ''
+  return template
+    .replace(/\{amount_paid\}/g, money(figures.amountPaid ?? 0))
+    .replace(/\{retained_amount\}/g, money(figures.retainedAmount ?? 0))
+    .replace(/\{credit_amount\}/g, money(credit))
+    .replace(/\{credit_clause\}/g, clause)
 }
 
 /** Pending rows for one org, oldest first — the admin's outbox view and the drains share it. */
