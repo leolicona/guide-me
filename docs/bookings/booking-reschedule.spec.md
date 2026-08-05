@@ -459,12 +459,18 @@ scope may make the line's redundant, exactly as it did in `folio-state-machine.s
 - [x] **The rename carried through** — 37 files, plus 18 test cleanup helpers reordered: the new
       `folio_requests.folio_line_id` FK means the table must now be deleted BEFORE `folio_lines`
 - [x] `POST /api/pos/folios/:id/reschedule` (counter) with all **seven** guards — including 5b
-- [ ] **`POST /portal/:token/reschedule-request` (tourist) — NOT BUILT.** The counter origin ships;
-      the portal origin does not. The table, the `kind` column and the one-open-petition index are
-      all in place for it, so this is wiring rather than design — but it is a second surface with
-      its own authorization (a portal token, not a session) and its own approval path, and shipping
-      it half-tested would be worse than shipping it next. **D2's requirement still holds for what
-      ships**: a counter reschedule records the seller in `resolved_by`
+- [x] `POST /portal/:token/reschedule-request` (tourist) + approve branching on `kind`. **Cheaper
+      than this spec estimated**: the portal token is resolved by the same `resolveToken` the ticket
+      link already uses, the table is the same, and the one-open-petition guard is the SAME query the
+      cancellation request ran — widened for free when the index grew to cover both kinds. The DoD's
+      original note ("a second surface with its own authorization") was half wrong: the
+      authorization already existed.
+- [x] **Auto-rejection with the reason and viable alternatives** when capacity is gone by approval
+      time. A petition holds no seats, so it CAN become unfulfillable — and leaving it `pending`
+      would block the customer from asking for anything else, including cancelling, because only one
+      petition may be open per folio. The alternatives are a **snapshot, never a hold**: a suggested
+      slot can fill up before the customer answers, so the copy has to say *they had room when we
+      wrote this*, not *pick one*.
 - [x] **Paid folios**: QR re-signed (the payload's `expires_at` came from the OLD departure, so a
       ticket moved further out would have died before its tour), rows cleared and re-emitted
 - [x] The credit written at the close; `booking_expired` carries its figures
@@ -475,10 +481,13 @@ scope may make the line's redundant, exactly as it did in `folio-state-machine.s
       mutation-verified** — and S-3 as first written did **not** survive its mutation: with one line
       nothing had been taken before the failure, so the compensation was a no-op. S-3b (two lines,
       the second full) is the smallest case with teeth
-- [ ] S-8c (one open petition of either kind) — needs the portal origin to be meaningful
+- [x] S-8c (one open petition of either kind) — a pending cancellation refuses a reschedule
+      request, which is the assertion the table rename exists for
 - [ ] S-12, S-14 (the credit horizon's independence) — not written
 - [x] Reschedule sheet (counter) + the credit on the card's money axis + the credit-validity setting
-- [ ] The request **history** on the detail, and the portal sheet — deferred with the portal origin
+- [ ] The **portal's own picker** (a server-rendered `<select>` in `hono/jsx`) and the request
+      **history** on the folio detail. The endpoint accepts the tourist's request today; what is
+      missing is the screen that submits it — recorded rather than ticked.
 - [x] `SPEC.md`: registered and struck through in #67
 
 ---

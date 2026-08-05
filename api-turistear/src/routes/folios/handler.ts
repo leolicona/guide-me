@@ -29,6 +29,7 @@ import {
 } from '../../services/resend'
 import { generateRefundPin } from '../../utils/portal'
 import { folioFulfillment, lineFulfillment } from '../../utils/folioFulfillment'
+import { rescheduleFolio, viableAlternatives } from '../pos/reschedule'
 import { emitNotification, recordEmailOutcome } from '../../utils/notifications'
 import { buildCancellationReversal, displayMethodSql, readFolioPayments } from '../../utils/folioPayments'
 import {
@@ -1147,6 +1148,10 @@ const loadRequest = async (db: Db, org: string, requestId: string) => {
       folioId: folioRequests.folioId,
       status: folioRequests.status,
       reason: folioRequests.reason,
+      // US-AG52 — a reschedule petition carries where it wants to go.
+      kind: folioRequests.kind,
+      folioLineId: folioRequests.folioLineId,
+      toSlotId: folioRequests.toSlotId,
     })
     .from(folioRequests)
     .where(
@@ -1160,6 +1165,80 @@ const loadRequest = async (db: Db, org: string, requestId: string) => {
     throw new ApiError('NOT_FOUND', 404, 'Cancellation request not found')
   }
   return request
+}
+
+// US-AG52 — approving a tourist's reschedule. Separated from the cancellation approval rather than
+// branched inside it: they share a table and a queue, not a body.
+const approveRescheduleRequest = async (
+  c: FoliosContext,
+  db: Db,
+  org: string,
+  actorId: string,
+  request: { id: string; folioId: string; folioLineId: string | null; toSlotId: string | null },
+) => {
+  const now = new Date()
+  const nowSec = Math.floor(now.getTime() / 1000)
+
+  const rejectWith = async (note: string, alternatives: unknown[]) => {
+    await db
+      .update(folioRequests)
+      .set({ status: 'rejected', resolutionNote: note, resolvedBy: actorId, resolvedAt: now, updatedAt: now })
+      .where(and(eq(folioRequests.id, request.id), eq(folioRequests.organizationId, org)))
+    return c.json({ request: { id: request.id, status: 'rejected', resolution_note: note }, alternatives })
+  }
+
+  if (!request.folioLineId || !request.toSlotId) {
+    return rejectWith('La solicitud no indicaba un horario válido.', [])
+  }
+
+  // Everything the counter path checks, in the same order and with the same compensation.
+  try {
+    await rescheduleFolio({
+      db,
+      org,
+      actorId,
+      folioId: request.folioId,
+      moves: [{ folio_line_id: request.folioLineId, to_slot_id: request.toSlotId }],
+      nowSec,
+    })
+  } catch (err) {
+    // The one refusal a customer can do something about. Everything else (a departed slot, a folio
+    // that is no longer live) is refused with its own reason and no alternatives, because offering
+    // dates for a sale that ended would be noise.
+    const code = err instanceof ApiError ? err.code : 'UNKNOWN'
+    let alternatives: Awaited<ReturnType<typeof viableAlternatives>> = []
+    if (code === 'NO_CAPACITY_AVAILABLE') {
+      const [line] = await db
+        .select({ serviceId: folioLines.serviceId, quantity: folioLines.quantity })
+        .from(folioLines)
+        .where(
+          and(eq(folioLines.id, request.folioLineId), eq(folioLines.organizationId, org)),
+        )
+        .limit(1)
+      const [orgRow] = await db
+        .select({ tz: organizations.timezone, cutoff: organizations.salesCutoffOffsetMinutes })
+        .from(organizations)
+        .where(eq(organizations.id, org))
+        .limit(1)
+      if (line) {
+        alternatives = await viableAlternatives(
+          db, org, line.serviceId, line.quantity, nowSec,
+          orgRow?.tz ?? 'America/Mexico_City', orgRow?.cutoff ?? 0,
+        )
+      }
+    }
+    const note =
+      err instanceof ApiError ? err.message : 'No se pudo mover a ese horario.'
+    return rejectWith(note, alternatives)
+  }
+
+  await db
+    .update(folioRequests)
+    .set({ status: 'approved', resolvedBy: actorId, resolvedAt: now, updatedAt: now })
+    .where(and(eq(folioRequests.id, request.id), eq(folioRequests.organizationId, org)))
+
+  const folioOut = await readFolio(db, org, request.folioId)
+  return c.json({ request: { id: request.id, status: 'approved' }, folio: folioOut })
 }
 
 // US-T04 → US-A21 — APPROVE a tourist's cancellation request: runs the same race-safe
@@ -1182,6 +1261,18 @@ export const approveCancellationRequest = async (c: FoliosContext) => {
   const request = await loadRequest(db, org, requestId)
   if (request.status !== 'pending') {
     throw new ApiError('CONFLICT', 409, 'This request has already been resolved')
+  }
+
+  // US-AG52 — a RESCHEDULE approval is not a cancellation approval. It runs the same seven guards
+  // the counter path runs, because a petition holds no seats: the capacity was never reserved and
+  // may be gone by now.
+  //
+  // When it IS gone the request is REJECTED automatically, with the reason and with viable
+  // alternatives. Leaving it `pending` would be worse than useless: `uq_folio_requests_open` allows
+  // one open petition per folio, so an unfulfillable request would block the customer from asking
+  // for anything else — including cancelling.
+  if (request.kind === 'reschedule') {
+    return approveRescheduleRequest(c, db, org, admin.userId, request)
   }
 
   const [folio] = await db

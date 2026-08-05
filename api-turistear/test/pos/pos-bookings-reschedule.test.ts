@@ -11,6 +11,7 @@ import { buildFakeJwt } from '../helpers/jwt'
 // the one outcome worse than not offering the feature.
 
 const AGENT = 'agent@empresa.com'
+const ADMIN = 'admin@empresa.com'
 const auth = (email: string) => ({ Cookie: `gm_access=${buildFakeJwt(email)}` })
 const jsonAuth = (email: string) => ({ ...auth(email), 'Content-Type': 'application/json' })
 
@@ -419,5 +420,145 @@ describe('Multitenancy isolation', () => {
     expect(res.status).toBe(404)
     expect(await booked(fromA)).toBe(2)
     expect(await booked(toB)).toBe(0)
+  })
+})
+
+// --- US-AG52 (D2) — the TOURIST origin ---------------------------------------------------------
+//
+// Almost nothing here is new code, which is the point: the portal token is resolved by the same
+// function the ticket link uses, the table is the same, and the one-open-petition guard is the same
+// query the cancellation request already ran — widened for free when the index grew to cover both
+// kinds.
+
+const seedPortalToken = async (organizationId: string, folioId: string) => {
+  const token = `tok-${crypto.randomUUID()}`
+  await env.DB.prepare(
+    `INSERT INTO folio_access_tokens (id, organization_id, folio_id, token, expires_at, created_at)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+  )
+    .bind(crypto.randomUUID(), organizationId, folioId, token, nowSec() + 30 * 86_400, nowSec())
+    .run()
+  return token
+}
+
+const requestReschedule = (token: string, lineId: string, slotId: string) =>
+  SELF.fetch(`http://api.local/portal/${token}/reschedule-request`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ folio_line_id: lineId, to_slot_id: slotId }).toString(),
+    redirect: 'manual',
+  })
+
+const approve = (email: string, requestId: string) =>
+  SELF.fetch(`http://api.local/api/folios/requests/${requestId}/approve`, {
+    method: 'POST',
+    headers: jsonAuth(email),
+    body: '{}',
+  })
+
+const openRequest = (folioId: string) =>
+  env.DB.prepare(
+    `SELECT id, kind, status, to_slot_id, resolution_note FROM folio_requests WHERE folio_id = ?`,
+  ).bind(folioId).first<any>()
+
+describe('US-AG52 — the tourist asks from their portal', () => {
+  it('the request reserves NOTHING — seats cannot be held for an unapproved petition', async () => {
+    const { organizationId, userId } = await seedUser({ email: AGENT, role: 'agent' })
+    const serviceId = await seedService(organizationId)
+    const from = await seedSlot({ organizationId, serviceId })
+    const to = await seedSlot({ organizationId, serviceId, date: dayOffset(9) })
+    const { folioId, lineId } = await seedFolio({ organizationId, agentId: userId, slotId: from, serviceId })
+    const token = await seedPortalToken(organizationId, folioId)
+
+    const res = await requestReschedule(token, lineId, to)
+    expect(res.status).toBe(303)
+
+    const req = await openRequest(folioId)
+    expect(req.kind).toBe('reschedule')
+    expect(req.status).toBe('pending')
+    expect(req.to_slot_id).toBe(to)
+    // The destination is untouched: nothing is reserved until somebody approves.
+    expect(await booked(to)).toBe(0)
+    expect(await booked(from)).toBe(2)
+  })
+
+  it('approving runs the same guards and moves the seats', async () => {
+    const { organizationId, userId } = await seedUser({ email: ADMIN, role: 'admin' })
+    const serviceId = await seedService(organizationId)
+    const from = await seedSlot({ organizationId, serviceId })
+    const to = await seedSlot({ organizationId, serviceId, date: dayOffset(9) })
+    const { folioId, lineId } = await seedFolio({ organizationId, agentId: userId, slotId: from, serviceId })
+    const token = await seedPortalToken(organizationId, folioId)
+    await requestReschedule(token, lineId, to)
+
+    const req = await openRequest(folioId)
+    const res = await approve(ADMIN, req.id)
+    expect(res.status).toBe(200)
+
+    expect(await booked(to)).toBe(2)
+    expect(await booked(from)).toBe(0)
+    expect((await openRequest(folioId)).status).toBe('approved')
+  })
+
+  it('capacity gone by approval time → AUTO-REJECTED with the reason and alternatives', async () => {
+    const { organizationId, userId } = await seedUser({ email: ADMIN, role: 'admin' })
+    const serviceId = await seedService(organizationId)
+    const from = await seedSlot({ organizationId, serviceId })
+    const wanted = await seedSlot({ organizationId, serviceId, date: dayOffset(9), capacity: 2 })
+    // A viable one, so the refusal is not a dead end.
+    const other = await seedSlot({ organizationId, serviceId, date: dayOffset(10), capacity: 20 })
+    const { folioId, lineId } = await seedFolio({ organizationId, agentId: userId, slotId: from, serviceId })
+    const token = await seedPortalToken(organizationId, folioId)
+    await requestReschedule(token, lineId, wanted)
+
+    // Somebody else buys the last seats between the request and the review.
+    await env.DB.prepare(`UPDATE slots SET booked = 2 WHERE id = ?`).bind(wanted).run()
+
+    const req = await openRequest(folioId)
+    const res = await approve(ADMIN, req.id)
+    const body = (await res.json()) as any
+
+    // Leaving it pending would block the customer from asking for ANYTHING else — including
+    // cancelling — because only one petition may be open per folio.
+    expect(body.request.status).toBe('rejected')
+    expect(body.request.resolution_note).toContain('lugar')
+    expect(body.alternatives.map((a: any) => a.id)).toContain(other)
+    // And the customer still has the seat they started with.
+    expect(await booked(from)).toBe(2)
+  })
+
+  it('one open petition per folio, of EITHER kind', async () => {
+    const { organizationId, userId } = await seedUser({ email: AGENT, role: 'agent' })
+    const serviceId = await seedService(organizationId)
+    const from = await seedSlot({ organizationId, serviceId })
+    const to = await seedSlot({ organizationId, serviceId, date: dayOffset(9) })
+    const { folioId, lineId } = await seedFolio({ organizationId, agentId: userId, slotId: from, serviceId })
+    const token = await seedPortalToken(organizationId, folioId)
+
+    // A pending CANCELLATION already exists.
+    await env.DB.prepare(
+      `INSERT INTO folio_requests (id, organization_id, folio_id, kind, status, created_at, updated_at)
+       VALUES (?, ?, ?, 'cancellation', 'pending', ?, ?)`,
+    ).bind(crypto.randomUUID(), organizationId, folioId, nowSec(), nowSec()).run()
+
+    const res = await requestReschedule(token, lineId, to)
+    // The invariant the table rename exists for: two petitions that contradict each other cannot
+    // both be open. Two tables could not have expressed this.
+    expect(res.status).toBe(409)
+  })
+
+  it("another folio's line cannot be smuggled in through the body", async () => {
+    const { organizationId, userId } = await seedUser({ email: AGENT, role: 'agent' })
+    const serviceId = await seedService(organizationId)
+    const from = await seedSlot({ organizationId, serviceId })
+    const to = await seedSlot({ organizationId, serviceId, date: dayOffset(9) })
+    const mine = await seedFolio({ organizationId, agentId: userId, slotId: from, serviceId })
+    const theirs = await seedFolio({ organizationId, agentId: userId, slotId: from, serviceId })
+    const token = await seedPortalToken(organizationId, mine.folioId)
+
+    // A token grants access to ONE folio, and a form body must not widen that.
+    const res = await requestReschedule(token, theirs.lineId, to)
+    expect(res.status).toBe(409)
+    expect(await openRequest(theirs.folioId)).toBeNull()
   })
 })

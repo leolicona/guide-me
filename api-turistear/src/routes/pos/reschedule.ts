@@ -404,3 +404,64 @@ export const reissueTicketsAfterReschedule = async (
     hasEmail,
   })
 }
+
+
+/**
+ * Departures of the same service that could take this party, right now.
+ *
+ * A SNAPSHOT, never a hold. Nothing here is reserved: a suggested slot can fill up between the
+ * moment this runs and the moment the customer answers, which is exactly why the copy that carries
+ * these must say *"tenían lugar cuando te escribimos"* rather than *"elige uno"*. A suggestion read
+ * as a promise makes the second disappointment worse than the first.
+ *
+ * Same query shape as the guard that refused, so the alternatives cost one read rather than two.
+ */
+export const viableAlternatives = async (
+  db: Db,
+  org: string,
+  serviceId: string,
+  quantity: number,
+  nowSec: number,
+  tz: string,
+  salesCutoffMinutes: number,
+  limit = 3,
+): Promise<{ id: string; date: string; startTime: string; remaining: number }[]> => {
+  const rows = await db
+    .select({
+      id: slots.id,
+      date: slots.date,
+      startTime: slots.startTime,
+      capacity: slots.capacity,
+      booked: slots.booked,
+      isFlexible: services.isFlexible,
+      flexPct: services.flexCapacityPct,
+    })
+    .from(slots)
+    .innerJoin(services, eq(slots.serviceId, services.id))
+    .where(
+      and(
+        eq(slots.organizationId, org),
+        eq(slots.serviceId, serviceId),
+        eq(slots.status, 'active'),
+        eq(services.status, 'active'),
+      ),
+    )
+
+  return rows
+    .map((r) => {
+      const margin = r.isFlexible && r.flexPct > 0 ? Math.floor((r.capacity * r.flexPct) / 100) : 0
+      return {
+        id: r.id,
+        date: r.date,
+        startTime: r.startTime,
+        remaining: r.capacity + margin - r.booked,
+        epoch: naiveEpoch(r.date, r.startTime, tz),
+      }
+    })
+    // Same two conditions the reschedule itself would apply: room for the whole party, and still
+    // sellable. Offering a departed slot would be a suggestion that cannot be taken.
+    .filter((r) => r.remaining >= quantity && r.epoch > nowSec + salesCutoffMinutes * 60)
+    .sort((a, b) => a.epoch - b.epoch)
+    .slice(0, limit)
+    .map(({ id, date, startTime, remaining }) => ({ id, date, startTime, remaining }))
+}
