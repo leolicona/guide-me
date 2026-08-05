@@ -1,9 +1,19 @@
 import type { Context } from 'hono'
-import { and, eq, gte, inArray, lt, ne, sql } from 'drizzle-orm'
+import { and, eq, gte, inArray, lt, lte, ne, sql } from 'drizzle-orm'
 import { getDb, type Db } from '../../db/client'
-import { affiliateCompanies, cashDrops, folioPayments, folios, payouts, users } from '../../db/schema'
+import {
+  affiliateCompanies,
+  cashDrops,
+  folioLines,
+  folioPayments,
+  folios,
+  organizations,
+  payouts,
+  users,
+} from '../../db/schema'
 import type { AppVariables } from '../../types/context'
 import type { CommissionReportQuery } from './schema'
+import { fulfillmentResolution, lineFulfillment } from '../../utils/folioFulfillment'
 
 export type ReportsContext = Context<{
   Bindings: CloudflareBindings
@@ -309,5 +319,159 @@ export const exportCommissionReport = async (c: ReportsContext) => {
       'Content-Type': 'text/csv; charset=utf-8',
       'Content-Disposition': `attachment; filename="comisiones_${q.from}_${q.to}.csv"`,
     },
+  })
+}
+
+
+// --- US-A85 — the wasted seat ------------------------------------------------------------------
+//
+// Spec: docs/folios/folio-state-machine.spec.md. Seats that were sold, held against capacity, and
+// used by nobody. `folio_lines.redeemed_count` has been written by the scanner since the QR
+// shipped; nothing ever read it for reporting, so an operator could not answer "how many seats did
+// I sell and nobody used, and on which departures" — the single question that says where their
+// overbooking tolerance should go.
+//
+// Read-only. No column, no cron, no state change: every number here is a reading of counts that
+// already exist (D4).
+export const getWastedSeatsReport = async (c: ReportsContext) => {
+  const admin = c.get('user')
+  const org = admin.organizationId
+  const db = getDb(c.env)
+
+  const { from, to } = c.req.valid('query' as never) as { from: string; to: string }
+
+  const [orgRow] = await db
+    .select({
+      tz: organizations.timezone,
+      noShowMargin: organizations.noShowMarginMinutes,
+      redemptionMode: organizations.qrRedemptionMode,
+    })
+    .from(organizations)
+    .where(eq(organizations.id, org))
+    .limit(1)
+  const tz = orgRow?.tz ?? 'America/Mexico_City'
+  const margin = orgRow?.noShowMargin ?? 0
+  const mode = orgRow?.redemptionMode ?? 'per_pass'
+  const nowEpoch = Math.floor(Date.now() / 1000)
+
+  // Only a PAID folio can waste a seat. A booking never got its QR, and a cancellation gave the
+  // seat back — its emptiness is not waste, it is a release.
+  const rows = await db
+    .select({
+      lineId: folioLines.id,
+      serviceId: folioLines.serviceId,
+      serviceName: folioLines.serviceName,
+      slotDate: folioLines.slotDate,
+      slotStartTime: folioLines.slotStartTime,
+      checkIn: folioLines.checkIn,
+      lineType: folioLines.lineType,
+      quantity: folioLines.quantity,
+      redeemedCount: folioLines.redeemedCount,
+      lineTotal: folioLines.lineTotal,
+    })
+    .from(folioLines)
+    .innerJoin(folios, eq(folioLines.folioId, folios.id))
+    .where(
+      and(
+        eq(folioLines.organizationId, org),
+        eq(folios.organizationId, org),
+        eq(folios.status, 'paid'),
+        // The DEPARTURE decides which period a wasted seat belongs to, not the sale date: a seat
+        // sold in June for an August tour is wasted in August.
+        gte(sql`COALESCE(${folioLines.slotDate}, ${folioLines.checkIn})`, from),
+        lte(sql`COALESCE(${folioLines.slotDate}, ${folioLines.checkIn})`, to),
+      ),
+    )
+
+  // Grouped by the departure a seat was wasted ON — service + date + time, which is the unit an
+  // operator schedules and therefore the unit they can act on.
+  const groups = new Map<
+    string,
+    {
+      service_id: string
+      service_name: string
+      departure_date: string | null
+      departure_time: string | null
+      seats_sold: number
+      seats_redeemed: number
+      seats_wasted: number
+      cents_wasted: number
+      folios: number
+    }
+  >()
+
+  let seatsWasted = 0
+  let centsWasted = 0
+
+  for (const r of rows) {
+    const state = lineFulfillment(
+      {
+        lineId: r.lineId,
+        lineType: r.lineType,
+        slotDate: r.slotDate,
+        slotStartTime: r.slotStartTime,
+        checkIn: r.checkIn,
+        lineTotal: r.lineTotal,
+        quantity: r.quantity,
+        redeemedCount: r.redeemedCount,
+      },
+      tz,
+      margin,
+      nowEpoch,
+    )
+    // A line still `pending` has not departed yet — nothing is wasted, it simply has not happened.
+    if (state !== 'no_show' && state !== 'partial') continue
+
+    const wasted = r.quantity - r.redeemedCount
+    if (wasted <= 0) continue
+
+    // The money a wasted seat represents: its share of the line, floored. Deliberately NOT a claim
+    // about revenue — that money was collected and kept. It is what the empty seat was worth.
+    const cents = Math.floor((r.lineTotal * wasted) / r.quantity)
+
+    const key = `${r.serviceId}|${r.slotDate ?? r.checkIn ?? ''}|${r.slotStartTime ?? ''}`
+    const g = groups.get(key) ?? {
+      service_id: r.serviceId,
+      service_name: r.serviceName,
+      departure_date: r.slotDate ?? r.checkIn,
+      departure_time: r.slotStartTime,
+      seats_sold: 0,
+      seats_redeemed: 0,
+      seats_wasted: 0,
+      cents_wasted: 0,
+      folios: 0,
+    }
+    g.seats_sold += r.quantity
+    g.seats_redeemed += r.redeemedCount
+    g.seats_wasted += wasted
+    g.cents_wasted += cents
+    g.folios += 1
+    groups.set(key, g)
+
+    seatsWasted += wasted
+    centsWasted += cents
+  }
+
+  const departures = [...groups.values()].sort(
+    (a, b) =>
+      b.seats_wasted - a.seats_wasted ||
+      (a.departure_date ?? '').localeCompare(b.departure_date ?? ''),
+  )
+
+  return c.json({
+    from,
+    to,
+    // D24 — WHAT THESE NUMBERS CAN DISTINGUISH, stated rather than assumed. Under `all_passes` a
+    // single scan sets redeemed_count = quantity, so a party of four where two boarded reads as
+    // fully used: the report can only separate "the party came" from "nobody came". Without this
+    // field the same title would mean two different things in two organizations.
+    redemption_mode: mode,
+    resolution: fulfillmentResolution(mode),
+    totals: {
+      seats_wasted: seatsWasted,
+      cents_wasted: centsWasted,
+      departures: departures.length,
+    },
+    departures,
   })
 }

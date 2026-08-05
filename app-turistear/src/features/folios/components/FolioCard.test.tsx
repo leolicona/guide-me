@@ -4,6 +4,7 @@ import { renderWithProviders, screen } from '../../../test/renderWithProviders'
 import { server } from '../../../test/server'
 import { FolioCard, type FolioCardFolio } from './FolioCard'
 import { FolioStatusChip } from './FolioStatusChip'
+import type { Fulfillment } from '../types'
 
 // US-A82 / US-AG49 — the card as RENDERED.
 // Spec: docs/oversight/folio-list-scanability.spec.md — S-10, plus the render-level facts the pure
@@ -210,5 +211,37 @@ describe('S-2 — a cancellation that refunded nothing does not claim it refunde
     )
     expect(await screen.findByText('(reembolsado)')).toBeInTheDocument()
     expect(screen.queryByText('(sin reembolso)')).not.toBeInTheDocument()
+  })
+})
+
+// --- US-A85 — the wasted seat, as RENDERED ------------------------------------------------------
+
+describe('US-A85 — a departed folio says its seats were wasted', () => {
+  const departed = (fulfillment: Fulfillment) =>
+    aFolio({ status: 'paid', fulfillment, booking_expires_at: null, tickets_sent_at: 1000 })
+
+  it('renders "Sin usar" on the chip channel, not a fourth channel', async () => {
+    renderWithProviders(
+      <FolioCard folio={departed('no_show')} to="/folios/f1" soldAt="hoy 14:32" nowSeconds={2000} />,
+    )
+    expect(await screen.findByText('Sin usar')).toBeInTheDocument()
+  })
+
+  it('a partial boarding says how it is partial', async () => {
+    renderWithProviders(
+      <FolioCard folio={departed('partial')} to="/folios/f1" soldAt="hoy 14:32" nowSeconds={2000} />,
+    )
+    expect(await screen.findByText('Parcialmente usado')).toBeInTheDocument()
+  })
+
+  it('a consumed sale is quiet — nothing to report is nothing to render', async () => {
+    renderWithProviders(
+      <FolioCard folio={departed('fulfilled')} to="/folios/f1" soldAt="hoy 14:32" nowSeconds={2000} />,
+    )
+    // Wait for the card to settle before asserting an ABSENCE — otherwise the assertion could
+    // pass simply because nothing had rendered yet.
+    await screen.findByText(/María González/)
+    expect(screen.queryByText('Sin usar')).not.toBeInTheDocument()
+    expect(screen.queryByText('Parcialmente usado')).not.toBeInTheDocument()
   })
 })

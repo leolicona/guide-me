@@ -22,6 +22,7 @@ const orgColumns = {
   bookingGraceOffsetMinutes: organizations.bookingGraceOffsetMinutes,
   bookingPreDepartureBufferHours: organizations.bookingPreDepartureBufferHours,
   bookingCreationCutoffHours: organizations.bookingCreationCutoffHours,
+  noShowMarginMinutes: organizations.noShowMarginMinutes,
   lodgingWeekendDays: organizations.lodgingWeekendDays,
   lodgingFreeCancelDays: organizations.lodgingFreeCancelDays,
   lodgingCancelPenaltyPct: organizations.lodgingCancelPenaltyPct,
@@ -41,6 +42,7 @@ const serializeOrg = (o: {
   bookingGraceOffsetMinutes: number
   bookingPreDepartureBufferHours: number
   bookingCreationCutoffHours: number
+  noShowMarginMinutes: number
   lodgingWeekendDays: string
   lodgingFreeCancelDays: number
   lodgingCancelPenaltyPct: number
@@ -58,6 +60,7 @@ const serializeOrg = (o: {
   booking_grace_offset_minutes: o.bookingGraceOffsetMinutes,
   booking_pre_departure_buffer_hours: o.bookingPreDepartureBufferHours,
   booking_creation_cutoff_hours: o.bookingCreationCutoffHours,
+  no_show_margin_minutes: o.noShowMarginMinutes,
   lodging_weekend_days: o.lodgingWeekendDays
     ? o.lodgingWeekendDays.split(',').map(Number)
     : [],
@@ -149,6 +152,39 @@ export const updateMyOrganization = async (c: OrganizationsContext) => {
       )
     }
   }
+  // US-A85 (D23) — the no-show margin may not mark a customer absent while their seat is still on
+  // sale. An org that keeps selling 30 minutes past departure (`sales_cutoff_offset_minutes = -30`)
+  // and calls people no-shows at the departure instant would be declaring someone absent BEFORE it
+  // sold them their ticket. Same shape as the cutoff/buffer guard above, and the same reason: two
+  // settings that describe the same moment from different sides have to agree about it.
+  //
+  // Both are signed the same way (+ before / − after), so "still sellable" is simply the LOWER
+  // number: the margin must not be greater than the sales cutoff.
+  if (
+    input.no_show_margin_minutes !== undefined ||
+    input.sales_cutoff_offset_minutes !== undefined
+  ) {
+    const [stored] = await db
+      .select({
+        margin: organizations.noShowMarginMinutes,
+        cutoff: organizations.salesCutoffOffsetMinutes,
+      })
+      .from(organizations)
+      .where(eq(organizations.id, user.organizationId))
+      .limit(1)
+
+    const margin = input.no_show_margin_minutes ?? stored?.margin ?? 0
+    const cutoff = input.sales_cutoff_offset_minutes ?? stored?.cutoff ?? 0
+    if (margin > cutoff) {
+      throw new ApiError(
+        'NO_SHOW_MARGIN_TOO_EARLY',
+        422,
+        'El margen de no-show no puede marcar a un cliente como ausente mientras su lugar todavía está a la venta.',
+      )
+    }
+  }
+  if (input.no_show_margin_minutes !== undefined)
+    updates.noShowMarginMinutes = input.no_show_margin_minutes
   if (input.lodging_weekend_days !== undefined)
     updates.lodgingWeekendDays = input.lodging_weekend_days.join(',')
   if (input.lodging_free_cancel_days !== undefined)

@@ -28,6 +28,7 @@ import {
   type CancellationEmailInput,
 } from '../../services/resend'
 import { generateRefundPin } from '../../utils/portal'
+import { folioFulfillment, lineFulfillment } from '../../utils/folioFulfillment'
 import { buildCancellationReversal, displayMethodSql, readFolioPayments } from '../../utils/folioPayments'
 import {
   readListCancellationRequests,
@@ -157,6 +158,17 @@ const readFolio = async (db: Db, org: string, folioId: string, apiBaseUrl?: stri
     )
     .orderBy(desc(cancellationRequests.createdAt))
 
+  // US-A85 — fulfilment is derived on read, so the detail resolves the org's clock and margin the
+  // same way the list does. One derivation, two callers: they cannot disagree.
+  const [fulfillmentOrg] = await db
+    .select({ tz: organizations.timezone, noShowMargin: organizations.noShowMarginMinutes })
+    .from(organizations)
+    .where(eq(organizations.id, org))
+    .limit(1)
+  const fulfillmentTz = fulfillmentOrg?.tz ?? 'America/Mexico_City'
+  const fulfillmentMargin = fulfillmentOrg?.noShowMargin ?? 0
+  const nowEpoch = Math.floor(Date.now() / 1000)
+
   const lineRows = await db
     .select({
       id: folioLines.id,
@@ -176,6 +188,7 @@ const readFolio = async (db: Db, org: string, folioId: string, apiBaseUrl?: stri
       checkOut: folioLines.checkOut,
       guests: folioLines.guests,
       nights: folioLines.nights,
+      redeemedCount: folioLines.redeemedCount,
     })
     .from(folioLines)
     .where(and(eq(folioLines.folioId, folioId), eq(folioLines.organizationId, org)))
@@ -259,6 +272,27 @@ const readFolio = async (db: Db, org: string, folioId: string, apiBaseUrl?: stri
       resolved_at: tsOrNull(r.resolvedAt),
       created_at: Math.floor(r.createdAt.getTime() / 1000),
     })),
+    // US-A85 (D7) — the worst of the lines. Computed from the same readings the array carries, so
+    // the summary and the breakdown are one number and its parts, never two opinions.
+    fulfillment: folioFulfillment(
+      lineRows.map((line) =>
+        lineFulfillment(
+          {
+            lineId: line.id,
+            lineType: line.lineType,
+            slotDate: line.slotDate,
+            slotStartTime: line.slotStartTime,
+            checkIn: line.checkIn,
+            lineTotal: line.lineTotal,
+            quantity: line.quantity,
+            redeemedCount: line.redeemedCount,
+          },
+          fulfillmentTz,
+          fulfillmentMargin,
+          nowEpoch,
+        ),
+      ),
+    ),
     lines: lineRows.map((line) => ({
       id: line.id,
       line_type: line.lineType,
@@ -273,6 +307,24 @@ const readFolio = async (db: Db, org: string, folioId: string, apiBaseUrl?: stri
       guests: line.guests,
       nights: line.nights,
       quantity: line.quantity,
+      // US-A85 — the per-line fulfilment the folio's roll-up is made of (D2). The detail is where
+      // "two of four boarded, and the Thursday tour nobody came to" can actually be read.
+      redeemed_count: line.redeemedCount,
+      fulfillment: lineFulfillment(
+        {
+          lineId: line.id,
+          lineType: line.lineType,
+          slotDate: line.slotDate,
+          slotStartTime: line.slotStartTime,
+          checkIn: line.checkIn,
+          lineTotal: line.lineTotal,
+          quantity: line.quantity,
+          redeemedCount: line.redeemedCount,
+        },
+        fulfillmentTz,
+        fulfillmentMargin,
+        nowEpoch,
+      ),
       base_price: line.basePrice,
       minimum_price: line.minimumPrice,
       unit_price: line.unitPrice,
@@ -351,11 +403,18 @@ export const listFolios = async (c: FoliosContext) => {
   // The org's zone decides every calendar boundary on this route — the window (US-A84 rule 2) and,
   // since US-A83, the range too.
   const [orgRow] = await db
-    .select({ tz: organizations.timezone })
+    .select({ tz: organizations.timezone, noShowMargin: organizations.noShowMarginMinutes })
     .from(organizations)
     .where(eq(organizations.id, org))
     .limit(1)
   const tz = orgRow?.tz ?? 'UTC'
+  // US-A85 — the fulfilment axis is DERIVED on read, so the clock and the margin travel with the
+  // query rather than being baked into a column. `now` is the one already taken above.
+  const fulfillmentCtx = {
+    tz,
+    marginMinutes: orgRow?.noShowMargin ?? 0,
+    nowEpoch: Math.floor(now.getTime() / 1000),
+  }
 
   // US-A83 rule 1 — an inclusive org-local range over `created_at`.
   const range = dateRangeFilter(tz, fromQ, toQ)
@@ -433,7 +492,7 @@ export const listFolios = async (c: FoliosContext) => {
     ? [eq(folios.organizationId, org), inArray(folios.id, page.map((r) => r.id))]
     : filters
   const [linesByFolio, portalLinkByFolio, requestByFolio] = await Promise.all([
-    readListLines(db, org, decorationFilters),
+    readListLines(db, org, decorationFilters, fulfillmentCtx),
     readListPortalLinks(db, org, decorationFilters, c.env.API_BASE_URL),
     readListCancellationRequests(db, org, decorationFilters),
   ])
@@ -481,6 +540,11 @@ export const listFolios = async (c: FoliosContext) => {
       sale_mode: r.saleMode,
       portal_link: portalLinkByFolio.get(r.id) ?? null,
       lines: linesByFolio.get(r.id) ?? [],
+      // US-A85 (D7) — the worst of the lines, so a folio with one wasted seat never reads as
+      // consumed. Derived; refused from any request body.
+      fulfillment: folioFulfillment(
+        (linesByFolio.get(r.id) ?? []).map((l) => l.fulfillment),
+      ),
       // US-A84 rule 6 — 'pending' ⇒ a customer is waiting on an answer (the card's first verb);
       // 'resolved' ⇒ requests exist but none live (the `Con solicitud` facet); null ⇒ none.
       cancellation_request: requestByFolio.get(r.id) ?? null,

@@ -2,7 +2,9 @@
 // integer minor units (centavos) — render with the helpers in features/catalog/types.
 // Spec: docs/cancellation/total-folio-cancellation.spec.md
 
-import type { FolioListLine, PaymentMethod, PaymentVerification } from '../pos/types'
+import type { Fulfillment, FolioListLine, PaymentMethod, PaymentVerification } from '../pos/types'
+
+export type { Fulfillment }
 
 export type FolioStatus = 'paid' | 'booking' | 'cancelled'
 
@@ -46,6 +48,8 @@ export interface FolioListItem {
   refund_amount?: number
   // US-A82 — what was sold (the card's title) and the {itinerary} the ticket send renders.
   lines?: FolioListLine[]
+  /** US-A85 — the worst of the folio's lines (D7). Derived server-side; read-only. */
+  fulfillment?: Fulfillment
   // US-A82 — the portal link the card's ticket send needs; null until the money clears.
   portal_link?: string | null
   // US-AG45 D17 — 'express' folios carry no customer_name; never infer the mode from a null name.
@@ -84,6 +88,9 @@ export interface FolioDetailLine {
   guests?: number | null
   nights?: number | null
   quantity: number
+  /** US-A85 — the counts the fulfilment axis is derived from; server-derived, read-only. */
+  redeemed_count?: number
+  fulfillment?: Fulfillment
   base_price: number
   minimum_price: number
   unit_price: number
@@ -93,6 +100,8 @@ export interface FolioDetailLine {
 
 export interface FolioDetail {
   id: string
+  /** US-A85 (D7) — the worst of the folio's lines. */
+  fulfillment?: Fulfillment
   agent: FolioAgent
   // US-A68 — the affiliate shift operator who took the sale; null if sold directly.
   operator_name?: string | null

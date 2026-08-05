@@ -28,6 +28,13 @@ export const organizations = sqliteTable('organizations', {
   // `bookingPreDepartureBufferHours`, so an apartado is never born inside the window it is supposed
   // to be settled in.
   bookingCreationCutoffHours: integer('booking_creation_cutoff_hours').notNull().default(0),
+  // US-A85 (docs/folios/folio-state-machine.spec.md, D23) — when a departed line with nothing
+  // redeemed starts reading as a no-show. SIGNED like its two neighbours: + = before departure,
+  // − = after. 0 (default) = the departure instant. Its OWN column, never one of those two: they
+  // drive the sales gate and the apartado's release, and one number cannot serve two intents.
+  // Enforced coherent with `salesCutoffOffsetMinutes` — a customer may not be marked absent while
+  // their seat is still sellable. Fulfilment ITSELF is derived and stored nowhere (D4).
+  noShowMarginMinutes: integer('no_show_margin_minutes').notNull().default(0),
   // Accommodation/lodging settings (docs/lodging/accommodation-stays.spec.md §2.5). weekendDays:
   // CSV of ISO weekday ints (0=Sun … 6=Sat) — which nights use a unit's weekend_rate (default
   // Fri+Sat). A PAID stay cancels free until lodgingFreeCancelDays before check-in; inside that

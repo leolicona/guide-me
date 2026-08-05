@@ -34,3 +34,11 @@ export const commissionExportQuerySchema = z
 
 export type CommissionReportQuery = z.infer<typeof commissionReportQuerySchema>
 export type CommissionExportQuery = z.infer<typeof commissionExportQuerySchema>
+
+// US-A85 — the wasted-seat report. `from`/`to` are inclusive calendar days compared against the
+// line's own snapshotted DEPARTURE, so a seat sold in June for an August tour is wasted in August.
+export const wastedSeatsQuerySchema = z.object({
+  from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+})
+export type WastedSeatsQuery = z.infer<typeof wastedSeatsQuerySchema>

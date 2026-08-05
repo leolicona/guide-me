@@ -216,6 +216,7 @@ export function folioTimeChip(
     booking_expires_at?: number | null
     cancelled_at?: number | null
     refund_status?: 'none' | 'pending' | 'refunded'
+    fulfillment?: 'pending' | 'partial' | 'fulfilled' | 'no_show'
   },
   nowSeconds: number | null,
 ): TimeChip | null {
@@ -223,6 +224,15 @@ export function folioTimeChip(
     const since = nowSeconds !== null && folio.cancelled_at != null ? nowSeconds - folio.cancelled_at : null
     return { label: since === null ? 'Reembolso pendiente' : `Debe hace ${ago(since)}`, tone: 'error' }
   }
+
+  // US-A85 — a departed folio's time reading IS its fulfilment: the chip already carries the clock,
+  // and once the departure has passed there is no countdown left to report. `no_show` is red and
+  // `partial` amber, both icon-paired by StatusChip's own presets — never teal, which carries no
+  // state meaning. `fulfilled` and `pending` say nothing here: a consumed sale needs no chip, and a
+  // tour that has not left yet is already described by the apartado countdown below.
+
+  if (folio.fulfillment === 'no_show') return { label: 'Sin usar', tone: 'error' }
+  if (folio.fulfillment === 'partial') return { label: 'Parcialmente usado', tone: 'warning' }
 
   if (folio.status !== 'booking' || folio.booking_expires_at == null) return null
 

@@ -16,6 +16,9 @@ export interface MyOrganization {
   booking_pre_departure_buffer_hours: number
   /** US-A77 — hours before departure past which an apartado may no longer be opened. 0 = off. */
   booking_creation_cutoff_hours: number
+  /** US-A85 (D23) — signed minutes (+ before / − after departure) at which an unscanned paid seat
+   *  starts reading as wasted. 0 = the departure instant. Its own number, never one of the two above. */
+  no_show_margin_minutes?: number
   // US-A60/A63 — lodging org settings. weekend days as ISO weekday ints (0=Sun…6=Sat; default
   // [5,6] = Fri+Sat); free-cancel window (days) + penalty (%) for paid-stay cancellations.
   lodging_weekend_days: number[]
@@ -50,6 +53,7 @@ export interface UpdateOrganizationInput {
   booking_grace_offset_minutes?: number
   booking_pre_departure_buffer_hours?: number
   booking_creation_cutoff_hours?: number
+  no_show_margin_minutes?: number
   lodging_weekend_days?: number[]
   lodging_free_cancel_days?: number
   lodging_cancel_penalty_pct?: number

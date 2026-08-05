@@ -483,3 +483,55 @@ describe('S-10 — the time chip states which clock is running', () => {
     expect(folioTimeChip({ status: 'paid' }, now)).toBeNull()
   })
 })
+
+// --- US-A85 — the fulfilment axis reaches the card through the time channel --------------------
+//
+// The chip already carries the clock, and once a departure has passed there is no countdown left
+// to report — so a departed folio's time reading IS its fulfilment. No new channel is added to the
+// card: US-A82's one-channel-per-axis rule holds.
+
+describe('US-A85 — a departed folio says whether its seats were used', () => {
+  const departed = {
+    status: 'paid' as const,
+    booking_expires_at: null,
+    cancelled_at: null,
+    refund_status: 'none' as const,
+  }
+
+  it('nobody boarded → "Sin usar", in error tone', () => {
+    expect(folioTimeChip({ ...departed, fulfillment: 'no_show' }, 1000)).toEqual({
+      label: 'Sin usar',
+      tone: 'error',
+    })
+  })
+
+  it('some boarded → "Parcialmente usado", in warning tone', () => {
+    expect(folioTimeChip({ ...departed, fulfillment: 'partial' }, 1000)).toEqual({
+      label: 'Parcialmente usado',
+      tone: 'warning',
+    })
+  })
+
+  it('a consumed sale needs no chip, and neither does one that has not departed', () => {
+    expect(folioTimeChip({ ...departed, fulfillment: 'fulfilled' }, 1000)).toBeNull()
+    expect(folioTimeChip({ ...departed, fulfillment: 'pending' }, 1000)).toBeNull()
+  })
+
+  it('an unconfirmed refund still outranks it — a debt is louder than a wasted seat', () => {
+    expect(
+      folioTimeChip(
+        { status: 'cancelled', refund_status: 'pending', cancelled_at: 500, fulfillment: 'no_show' },
+        1000,
+      )?.label,
+    ).toMatch(/Debe hace/)
+  })
+
+  it('a live apartado keeps its countdown — fulfilment only speaks once the tour has left', () => {
+    expect(
+      folioTimeChip(
+        { status: 'booking', booking_expires_at: 100000, refund_status: 'none', fulfillment: 'pending' },
+        1000,
+      )?.label,
+    ).toMatch(/Vence en/)
+  })
+})
