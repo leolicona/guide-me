@@ -597,9 +597,14 @@ join removed — see `folio-lifecycle-unification.spec.md` S-18.)*
 
 ### Phase 4 — the two new notices *(no migration · `feat/folio-reminders`)*
 
-- [ ] `departure_reminder` at T−24h for `paid` folios
-- [ ] The review request at T+2h for `fulfilled` folios — **explicitly marketing, and it adds a tap**
-- [ ] `SPEC.md`: US-T08 already registered — tick the Features-by-Phase box, the feature is now complete
+- [x] `departure_reminder` at T−24h for `paid` folios — anchored on the folio's **earliest**
+      departure, resolved in the org's zone, **one message per folio and not one per line**
+- [x] `review_requested` at T+2h — **explicitly marketing, and it adds a tap**, so D20's
+      written-notice rule does not reach it. Sent **only to somebody who actually boarded**: the
+      fulfilment axis of Phase 2 is precisely what makes "¿cómo te fue?" to a no-show avoidable
+- [x] 10 scenarios in `test/folios/departure-reminders.test.ts`; the two guards that matter (an
+      apartado is not reminded, a no-show is not asked for a review) are **mutation-verified**
+- [x] `SPEC.md`: US-T08 registered in #61; Features-by-Phase box ticked below
 
 ---
 

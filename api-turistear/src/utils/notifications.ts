@@ -26,6 +26,10 @@ export type NotificationEvent =
   | 'booking_grace_entered'
   | 'departure_reminder'
   | 'refund_completed'
+  // Phase 4. Marketing, and labelled as such: it ADDS a tap rather than removing one, so D20's
+  // written-notice rule does not reach it — it is the one message an org should be able to switch
+  // off, and the only one sent to somebody who is not owed anything.
+  | 'review_requested'
 
 export type NotificationChannel = 'email' | 'whatsapp'
 
@@ -93,6 +97,12 @@ export const EVENTS: Record<NotificationEvent, EventDef> = {
   // most litigable moment in the product: cash, in person, no receipt, and a retention the customer
   // does not understand. "Pagué 3,000 y recibí 1,800, ¿dónde quedaron 1,200?" is answered nowhere
   // else, which is why the amounts are spelled out (business rule 13).
+  review_requested: {
+    origin: 'clock',
+    template:
+      'Hola {customer_name}, ¿cómo te fue en {itinerary}? ' +
+      'Si tienes un minuto, nos ayudaría mucho tu reseña. — {org_name}',
+  },
   refund_completed: {
     origin: 'action-tail',
     template:

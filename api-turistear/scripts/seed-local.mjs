@@ -27,6 +27,10 @@ const TZ = 'America/Cancun'
 
 const now = Math.floor(Date.now() / 1000)
 const DAY = 86400
+// 'YYYY-MM-DD' N days from today. The fulfilment axis (US-A85) compares a line's snapshotted
+// departure against the clock, so a seed with only FUTURE departures can demonstrate nothing about
+// it: every folio reads pending, the wasted-seat report is empty, and the T-24h sweep finds nothing.
+const dayOffset = (n) => new Date((now + n * DAY) * 1000).toISOString().slice(0, 10)
 const q = (s) => `'${String(s).replace(/'/g, "''")}'`
 
 console.log(`→ hashing the password via agnostic-auth (stateless; no account is created there)`)
@@ -44,9 +48,18 @@ const { data } = await res.json()
 const adminId = randomUUID()
 const agentId = randomUUID()
 const serviceIds = [randomUUID(), randomUUID(), randomUUID(), randomUUID()]
+// Held rather than inlined, so the outbox rows below can point at real folios.
+const reminderFolioId = randomUUID()
+const graceFolioId = randomUUID()
 
 // A folio + its line, so the list has cards with a real service name on them.
-const folio = ({ id, customer, phone, status, total, paid, createdAt, extra = {}, service }) => {
+const folio = ({
+  id, customer, phone, status, total, paid, createdAt, extra = {}, service,
+  // US-A85 — fulfilment is DERIVED from these two against the line's departure, so a seed that
+  // leaves them at their defaults can only ever produce 'pending'. Overriding the date is what lets
+  // a folio be genuinely departed rather than merely old.
+  quantity = 2, redeemed = 0, departsOn,
+}) => {
   const cols = {
     id: q(id),
     organization_id: q(ORG_ID),
@@ -70,8 +83,10 @@ const folio = ({ id, customer, phone, status, total, paid, createdAt, extra = {}
        slot_date, slot_start_time, quantity, base_price, minimum_price, unit_price, line_total,
        qr_token, redeemed_count, created_at)
      VALUES (${q(lineId)}, ${q(ORG_ID)}, ${q(id)}, ${q(service.id)}, NULL, ${q(service.name)},
-       ${q(service.date)}, '08:00', 2, ${total / 2}, ${total / 2}, ${total / 2}, ${total},
-       NULL, 0, ${createdAt});`,
+       ${q(departsOn ?? service.date)}, '08:00', ${quantity},
+       ${Math.round(total / quantity)}, ${Math.round(total / quantity)},
+       ${Math.round(total / quantity)}, ${total},
+       NULL, ${redeemed}, ${createdAt});`,
   ].join('\n')
 }
 
@@ -87,6 +102,7 @@ const svc = [
 
 const sql = `
 -- Clean slate: children first, then the org itself.
+DELETE FROM notifications WHERE organization_id = ${q(ORG_ID)};
 DELETE FROM folio_lines WHERE organization_id = ${q(ORG_ID)};
 DELETE FROM folio_payments WHERE organization_id = ${q(ORG_ID)};
 DELETE FROM cancellation_requests WHERE organization_id = ${q(ORG_ID)};
@@ -138,6 +154,70 @@ ${folio({
   total: 150000, paid: 150000, createdAt: now - 9 * DAY, service: svc[0],
   extra: { cancelled_at: now - 8 * DAY, refund_status: q('pending'), refund_amount: 150000 },
 })}
+-- US-A85 - the three fulfilment readings, so the chip, the "Sin usar" facet and the wasted-seat
+-- report each have something behind them. Departures are RELATIVE to today: fixed future dates are
+-- why the first version of this seed could only ever show 'pending'.
+${folio({
+  id: randomUUID(), customer: 'Familia Perez', phone: '+529981110001', status: 'paid',
+  total: 200000, paid: 200000, createdAt: now - 10 * DAY, service: svc[0],
+  departsOn: dayOffset(-2), quantity: 4, redeemed: 0,
+  extra: { payment_verification: q('verified'), tickets_sent_at: now - 10 * DAY },
+})}
+${folio({
+  id: randomUUID(), customer: 'Grupo Hernandez', phone: '+529981110002', status: 'paid',
+  total: 200000, paid: 200000, createdAt: now - 10 * DAY, service: svc[1],
+  departsOn: dayOffset(-2), quantity: 4, redeemed: 2,
+  extra: { payment_verification: q('verified'), tickets_sent_at: now - 10 * DAY },
+})}
+-- Consumed AND departed: the only shape the review request (US-T08) is allowed to reach.
+${folio({
+  id: randomUUID(), customer: 'Sofia Lira', phone: '+529981110003', status: 'paid',
+  total: 200000, paid: 200000, createdAt: now - 10 * DAY, service: svc[2],
+  departsOn: dayOffset(-1), quantity: 4, redeemed: 4,
+  extra: {
+    payment_verification: q('verified'),
+    tickets_sent_at: now - 10 * DAY, tickets_viewed_at: now - 9 * DAY,
+  },
+})}
+-- Departing tomorrow: the folio the T-24h sweep exists to remind.
+${folio({
+  id: reminderFolioId, customer: 'Diego Cabrera', phone: '+529981110004', status: 'paid',
+  total: 150000, paid: 150000, createdAt: now - 2 * DAY, service: svc[0],
+  departsOn: dayOffset(1), quantity: 3, redeemed: 0,
+  extra: { payment_verification: q('verified'), tickets_sent_at: now - 2 * DAY },
+})}
+-- An apartado past its settle deadline: stage 2, the OTHER clock-produced notification (D19).
+${folio({
+  id: graceFolioId, customer: 'Norma Escalante', phone: '+529981110006', status: 'booking',
+  total: 400000, paid: 120000, createdAt: now - 6 * DAY, service: svc[2],
+  departsOn: dayOffset(2), quantity: 4,
+  extra: { booking_expires_at: now - 3600, reminder_status: q('sent') },
+})}
+-- BUG-027 - cancelled and owed NOTHING back: the ladder retained everything. This folio used to
+-- render "$X (reembolsado)" about money the company kept, and now reads "(sin reembolso)".
+-- Without this row the fix is invisible.
+${folio({
+  id: randomUUID(), customer: 'Ernesto Vidal', phone: '+529981110005', status: 'cancelled',
+  total: 300000, paid: 90000, createdAt: now - 12 * DAY, service: svc[1],
+  extra: {
+    cancelled_at: now - 11 * DAY, refund_status: q('none'), refund_amount: 0,
+    cancellation_source: q('admin'),
+  },
+})}
+
+-- US-A86 - the outbox with something in it: work to drain, and a failure that must not stay
+-- invisible. Seeded DIRECTLY because wrangler dev does not fire a cron trigger on its own, so an
+-- outbox waiting on the scheduled worker would look broken rather than empty. Everything else about
+-- these rows is exactly what the sweep writes.
+INSERT INTO notifications (id, organization_id, folio_id, event, channel, status, created_at)
+VALUES (${q(randomUUID())}, ${q(ORG_ID)}, ${q(reminderFolioId)}, 'departure_reminder', 'whatsapp', 'pending', ${now - 1800}),
+       (${q(randomUUID())}, ${q(ORG_ID)}, ${q(reminderFolioId)}, 'departure_reminder', 'email', 'skipped', ${now - 1800}),
+       (${q(randomUUID())}, ${q(ORG_ID)}, ${q(graceFolioId)}, 'booking_grace_entered', 'whatsapp', 'pending', ${now - 3600});
+
+INSERT INTO notifications (id, organization_id, folio_id, event, channel, status, attempts, last_error, created_at)
+VALUES (${q(randomUUID())}, ${q(ORG_ID)}, ${q(graceFolioId)}, 'booking_grace_entered', 'email', 'failed', 2,
+        'Resend 503 - service unavailable', ${now - 3600});
+
 -- Older than the 30-day window and owing nothing: only findable through search or a date range,
 -- which is exactly what US-A83 is for.
 ${folio({
@@ -164,7 +244,14 @@ console.log(`
    Email     ${EMAIL}
    Password  ${PASSWORD}
 
-   Also seeded: an agent (ana@local.test, same password), 3 services, and 5 sales — one per
+   Also seeded: an agent (ana@local.test, same password), 4 services, and 11 sales — one per
    state the Ventas screen can show, plus one from 200 days ago that ONLY search or a date
    range can reach.
+
+   For the folio state machine:
+     /folios     "Apartado" everywhere (never "Reserva") · a cancelled folio reading
+                 "(sin reembolso)" · chips "Sin usar" and "Parcialmente usado" on departed tours.
+                 Estado -> Pendiente -> "Sin usar".
+     /mensajes   the admin outbox: two WhatsApp rows to drain, one recorded failure.
+     Ajustes     "Marcar como no usado" - set it to 2 h Despues and the no-shows go quiet.
 `)
