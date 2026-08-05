@@ -31,7 +31,6 @@ describe('US-A46 — org booking policy', () => {
     expect(status).toBe(200)
     expect(json.organization).toMatchObject({
       booking_min_down_payment_pct: 0,
-      booking_hold_days: 7,
       // US-A47 — split policies: sales cutoff (default 0 = sellable until departure) +
       // booking grace (renamed same-day buffer; default 15 = cancel 15 min before departure).
       sales_cutoff_offset_minutes: 0,
@@ -45,7 +44,6 @@ describe('US-A46 — org booking policy', () => {
     await seedUser({ email: 'admin@empresa.com', role: 'admin' })
     const { status, json } = await put('admin@empresa.com', {
       booking_min_down_payment_pct: 50,
-      booking_hold_days: 3,
       // A positive cutoff (close sales 5 min before) and a NEGATIVE grace (cancel 10 min AFTER
       // departure — the "After" direction the UI translates to a negative integer).
       sales_cutoff_offset_minutes: 5,
@@ -55,7 +53,6 @@ describe('US-A46 — org booking policy', () => {
     expect(status).toBe(200)
     expect(json.organization).toMatchObject({
       booking_min_down_payment_pct: 50,
-      booking_hold_days: 3,
       sales_cutoff_offset_minutes: 5,
       booking_grace_offset_minutes: -10,
       booking_pre_departure_buffer_hours: 12,
@@ -67,7 +64,6 @@ describe('US-A46 — org booking policy', () => {
   it('rejects out-of-range values → 400', async () => {
     await seedUser({ email: 'admin@empresa.com', role: 'admin' })
     expect((await put('admin@empresa.com', { booking_min_down_payment_pct: 101 })).status).toBe(400)
-    expect((await put('admin@empresa.com', { booking_hold_days: 0 })).status).toBe(400)
     // Offsets are signed (±240). Negative is now VALID (a grace window); only out-of-bounds fails.
     expect((await put('admin@empresa.com', { booking_grace_offset_minutes: -30 })).status).toBe(200)
     expect((await put('admin@empresa.com', { sales_cutoff_offset_minutes: 999 })).status).toBe(400)
@@ -117,20 +113,36 @@ describe('US-A46 — org booking policy', () => {
     expect((await put('admin@empresa.com', { booking_creation_cutoff_hours: 0 })).status).toBe(200)
   })
 
+  // BUG-028 — `booking_hold_days` configured the retired `created_at + N days` model. It has been
+  // inert since the hold moved to time-distance-to-departure, so accepting it (with a min(1) that
+  // rejected a 0 and then ignored the 5) was the API promising a policy it does not have.
+  it('booking_hold_days is neither returned nor writable', async () => {
+    await seedUser({ email: 'admin@empresa.com', role: 'admin' })
+    expect((await get('admin@empresa.com')).json.organization).not.toHaveProperty(
+      'booking_hold_days',
+    )
+    // Accepted at the HTTP layer (Zod strips unknown keys) but written nowhere — and a value the
+    // old min(1) would have rejected no longer produces a 400 about a policy that does not exist.
+    expect((await put('admin@empresa.com', { booking_hold_days: 0 })).status).toBe(200)
+    expect((await get('admin@empresa.com')).json.organization).not.toHaveProperty(
+      'booking_hold_days',
+    )
+  })
+
   it('an agent may not edit the policy → 403', async () => {
     const { organizationId } = await seedUser({ email: 'admin@empresa.com', role: 'admin' })
     await seedUser({ email: 'agent@empresa.com', role: 'agent', organizationId })
-    expect((await put('agent@empresa.com', { booking_hold_days: 5 })).status).toBe(403)
+    expect((await put('agent@empresa.com', { booking_min_down_payment_pct: 5 })).status).toBe(403)
   })
 
   it('isolation — an admin only edits their own org', async () => {
     const { orgA, orgB } = await seedTwoOrgs()
-    await put(orgA.adminEmail, { booking_hold_days: 2 })
+    await put(orgA.adminEmail, { booking_min_down_payment_pct: 40 })
 
     const a = await get(orgA.adminEmail)
     const b = await get(orgB.adminEmail)
-    expect(a.json.organization.booking_hold_days).toBe(2)
-    expect(b.json.organization.booking_hold_days).toBe(7) // untouched default
+    expect(a.json.organization.booking_min_down_payment_pct).toBe(40)
+    expect(b.json.organization.booking_min_down_payment_pct).toBe(0) // untouched default
   })
 })
 
@@ -236,7 +248,7 @@ describe('US-A69 — cancellation policy ladder', () => {
   it('leaves the ladder alone when the field is absent from a partial update', async () => {
     await seedUser({ email: 'admin@empresa.com', role: 'admin' })
     await put('admin@empresa.com', { cancellation_policy: LADDER })
-    await put('admin@empresa.com', { booking_hold_days: 3 })
+    await put('admin@empresa.com', { booking_min_down_payment_pct: 30 })
     expect((await get('admin@empresa.com')).json.organization.cancellation_policy).not.toBeNull()
   })
 
@@ -273,10 +285,13 @@ describe('US-A69 — cancellation policy ladder', () => {
     expect((await get('admin@empresa.com')).json.organization.cancellation_policy).toBeNull()
   })
 
-  it('US-A73 — the agent-cancellation switch round-trips', async () => {
+  // BUG-028 — US-A73 is specified, NOT built: no endpoint reads the flag and every cancel route is
+  // still admin-only. The switch used to round-trip through PATCH, which told an admin they had
+  // enabled something. It is now refused (Zod strips it), and the read field stays for US-AG44.
+  it('US-A73 — the agent-cancellation switch is NOT writable while the endpoint does not exist', async () => {
     await seedUser({ email: 'admin@empresa.com', role: 'admin' })
     expect((await put('admin@empresa.com', { agent_cancellation_enabled: true })).status).toBe(200)
-    expect((await get('admin@empresa.com')).json.organization.agent_cancellation_enabled).toBe(true)
+    expect((await get('admin@empresa.com')).json.organization.agent_cancellation_enabled).toBe(false)
   })
 
   it('isolation — one org\'s ladder is invisible to another', async () => {

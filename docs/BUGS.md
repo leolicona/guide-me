@@ -6,6 +6,83 @@ Tracks confirmed bugs, root causes, and fixes. Each entry is immutable once clos
 
 ---
 
+## BUG-028 — Two Org Settings the API Accepts and Nothing Obeys — ✅ FIXED
+
+**Discovered:** 2026-08-04
+**Reporter:** an audit of every column on `organizations` for a real consumer, prompted by a
+question about how the apartado time limit works
+**Affected component:** `api-turistear/src/routes/organizations/schema.ts` (the `PATCH` contract),
+`handler.ts` (the read shape), `pos/handler.ts:660-690` (`BookingPolicy`), and — the part that
+matters — `docs/SPEC.md` US-A46
+**Severity:** Low in code, **Medium in the index.** Nothing computes wrongly; an admin is told
+something untrue.
+
+### Symptom
+
+`PATCH /api/organizations` accepted two fields that changed nothing:
+
+| Field | What the caller is told | What happens |
+|---|---|---|
+| `booking_hold_days` | US-A46: *"the **hold window** (≥ 1) after which an unsettled apartado auto-cancels and releases its spots"* | **nothing.** `200`, the value is stored, and no code reads it |
+| `agent_cancellation_enabled` | US-A73's switch, round-tripping through the API | **nothing.** Every cancel route is still `requireRole('admin')` |
+
+`booking_hold_days` was the worse of the two, for three reasons:
+
+1. It **validated** — `z.number().int().min(1)`. It rejected a `0` with a 400 and then ignored the
+   `5`. Validation is the strongest signal an API can send that a field is load-bearing.
+2. It was carried into `BookingPolicy.holdDays` (`pos/handler.ts:681`), so reading the code it
+   looked like a live policy.
+3. **`SPEC.md` US-A46 described its behaviour as real.** An admin who read the index and set
+   `booking_hold_days: 3` believing their apartados would last three days got `200` and no effect.
+
+### Root cause
+
+The `created_at + holdDays` model was correct when it shipped. It produced the born-expired
+apartado (`#29`/`#30`), whose fix moved the calculation to **time-distance to departure**, and
+`apartado-stages.spec.md` then made the deadline a transition rather than an event. Neither change
+removed the setting that configured the old model — the code comment records the moment:
+
+> *The former `createdAt + holdDays` cap was removed — the hold now lasts until the pre-departure
+> buffer regardless of how far out the tour is; **`holdDays` is retained inert**.*
+
+"Retained inert" is a fair description of a column. It is not a fair description of a validated
+field in a public contract that the product index documents as working.
+
+`agent_cancellation_enabled` is a different shape and was never a lie: `SPEC.md` US-A73 says
+plainly *"**Not yet built** — the switch is not surfaced until the endpoint exists"*, and it is
+deliberately absent from `/settings`. The only defect is that the `PATCH` still **accepted** it,
+so a caller using the API directly could set `true` and believe they had enabled something.
+
+### Fix
+
+- Both fields removed from `updateOrganizationSchema`. Zod strips unknown keys on a non-strict
+  object, so a client still sending them gets `200` and no write — no breaking error.
+- `booking_hold_days` removed from the read shape and from `MyOrganization`; `holdDays` removed
+  from `BookingPolicy` and from the three call sites that selected it.
+- `agent_cancellation_enabled` **stays readable**: it is genuinely reserved, and US-AG44 will need
+  it. The `PATCH` line is restored by the PR that builds the endpoint.
+- **`SPEC.md` US-A46 amended** — the sentence that described the retired model is struck through
+  and replaced with what actually governs the deadline.
+- Neither column is dropped. There is no migration: the stored values are harmless history, and
+  rewriting a table in D1 to remove two columns buys nothing.
+
+### Tests
+
+`test/organizations/organization-policy.test.ts` — both new assertions were **mutation-verified**:
+re-adding the schema lines and the update branches turns exactly those two tests red, and nothing
+else.
+
+### Related changes
+
+The audit that found this is recorded in `docs/folios/folio-state-machine.spec.md` (§ Settings
+audit), which also notes two findings deliberately left alone: `ack_window_hours` works but has no
+UI (tracked as unbuilt at `SPEC.md` *Configuración home*), and the lodging pair
+(`lodging_free_cancel_days` / `lodging_cancel_penalty_pct`) is the model this fix copies — a
+retired setting that stops being editable and **tells the orgs that set it where the behaviour
+went** (`SettingsPage.tsx:488`).
+
+---
+
 ## BUG-025 — A Zoned Service Becomes Unsellable Once It Has 100 Sellable Slots — ⚠️ OPEN
 
 **Discovered:** 2026-08-03

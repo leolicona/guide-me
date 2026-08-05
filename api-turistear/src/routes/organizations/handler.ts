@@ -18,7 +18,6 @@ const orgColumns = {
   id: organizations.id,
   name: organizations.name,
   bookingMinDownPaymentPct: organizations.bookingMinDownPaymentPct,
-  bookingHoldDays: organizations.bookingHoldDays,
   salesCutoffOffsetMinutes: organizations.salesCutoffOffsetMinutes,
   bookingGraceOffsetMinutes: organizations.bookingGraceOffsetMinutes,
   bookingPreDepartureBufferHours: organizations.bookingPreDepartureBufferHours,
@@ -38,7 +37,6 @@ const serializeOrg = (o: {
   id: string
   name: string
   bookingMinDownPaymentPct: number
-  bookingHoldDays: number
   salesCutoffOffsetMinutes: number
   bookingGraceOffsetMinutes: number
   bookingPreDepartureBufferHours: number
@@ -56,7 +54,6 @@ const serializeOrg = (o: {
   id: o.id,
   name: o.name,
   booking_min_down_payment_pct: o.bookingMinDownPaymentPct,
-  booking_hold_days: o.bookingHoldDays,
   sales_cutoff_offset_minutes: o.salesCutoffOffsetMinutes,
   booking_grace_offset_minutes: o.bookingGraceOffsetMinutes,
   booking_pre_departure_buffer_hours: o.bookingPreDepartureBufferHours,
@@ -112,8 +109,6 @@ export const updateMyOrganization = async (c: OrganizationsContext) => {
   const updates: Record<string, unknown> = { updatedAt: new Date() }
   if (input.booking_min_down_payment_pct !== undefined)
     updates.bookingMinDownPaymentPct = input.booking_min_down_payment_pct
-  if (input.booking_hold_days !== undefined)
-    updates.bookingHoldDays = input.booking_hold_days
   if (input.sales_cutoff_offset_minutes !== undefined)
     updates.salesCutoffOffsetMinutes = input.sales_cutoff_offset_minutes
   if (input.booking_grace_offset_minutes !== undefined)
@@ -174,8 +169,6 @@ export const updateMyOrganization = async (c: OrganizationsContext) => {
     updates.cancellationPolicy = input.cancellation_policy
       ? JSON.stringify(input.cancellation_policy)
       : null
-  if (input.agent_cancellation_enabled !== undefined)
-    updates.agentCancellationEnabled = input.agent_cancellation_enabled
   // US-A81 — the scan-consumption mode (group-redemption D1); enum-validated in the schema.
   if (input.qr_redemption_mode !== undefined)
     updates.qrRedemptionMode = input.qr_redemption_mode

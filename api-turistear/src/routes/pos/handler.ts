@@ -660,7 +660,6 @@ interface PreparedLine {
 
 interface BookingPolicy {
   minDownPaymentPct: number
-  holdDays: number
   bookingGraceOffsetMinutes: number
   preDepartureBufferHours: number
   /** US-A77 — hours before departure past which an apartado may no longer be CREATED. 0 = off. */
@@ -671,14 +670,12 @@ interface BookingPolicy {
 // precedence over the org global; this phase there are no overrides, so it returns the org globals.
 function resolveBookingPolicy(org: {
   bookingMinDownPaymentPct: number
-  bookingHoldDays: number
   bookingGraceOffsetMinutes: number
   bookingPreDepartureBufferHours: number
   bookingCreationCutoffHours?: number
 }): BookingPolicy {
   return {
     minDownPaymentPct: org.bookingMinDownPaymentPct,
-    holdDays: org.bookingHoldDays,
     bookingGraceOffsetMinutes: org.bookingGraceOffsetMinutes,
     preDepartureBufferHours: org.bookingPreDepartureBufferHours,
     creationCutoffHours: org.bookingCreationCutoffHours ?? 0,
@@ -719,8 +716,9 @@ const slotEpoch = (date: string, time: string, tz: string): number =>
 // after departure); a slot beyond it uses the full pre-departure buffer as the settle-by deadline.
 // This closes the born-expired booking bug — a slot that was calendar-tomorrow but < buffer away
 // previously took the flat 24h buffer and landed its expiry in the past. A negative grace pushes
-// expiry PAST departure. (The former createdAt + holdDays cap was removed — the hold now lasts until
-// the pre-departure buffer regardless of how far out the tour is; `holdDays` is retained inert.)
+// expiry PAST departure. (The former createdAt + holdDays cap was removed — the hold now lasts
+// until the pre-departure buffer regardless of how far out the tour is. `booking_hold_days` used to
+// be carried into this policy object unread; it is gone from here and from the API — BUG-028.)
 function bookingExpiryDate(
   policy: BookingPolicy,
   nowSec: number,
@@ -972,7 +970,6 @@ export const confirmSale = async (c: PosContext) => {
     .select({
       name: organizations.name,
       bookingMinDownPaymentPct: organizations.bookingMinDownPaymentPct,
-      bookingHoldDays: organizations.bookingHoldDays,
       salesCutoffOffsetMinutes: organizations.salesCutoffOffsetMinutes,
       bookingGraceOffsetMinutes: organizations.bookingGraceOffsetMinutes,
       bookingPreDepartureBufferHours: organizations.bookingPreDepartureBufferHours,
@@ -1357,7 +1354,6 @@ export const confirmSale = async (c: PosContext) => {
   // like a paid sale (the decrement below is shared). A booking defers QR/portal/ticket-email.
   const policy = resolveBookingPolicy({
     bookingMinDownPaymentPct: orgRow?.bookingMinDownPaymentPct ?? 0,
-    bookingHoldDays: orgRow?.bookingHoldDays ?? 7,
     bookingGraceOffsetMinutes: orgRow?.bookingGraceOffsetMinutes ?? 15,
     bookingPreDepartureBufferHours: orgRow?.bookingPreDepartureBufferHours ?? 24,
     bookingCreationCutoffHours: orgRow?.bookingCreationCutoffHours ?? 0,
@@ -3077,7 +3073,6 @@ export const reactivateBooking = async (c: PosContext) => {
   const orgRows = await db
     .select({
       bookingMinDownPaymentPct: organizations.bookingMinDownPaymentPct,
-      bookingHoldDays: organizations.bookingHoldDays,
       salesCutoffOffsetMinutes: organizations.salesCutoffOffsetMinutes,
       bookingGraceOffsetMinutes: organizations.bookingGraceOffsetMinutes,
       bookingPreDepartureBufferHours: organizations.bookingPreDepartureBufferHours,
@@ -3089,7 +3084,6 @@ export const reactivateBooking = async (c: PosContext) => {
     .limit(1)
   const policy = resolveBookingPolicy({
     bookingMinDownPaymentPct: orgRows[0]?.bookingMinDownPaymentPct ?? 0,
-    bookingHoldDays: orgRows[0]?.bookingHoldDays ?? 7,
     bookingGraceOffsetMinutes: orgRows[0]?.bookingGraceOffsetMinutes ?? 15,
     bookingPreDepartureBufferHours: orgRows[0]?.bookingPreDepartureBufferHours ?? 24,
     bookingCreationCutoffHours: orgRows[0]?.bookingCreationCutoffHours ?? 0,
