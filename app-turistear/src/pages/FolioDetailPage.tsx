@@ -23,6 +23,7 @@ import {
 } from '@mui/material'
 import ArrowBackRounded from '@mui/icons-material/ArrowBackRounded'
 import { useFolio, useCancelFolio, useConfirmRefund, FolioStatusChip } from '../features/folios'
+import { refundReceiptUrl } from '../features/folios/refundReceipt'
 import { FolioWorkActions } from '../features/folios/components/FolioWorkActions'
 import type { FolioDetail } from '../features/folios/types'
 import { useOrgDateFormatter } from '../features/organization'
@@ -107,12 +108,33 @@ export default function FolioDetailPage() {
     setRefundOpen(true)
   }
 
+  // Opens the composer with the receipt pre-filled. The message itself is a pure function
+  // (`refundReceipt.ts`) so the three figures it must contain are testable without a page.
+  const openRefundReceipt = (f: FolioDetail | undefined) => {
+    const url = f && refundReceiptUrl(f)
+    if (url) window.open(url, '_blank')
+  }
+
   const handleConfirmRefund = () => {
     if (!id) return
     const input = useOverride
       ? { override_note: overrideNote.trim() }
       : { pin: pin.trim() }
-    refund.mutate({ id, input }, { onSuccess: () => setRefundOpen(false) })
+    // US-AG51 (D12/D20) — the action does not end when the sheet closes; it ends when the customer
+    // has been told. This used to stop at `setRefundOpen(false)` and nobody was notified — the
+    // pattern that works already existed one screen away (`Verificar y enviar`).
+    //
+    // The receipt is the record the customer keeps: cash was handed over in person with no paper,
+    // and the retention arithmetic — *paid 3,000, received 1,800* — is shown to them nowhere else.
+    refund.mutate(
+      { id, input },
+      {
+        onSuccess: (updated) => {
+          setRefundOpen(false)
+          openRefundReceipt(updated ?? folio)
+        },
+      },
+    )
   }
 
   const refundSubmitDisabled =

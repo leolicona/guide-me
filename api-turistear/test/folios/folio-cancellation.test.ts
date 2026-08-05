@@ -137,6 +137,7 @@ const clearFoliosDb = async () => {
   await env.DB.exec('DELETE FROM cancellation_requests')
   await env.DB.exec('DELETE FROM folio_access_tokens')
   await env.DB.exec('DELETE FROM folio_payments')
+  await env.DB.exec('DELETE FROM notifications')
   await env.DB.exec('DELETE FROM folios')
   // FK-safe: slot_zones and folio_lines both reference service_zones, which references services.
   await env.DB.exec('DELETE FROM slot_zones')

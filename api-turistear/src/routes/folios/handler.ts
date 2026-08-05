@@ -29,6 +29,7 @@ import {
 } from '../../services/resend'
 import { generateRefundPin } from '../../utils/portal'
 import { folioFulfillment, lineFulfillment } from '../../utils/folioFulfillment'
+import { emitNotification, recordEmailOutcome } from '../../utils/notifications'
 import { buildCancellationReversal, displayMethodSql, readFolioPayments } from '../../utils/folioPayments'
 import {
   readListCancellationRequests,
@@ -980,10 +981,19 @@ export const queueCancellationEmail = async (
     })),
   }
 
+  // The send stays here; what changed is that its OUTCOME is recorded (US-A86). A Resend outage
+  // used to vanish into a console line — the outbox now carries `failed` with the error, so the
+  // one notification a customer gets is never silently consumed.
   c.executionCtx.waitUntil(
-    sendCancellationEmail(c.env, emailData).catch((err) =>
-      console.error('[email] cancellation send failed', folioId, err),
-    ),
+    sendCancellationEmail(c.env, emailData)
+      .then(() => recordEmailOutcome(db, org, folioId, 'cancellation_approved', { ok: true }))
+      .catch((err) => {
+        console.error('[email] cancellation send failed', folioId, err)
+        return recordEmailOutcome(db, org, folioId, 'cancellation_approved', {
+          ok: false,
+          error: String(err),
+        })
+      }),
   )
 }
 
@@ -1223,6 +1233,14 @@ export const approveCancellationRequest = async (c: FoliosContext) => {
     )
 
   const folioOut = await readFolio(db, org, folio.id)
+  // US-A86 — the customer asked and is waiting on the answer; the row is written whether or not an
+  // address exists, because WhatsApp is the channel that always reaches them (D20).
+  await emitNotification(db, {
+    organizationId: org,
+    folioId: folio.id,
+    event: 'cancellation_approved',
+    hasEmail: !!folioOut?.customer_email,
+  })
   if (folioOut) await queueCancellationEmail(c, db, org, folio.id, folioOut)
 
   const [updated] = await db
@@ -1361,5 +1379,17 @@ export const confirmRefund = async (c: FoliosContext) => {
     )
 
   const folioOut = await readFolio(db, org, id)
+
+  // US-AG51 (D20) — the receipt. The cash and the PIN are the confirmation in the moment; this is
+  // the record the customer keeps afterwards, and the only place the ladder's arithmetic is ever
+  // shown to them (business rule 13). An earlier draft (D18, withdrawn) left it off WhatsApp to
+  // save a tap — it is an action-tail, so it rides the tap the agent has just made.
+  await emitNotification(db, {
+    organizationId: org,
+    folioId: id,
+    event: 'refund_completed',
+    hasEmail: !!folioOut?.customer_email,
+  })
+
   return c.json({ folio: folioOut })
 }

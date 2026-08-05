@@ -940,6 +940,47 @@ export const folioPayments = sqliteTable('folio_payments', {
     .default(sql`(unixepoch())`),
 })
 
+// US-A86 / US-AG51 (docs/folios/folio-state-machine.spec.md) — the notification outbox. One row per
+// (folio, event, channel) the system decided to emit, unique on that triple so a re-run of a cron or
+// a double-tapped button cannot duplicate a message.
+//
+// TWO DRAINS, because one is forced: email sends itself; WhatsApp is a human tap, since a Worker
+// cannot send `wa.me` (apartado-stages.spec.md S4). Every event goes out by WhatsApp (D20) — written
+// notice is what prevents a dispute — with email emitted ADDITIONALLY as a durable second copy.
+//
+// There is deliberately NO `viewed_at` (D21/D26): reading is measured only where a beacon exists,
+// which today is `folios.tickets_viewed_at` and the tickets alone. A column here would be a second
+// home for that fact, null for seven of eight events by unmeasurability rather than non-reading.
+export const notifications = sqliteTable('notifications', {
+  id: text('id').primaryKey(),
+  organizationId: text('organization_id')
+    .notNull()
+    .references(() => organizations.id),
+  folioId: text('folio_id')
+    .notNull()
+    .references(() => folios.id),
+  // The whitelist in `utils/notifications.ts`; never free text.
+  event: text('event').notNull(),
+  channel: text('channel', { enum: ['email', 'whatsapp'] }).notNull(),
+  // The DRAIN's state, not the folio's. `skipped` = this channel does not apply (no email on file),
+  // which is deliberately distinct from `failed` = the provider refused.
+  status: text('status', { enum: ['pending', 'sent', 'failed', 'skipped'] })
+    .notNull()
+    .default('pending'),
+  attempts: integer('attempts').notNull().default(0),
+  lastError: text('last_error'),
+  sentAt: integer('sent_at', { mode: 'timestamp' }),
+  // Null for an automatic (email) send; the human who tapped, for WhatsApp. D21 — it asserts that
+  // someone sent it, NOT that the customer received it.
+  sentBy: text('sent_by').references(() => users.id),
+  createdAt: integer('created_at', { mode: 'timestamp' })
+    .notNull()
+    .default(sql`(unixepoch())`),
+})
+
+export type Notification = typeof notifications.$inferSelect
+export type NewNotification = typeof notifications.$inferInsert
+
 export type FolioPayment = typeof folioPayments.$inferSelect
 export type NewFolioPayment = typeof folioPayments.$inferInsert
 

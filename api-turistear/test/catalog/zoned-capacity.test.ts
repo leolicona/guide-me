@@ -177,6 +177,7 @@ const clearZoneDb = async () => {
     'slot_zones',
     'folio_lines',
     'folio_payments',
+    'notifications',
     'folios',
     'service_zones',
     'slots',
