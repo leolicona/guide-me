@@ -79,7 +79,7 @@ change meaning.
 | # | Decision | Why |
 |---|---|---|
 | **D1** | **Rescheduling belongs to ① and ②, and moves the SAME folio.** | There, the seats are already yours: moving a hold you own takes nothing from anybody. Nothing ended — no ladder ran, no retention was taken, no message of loss was sent — so there is nothing to undo and no new folio to justify. It is the cheap operation, and it is the one the product never built. |
-| **D2** | **A reschedule is a HUMAN action, agreed between the tourist and the agent.** Never a cron, never an automatic outcome of a clock. | *(User decision, and the industry agrees.)* A machine choosing a date for an absent customer **takes a seat from the pool and gives it to someone who has just demonstrated they do not arrive** — the opposite of protecting the operator. Airlines, hotels, OTAs and restaurants all reschedule only while the inventory is still held, always with a person present; none automate it. |
+| **D2** | **A reschedule is a HUMAN action agreed by both parties, and it has TWO origins**: the tourist requests it from the portal and a seller approves; or the seller executes it at the counter with the customer in front of them. Never a cron, never an automatic outcome of a clock. | *(User decision, and the industry agrees.)* A machine choosing a date for an absent customer **takes a seat from the pool and gives it to someone who has just demonstrated they do not arrive** — the opposite of protecting the operator. Airlines, hotels, OTAs and restaurants all reschedule only while the inventory is still held, always with a person present; none automate it. **Two origins rather than one** because a customer standing at the booth asking *"¿puedo el domingo?"* should not be told to open a portal to ask the person in front of them. The requirement is not the channel — it is that **both parties end up on the record**: from the portal the request is the tourist's signature, from the counter `resolved_by` is the seller's. |
 | **D3** | **Reactivation is RETIRED** — endpoint, UI and tests deleted. The honest operation when someone arrives after the hold ended is *a new sale with their credit applied*. | It erases `cancelled_at` and leaves the history asserting the expiry never happened, **after the customer was told it did**. And under D4 there is no longer a window in which a released seat is still sellable, so the case it was built for stops existing. **Counter-argument, recorded because it is real:** it is a proven counter shortcut, sellers know the screen, and retiring it is a product decision, not an architectural one. If this is ever reversed, the reason to re-read is D4 — the retirement rests on it. |
 | **D4** | **The third coherence rule: the hold release may not precede the sales cutoff.** Validated server-side and mirrored in the form → `422 RELEASE_BEFORE_SALES_CUTOFF`. | Same shape as the two guards that already exist (`apartado-stages.spec.md` S1's `cutoff ≥ buffer`; `folio-state-machine.spec.md` D23's `margin ≤ cutoff`), and the same reasoning: two settings that describe the same moment from different sides have to agree about it. Releasing inventory nobody can buy is loss with no beneficiary. |
 | **D5** | **No third stage.** The ①/② model is unchanged. | An earlier draft of this design added **③ LIBERADO** — seats returned, folio still recoverable — so that reactivation could become a transition instead of an undo. D3 retires reactivation, which removes the only thing ③ existed for. Recorded rather than dropped silently, because ③ is the obvious idea and the next reader will have it too. |
@@ -90,8 +90,12 @@ change meaning.
 | **D10** | **The credit expires**, on an org setting (`booking_credit_valid_days`, default 90), and the closing message **must** state the date. | A perpetual credit is an unbounded liability on the books, and orgs differ on how long they will carry one. The message requirement is the load-bearing half: **a credit the customer discovers already expired is worse than never granting one** — it converts goodwill into a grievance. |
 | **D11** | **A reschedule moves to another SLOT of the SAME service.** A different service is a different sale. | This is what got the feature deferred in the first place: a different service means re-quoting, and a deposit that silently over- or under-covers a new price. Bounding it to the same service keeps the line's snapshotted `unit_price` valid, so **no money is re-decided** — which is exactly what the Scope boundary promises. The wider case is listed under *Deferred* with this reason. |
 | **D12** | **A reschedule is bounded by the same guards as a sale**: destination capacity (the atomic check `confirmSale` uses), the sales cutoff, and the apartado creation cutoff. | A rescheduled apartado must not be born inside its own settle window — the one-minute apartado `apartado-stages.spec.md` S1 was written to kill. Reusing the guards rather than re-implementing them is what keeps that true. |
-| **D13** | **The reschedule is RECORDED** — from, to, who agreed it, when — in `folio_reschedules`. | D2 says a human agreed it; a record naming that human and that moment is the only thing that makes the claim checkable. It also answers the question an operator will ask second: *is rescheduling a courtesy or a pattern?* A column pair would only ever remember the last one. |
+| **D13** | **The record is `cancellation_requests`, widened and RENAMED to `folio_requests`** — not a new table. It gains `kind` (`cancellation` \| `reschedule`), `folio_line_id`, `from_slot_id`, `to_slot_id`. | *(Reverses this spec's first draft, which proposed a parallel `folio_reschedules`.)* The decisive argument is an invariant the existing table already enforces and a second table **cannot**: `uq_cancellation_requests_open` is `UNIQUE (folio_id) WHERE status = 'pending'` — **exactly one open request per folio**. With two tables a folio could carry a pending cancellation *and* a pending reschedule at once: two petitions that contradict each other, with nothing preventing it. Reuse also inherits the approval machine, the `Revisar solicitud` rung of the action ladder, the resolution audit and the isolation tests. **The rename is not cosmetic** — a table called `cancellation_requests` holding reschedules is exactly the index-rot this repo has paid for before. |
+| **D13b** | **A counter reschedule writes the same row, created and resolved in one instant** (`status='approved'`, `resolved_by` = the seller). | One history for both origins instead of two shapes to reconcile, and it costs nothing: a row that is never `pending` never touches the partial index, so the counter path cannot collide with a tourist's open request. It also makes *"is rescheduling a courtesy or a pattern?"* answerable with one query. |
 | **D14** | **Rescheduling resets `reminder_status` and clears the folio's stage-② outbox rows.** | The deadline moved, so the customer is owed a fresh warning for the new one — and today neither would fire: the flag skips the sweep, and `uq_notifications_folio_event_channel` blocks a second `booking_grace_entered`. **Cost, accepted:** the audit trail of the first warning is lost. Mitigated by D13, which records the reschedule itself, so the history is not blank — it says *the date moved*, which is the more useful fact. |
+| **D16** | **A `paid` folio may be rescheduled too, and doing so RE-SIGNS the line's QR**, deletes the folio's `tickets_delivered` outbox rows and re-emits — so the customer receives the ticket that matches the new date. | *(Reverses a round-4 recommendation of mine that deferred paid reschedules to a third phase; it overstated the difficulty.)* A paid customer who cannot make Friday has exactly the same need and today has **no option but to cancel**, which runs the ladder against them. The obstacle is real but already solved: the signed payload carries `slot_id` (`utils/qr.ts:32`), so a moved line invalidates the ticket — and the outbox's `(folio, event, channel)` guard would block re-delivery. That is **the same shape as D14**: the index protects against duplicates *within a cycle*, and a reschedule opens a new one. **Cost, accepted:** the customer's existing `/t/<token>` link stops working. Tolerable precisely because D2 makes the change agreed — nobody's ticket dies without them asking — and the re-emitted message carries the replacement. |
+| **D17** | **`booking_expires_at` is recalculated from the NEW earliest departure**, which is what `bookingExpiryDate` already does. | Three alternatives were weighed and the tiebreaker is **explainability**, which is the same thing this spec is for. Under D17 the sentence *"pagas 24 h antes de tu primer tour"* is **true**; under the alternatives it is false. *(2) Freezing the original deadline* closes the postpone-forever loophole but leaves the deadline arbitrarily earlier than any remaining departure. *(3) A ratchet, `min(old, new)`,* closes it too and still protects a customer who reschedules to something sooner — but produces *"¿por qué vence el lunes si mi tour es en tres semanas?"*, which nobody can answer at a counter. *(4) Per-line deadlines* is US-A22, blocked below. **The loophole is closed by a reschedule limit, not by a deadline rule** — *"puedes reagendar dos veces"* explains itself. |
+| **D18** | **Per-line release is NOT built**, although the sweep's use of the earliest departure means a two-service apartado is cancelled **whole** when the first service's grace passes — releasing seats that still had days to be paid for. | Real, and it is **US-A22** (*"Partial cancellations (per service within the folio) — Deferred to simplify inventory logic"*). The blocker is not inventory: `amount_paid` and `total` live on the **folio**, not the line, so a folio half-released has no defined balance. **Rescheduling resolves the case without opening it**: move the near service, the earliest departure moves with it (D17), and the later one is safe. Recorded so the next reader knows `sweep.ts:118`'s `Math.min(...departures)` is a known consequence, not an oversight. |
 | **D15** | **Authorization mirrors settle/cancel/reminder**: the folio's own seller, or an admin. Cross-org → `404`. | Rescheduling is a sale-shaped action on a sale the seller owns. Inventing a different rule for it would be the kind of drift that makes a permission model unlearnable. |
 
 ---
@@ -105,47 +109,53 @@ D4 is a validation over two columns that already exist; D9 is a whitelist entry.
 ### Phase 2 — migration `0060_booking_reschedule.sql`
 
 ```sql
--- D6/D10 — what a closed apartado leaves the customer, in the only form deliverable to somebody
--- who is not there. `credit_amount` is the ladder's non-retained remainder, SNAPSHOTTED at the
--- close: re-deriving it later would give a different answer, because the ladder is time-based and
--- the clock has moved. Zero for every org on the inherited default (D8).
+-- D13 — the requests table stops being about cancellations only. RENAMED rather than duplicated,
+-- because a table called `cancellation_requests` holding reschedules is the index-rot this repo has
+-- already paid for once.
+ALTER TABLE cancellation_requests RENAME TO folio_requests;
+
+-- What kind of petition this is. DEFAULT 'cancellation' so every existing row keeps its meaning
+-- without a data migration.
+ALTER TABLE folio_requests ADD COLUMN kind TEXT NOT NULL DEFAULT 'cancellation';
+
+-- Reschedule-only. Null on a cancellation, which is the honest shape: they are not two tables'
+-- worth of difference, they are one table with one branch.
+ALTER TABLE folio_requests ADD COLUMN folio_line_id TEXT REFERENCES folio_lines(id);
+ALTER TABLE folio_requests ADD COLUMN from_slot_id  TEXT REFERENCES slots(id);
+ALTER TABLE folio_requests ADD COLUMN to_slot_id    TEXT REFERENCES slots(id);
+
+-- The invariant that decided the reuse (D13), re-created under the table's new name. It now says
+-- something STRONGER than it did: one open petition per folio, OF ANY KIND — so a folio can never
+-- carry a pending cancellation and a pending reschedule at the same time.
+DROP INDEX uq_cancellation_requests_open;
+CREATE UNIQUE INDEX uq_folio_requests_open ON folio_requests (folio_id) WHERE status = 'pending';
+
+-- D6/D10 — what a closed apartado leaves the customer, in the only form deliverable to somebody who
+-- is not there. SNAPSHOTTED at the close: re-deriving it later gives a different answer, because the
+-- ladder is time-based and the clock has moved. Zero for every org on the inherited default (D8).
 ALTER TABLE folios ADD COLUMN credit_amount INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE folios ADD COLUMN credit_expires_at INTEGER;
 
--- D10 — how long the operator carries that liability. Its own column: it is an accounting horizon,
--- not one of the four departure clocks, and nothing about a departure should move it.
+-- D10 — how long the operator carries that liability. Its own column: an accounting horizon, not
+-- one of the four departure clocks, and nothing about a departure should move it.
 ALTER TABLE organizations ADD COLUMN booking_credit_valid_days INTEGER NOT NULL DEFAULT 90;
-
--- D13 — the record that makes "agreed between the tourist and the agent" checkable. A table rather
--- than a column pair, because an apartado can be rescheduled more than once and the second time is
--- the one an operator wants to see.
-CREATE TABLE folio_reschedules (
-  id               TEXT PRIMARY KEY,
-  organization_id  TEXT NOT NULL REFERENCES organizations(id),
-  folio_id         TEXT NOT NULL REFERENCES folios(id),
-  folio_line_id    TEXT NOT NULL REFERENCES folio_lines(id),
-  from_slot_id     TEXT NOT NULL REFERENCES slots(id),
-  to_slot_id       TEXT NOT NULL REFERENCES slots(id),
-  from_departure   TEXT NOT NULL,   -- 'YYYY-MM-DD HH:MM', snapshotted like the line's own
-  to_departure     TEXT NOT NULL,
-  -- The human D2 requires. Never null: a reschedule with no author is the thing this table exists
-  -- to make impossible.
-  agreed_by        TEXT NOT NULL REFERENCES users(id),
-  created_at       INTEGER NOT NULL DEFAULT (unixepoch())
-);
-
-CREATE INDEX idx_folio_reschedules_folio ON folio_reschedules(organization_id, folio_id, created_at);
 ```
 
-**Nothing is dropped.** `reactivateBooking` goes, but no column does: `booking_expires_at` and
+**Blast radius of the rename, stated rather than discovered during the build:** `db/schema.ts`
+(`cancellationRequests` → `folioRequests`), `routes/folios/handler.ts` (list / approve / reject),
+`utils/folioPendingWork.ts` (the `requestPendingFilter`), the `/api/folios/cancellation-requests/…`
+routes, the frontend types and the `Con solicitud` facet. Mechanical, but not small — and cheaper
+now than after a second table exists.
+
+**Nothing else is dropped.** `reactivateBooking` goes; no column does. `booking_expires_at` and
 `cancelled_*` keep their meaning, and folios reactivated before this feature stay readable.
 
 ---
 
 ## Business rules (enforced server-side)
 
-1. A folio may be rescheduled only while `status = 'booking'` — i.e. in ① or ② — and only before its
-   release instant. Anything else → `409 NOT_RESCHEDULABLE`.
+1. A folio may be rescheduled while `status = 'booking'` **or `'paid'`** (D16), and only before the
+   line's release instant. Anything else → `409 NOT_RESCHEDULABLE`.
 2. The destination slot must belong to the **same service** as the line being moved (D11); otherwise
    `422 DIFFERENT_SERVICE`.
 3. The destination must pass the **same atomic capacity guard** `confirmSale` applies, including the
@@ -154,22 +164,31 @@ CREATE INDEX idx_folio_reschedules_folio ON folio_reschedules(organization_id, f
 4. The destination must be sellable under `sales_cutoff_offset_minutes` → `409 SLOT_CLOSED`.
 5. The destination must satisfy `booking_creation_cutoff_hours` → `422 BOOKING_TOO_LATE`.
 6. A successful reschedule releases the source seats, blocks the destination, rewrites the line's
-   snapshotted departure, and recomputes `booking_expires_at` from the **new** departure.
+   snapshotted departure, and recomputes `booking_expires_at` **from the new earliest departure
+   across the folio** (D17). On a multi-service folio the deadline therefore follows whichever
+   service is now first — which is what keeps *"pagas 24 h antes de tu primer tour"* true.
 7. **No money moves**: `amount_paid`, `commission_amount`, `cancellation_policy_snapshot` and every
-   `folio_payments` row are untouched.
-8. A reschedule writes exactly one `folio_reschedules` row per line moved, with `agreed_by` = the
-   caller (D13).
-9. A reschedule sets `reminder_status = 'none'` and deletes the folio's `booking_grace_entered`
-   outbox rows, so the new deadline gets its own warning (D14).
-10. **The hold release may not precede the sales cutoff** (D4). Both are signed the same way
+   `folio_payments` row are untouched. **A reschedule never runs the ladder.**
+8. A reschedule writes exactly one `folio_requests` row of `kind = 'reschedule'` per line moved,
+   carrying `from_slot_id`, `to_slot_id` and `resolved_by` (D13). A **counter** reschedule writes it
+   already `approved`, resolved in the same instant (D13b); a **portal** request is created
+   `pending` and executes on approval.
+9. **One open petition per folio, of any kind** — `uq_folio_requests_open`. A folio with a pending
+   cancellation cannot also have a pending reschedule; the second attempt is refused by the index.
+10. A reschedule sets `reminder_status = 'none'` and deletes the folio's `booking_grace_entered`
+    outbox rows, so the new deadline gets its own warning (D14).
+11. **On a `paid` folio** the reschedule additionally re-signs the moved line's QR, deletes the
+    folio's `tickets_delivered` outbox rows and re-emits (D16). The previous `/t/<token>` link stops
+    resolving; the replacement travels in the re-emitted message.
+12. **The hold release may not precede the sales cutoff** (D4). Both are signed the same way
     (+ before / − after), so the rule is `booking_grace_offset_minutes ≤ sales_cutoff_offset_minutes`
     → `422 RELEASE_BEFORE_SALES_CUTOFF`. The form mirrors it.
-11. At the release instant the sweep runs the ladder as it does today, and additionally stores
+13. At the release instant the sweep runs the ladder as it does today, and additionally stores
     `credit_amount = outcome.refund` and `credit_expires_at = now + booking_credit_valid_days`
     **only when `outcome.refund > 0`**. A zero credit stores no expiry — a date on nothing is noise.
-12. The `booking_expired` notification states **paid · retained · credit**, and when a credit exists,
+14. The `booking_expired` notification states **paid · retained · credit**, and when a credit exists,
     the date it dies (D9/D10).
-13. Every read and write is filtered by `organization_id`.
+15. Every read and write is filtered by `organization_id`.
 
 ---
 
@@ -177,8 +196,9 @@ CREATE INDEX idx_folio_reschedules_folio ON folio_reschedules(organization_id, f
 
 | Action | Who |
 |---|---|
-| Reschedule a folio | the folio's **own seller**, or an **admin** |
-| Read the reschedule history | anyone who can read the folio |
+| Request a reschedule from the portal | the **tourist**, through their portal token |
+| Reschedule at the counter / approve a request | the folio's **own seller**, or an **admin** |
+| Read the request history | anyone who can read the folio |
 | Set `booking_credit_valid_days` | **admin** |
 
 Cross-org → **`404`**, never `403`.
@@ -187,19 +207,31 @@ Cross-org → **`404`**, never `403`.
 
 ## API surface
 
-### `POST /api/pos/folios/:id/reschedule`
+### `POST /api/pos/folios/:id/reschedule` *(counter origin)*
 
 ```jsonc
-// Request — one entry per line being moved. Explicit rather than "move everything": a folio with
-// two tours may only need one of them moved, and guessing is how a customer loses the other.
+// One entry per line being moved. Explicit rather than "move everything": a folio with two tours
+// may only need one moved, and guessing is how a customer loses the other.
 { "moves": [{ "folio_line_id": "…", "to_slot_id": "…" }] }
 ```
 
-Returns the folio, re-read, with its new departures and `booking_expires_at`.
+Executes immediately and records the row as `approved` (D13b). Returns the folio, re-read.
+
+### `POST /portal/:token/reschedule-request` *(tourist origin)*
+
+Creates a `pending` `folio_requests` row with the requested slot. Touches **no** inventory and **no**
+folio state — exactly as US-T04's cancellation request does. It surfaces on the seller's card as the
+existing `Revisar solicitud` rung.
+
+### `POST /api/folios/requests/:id/approve` · `/reject`
+
+The renamed US-T04 routes, now branching on `kind`. Approving a `reschedule` runs the same guards as
+the counter path; **the capacity check happens at approval, not at request time**, because seats
+cannot be held for an unapproved petition.
 
 ### `GET /api/folios/:id` · `GET /api/pos/folios/:id` *(extended)*
 
-Gain `reschedules[]` (from, to, who, when) and, on a closed apartado, `credit_amount` /
+`requests[]` gains `kind`, `from_slot_id`, `to_slot_id`. A closed apartado gains `credit_amount` /
 `credit_expires_at`. Server-derived; refused from any request body.
 
 ### `PUT /api/organizations/me` *(extended)*
@@ -214,11 +246,12 @@ Accepts `booking_credit_valid_days` (1–730).
 
 | Code | HTTP | When |
 |---|---|---|
-| `NOT_RESCHEDULABLE` | 409 | the folio is not a live apartado |
+| `NOT_RESCHEDULABLE` | 409 | the folio is not a live apartado or paid sale, or the line's release instant has passed |
 | `DIFFERENT_SERVICE` | 422 | the destination slot belongs to another service (D11) |
 | `NO_CAPACITY_AVAILABLE` | 409 | the destination cannot seat the party |
 | `SLOT_CLOSED` | 409 | the destination is past the sales cutoff |
 | `BOOKING_TOO_LATE` | 422 | the destination is inside the apartado creation cutoff |
+| `REQUEST_ALREADY_OPEN` | 409 | the folio already has a pending petition of either kind (rule 9) |
 | `RELEASE_BEFORE_SALES_CUTOFF` | 422 | the settings would release seats nobody can buy (D4) |
 
 ---
@@ -228,12 +261,24 @@ Accepts `booking_credit_valid_days` (1–730).
 Design system: `.design/design-system/DESIGN_TOKENS.md`. No new primitive.
 
 **`BookingActions`** loses the *Reactivar y Liquidar* branch and the two `Próximamente` buttons, and
-gains **Reagendar** on a live apartado, beside *Liquidar saldo* and *Cancelar*.
+gains **Reagendar** — on a live apartado beside *Liquidar saldo* and *Cancelar*, and on a **paid**
+folio beside the delivery actions (D16).
 
 **The reschedule sheet** is a `FormSheet` (never a Dialog): it shows the current departure, a slot
 picker reusing the POS date/time matrix — **restricted to the same service** (D11) and to slots that
 pass the guards — and a confirm whose copy names both parties, because D2 is the point:
 *"Acordado con el cliente · reagenda registrada a tu nombre."*
+
+**The tourist's portal** gains the same picker behind *"Cambiar mi fecha"*, which creates a request
+rather than a move — and says so, because a customer who believes their date changed and finds it
+did not is worse off than one who was never offered the button.
+
+**A pending reschedule reaches the seller through the rung that already exists** — `Revisar
+solicitud`, the first of the action ladder. No new surface: the review sheet branches on `kind`.
+
+**On a `paid` folio the sheet warns before it moves** that the current ticket will stop working and
+a new one will be sent (D16). A QR dying silently in somebody's WhatsApp is the failure this copy
+exists to prevent.
 
 **The folio detail** shows the reschedule history when there is one, and on a closed apartado the
 credit with its expiry — in `MoneyText`, semantic colour, never teal.
@@ -289,6 +334,33 @@ Then `reminder_status = 'none'` and no `booking_grace_entered` row remains — s
 again for the new deadline (D14).
 *(The mutation this must catch: keeping the flag, which is what makes the second cycle silent
 today.)*
+
+**S-8b — a paid folio moves, and its ticket moves with it**
+Given a `paid` folio whose line has a signed QR and a delivered `tickets_delivered` outbox row
+When it is rescheduled to another slot of the same service
+Then the line's `qr_token` changes, the old `/t/<token>` no longer resolves, the
+`tickets_delivered` rows are gone, and a fresh pair is emitted (D16).
+And `amount_paid`, `commission_amount` and every `folio_payments` row are unchanged.
+
+**S-8c — one open petition per folio, of any kind**
+Given a folio with a **pending cancellation** request
+When a reschedule is requested for the same folio
+Then `409 REQUEST_ALREADY_OPEN` — the widened `uq_folio_requests_open` refuses it (rule 9).
+*(The assertion the rename exists for: two tables could not express this.)*
+
+**S-8d — the two origins produce the same record**
+Given a tourist requests from the portal and a seller approves
+And separately a seller reschedules at the counter
+Then both leave a `folio_requests` row with `kind='reschedule'`, both slots and `resolved_by` set —
+the counter one never having been `pending` (D13b).
+
+**S-9b — the deadline follows the new earliest departure**
+Given a folio with lines on Tuesday 12 and Thursday 14, and a 24 h buffer
+Then `booking_expires_at` is Monday 11.
+When Tuesday's line is rescheduled to Saturday 16
+Then `booking_expires_at` is **Wednesday 13** — the minimum is now Thursday (D17).
+*(The mutation this must catch: freezing the original deadline, which would leave it arbitrarily
+earlier than anything left on the folio.)*
 
 ### US-T09 — tell me what happened to my deposit
 
@@ -356,13 +428,18 @@ scope may make the line's redundant, exactly as it did in `folio-state-machine.s
 
 ### Phase 2 — reschedule, credit, and the retirement *(migration `0060` · `feat/booking-reschedule`)*
 
-- [ ] Migration `0060`
-- [ ] `POST /api/pos/folios/:id/reschedule` with all six guards
+- [ ] Migration `0060` — the rename + `kind`/slot columns, the widened index, credit, org setting
+- [ ] **The rename carried through**: `db/schema.ts`, `routes/folios/handler.ts`,
+      `utils/folioPendingWork.ts`, the `/api/folios/requests/…` routes, the frontend types and the
+      `Con solicitud` facet
+- [ ] `POST /api/pos/folios/:id/reschedule` (counter) with all six guards
+- [ ] `POST /portal/:token/reschedule-request` (tourist) + approve/reject branching on `kind`
+- [ ] **Paid folios**: QR re-signed, `tickets_delivered` rows cleared and re-emitted (D16)
 - [ ] The credit written at the close; `booking_expired` carries its figures
 - [ ] **`reactivateBooking` deleted** — endpoint, UI branch, and
       `test/pos/pos-bookings-reactivate.test.ts` **removed, not rewritten**
-- [ ] S-1 … S-9, S-12, S-14 … S-17; S-3 and S-9 mutation-verified
-- [ ] Reschedule sheet + history + credit on the card and the detail
+- [ ] S-1 … S-9b, S-12, S-14 … S-17; **S-3, S-8c and S-9b mutation-verified**
+- [ ] Reschedule sheet (counter + portal) + history + credit on the card and the detail
 - [ ] `SPEC.md`: US-AG52, Features by Phase, glossary; **US-AG07.5 struck through and annotated**
 
 ---
@@ -374,6 +451,7 @@ scope may make the line's redundant, exactly as it did in `folio-state-machine.s
 | **Rescheduling to a different SERVICE** | It requires re-quoting, and a deposit that silently over- or under-covers a new price is exactly the kind of quiet money bug this spec's Scope boundary exists to prevent. Same-service covers the case the counter actually has: *"can I come Sunday instead?"* |
 | **Spending the credit** | Phase 2 grants and expires it; applying it to a new sale is the checkout's problem, not the apartado's. Recorded openly: **until that ships, the credit is a promise the product cannot yet honour**, which is why D8's default of zero matters — no organization is handed an obligation it cannot discharge. |
 | **Rescheduling a lodging stay** | Nights are a per-night guard rather than a slot; the shape differs enough to deserve its own scenarios instead of an `if`. |
+| **Per-line release (US-A22)** | D18. The sweep cancels a multi-service apartado whole at the earliest departure's grace. Rescheduling the near service resolves the case without opening partial cancellation — whose real blocker is that `amount_paid` and `total` live on the folio, so a half-released folio has no defined balance. |
 | **Transferring the folio to another person** | *"No puedo ir, que vaya mi hermano"* is a different operation — it changes who, not when — and it touches identity and the QR. |
 
 ---
@@ -381,8 +459,11 @@ scope may make the line's redundant, exactly as it did in `folio-state-machine.s
 ## Known behaviour change
 
 1. **`Reactivar y Liquidar` disappears.** Sellers who use it will find *Reagendar* on live apartados
-   instead, and for a customer arriving after the hold ended, an ordinary sale. **This is a removal,
-   and it is the one thing in this spec a user will notice immediately.**
+   **and on paid folios** instead, and for a customer arriving after the hold ended, an ordinary
+   sale. **This is a removal, and it is the one thing in this spec a user will notice immediately.**
+4. **A rescheduled paid folio's existing ticket stops working** (D16). The replacement is sent in
+   the same gesture, but a customer who screenshotted the old QR will find it invalid — which is
+   why the sheet says so before the move, not after.
 2. **Organizations whose release precedes their sales cutoff cannot save Settings** until they fix
    it. Every org on the shipped defaults is in exactly that state (release −15 min, cutoff 0), so
    **this will greet most operators on the first visit** — the form must say what to change, not
