@@ -81,7 +81,7 @@ change meaning.
 | **D1** | **Rescheduling belongs to ① and ②, and moves the SAME folio.** | There, the seats are already yours: moving a hold you own takes nothing from anybody. Nothing ended — no ladder ran, no retention was taken, no message of loss was sent — so there is nothing to undo and no new folio to justify. It is the cheap operation, and it is the one the product never built. |
 | **D2** | **A reschedule is a HUMAN action agreed by both parties, and it has TWO origins**: the tourist requests it from the portal and a seller approves; or the seller executes it at the counter with the customer in front of them. Never a cron, never an automatic outcome of a clock. | *(User decision, and the industry agrees.)* A machine choosing a date for an absent customer **takes a seat from the pool and gives it to someone who has just demonstrated they do not arrive** — the opposite of protecting the operator. Airlines, hotels, OTAs and restaurants all reschedule only while the inventory is still held, always with a person present; none automate it. **Two origins rather than one** because a customer standing at the booth asking *"¿puedo el domingo?"* should not be told to open a portal to ask the person in front of them. The requirement is not the channel — it is that **both parties end up on the record**: from the portal the request is the tourist's signature, from the counter `resolved_by` is the seller's. |
 | **D3** | **Reactivation is RETIRED** — endpoint, UI and tests deleted. The honest operation when someone arrives after the hold ended is *a new sale with their credit applied*. | It erases `cancelled_at` and leaves the history asserting the expiry never happened, **after the customer was told it did**. And under D4 there is no longer a window in which a released seat is still sellable, so the case it was built for stops existing. **Counter-argument, recorded because it is real:** it is a proven counter shortcut, sellers know the screen, and retiring it is a product decision, not an architectural one. If this is ever reversed, the reason to re-read is D4 — the retirement rests on it. |
-| **D4** | **The third coherence rule: the hold release may not precede the sales cutoff.** Validated server-side and mirrored in the form → `422 RELEASE_BEFORE_SALES_CUTOFF`. | Same shape as the two guards that already exist (`apartado-stages.spec.md` S1's `cutoff ≥ buffer`; `folio-state-machine.spec.md` D23's `margin ≤ cutoff`), and the same reasoning: two settings that describe the same moment from different sides have to agree about it. Releasing inventory nobody can buy is loss with no beneficiary. |
+| **D4** | **The third coherence rule: the hold release may not precede the sales cutoff.** Validated server-side and mirrored in the form → `422 RELEASE_BEFORE_SALES_CUTOFF`. | Same shape as the two guards that already exist — US-A77's apartado creation cutoff (whose rule is *"an apartado created at the tightest legal moment must be born alive"*, **as corrected by BUG-029**; the original `cutoff ≥ buffer` rejected the useful configurations and accepted a born-dead one) and `folio-state-machine.spec.md` D23's `margin ≤ cutoff`. Same reasoning: two settings that describe the same moment from different sides have to agree about it. Releasing inventory nobody can buy is loss with no beneficiary. |
 | **D5** | **No third stage.** The ①/② model is unchanged. | An earlier draft of this design added **③ LIBERADO** — seats returned, folio still recoverable — so that reactivation could become a transition instead of an undo. D3 retires reactivation, which removes the only thing ③ existed for. Recorded rather than dropped silently, because ③ is the obvious idea and the next reader will have it too. |
 | **D6** | **At the close the ladder runs, and what it does NOT retain becomes a CREDIT on the folio — not cash.** | There is nobody standing there to hand cash to: the close is produced by a clock, and the customer is absent by definition. A refund obligation would create a debt with a PIN nobody asked for. The credit is the same money, in the only form that can be delivered to an absent person. |
 | **D7** | **The ladder stays the single source of *how much*.** This feature adds no percentage, no floor, no second knob. | `booking_deposit_retained_pct` was exactly that second knob and US-A76 **deleted** it — *"a hidden second rule that silently overrides the tiers I configured"*. An "autocancel vs reschedule" toggle at the release instant would reintroduce it wearing a different name. What the credit changes is not the amount but its **form**, which is why it is safe. |
@@ -163,6 +163,11 @@ now than after a second table exists.
    destination is secured.
 4. The destination must be sellable under `sales_cutoff_offset_minutes` → `409 SLOT_CLOSED`.
 5. The destination must satisfy `booking_creation_cutoff_hours` → `422 BOOKING_TOO_LATE`.
+5b. **The recomputed `booking_expires_at` must be in the future** — the same sale-time guard
+    `confirmSale` gained in BUG-029, applied to the destination. Without it a reschedule is a second
+    door onto the defect that guard exists to close: moving a line onto a slot inside the grace
+    window would write a hold that was already over, and the sweep would cancel the folio on its
+    next run. `422 BOOKING_TOO_LATE`, same code — the customer-facing meaning is identical.
 6. A successful reschedule releases the source seats, blocks the destination, rewrites the line's
    snapshotted departure, and recomputes `booking_expires_at` **from the new earliest departure
    across the folio** (D17). On a multi-service folio the deadline therefore follows whichever
@@ -324,8 +329,19 @@ Then `409 NO_CAPACITY_AVAILABLE` — and the SOURCE slot still holds the 4 spots
 Then `422 DIFFERENT_SERVICE`, and nothing moves (D11).
 
 **S-5 — the destination cannot be inside its own settle window**
-Given `booking_creation_cutoff_hours = 24` and a destination departing in 12 hours
+Given `booking_creation_cutoff_hours = 12` (legal since BUG-029: at 12 h out the near branch gives
+the apartado `salida − 15 min`, so it is born alive) and a destination departing in **6 hours**
 Then `422 BOOKING_TOO_LATE` — the one-minute apartado cannot be created by the back door.
+*(The original numbers here were `cutoff = 24` against the default 24 h buffer — a configuration
+BUG-029 now **rejects**, because an apartado created at that boundary is born with zero life. The
+scenario could not have been set up.)*
+
+**S-5b — a reschedule cannot write a hold that is already over**
+Given `booking_creation_cutoff_hours = 0` (no restriction — the shipped default)
+And a destination departing in **10 minutes**, with a grace of +15
+Then `422 BOOKING_TOO_LATE` (rule 5b): the recomputed expiry would be five minutes in the past.
+*(The mutation this must catch: checking only the creation cutoff, which with `0` runs nothing at
+all — exactly the hole BUG-029 found on the sale path.)*
 
 **S-6 — a departed destination is refused**
 Then `409 SLOT_CLOSED`.
@@ -443,13 +459,14 @@ scope may make the line's redundant, exactly as it did in `folio-state-machine.s
 - [ ] **The rename carried through**: `db/schema.ts`, `routes/folios/handler.ts`,
       `utils/folioPendingWork.ts`, the `/api/folios/requests/…` routes, the frontend types and the
       `Con solicitud` facet
-- [ ] `POST /api/pos/folios/:id/reschedule` (counter) with all six guards
+- [ ] `POST /api/pos/folios/:id/reschedule` (counter) with all **seven** guards — including 5b, the
+      born-expired check BUG-029 added to the sale path
 - [ ] `POST /portal/:token/reschedule-request` (tourist) + approve/reject branching on `kind`
 - [ ] **Paid folios**: QR re-signed, `tickets_delivered` rows cleared and re-emitted (D16)
 - [ ] The credit written at the close; `booking_expired` carries its figures
 - [ ] **`reactivateBooking` deleted** — endpoint, UI branch, and
       `test/pos/pos-bookings-reactivate.test.ts` **removed, not rewritten**
-- [ ] S-1 … S-9b, S-12, S-14 … S-17; **S-3, S-8c and S-9b mutation-verified**
+- [ ] S-1 … S-9b (incl. S-5b), S-12, S-14 … S-17; **S-3, S-5b, S-8c and S-9b mutation-verified**
 - [ ] Reschedule sheet (counter + portal) + history + credit on the card and the detail
 - [ ] `SPEC.md`: US-AG52, Features by Phase, glossary; **US-AG07.5 struck through and annotated**
 
