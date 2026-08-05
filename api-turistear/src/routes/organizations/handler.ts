@@ -6,6 +6,7 @@ import { ApiError } from '../../types/errors'
 import type { AppVariables } from '../../types/context'
 import type { UpdateOrganizationInput } from './schema'
 import { parseCancellationPolicy } from '../../utils/cancellationPolicy'
+import { bookingExpiryEpoch } from '../pos/handler'
 
 type OrganizationsContext = Context<{
   Bindings: CloudflareBindings
@@ -121,21 +122,31 @@ export const updateMyOrganization = async (c: OrganizationsContext) => {
   if (input.booking_creation_cutoff_hours !== undefined)
     updates.bookingCreationCutoffHours = input.booking_creation_cutoff_hours
 
-  // US-A77 (S1) — the two apartado windows have to stay coherent, and the check needs the STORED
-  // value of whichever field this request did not send. A PATCH that raises the settle deadline
-  // above an existing creation cutoff is just as incoherent as one that lowers the cutoff below the
-  // deadline, so both directions are checked against the merged result rather than the body alone.
+  // US-A77 (S1), corrected by BUG-029 — the apartado windows have to stay coherent, and the check
+  // needs the STORED value of whichever field this request did not send.
   //
-  // An apartado created inside its own settle window is born owing money it has no time to pay:
-  // that is the shape that produced the one-minute apartado.
+  // The rule this replaces was `cutoff >= buffer`, on the reasoning that an apartado created inside
+  // its own settle window is born owing money it has no time to pay. That ignored the GRACE stage,
+  // which `apartado-stages.spec.md` S2 documents as a legitimate birthplace: *"sales made close to
+  // departure are BORN here"*. It was wrong at both ends —
+  //
+  //   · it forbade the only useful configurations ("no apartados inside 2 hours" → 400), and
+  //   · at its own boundary `cutoff == buffer` it ACCEPTED an apartado born with zero life:
+  //     `nearDeparture` is `distance < buffer`, so at exactly the buffer the FAR branch applies and
+  //     the expiry lands on the instant of sale.
+  //
+  // The rule now asks the real function what an apartado created at the tightest legal moment would
+  // get, and requires it to be alive. Same arithmetic as production, so it cannot drift from it.
   if (
     input.booking_creation_cutoff_hours !== undefined ||
-    input.booking_pre_departure_buffer_hours !== undefined
+    input.booking_pre_departure_buffer_hours !== undefined ||
+    input.booking_grace_offset_minutes !== undefined
   ) {
     const [stored] = await db
       .select({
         cutoff: organizations.bookingCreationCutoffHours,
         buffer: organizations.bookingPreDepartureBufferHours,
+        grace: organizations.bookingGraceOffsetMinutes,
       })
       .from(organizations)
       .where(eq(organizations.id, user.organizationId))
@@ -143,23 +154,32 @@ export const updateMyOrganization = async (c: OrganizationsContext) => {
 
     const cutoff = input.booking_creation_cutoff_hours ?? stored?.cutoff ?? 0
     const buffer = input.booking_pre_departure_buffer_hours ?? stored?.buffer ?? 24
-    // 0 means "no restriction", which is coherent with any deadline.
-    if (cutoff !== 0 && cutoff < buffer) {
-      throw new ApiError(
-        'VALIDATION_ERROR',
-        400,
-        `El límite para crear apartados (${cutoff} h) no puede ser menor que el plazo para pagar el saldo (${buffer} h).`,
+    const grace = input.booking_grace_offset_minutes ?? stored?.grace ?? 15
+
+    // `0` means "no restriction", so there is no tightest legal moment to evaluate — and nothing a
+    // settings rule can promise. The sale-time guard in `confirmSale` is what covers that case.
+    if (cutoff > 0) {
+      const departure = 0
+      const createdAt = -cutoff * 3_600
+      const expiry = bookingExpiryEpoch(
+        { preDepartureBufferHours: buffer, bookingGraceOffsetMinutes: grace },
+        createdAt,
+        departure,
       )
+      if (expiry <= createdAt) {
+        throw new ApiError(
+          'VALIDATION_ERROR',
+          400,
+          `Con estos valores un apartado creado en el límite (${cutoff} h antes de la salida) nacería ya vencido. ` +
+            `Sube el límite para crear apartados, o baja el plazo para pagar el saldo (${buffer} h).`,
+        )
+      }
     }
   }
   // US-A85 (D23) — the no-show margin may not mark a customer absent while their seat is still on
-  // sale. An org that keeps selling 30 minutes past departure (`sales_cutoff_offset_minutes = -30`)
-  // and calls people no-shows at the departure instant would be declaring someone absent BEFORE it
-  // sold them their ticket. Same shape as the cutoff/buffer guard above, and the same reason: two
-  // settings that describe the same moment from different sides have to agree about it.
-  //
-  // Both are signed the same way (+ before / − after), so "still sellable" is simply the LOWER
-  // number: the margin must not be greater than the sales cutoff.
+  // sale. An org that keeps selling 30 minutes past departure and calls people no-shows at the
+  // departure instant would be declaring someone absent BEFORE it sold them their ticket. Both are
+  // signed the same way (+ before / − after), so "still sellable" is simply the LOWER number.
   if (
     input.no_show_margin_minutes !== undefined ||
     input.sales_cutoff_offset_minutes !== undefined

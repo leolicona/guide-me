@@ -721,16 +721,28 @@ const slotEpoch = (date: string, time: string, tz: string): number =>
 // expiry PAST departure. (The former createdAt + holdDays cap was removed — the hold now lasts
 // until the pre-departure buffer regardless of how far out the tour is. `booking_hold_days` used to
 // be carried into this policy object unread; it is gone from here and from the API — BUG-028.)
+//
+// EXPORTED as epoch seconds (BUG-029) so the settings validation can ask this function what an
+// apartado created at the cutoff boundary would actually get, instead of re-deriving it. A
+// validation that re-implements the arithmetic it is validating drifts from it — which is exactly
+// how `cutoff >= buffer` came to reject the healthy configurations and accept a born-dead one.
+export function bookingExpiryEpoch(
+  policy: Pick<BookingPolicy, 'preDepartureBufferHours' | 'bookingGraceOffsetMinutes'>,
+  nowSec: number,
+  earliestSlotEpoch: number,
+): number {
+  const bufferSeconds = policy.preDepartureBufferHours * 3_600
+  const nearDeparture = earliestSlotEpoch - nowSec < bufferSeconds
+  const tourBuffer = nearDeparture ? policy.bookingGraceOffsetMinutes * 60 : bufferSeconds
+  return earliestSlotEpoch - tourBuffer
+}
+
 function bookingExpiryDate(
   policy: BookingPolicy,
   nowSec: number,
   earliestSlotEpoch: number,
 ): Date {
-  const bufferSeconds = policy.preDepartureBufferHours * 3_600
-  const nearDeparture = earliestSlotEpoch - nowSec < bufferSeconds
-  const tourBuffer = nearDeparture ? policy.bookingGraceOffsetMinutes * 60 : bufferSeconds
-  const expiry = earliestSlotEpoch - tourBuffer
-  return new Date(expiry * 1000)
+  return new Date(bookingExpiryEpoch(policy, nowSec, earliestSlotEpoch) * 1000)
 }
 
 // A dialable phone (US-AG07 D4): ≥ 8 digits after stripping formatting.
@@ -1416,6 +1428,19 @@ export const confirmSale = async (c: PosContext) => {
     // a completed sale near departure is fine, a promise to come back and pay is not. Without this
     // an agent could open an apartado twenty minutes out that expires fifteen minutes out — five
     // minutes of hold, and a customer who never had a chance to settle.
+    // BUG-029 — the guard that a SETTINGS rule cannot provide. Whether an apartado is born expired
+    // depends on WHEN the sale happens, not only on how the org is configured: with the default
+    // `creationCutoffHours = 0` ("no restriction") nothing below ran at all, so a sale five minutes
+    // before departure produced `booking_expires_at = salida − 15min` — a hold that was already over
+    // when it was written, cancelled by the next sweep. Checked against the same function that
+    // computes the real value, so the two can never disagree.
+    if (bookingExpiryEpoch(policy, nowSec, earliest.epoch) <= nowSec) {
+      throw new ApiError(
+        'BOOKING_TOO_LATE',
+        422,
+        'Ya no se puede abrir un apartado para esta salida: vencería antes de que el cliente pueda liquidarlo.',
+      )
+    }
     if (policy.creationCutoffHours > 0) {
       const hoursOut = (earliest.epoch - nowSec) / 3600
       if (hoursOut < policy.creationCutoffHours) {
