@@ -7,7 +7,6 @@ export interface MyOrganization {
   id: string
   name: string
   booking_min_down_payment_pct: number
-  booking_hold_days: number
   // US-A47 — signed departure offsets (minutes): + = before departure, − = after (grace).
   // salesCutoff closes new walk-in sales; bookingGrace times the unsettled same-day auto-cancel.
   sales_cutoff_offset_minutes: number
@@ -47,7 +46,6 @@ export const getMyOrganization = async (): Promise<MyOrganization> => {
 
 export interface UpdateOrganizationInput {
   booking_min_down_payment_pct?: number
-  booking_hold_days?: number
   sales_cutoff_offset_minutes?: number
   booking_grace_offset_minutes?: number
   booking_pre_departure_buffer_hours?: number
@@ -63,7 +61,8 @@ export interface UpdateOrganizationInput {
   // US-A69 — the whole ladder, validated server-side as a unit (a malformed one is rejected, never
   // partially stored). `null` clears it and returns cancellations to their pre-feature behaviour.
   cancellation_policy?: CancellationPolicy | null
-  agent_cancellation_enabled?: boolean
+  // `agent_cancellation_enabled` is deliberately NOT writable — US-A73 is specified, not built,
+  // and no endpoint reads it (BUG-028). It stays on `MyOrganization` for when US-AG44 lands.
   // US-A81 — admin-only, org-wide, deliberately not an agent-facing toggle (D7: nothing can
   // un-redeem a pass).
   qr_redemption_mode?: 'per_pass' | 'all_passes'
