@@ -109,6 +109,87 @@ the defect) and `folioFacets.test.ts` (S-1, incl. `FACETS.some(f => f.label === 
 
 ---
 
+## BUG-029 — The Apartado Creation Cutoff Forbids the Only Useful Values, and Accepts a Born-Dead One — ✅ FIXED
+
+**Discovered:** 2026-08-05, in review of the reschedule spec
+**Reporter:** a reviewer reading the validation against `bookingExpiryDate`
+**Affected component:** `api-turistear/src/routes/organizations/handler.ts` (the US-A77 coherence
+rule) and `routes/pos/handler.ts` (`confirmSale`, which had no equivalent guard)
+**Severity:** Medium — no wrong number is computed, but a documented capability is unreachable and
+an apartado can be written already expired.
+
+### Symptom
+
+The rule was `cutoff >= buffer`. It is wrong at **both** ends.
+
+**Below the buffer, the useful configurations are rejected.** *"No apartados inside 2 hours"* —
+`booking_creation_cutoff_hours: 2` against the default 24 h deadline — returns `400`. The admin's
+only legal choices are `0` (no restriction at all) or something ≥ 24 h, so **same-day apartados
+cannot be governed**.
+
+**At the boundary, an apartado is born dead.** With `cutoff == buffer == 24`, a sale at exactly 24 h
+out passes the creation guard (`hoursOut < cutoff` is `24 < 24`, false) and then:
+
+```ts
+nearDeparture = (earliestSlotEpoch - nowSec < bufferSeconds)   //  86400 < 86400  →  false
+tourBuffer    = bufferSeconds                                   //  the FAR branch
+expiry        = earliestSlotEpoch - 86400                       //  = the instant of sale
+```
+
+`booking_expires_at = now`. The sweep cancels it within fifteen minutes.
+
+**And with the default `cutoff = 0` there is no guard at all** — `if (policy.creationCutoffHours > 0)`
+skips it — so a sale five minutes before departure computes `salida − 15 min`, an expiry already in
+the past.
+
+### Root cause
+
+The rule's stated reasoning was *"an apartado created inside its own settle window is born owing
+money it has no time to pay"*. That **ignores the grace stage**, which the same feature documents as
+a legitimate birthplace — `apartado-stages.spec.md` S2: *"Sales made close to departure are BORN
+here \[in ②], which is why entry is not a separate event."*
+
+A sale 2 h out takes the near branch and gets `salida − 15 min`: one hour forty-five of life. It is
+healthy. The validation forbade it while accepting the one case that genuinely is not.
+
+The deeper cause is that the validation **re-derived** the arithmetic it was validating instead of
+asking the function that owns it, so the two could disagree — and did.
+
+### Fix
+
+Three parts, because no single one is sufficient:
+
+1. **`cutoff >= buffer` is removed.**
+2. **The rule now asks the real function.** `bookingExpiryEpoch` is extracted from
+   `bookingExpiryDate` and exported; the validation computes what an apartado created at the
+   *tightest legal moment* (`departure − cutoff`) would receive, and requires it to be alive. Same
+   arithmetic as production, so it cannot drift. It also now re-checks when
+   `booking_grace_offset_minutes` alone changes, which the old rule ignored.
+3. **A sale-time guard in `confirmSale`** — the part a settings rule **cannot** provide, because
+   whether an apartado is born expired depends on *when the sale happens*, not only on the config.
+   With `cutoff = 0` no settings rule can promise anything. `confirmSale` now refuses a booking
+   whose computed expiry is already past → `422 BOOKING_TOO_LATE`.
+
+A **full-payment** sale on the same slot is untouched: a completed sale near departure is fine, a
+promise to come back and pay is not.
+
+### Tests
+
+`test/organizations/organization-policy.test.ts` — six assertions replacing the one that asserted
+the removed rule (kept, not deleted: it also covered the merged-stored-value logic, which survives).
+`test/pos/pos-bookings-create.test.ts` — the sale-time guard, plus the walk-in path staying open.
+
+**Mutation-verified:** restoring `cutoff < buffer` and neutering the `confirmSale` guard turns
+exactly these six red and nothing else.
+
+### Related changes
+
+Found while reviewing `docs/bookings/booking-reschedule.spec.md` (PR #67), whose Phase 2 reuses
+`booking_creation_cutoff_hours` as the destination guard for a reschedule (rule 5) — it would have
+inherited the defect.
+
+---
+
 ## BUG-028 — Two Org Settings the API Accepts and Nothing Obeys — ✅ FIXED
 
 **Discovered:** 2026-08-04

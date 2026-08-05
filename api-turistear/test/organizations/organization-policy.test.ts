@@ -84,27 +84,71 @@ describe('US-A46 — org booking policy', () => {
     expect((await get('admin@empresa.com')).json.organization.booking_creation_cutoff_hours).toBe(48)
   })
 
-  it('rejects a cutoff below the settle deadline → 400, in BOTH directions', async () => {
+  // BUG-029 — this used to assert `cutoff >= buffer`, which was wrong at BOTH ends: it forbade the
+  // only useful configurations ("no apartados inside 2 hours") and, at its own boundary, accepted an
+  // apartado born with zero life. The rule now asks `bookingExpiryEpoch` what an apartado created at
+  // the tightest legal moment would get, and requires it to be alive.
+  it('BUG-029 — a same-day creation cutoff is legal, because stage ② is a legitimate birthplace', async () => {
     await seedUser({ email: 'admin@empresa.com', role: 'admin' })
-    // Default deadline is 24h. A 12h cutoff would let an apartado be created inside the window it
-    // is expected to be settled in — born owing money it has no time to pay.
-    expect((await put('admin@empresa.com', { booking_creation_cutoff_hours: 12 })).status).toBe(400)
+    // Default deadline 24 h, default grace +15 min. A 2 h cutoff means the tightest apartado is
+    // born 2 h out and released at salida−15min: one hour and forty-five minutes of life.
+    // `apartado-stages.spec.md` S2 — "sales made close to departure are BORN here".
+    expect((await put('admin@empresa.com', { booking_creation_cutoff_hours: 2 })).status).toBe(200)
+  })
 
-    // The other direction: a cutoff already stored, and a PATCH that raises the deadline past it.
-    // The check reads the STORED value of whichever field the request did not send, so this fails
-    // too — validating the body alone would have let it through.
-    expect((await put('admin@empresa.com', { booking_creation_cutoff_hours: 48 })).status).toBe(200)
-    expect(
-      (await put('admin@empresa.com', { booking_pre_departure_buffer_hours: 72 })).status,
-    ).toBe(400)
+  it('BUG-029 — cutoff == buffer is REJECTED: that apartado is born already dead', async () => {
+    await seedUser({ email: 'admin@empresa.com', role: 'admin' })
+    // `nearDeparture` is `distance < buffer`, so at EXACTLY the buffer the far branch applies and
+    // the expiry lands on the instant of sale. The old rule accepted this and rejected the case
+    // above — precisely backwards.
+    expect((await put('admin@empresa.com', { booking_creation_cutoff_hours: 24 })).status).toBe(400)
+    // One hour of daylight is enough to be legal.
+    expect((await put('admin@empresa.com', { booking_creation_cutoff_hours: 25 })).status).toBe(200)
+  })
 
-    // Both together, coherent, is fine.
+  it('BUG-029 — a cutoff inside the grace window is rejected', async () => {
+    await seedUser({ email: 'admin@empresa.com', role: 'admin' })
+    // Grace +120 min: the hold is released two hours before departure. A cutoff of 1 h would let an
+    // apartado be created an hour AFTER its own release instant.
     expect(
       (await put('admin@empresa.com', {
-        booking_creation_cutoff_hours: 96,
-        booking_pre_departure_buffer_hours: 72,
+        booking_grace_offset_minutes: 120,
+        booking_creation_cutoff_hours: 1,
+      })).status,
+    ).toBe(400)
+    expect(
+      (await put('admin@empresa.com', {
+        booking_grace_offset_minutes: 120,
+        booking_creation_cutoff_hours: 3,
       })).status,
     ).toBe(200)
+  })
+
+  it('BUG-029 — a NEGATIVE grace is courtesy after departure, so any cutoff is coherent', async () => {
+    await seedUser({ email: 'admin@empresa.com', role: 'admin' })
+    // −30 = released 30 min AFTER departure. An apartado created at the 1 h boundary lives 1 h 30.
+    expect(
+      (await put('admin@empresa.com', {
+        booking_grace_offset_minutes: -30,
+        booking_creation_cutoff_hours: 1,
+      })).status,
+    ).toBe(200)
+  })
+
+  it('the check reads the STORED value of whichever field the request did not send', async () => {
+    await seedUser({ email: 'admin@empresa.com', role: 'admin' })
+    expect((await put('admin@empresa.com', { booking_creation_cutoff_hours: 2 })).status).toBe(200)
+    // Raising the GRACE alone now makes the stored cutoff incoherent. Validating the body alone
+    // would have let this through — which is the half of the original rule worth keeping.
+    expect(
+      (await put('admin@empresa.com', { booking_grace_offset_minutes: 180 })).status,
+    ).toBe(400)
+  })
+
+  it('0 means no restriction, so there is no boundary to evaluate', async () => {
+    await seedUser({ email: 'admin@empresa.com', role: 'admin' })
+    // And nothing a settings rule can promise — `confirmSale`'s guard is what covers that case.
+    expect((await put('admin@empresa.com', { booking_creation_cutoff_hours: 0 })).status).toBe(200)
   })
 
   it('0 means no restriction, so it is coherent with any deadline', async () => {
