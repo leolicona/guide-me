@@ -51,6 +51,9 @@ const serviceIds = [randomUUID(), randomUUID(), randomUUID(), randomUUID()]
 // Held rather than inlined, so the outbox rows below can point at real folios.
 const reminderFolioId = randomUUID()
 const graceFolioId = randomUUID()
+// US-AG52 — the two ways a tourist's reschedule petition can end at review time.
+const reqViableFolioId = randomUUID()
+const reqDoomedFolioId = randomUUID()
 
 // A folio + its line, so the list has cards with a real service name on them.
 const folio = ({
@@ -254,6 +257,32 @@ ${folio({
   },
 })}
 
+-- US-AG52 — the TOURIST origin, at its two review outcomes. Both render the review card that
+-- branches on kind ("El cliente pidió reagendar", never "Aprobar y cancelar folio").
+--   Carlos Peña   -> the destination still has room: Aprobar reagenda moves the seats.
+--   Lucía Ortega  -> the destination FILLED after she asked: approving auto-rejects with the
+--                    reason and viable alternatives, because a petition holds no seats.
+${folio({
+  id: reqViableFolioId, customer: 'Carlos Peña', phone: '+529981110008', status: 'booking',
+  total: 240000, paid: 72000, createdAt: now - 4 * 3600, service: svc[0], slot: slotOf(svc[0].id),
+  extra: { booking_expires_at: now + 2 * DAY },
+})}
+${folio({
+  id: reqDoomedFolioId, customer: 'Lucía Ortega', phone: '+529981110009', status: 'booking',
+  total: 240000, paid: 72000, createdAt: now - 3 * 3600, service: svc[0], slot: slotOf(svc[0].id),
+  extra: { booking_expires_at: now + 2 * DAY },
+})}
+INSERT INTO folio_requests (id, organization_id, folio_id, kind, status, reason,
+                            folio_line_id, from_slot_id, to_slot_id, created_at, updated_at)
+VALUES (${q(randomUUID())}, ${q(ORG_ID)}, ${q(reqViableFolioId)}, 'reschedule', 'pending',
+        'Nos cambió el vuelo, ¿puede ser dos días después?',
+        (SELECT id FROM folio_lines WHERE folio_id = ${q(reqViableFolioId)}),
+        ${q(slotOf(svc[0].id).id)}, ${q(slotOf(svc[0].id, 1).id)}, ${now - 7200}, ${now - 7200}),
+       (${q(randomUUID())}, ${q(ORG_ID)}, ${q(reqDoomedFolioId)}, 'reschedule', 'pending',
+        'Preferimos la salida de la tarde',
+        (SELECT id FROM folio_lines WHERE folio_id = ${q(reqDoomedFolioId)}),
+        ${q(slotOf(svc[0].id).id)}, ${q(slotOf(svc[0].id, 2).id)}, ${now - 5400}, ${now - 5400});
+
 -- US-A86 - the outbox with something in it: work to drain, and a failure that must not stay
 -- invisible. Seeded DIRECTLY because wrangler dev does not fire a cron trigger on its own, so an
 -- outbox waiting on the scheduled worker would look broken rather than empty. Everything else about
@@ -293,7 +322,7 @@ console.log(`
    Email     ${EMAIL}
    Password  ${PASSWORD}
 
-   Also seeded: an agent (ana@local.test, same password), 4 services, and 11 sales — one per
+   Also seeded: an agent (ana@local.test, same password), 4 services, and 13 sales — one per
    state the Ventas screen can show, plus one from 200 days ago that ONLY search or a date
    range can reach.
 
@@ -306,8 +335,14 @@ console.log(`
 
    For the reschedule (US-AG52):
      Maria Fernandez / Norma Escalante  apartados vivos con horario real -> Reagendar
+                                        (fecha primero, luego los horarios de ese dia)
      Leo Licona                          venta PAGADA -> Reagendar re-firma su QR
-     Beatriz Solano                      apartado cerrado con $900.00 a favor
+     Carlos Pena                         pidio reagendar desde el portal -> "Aprobar reagenda"
+                                        mueve los lugares (el review sheet ya no dice cancelar)
+     Lucia Ortega                        pidio un horario que se LLENO despues -> aprobar la
+                                        auto-rechaza con el motivo y fechas alternativas
+     Beatriz Solano                      apartado cerrado con $900.00 a favor (en la card y
+                                        en el detalle, con su vigencia)
      Ajustes                             "Liberacion de apartado" te va a frenar: cada
                                          organizacion nace liberando 15 min antes de dejar
                                          de vender. Eso es la regla D4, y es el cambio que
