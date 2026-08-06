@@ -74,6 +74,13 @@ export const organizations = sqliteTable('organizations', {
   qrRedemptionMode: text('qr_redemption_mode', { enum: ['per_pass', 'all_passes'] })
     .notNull()
     .default('per_pass'),
+  // US-A88 (docs/payment-verification/payment-verification.spec.md, D10 — amends D2) — must a
+  // transfer carry its bank reference at checkout/settle? ON by default (today's rule). Turning it
+  // OFF relaxes the input only: an unreferenced transfer still lands `payment_verification =
+  // 'pending'` with its QR deferred — the US-A67 verification axis is untouched.
+  paymentReferenceRequired: integer('payment_reference_required', { mode: 'boolean' })
+    .notNull()
+    .default(true),
   createdAt: integer('created_at', { mode: 'timestamp' })
     .notNull()
     .default(sql`(unixepoch())`),

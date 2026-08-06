@@ -691,6 +691,39 @@ export default function SettingsPage() {
               }
               sx={{ alignItems: 'flex-start', mx: 0 }}
             />
+
+            <Divider sx={{ my: 2 }} />
+
+            {/* US-A88 (payment-verification D10) — org-wide, commits on tap like the scanner
+                toggle. Only the INPUT relaxes: the copy says so, because the admin still verifies
+                every transferencia (US-A67) — with or without a reference to match against. */}
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={org?.payment_reference_required ?? true}
+                  disabled={update.isPending}
+                  onChange={(e) =>
+                    update.mutate(
+                      { payment_reference_required: e.target.checked },
+                      { onSuccess: () => setSaved(true) },
+                    )
+                  }
+                />
+              }
+              label={
+                <Box>
+                  <Typography variant="body1" sx={{ fontWeight: 500 }}>
+                    Referencia obligatoria en transferencias
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Exigir el número de referencia al cobrar o liquidar por transferencia. Si lo
+                    desactivas, el campo se vuelve opcional — el pago igual pasa por verificación
+                    del administrador.
+                  </Typography>
+                </Box>
+              }
+              sx={{ alignItems: 'flex-start', mx: 0 }}
+            />
           </CardContent>
         </Card>
 

@@ -154,14 +154,20 @@ export default function PosCheckoutPage() {
   const emailValid = emailTrimmed === '' || EMAIL_RE.test(emailTrimmed)
   const nameValid = customerName.trim().length > 0
   const phoneValid = isSendablePhone(customerPhone)
-  // US-AG41 — a bank transfer needs a reference (≥ 4 chars). The customer's tickets are then held
-  // until an admin verifies the money (US-A67). Local state — it isn't persisted with the cart.
+  // US-AG41 — a bank transfer needs a reference (≥ 4 chars) — unless the org made it optional
+  // (US-A88): then an empty field is fine too, but a partial one still isn't. Either way the
+  // customer's tickets are held until an admin verifies the money (US-A67). Local state — it
+  // isn't persisted with the cart.
   const [reference, setReference] = useState('')
-  const referenceValid = paymentMethod !== 'transfer' || reference.trim().length >= 4
 
   // US-AG07.2 — adaptive, amount-driven checkout. The amount input pre-loads the cart total; the
   // sale type / button / validity derive from it. A suggested-deposit chip reuses the org minimum %.
   const { data: org } = useMyOrganization()
+  const referenceRequired = org?.payment_reference_required ?? true
+  const referenceValid =
+    paymentMethod !== 'transfer' ||
+    reference.trim().length >= 4 ||
+    (!referenceRequired && reference.trim().length === 0)
   const total = cartTotal(lines)
   const minPct = org?.booking_min_down_payment_pct ?? 0
   const minCents = Math.ceil((total * minPct) / 100)
@@ -216,8 +222,10 @@ export default function PosCheckoutPage() {
     // Read the current state directly so the payload reflects any last edits.
     const payload = toConfirmPayload(usePosCart.getState())
     if (saleState === 'PARTIAL') payload.down_payment = amountCents
-    // US-AG41 — carry the transfer reference (ignored server-side for other methods).
-    if (paymentMethod === 'transfer') payload.payment_reference = reference.trim()
+    // US-AG41 — carry the transfer reference (ignored server-side for other methods). An empty
+    // optional reference (US-A88) is omitted, not sent as ''.
+    if (paymentMethod === 'transfer' && reference.trim())
+      payload.payment_reference = reference.trim()
     confirm.mutate(payload, {
       onSuccess: (folio) => {
         clear()
@@ -414,10 +422,15 @@ export default function PosCheckoutPage() {
                   </ToggleButton>
                 </ToggleButtonGroup>
 
-                {/* US-AG41 — a transfer requires its bank reference; the QR is held until verified. */}
+                {/* US-AG41 — a transfer carries its bank reference (optional per org, US-A88);
+                    the QR is held until verified either way. */}
                 {paymentMethod === 'transfer' && (
                   <TextField
-                    label="Referencia de la transferencia"
+                    label={
+                      referenceRequired
+                        ? 'Referencia de la transferencia'
+                        : 'Referencia de la transferencia (opcional)'
+                    }
                     placeholder="Ej. BBVA 0099887766"
                     value={reference}
                     onChange={(e) => setReference(e.target.value)}

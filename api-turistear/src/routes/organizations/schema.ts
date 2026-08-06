@@ -75,6 +75,9 @@ export const updateOrganizationSchema = z.object({
   // passes. Admin-only, org-wide, deliberately NOT an agent-facing toggle: a mis-tap would burn a
   // whole party's passes and nothing in the system can un-redeem one.
   qr_redemption_mode: z.enum(['per_pass', 'all_passes']).optional(),
+  // US-A88 (payment-verification D10, amends D2) — must a transfer carry its bank reference?
+  // Relaxes the input only; verification (US-A67) stays armed either way.
+  payment_reference_required: z.boolean().optional(),
 })
 
 export type UpdateOrganizationInput = z.infer<typeof updateOrganizationSchema>

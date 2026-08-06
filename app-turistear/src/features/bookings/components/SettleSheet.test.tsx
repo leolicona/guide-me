@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { http, HttpResponse } from 'msw'
 import { server } from '../../../test/server'
 import { renderWithProviders, screen, userEvent, waitFor } from '../../../test/renderWithProviders'
@@ -15,6 +15,19 @@ const props = {
   balance: 120_000,
   defaultMethod: 'cash' as const,
 }
+
+// US-A88 — the sheet reads the org to learn whether a transfer demands its reference. Registered in
+// `beforeEach` (MSW resets handlers per test); individual tests override to flip the requirement.
+const orgWith = (payment_reference_required: boolean) =>
+  http.get('/api/organizations/me', () =>
+    HttpResponse.json({
+      organization: { id: 'o1', name: 'Turistear Ya!', payment_reference_required },
+    }),
+  )
+
+beforeEach(() => {
+  server.use(orgWith(true))
+})
 
 /** Capture the settle request body so the payload contract can be asserted, not assumed. */
 function captureSettle() {
@@ -103,6 +116,58 @@ describe('SettleSheet', () => {
       await userEvent.type(
         screen.getByLabelText(/Referencia de la transferencia/),
         '  BBVA 0099887766  ',
+      )
+      await userEvent.click(screen.getByRole('button', { name: 'Cobrar y liquidar' }))
+
+      await waitFor(() => expect(bodies).toHaveLength(1))
+      expect(bodies[0]).toEqual({ method: 'transfer', payment_reference: 'BBVA 0099887766' })
+    })
+  })
+
+  // US-A88 — the org turned the requirement off: an EMPTY reference settles, a partial one still
+  // doesn't (4–64 if present), and nothing about verification changes client-side.
+  describe('an org with the reference optional (US-A88)', () => {
+    beforeEach(() => {
+      server.use(orgWith(false))
+    })
+
+    it('labels the field optional and settles without a reference, sending none', async () => {
+      const bodies = captureSettle()
+      renderWithProviders(<SettleSheet {...props} onClose={vi.fn()} />)
+      await userEvent.click(screen.getByRole('button', { name: 'Transferencia' }))
+
+      expect(
+        await screen.findByLabelText(/Referencia de la transferencia \(opcional\)/),
+      ).toBeInTheDocument()
+      const submit = screen.getByRole('button', { name: 'Cobrar y liquidar' })
+      await waitFor(() => expect(submit).toBeEnabled())
+      await userEvent.click(submit)
+
+      await waitFor(() => expect(bodies).toHaveLength(1))
+      expect(bodies[0]).toEqual({ method: 'transfer' })
+      expect(bodies[0]).not.toHaveProperty('payment_reference')
+    })
+
+    it('still rejects a too-short reference once typing starts', async () => {
+      renderWithProviders(<SettleSheet {...props} onClose={vi.fn()} />)
+      await userEvent.click(screen.getByRole('button', { name: 'Transferencia' }))
+
+      await userEvent.type(
+        await screen.findByLabelText(/Referencia de la transferencia \(opcional\)/),
+        'ABC',
+      )
+      expect(screen.getByRole('button', { name: 'Cobrar y liquidar' })).toBeDisabled()
+      expect(screen.getByText('Captura al menos 4 caracteres.')).toBeInTheDocument()
+    })
+
+    it('sends the reference when the agent does capture one', async () => {
+      const bodies = captureSettle()
+      renderWithProviders(<SettleSheet {...props} onClose={vi.fn()} />)
+      await userEvent.click(screen.getByRole('button', { name: 'Transferencia' }))
+
+      await userEvent.type(
+        await screen.findByLabelText(/Referencia de la transferencia \(opcional\)/),
+        'BBVA 0099887766',
       )
       await userEvent.click(screen.getByRole('button', { name: 'Cobrar y liquidar' }))
 
