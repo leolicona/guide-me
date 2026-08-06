@@ -131,18 +131,12 @@ describe('RescheduleSheet — the day pager', () => {
     })
   })
 
-  it('warns on a paid folio that the current ticket will stop working (D16)', async () => {
-    serveSlots()
-    renderWithProviders(<RescheduleSheet {...props} isPaid />)
-    expect(
-      await screen.findByText(/el boleto actual deja de funcionar/),
-    ).toBeInTheDocument()
-  })
-
   // D16, second half — the sheet does not end at the confirm on a paid folio. The move just
   // killed a ticket the customer may have saved, so the replacement's send must be ONE tap away
-  // from the person who promised it — the same WhatsApp send the receipt uses.
-  it('a paid move chains straight into sending the new ticket', async () => {
+  // from the person who promised it — the same WhatsApp send the receipt uses, and the ONLY
+  // button on screen: no pre-warning before (the handoff states the fact when it becomes true),
+  // no Listo after (dismissal is the sheet contract, and the outbox keeps a skipped send visible).
+  it('a paid move chains straight into sending the new ticket — the one button on screen', async () => {
     serveSlots()
     const onClose = vi.fn()
     server.use(
@@ -162,18 +156,22 @@ describe('RescheduleSheet — the day pager', () => {
     )
     renderWithProviders(<RescheduleSheet {...props} isPaid onClose={onClose} />)
 
+    // No warning before the move — the handoff says it once, when it is true.
+    expect(screen.queryByText(/deja de funcionar/)).toBeNull()
+
     await userEvent.click(await screen.findByRole('button', { name: /14:00/ }))
     await userEvent.click(screen.getByRole('button', { name: 'Reagendar' }))
 
     // The sheet became the handoff instead of closing.
     expect(await screen.findByText('Fecha movida')).toBeInTheDocument()
     expect(onClose).not.toHaveBeenCalled()
-    expect(
-      screen.getByRole('button', { name: /Enviar boletos por WhatsApp/ }),
-    ).toBeInTheDocument()
-    // Skipping is allowed: the footer turned into Listo, and the outbox keeps the send visible.
-    await userEvent.click(screen.getByRole('button', { name: 'Listo' }))
-    expect(onClose).toHaveBeenCalled()
+    const send = screen.getByRole('button', { name: /Enviar boletos por WhatsApp/ })
+    expect(send).toBeInTheDocument()
+    // With portal link + valid phone the send is LIVE, not gray.
+    expect(send).toBeEnabled()
+    // And it is the only action: no footer button competes with it.
+    expect(screen.queryByRole('button', { name: 'Listo' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Reagendar' })).toBeNull()
   })
 
   it('a live apartado’s move just closes — no ticket existed to replace', async () => {

@@ -51,6 +51,9 @@ const serviceIds = [randomUUID(), randomUUID(), randomUUID(), randomUUID()]
 // Held rather than inlined, so the outbox rows below can point at real folios.
 const reminderFolioId = randomUUID()
 const graceFolioId = randomUUID()
+// The PAID reschedule demo: needs a portal token, or the post-move WhatsApp handoff renders its
+// button disabled ("Los boletos aún no están listos") — a real sale gets the token at confirm.
+const leoFolioId = randomUUID()
 // US-AG52 — the two ways a tourist's reschedule petition can end at review time.
 const reqViableFolioId = randomUUID()
 const reqDoomedFolioId = randomUUID()
@@ -172,10 +175,15 @@ ${slots
 -- One folio per state the Ventas screen can show, so every pill in the pending-work bar has
 -- something behind it and the search has more than one row to narrow.
 ${folio({
-  id: randomUUID(), customer: 'Leo Licona', phone: '+529981234567', status: 'paid',
+  id: leoFolioId, customer: 'Leo Licona', phone: '+529981234567', status: 'paid',
   total: 240000, paid: 240000, createdAt: now - 3600, service: svc[0], slot: slotOf(svc[0].id),
   extra: { payment_verification: q('verified'), tickets_sent_at: 'NULL', tickets_viewed_at: 'NULL' },
 })}
+-- The portal token a real sale issues at confirm. Without it the folio has no portal_link, and
+-- every WhatsApp send (incl. the post-reschedule handoff) is disabled.
+INSERT INTO folio_access_tokens (id, organization_id, folio_id, token, expires_at, created_at)
+VALUES (${q(randomUUID())}, ${q(ORG_ID)}, ${q(leoFolioId)}, ${q(`tok-${randomUUID()}`)},
+        ${now + 30 * DAY}, ${now - 3600});
 ${folio({
   id: randomUUID(), customer: null, phone: '+529985554444', status: 'paid',
   total: 180000, paid: 180000, createdAt: now - 26 * 3600, service: svc[1], slot: slotOf(svc[1].id),

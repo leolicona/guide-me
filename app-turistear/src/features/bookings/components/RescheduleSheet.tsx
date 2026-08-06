@@ -148,11 +148,7 @@ export function RescheduleSheet({ open, onClose, folioId, lines, isPaid }: Resch
 
   const submit = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault()
-    if (done) {
-      onClose()
-      return
-    }
-    if (!lineId || !slotId) return
+    if (done || !lineId || !slotId) return
     reschedule.mutate(
       { folioId, moves: [{ folio_line_id: lineId, to_slot_id: slotId }] },
       // A live apartado's move ends here. A PAID move just killed a ticket the customer may have
@@ -166,7 +162,10 @@ export function RescheduleSheet({ open, onClose, folioId, lines, isPaid }: Resch
       open={open}
       onClose={onClose}
       title="Reagendar"
-      submitLabel={done ? 'Listo' : 'Reagendar'}
+      // The handoff has ONE action and it lives in the body — no footer button to compete with
+      // it. Dismissal stays the sheet contract (X / backdrop / swipe), so skipping is still easy,
+      // and the outbox row keeps a skipped send visible as pending work.
+      submitLabel={done ? undefined : 'Reagendar'}
       onSubmit={submit}
       busy={reschedule.isPending}
       disabled={!done && (!lineId || !slotId)}
@@ -180,8 +179,8 @@ export function RescheduleSheet({ open, onClose, folioId, lines, isPaid }: Resch
     >
       {done ? (
         // D16, second half — the handoff. The old link is dead; the replacement travels NOW, in
-        // the same gesture, through the same send the receipt uses. Skipping this screen is
-        // allowed (Listo): the outbox row keeps the send visible as pending work either way.
+        // the same gesture, through the same send the receipt uses. Skipping is dismissing the
+        // sheet: the outbox row keeps the send visible as pending work either way.
         <Stack spacing={2} sx={{ alignItems: 'stretch' }}>
           <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
             <CheckCircleRounded color="success" />
@@ -315,12 +314,8 @@ export function RescheduleSheet({ open, onClose, folioId, lines, isPaid }: Resch
             </>
           )}
 
-          {isPaid && (
-            <Alert severity="warning">
-              Al mover la fecha, <strong>el boleto actual deja de funcionar</strong>. Al confirmar
-              podrás enviarle el nuevo por WhatsApp.
-            </Alert>
-          )}
+          {/* D16's pre-warning used to sit here; withdrawn — the handoff screen states the fact
+              at the moment it becomes true, which is once instead of twice. */}
 
           {/* D2's enforcement, stated as the fact it is: the record carries the seller's name.
               (The earlier "Acordado con el cliente ·" prefix claimed something the UI cannot

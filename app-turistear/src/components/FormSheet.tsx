@@ -7,8 +7,10 @@ export interface FormSheetProps {
   open: boolean
   onClose: () => void
   title: string
-  /** Footer primary action label, e.g. 'Guardar' / 'Agregar'. */
-  submitLabel: string
+  /** Footer primary action label, e.g. 'Guardar' / 'Agregar'. Omit for a terminal state whose
+   *  ONE action lives in the body (e.g. the reschedule handoff's WhatsApp send) — dismissal stays
+   *  the sheet contract (puller / X / backdrop / swipe), so no footer button is not no exit. */
+  submitLabel?: string
   /** Pass RHF's `handleSubmit(onValid)` (or any submit handler) — wired to the internal form. */
   onSubmit: (e: FormEvent<HTMLFormElement>) => void
   /** Mutation in flight: spinner in the button + disables it. */
@@ -58,24 +60,26 @@ export function FormSheet({
       footer={
         <>
           {error && <Box sx={{ px: 2, pt: 1 }}>{error}</Box>}
-          <Box sx={{ p: 2 }}>
-            <Button
-              type="submit"
-              form={formId}
-              fullWidth
-              variant="contained"
-              disableElevation
-              disabled={busy || disabled}
-              // BUG-022 — the spinner REPLACES the label, so without these the control becomes a
-              // nameless button at the exact moment a screen-reader user needs to know what is
-              // happening. The label is kept as the name; `aria-busy` carries the state; the
-              // spinner itself is decorative, since the button already says it is busy.
-              aria-label={submitLabel}
-              aria-busy={busy}
-            >
-              {busy ? <CircularProgress size={22} color="inherit" aria-hidden /> : submitLabel}
-            </Button>
-          </Box>
+          {submitLabel && (
+            <Box sx={{ p: 2 }}>
+              <Button
+                type="submit"
+                form={formId}
+                fullWidth
+                variant="contained"
+                disableElevation
+                disabled={busy || disabled}
+                // BUG-022 — the spinner REPLACES the label, so without these the control becomes a
+                // nameless button at the exact moment a screen-reader user needs to know what is
+                // happening. The label is kept as the name; `aria-busy` carries the state; the
+                // spinner itself is decorative, since the button already says it is busy.
+                aria-label={submitLabel}
+                aria-busy={busy}
+              >
+                {busy ? <CircularProgress size={22} color="inherit" aria-hidden /> : submitLabel}
+              </Button>
+            </Box>
+          )}
         </>
       }
     >
