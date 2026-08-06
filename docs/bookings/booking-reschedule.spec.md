@@ -275,15 +275,20 @@ Design system: `.design/design-system/DESIGN_TOKENS.md`. No new primitive.
 gains **Reagendar** — on a live apartado beside *Liquidar saldo* and *Cancelar*, and on a **paid**
 folio beside the delivery actions (D16).
 
-**The reschedule sheet** is a `FormSheet` (never a Dialog): it shows the current departure, then a
-**date-first picker — pick the day, and it answers with that day's remaining times** *(user
-decision; supersedes this spec's first idea of reusing the POS date/time matrix — the counter
-conversation is "¿puedo el domingo?", a day answered with hours, and two selects fit a FormSheet
-where the matrix does not)*. The options come from the **selected line's** service (D11), look 60
-days ahead (the POS default window is 3 days — right for walk-ups, useless for "¿la otra
-semana?"), and only days with room for the whole party appear, using the same effective-capacity
-arithmetic the POS sale applies. The confirm's copy names both parties, because D2 is the point:
-*"Acordado con el cliente · reagenda registrada a tu nombre."*
+**The reschedule sheet** is a `FormSheet` (never a Dialog): the current departure, then a
+**one-day pager that opens on the FIRST day with room** — `◀ Viernes 7 ago ▶` with that day's
+remaining times as chips — whose arrows step **only between days that can seat the whole group**
+*(user decision, refined twice: first from the POS matrix to two selects, then to the pager —
+the counter's real question is "¿cuándo puedes?", best answered by the nearest actual options
+with zero taps)*. A day the service does not operate, or whose slots cannot seat the party,
+simply does not exist on the axis (US-AG33's rule: never present a day the group cannot take).
+For *"¿y en dos semanas?"* the sheet embeds the **same `DateRangeCalendar` the POS already
+taught the seller**, behind *Elegir fecha*: days without room disabled, one tap jumps the pager.
+The options come from the **selected line's** service (D11), look 60 days ahead (the POS default
+window is 3 days — right for walk-ups, useless for "¿la otra semana?"), filtered by the same
+effective-capacity arithmetic the POS sale applies. The submit reads **Reagendar**, and the copy
+names both parties, because D2 is the point: *"Acordado con el cliente · reagenda registrada a tu
+nombre."*
 
 **The tourist's portal** gains the same picker behind *"Cambiar mi fecha"*, which creates a request
 rather than a move — and says so, because a customer who believes their date changed and finds it
