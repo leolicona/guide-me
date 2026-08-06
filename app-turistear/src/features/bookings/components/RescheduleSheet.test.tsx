@@ -98,6 +98,22 @@ describe('RescheduleSheet — the day pager', () => {
     expect(await screen.findByRole('button', { name: iso(2) })).toBeDisabled()
   })
 
+  it('the calendar dots the days that fit the group, and only those', async () => {
+    serveSlots()
+    renderWithProviders(<RescheduleSheet {...props} />)
+    await screen.findByRole('button', { name: /14:00/ })
+
+    await userEvent.click(screen.getByRole('button', { name: 'Elegir fecha' }))
+    await screen.findByRole('button', { name: iso(5) })
+    // The dot is the same promise the POS calendar makes: "this day fits the group." Day +5
+    // earns one; the too-small day +2 must not — a dot on it would promise what the tap refuses.
+    // (Day +1 is the pager's current day = the calendar's endpoint, where the fill says it.)
+    const dotted = screen.getAllByTestId('availability-dot')
+    const dottedDays = dotted.map((d) => d.closest('button')?.getAttribute('aria-label'))
+    expect(dottedDays).toContain(iso(5))
+    expect(dottedDays).not.toContain(iso(2))
+  })
+
   it('submits the chosen slot as one move, behind the Reagendar button', async () => {
     serveSlots()
     const bodies: Record<string, unknown>[] = []

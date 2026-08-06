@@ -280,6 +280,8 @@ export function RescheduleSheet({ open, onClose, folioId, lines, isPaid }: Resch
                     today={range.from}
                     dayRemaining={dayRemaining}
                     requiredQuantity={quantity}
+                    // The same dot the POS calendar makes: "this day fits the group."
+                    availabilityDots
                   />
                 </Box>
               </Collapse>
