@@ -293,11 +293,10 @@ that deters.)*
 
 **On a `paid` folio the sheet does not end at the confirm** (D16, second half): the move just
 killed a ticket the customer may have saved, so the success state **chains straight into the
-same WhatsApp send the receipt uses** — *Fecha movida → Enviar boletos por WhatsApp*, **the only
-button on screen**. No pre-warning before it (the handoff states the fact at the moment it
-becomes true — once, not twice) and no *Listo* after it (dismissal is the sheet contract:
-X / backdrop / swipe). Skipping by dismissing is safe: the outbox row keeps the pending send
-visible as work, so a skipped handoff cannot silently strand the customer with a dead QR.
+same WhatsApp send the receipt uses** — *Fecha movida → Enviar boletos por WhatsApp*, one tap
+away from the person who promised it. Skipping is allowed (*Listo*): the outbox row keeps the
+pending send visible as work either way, so a skipped handoff cannot silently strand the
+customer with a dead QR.
 
 **The tourist's portal** gains the same picker behind *"Cambiar mi fecha"*, which creates a request
 rather than a move — and says so, because a customer who believes their date changed and finds it

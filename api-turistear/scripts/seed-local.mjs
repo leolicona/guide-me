@@ -132,6 +132,8 @@ const slotOf = (serviceId, i = 0) => slots.filter((s) => s.serviceId === service
 const sql = `
 -- Clean slate: children first, then the org itself.
 DELETE FROM notifications WHERE organization_id = ${q(ORG_ID)};
+-- The portal token seeded below references folios — without this, the SECOND run dies on the FK.
+DELETE FROM folio_access_tokens WHERE organization_id = ${q(ORG_ID)};
 -- 0060 renamed cancellation_requests, and its new folio_line_id FK means it must go BEFORE the lines.
 DELETE FROM folio_requests WHERE organization_id = ${q(ORG_ID)};
 DELETE FROM folio_lines WHERE organization_id = ${q(ORG_ID)};
