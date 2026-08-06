@@ -131,9 +131,6 @@ test.describe('Paid reschedule → the ticket moves with the date', () => {
     await expect(timeChip).toBeVisible()
     const chosenTime = ((await timeChip.textContent()) ?? '').slice(0, 5)
 
-    // The warning the customer's ticket depends on, before anything moves (D16).
-    await expect(sheet.getByText(/el boleto actual deja de funcionar/i)).toBeVisible()
-
     await timeChip.click()
     await sheet.getByRole('button', { name: 'Reagendar', exact: true }).click()
 

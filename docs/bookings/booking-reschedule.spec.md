@@ -279,21 +279,26 @@ Design system: `.design/design-system/DESIGN_TOKENS.md`. No new primitive.
 gains **Reagendar** — on a live apartado beside *Liquidar saldo* and *Cancelar*, and on a **paid**
 folio beside the delivery actions (D16).
 
-**The reschedule sheet** is a `FormSheet` (never a Dialog), and reads top to bottom the way the
-counter conversation runs *(user decision, refined three times: POS matrix → two selects → day
-pager behind a toggle → **calendar first**)*: the line being moved and its current departure
-(*"Ahora: Sábado 22 ago · 08:00"* — the FROM of a from→to move, which is what keeps the wrong
-line from being moved), then the **month grid the POS already taught the seller**
-(`DateRangeCalendar`), **availability-dotted** — a dot means *this day fits the group*, days
-without room disabled — then the landed day: `◀ Viernes 7 ago ▶` with that day's remaining times
-as chips, arrows stepping **only between days that can seat everyone**. The pager opens on the
-FIRST day with room, so the nearest real options are on screen before anybody taps. A day the
-service does not operate simply does not exist on the axis (US-AG33's rule). Options come from
-the **selected line's** service (D11), 60 days ahead, filtered by the POS's effective-capacity
-arithmetic. The submit reads **Reagendar**, and the caption states D2's enforcement as the fact
-it is — *"La reagenda queda registrada a tu nombre."* *(An earlier draft prefixed "Acordado con
-el cliente ·", withdrawn: the UI cannot verify an agreement, and the registered name is the half
-that deters.)*
+**The reschedule sheet** is a `FormSheet` (never a Dialog) and is **a picker and nothing else**
+*(user decision, refined four times: POS matrix → two selects → day pager behind a toggle →
+calendar first → **copy stripped**)*: the line selector when the folio has more than one movable
+line, then the **month grid the POS already taught the seller** (`DateRangeCalendar`),
+**availability-dotted** — a dot means *this day fits the group*, days without room disabled —
+then the landed day: `◀ Viernes 7 ago ▶` with that day's remaining times as chips, arrows
+stepping **only between days that can seat everyone**. The pager opens on the FIRST day with
+room, so the nearest real options are on screen before anybody taps. A day the service does not
+operate simply does not exist on the axis (US-AG33's rule). Options come from the **selected
+line's** service (D11), 60 days ahead, filtered by the POS's effective-capacity arithmetic. The
+submit reads **Reagendar**.
+
+**Three pieces of copy were tried and removed** — recorded because each was argued for at the
+time: the current departure (*"Ahora: Sábado 22 ago · 08:00"*), the pre-move ticket warning, and
+the by-line caption (*"La reagenda queda registrada a tu nombre"*, itself the survivor of an
+earlier *"Acordado con el cliente ·"* that was cut for claiming what the UI cannot verify). None
+was carrying a guarantee: **the warning survives on the handoff**, where it is true rather than
+predicted; **D2's record is `resolved_by`**, enforced server-side on every path; and **BUG-030**
+makes the replaced QR actually stop admitting, which is the enforcement the warning was standing
+in for.
 
 **On a `paid` folio the sheet does not end at the confirm** (D16, second half): the move just
 killed a ticket the customer may have saved, so the success state **chains straight into the
@@ -311,9 +316,11 @@ the tourist-self-service increment. Until then every reschedule enters through a
 **A pending reschedule reaches the seller through the rung that already exists** — `Revisar
 solicitud`, the first of the action ladder. No new surface: the review sheet branches on `kind`.
 
-**On a `paid` folio the sheet warns before it moves** that the current ticket will stop working and
-a new one will be sent (D16). A QR dying silently in somebody's WhatsApp is the failure this copy
-exists to prevent.
+**On a `paid` folio the sheet states it on the HANDOFF** — the current ticket stopped working and
+the new one is one tap away (D16). *(This paragraph used to require a warning BEFORE the move;
+the pre-move copy was removed with the rest, and what prevents "a QR dying silently in somebody's
+WhatsApp" is now enforcement rather than copy: BUG-030's `SUPERSEDED` refusal plus the outbox row
+that keeps an unsent replacement visible as work.)*
 
 **The folio detail** shows the reschedule history when there is one, and on a closed apartado the
 credit with its expiry — in `MoneyText`, semantic colour, never teal.
@@ -606,8 +613,8 @@ scope may make the line's redundant, exactly as it did in `folio-state-machine.s
    **and on paid folios** instead, and for a customer arriving after the hold ended, an ordinary
    sale. **This is a removal, and it is the one thing in this spec a user will notice immediately.**
 4. **A rescheduled paid folio's existing ticket stops working** (D16). The replacement is sent in
-   the same gesture, but a customer who screenshotted the old QR will find it invalid — which is
-   why the sheet says so before the move, not after.
+   the same gesture, but a customer who screenshotted the old QR will find it invalid — which the
+   sheet states on the handoff, at the moment it becomes true.
    **BUG-030, found while writing the e2e and fixed in this PR:** re-signing did NOT make the old
    ticket stop working. Its signature is genuine, its line still resolves, its folio is still paid,
    and its `expires_at` came from the OLD departure — so on a move to a *later* date it was still

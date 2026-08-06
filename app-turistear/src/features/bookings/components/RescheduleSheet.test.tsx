@@ -131,12 +131,16 @@ describe('RescheduleSheet — the day pager', () => {
     })
   })
 
-  it('warns on a paid folio that the current ticket will stop working (D16)', async () => {
+  // The pre-move warning was REMOVED (user decision): the ticket's death is stated on the handoff
+  // screen, at the moment it becomes true, and BUG-030 makes the replaced QR actually stop
+  // admitting. The picker carries no copy the seller has to read past.
+  it('the picker says nothing about tickets before the move', async () => {
     serveSlots()
     renderWithProviders(<RescheduleSheet {...props} isPaid />)
-    expect(
-      await screen.findByText(/el boleto actual deja de funcionar/),
-    ).toBeInTheDocument()
+    await screen.findByRole('button', { name: /14:00/ })
+    expect(screen.queryByText(/el boleto actual deja de funcionar/)).toBeNull()
+    expect(screen.queryByText(/queda registrada a tu nombre/)).toBeNull()
+    expect(screen.queryByText(/^Ahora:/)).toBeNull()
   })
 
   // D16, second half — the sheet does not end at the confirm on a paid folio. The move just

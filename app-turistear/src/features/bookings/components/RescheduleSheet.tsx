@@ -29,12 +29,18 @@ import { TicketWhatsAppButton } from './TicketWhatsAppButton'
 // A `FormSheet`, never a Dialog — the design system reserves Dialogs for nothing, and every entity
 // edit in this product is a sheet.
 //
-// CALENDAR FIRST: the month grid the POS already taught the seller, availability-dotted, one tap
-// to land on a day — and under it, that day's remaining times as chips, with ◀ ▶ stepping ONLY
-// between days that can seat the group. The pager still opens on the FIRST day with room, so the
-// nearest real options are on screen before anybody taps anything. A day the service does not
-// operate, or whose slots cannot take the party, is disabled on the grid and absent from the axis
-// (US-AG33's rule: never present a day the group cannot take).
+// CALENDAR FIRST, AND ALMOST NOTHING ELSE: the month grid the POS already taught the seller,
+// availability-dotted, one tap to land on a day — and under it, that day's remaining times as
+// chips, with ◀ ▶ stepping ONLY between days that can seat the group. The pager opens on the
+// FIRST day with room, so the nearest real options are on screen before anybody taps anything. A
+// day the service does not operate, or whose slots cannot take the party, is disabled on the grid
+// and absent from the axis (US-AG33's rule: never present a day the group cannot take).
+//
+// The current departure, the ticket warning and the by-line caption were all REMOVED (user
+// decision): a picker whose job is "pick a day" should be a picker. The warning survives on the
+// handoff, where it is true rather than predicted; D2's record is `resolved_by`, enforced
+// server-side; and BUG-030 makes the replaced QR actually stop admitting, so nothing that was
+// deleted here was carrying a guarantee.
 //
 // The slots come from the SELECTED line's service (D11), 60 days ahead, filtered by the same
 // effective-capacity arithmetic the POS sale applies. The server re-checks everything; the sheet
@@ -223,14 +229,6 @@ export function RescheduleSheet({ open, onClose, folioId, lines, isPaid }: Resch
             </TextField>
           )}
 
-          {/* The FROM of a from→to move. This is what keeps the wrong line from being moved:
-              the seller confirms out loud "te muevo del sábado 08:00 al…" reading this line. */}
-          {current && current.slot_date && (
-            <Typography variant="body2" color="text.secondary">
-              Ahora: <strong>{dayHeadline(current.slot_date)} · {current.slot_start_time}</strong>
-            </Typography>
-          )}
-
           {service.isLoading ? (
             <Skeleton variant="rounded" height={280} />
           ) : dates.length === 0 ? (
@@ -315,19 +313,11 @@ export function RescheduleSheet({ open, onClose, folioId, lines, isPaid }: Resch
             </>
           )}
 
-          {isPaid && (
-            <Alert severity="warning">
-              Al mover la fecha, <strong>el boleto actual deja de funcionar</strong>. Al confirmar
-              podrás enviarle el nuevo por WhatsApp.
-            </Alert>
-          )}
-
-          {/* D2's enforcement, stated as the fact it is: the record carries the seller's name.
-              (The earlier "Acordado con el cliente ·" prefix claimed something the UI cannot
-              verify; the registered name is the half that deters.) */}
-          <Typography variant="caption" color="text.secondary">
-            La reagenda queda registrada a tu nombre.
-          </Typography>
+          {/* No pre-move warning and no by-line caption (user decision). The ticket's death is
+              stated on the handoff screen, at the moment it becomes true rather than twice; D2's
+              record is enforced server-side by `resolved_by` either way, and BUG-030 makes the
+              replaced QR actually stop admitting — so nothing here was load-bearing. What is left
+              is the picker: pick a day, pick a time, move. */}
         </Stack>
       )}
     </FormSheet>
