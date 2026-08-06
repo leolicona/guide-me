@@ -318,6 +318,28 @@ export default function FolioDetailPage() {
                       </Typography>
                     </Stack>
                   )}
+                  {/* US-A87 (D6/D10) — what the close left the customer, and until when. This is
+                      the number the agent honours by MANUAL DISCOUNT while the checkout cannot
+                      spend it — an agent who cannot see the credit cannot decide to apply it.
+                      Positive green: it is the customer's money, not the company's. */}
+                  {(folio.credit_amount ?? 0) > 0 && (
+                    <Stack direction="row" sx={{ justifyContent: 'space-between', alignItems: 'baseline' }}>
+                      <Box>
+                        <Typography color="text.secondary">Saldo a favor del cliente</Typography>
+                        {folio.credit_expires_at && (
+                          <Typography variant="caption" color="text.secondary">
+                            Vigente hasta el {formatDate(folio.credit_expires_at)}
+                          </Typography>
+                        )}
+                      </Box>
+                      <MoneyText
+                        cents={folio.credit_amount!}
+                        variant="h6"
+                        semantic="positive"
+                        srLabel="Saldo a favor del cliente"
+                      />
+                    </Stack>
+                  )}
                 </Stack>
               </CardContent>
             </Card>

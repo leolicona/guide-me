@@ -5,7 +5,6 @@ import PaidRounded from '@mui/icons-material/PaidRounded'
 import { useCancelBooking } from '../hooks/useBookingActions'
 import { SettleSheet } from './SettleSheet'
 import { RescheduleSheet } from './RescheduleSheet'
-import { usePosService } from '../../pos/hooks/usePosService'
 import EventRepeatRounded from '@mui/icons-material/EventRepeatRounded'
 import { ConfirmSheet, MoneyText } from '../../../components'
 import type { DisplayMethod, PaymentMethod } from '../../pos/types'
@@ -22,13 +21,17 @@ export interface BookingFolio {
   amount_paid?: number
   pending_balance?: number
   payment_method?: DisplayMethod
+  /** D16 — while a transfer awaits verification there is no ticket yet, so nothing to warn about. */
+  payment_verification?: string
   /** US-AG52 — the lines the reschedule sheet offers to move (tour lines only). */
   lines?: {
     id?: string
     service_id?: string
+    slot_id?: string | null
     service_name: string
     slot_date: string | null
     slot_start_time: string | null
+    quantity?: number
     line_type?: 'slot' | 'stay'
   }[]
 }
@@ -146,23 +149,21 @@ export function BookingActions({
   const [settleOpen, setSettleOpen] = useState(false)
   const [rescheduleOpen, setRescheduleOpen] = useState(false)
 
-  // D11 — same service only, so the options come from THE line's service. A stay is nights under a
-  // per-night guard rather than a slot, and is deferred with its own scenarios.
+  // D11 — same service only. A stay is nights under a per-night guard rather than a slot, and is
+  // deferred with its own scenarios. The sheet fetches the SELECTED line's calendar itself — the
+  // options used to come from the FIRST line's service, which offered a two-service folio the
+  // wrong calendar for every line but one.
   const rescheduleLines = (folio.lines ?? [])
-    .filter((l) => l.line_type !== 'stay' && !!l.id)
+    .filter((l) => l.line_type !== 'stay' && !!l.id && !!l.service_id)
     .map((l) => ({
       id: l.id!,
+      service_id: l.service_id!,
+      slot_id: l.slot_id ?? null,
       service_name: l.service_name,
       slot_date: l.slot_date,
       slot_start_time: l.slot_start_time,
+      quantity: l.quantity ?? 1,
     }))
-  const firstServiceId = folio.lines?.find((l) => l.line_type !== 'stay')?.service_id
-  // Only asked for while the sheet is open: a folio detail should not fetch a service's calendar
-  // for a button nobody pressed.
-  const service = usePosService(rescheduleOpen ? firstServiceId : undefined)
-  const rescheduleOptions = (service.data?.slots ?? [])
-    .filter((s) => s.remaining > 0)
-    .map((s) => ({ id: s.id, date: s.date, start_time: s.start_time, remaining: s.remaining }))
   const busy = cancel.isPending
 
   if (isLiveBooking(folio)) {
@@ -206,8 +207,7 @@ export function BookingActions({
           onClose={() => setRescheduleOpen(false)}
           folioId={folio.id}
           lines={rescheduleLines}
-          options={rescheduleOptions}
-          isPaid={folio.status === 'paid'}
+          isPaid={false}
         />
 
         <SettleSheet
@@ -243,10 +243,38 @@ export function BookingActions({
     )
   }
 
+  // D16 — a PAID folio reschedules too: the customer who cannot make Friday has exactly the same
+  // need, and before this their only option was cancelling, which runs the ladder against them.
+  // The sheet warns that the current ticket dies and a new one is sent — unless the transfer is
+  // still awaiting verification, in which case no ticket exists yet and there is nothing to kill.
+  if (folio.status === 'paid' && rescheduleLines.length > 0) {
+    return (
+      <>
+        <Stack spacing={1.5}>
+          <Button
+            color="inherit"
+            startIcon={<EventRepeatRounded />}
+            onClick={() => setRescheduleOpen(true)}
+          >
+            Reagendar
+          </Button>
+        </Stack>
+        <RescheduleSheet
+          open={rescheduleOpen}
+          onClose={() => setRescheduleOpen(false)}
+          folioId={folio.id}
+          lines={rescheduleLines}
+          isPaid={folio.payment_verification !== 'pending'}
+        />
+      </>
+    )
+  }
+
   // US-AG07.5 RETIRED (booking-reschedule.spec.md D3). This branch offered `Reactivar y Liquidar`,
   // which resurrected a folio the system had cancelled and told the customer it had cancelled — and
   // two buttons marked "Próximamente" that never arrived. Reagendar now lives on a LIVE apartado
-  // (above), where the seats are still the customer's and moving them takes nothing from anybody.
+  // and on a PAID folio (above), where the seats are still the customer's and moving them takes
+  // nothing from anybody.
   //
   // A customer arriving after the hold ended makes an ordinary sale; the banner says so, and the
   // credit is on the folio for the seller to apply.

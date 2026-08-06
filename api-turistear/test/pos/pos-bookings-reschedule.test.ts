@@ -264,6 +264,45 @@ describe('US-AG52 — a live apartado moves to another departure', () => {
     expect(await booked(from)).toBe(2)
   })
 
+  it('a line cannot be moved twice in one operation', async () => {
+    const { organizationId, userId } = await seedUser({ email: AGENT, role: 'agent' })
+    const serviceId = await seedService(organizationId)
+    const from = await seedSlot({ organizationId, serviceId })
+    const toA = await seedSlot({ organizationId, serviceId, date: dayOffset(9) })
+    const toB = await seedSlot({ organizationId, serviceId, date: dayOffset(10) })
+    const { folioId, lineId } = await seedFolio({ organizationId, agentId: userId, slotId: from, serviceId })
+
+    // Both moves would resolve against the line's ORIGINAL slot: capacity taken in two
+    // destinations, the source released twice, and the first destination left carrying booked
+    // seats no line points at — phantom inventory.
+    const res = await reschedule(AGENT, folioId, [
+      { folio_line_id: lineId, to_slot_id: toA },
+      { folio_line_id: lineId, to_slot_id: toB },
+    ])
+    expect(res.status).toBe(400)
+    expect(await booked(from)).toBe(2)
+    expect(await booked(toA)).toBe(0)
+    expect(await booked(toB)).toBe(0)
+  })
+
+  it('rule 1, second half — past the release instant the seats are the pool’s, not the folio’s', async () => {
+    const { organizationId, userId } = await seedUser({ email: AGENT, role: 'agent' })
+    const serviceId = await seedService(organizationId)
+    // Departing in 10 minutes with grace +15: the release instant was 5 minutes AGO. The sweep
+    // runs every 15 minutes, so the folio can sit un-cancelled here for one cron interval —
+    // and without this guard the reschedule to a far date would simply succeed (the destination
+    // passes every other rule), extending stage ② by cron jitter.
+    const from = await seedSlot({ organizationId, serviceId, date: dayOffset(0), startTime: '12:10' })
+    const to = await seedSlot({ organizationId, serviceId, date: dayOffset(9) })
+    const { folioId, lineId } = await seedFolio({ organizationId, agentId: userId, slotId: from, serviceId })
+
+    const res = await reschedule(AGENT, folioId, [{ folio_line_id: lineId, to_slot_id: to }])
+    expect(res.status).toBe(409)
+    expect(JSON.stringify(await res.json())).toContain('NOT_RESCHEDULABLE')
+    expect(await booked(from)).toBe(2)
+    expect(await booked(to)).toBe(0)
+  })
+
   it('S-7 — only a live apartado or a paid sale', async () => {
     const { organizationId, userId } = await seedUser({ email: AGENT, role: 'agent' })
     const serviceId = await seedService(organizationId)
@@ -525,6 +564,69 @@ describe('US-AG52 — the tourist asks from their portal', () => {
     expect(body.alternatives.map((a: any) => a.id)).toContain(other)
     // And the customer still has the seat they started with.
     expect(await booked(from)).toBe(2)
+  })
+
+  it('approving a PAID folio’s request re-signs the QR and re-emits the ticket (rule 11)', async () => {
+    const { organizationId, userId } = await seedUser({ email: ADMIN, role: 'admin' })
+    const serviceId = await seedService(organizationId)
+    const from = await seedSlot({ organizationId, serviceId })
+    const to = await seedSlot({ organizationId, serviceId, date: dayOffset(20) })
+    const { folioId, lineId } = await seedFolio({
+      organizationId, agentId: userId, slotId: from, serviceId, status: 'paid',
+    })
+    await env.DB.prepare(
+      `INSERT INTO notifications (id, organization_id, folio_id, event, channel, status)
+       VALUES (?, ?, ?, 'tickets_delivered', 'whatsapp', 'sent')`,
+    ).bind(crypto.randomUUID(), organizationId, folioId).run()
+    const token = await seedPortalToken(organizationId, folioId)
+    await requestReschedule(token, lineId, to)
+
+    const req = await openRequest(folioId)
+    const res = await approve(ADMIN, req.id)
+    expect(res.status).toBe(200)
+
+    // D16 does not care which door the agreement came through. The customer whose request was
+    // GRANTED must not be the one left holding a ticket whose signed `expires_at` still derives
+    // from the OLD departure — it would die before the tour it is for.
+    const row = await env.DB.prepare(`SELECT qr_token FROM folio_lines WHERE id = ?`)
+      .bind(lineId).first<{ qr_token: string | null }>()
+    expect(row!.qr_token).not.toBe('tok-old')
+    expect(row!.qr_token).toBeTruthy()
+
+    const rows = (
+      await env.DB.prepare(
+        `SELECT status FROM notifications WHERE folio_id = ? AND event = 'tickets_delivered'`,
+      ).bind(folioId).all()
+    ).results as Array<{ status: string }>
+    expect(rows).toHaveLength(2)
+    expect(rows.every((r) => r.status === 'pending')).toBe(true)
+  })
+
+  it('an apartado’s alternatives obey rules 5/5b — a slot the move would refuse is not offered', async () => {
+    const { organizationId, userId } = await seedUser({ email: ADMIN, role: 'admin' })
+    // Legal since BUG-029 (near branch gives salida−15min); binds destinations AND suggestions.
+    await env.DB.prepare(
+      `UPDATE organizations SET booking_creation_cutoff_hours = 12 WHERE id = ?`,
+    ).bind(organizationId).run()
+    const serviceId = await seedService(organizationId)
+    const from = await seedSlot({ organizationId, serviceId })
+    const wanted = await seedSlot({ organizationId, serviceId, date: dayOffset(9), capacity: 2 })
+    // Six hours out: room to spare, but the reschedule itself would refuse it (BOOKING_TOO_LATE).
+    const tooNear = await seedSlot({ organizationId, serviceId, date: dayOffset(0), startTime: '18:00' })
+    const viable = await seedSlot({ organizationId, serviceId, date: dayOffset(10) })
+    const { folioId, lineId } = await seedFolio({ organizationId, agentId: userId, slotId: from, serviceId })
+    const token = await seedPortalToken(organizationId, folioId)
+    await requestReschedule(token, lineId, wanted)
+
+    await env.DB.prepare(`UPDATE slots SET booked = 2 WHERE id = ?`).bind(wanted).run()
+
+    const req = await openRequest(folioId)
+    const body = (await (await approve(ADMIN, req.id)).json()) as any
+
+    // A stale suggestion is a snapshot; a slot that was NEVER takeable is a false promise.
+    const ids = body.alternatives.map((a: any) => a.id)
+    expect(ids).toContain(viable)
+    expect(ids).not.toContain(tooNear)
   })
 
   it('one open petition per folio, of EITHER kind', async () => {

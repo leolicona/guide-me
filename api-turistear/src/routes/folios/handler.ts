@@ -29,7 +29,11 @@ import {
 } from '../../services/resend'
 import { generateRefundPin } from '../../utils/portal'
 import { folioFulfillment, lineFulfillment } from '../../utils/folioFulfillment'
-import { rescheduleFolio, viableAlternatives } from '../pos/reschedule'
+import {
+  rescheduleFolio,
+  reissueTicketsAfterReschedule,
+  viableAlternatives,
+} from '../pos/reschedule'
 import { emitNotification, recordEmailOutcome } from '../../utils/notifications'
 import { buildCancellationReversal, displayMethodSql, readFolioPayments } from '../../utils/folioPayments'
 import {
@@ -146,14 +150,27 @@ const readFolio = async (db: Db, org: string, folioId: string, apiBaseUrl?: stri
   const requestRows = await db
     .select({
       id: folioRequests.id,
+      // US-AG52 — the review surface must know WHAT it is approving. A reschedule petition
+      // presented as a cancellation is a button that lies about the destructive half.
+      kind: folioRequests.kind,
       status: folioRequests.status,
       reason: folioRequests.reason,
       resolutionNote: folioRequests.resolutionNote,
       resolvedBy: folioRequests.resolvedBy,
       resolvedAt: folioRequests.resolvedAt,
       createdAt: folioRequests.createdAt,
+      folioLineId: folioRequests.folioLineId,
+      // The requested destination, resolved to a human date — the seller decides on "quiere
+      // moverse al 21 · 09:00", not on a slot UUID.
+      toSlotId: folioRequests.toSlotId,
+      toSlotDate: slots.date,
+      toSlotStartTime: slots.startTime,
     })
     .from(folioRequests)
+    .leftJoin(
+      slots,
+      and(eq(slots.id, folioRequests.toSlotId), eq(slots.organizationId, org)),
+    )
     .where(
       and(
         eq(folioRequests.folioId, folioId),
@@ -272,12 +289,17 @@ const readFolio = async (db: Db, org: string, folioId: string, apiBaseUrl?: stri
     // folios, which is why it costs nothing to always send it.
     folio_requests: requestRows.map((r) => ({
       id: r.id,
+      kind: r.kind,
       status: r.status,
       reason: r.reason,
       resolution_note: r.resolutionNote,
       resolved_by: r.resolvedBy,
       resolved_at: tsOrNull(r.resolvedAt),
       created_at: Math.floor(r.createdAt.getTime() / 1000),
+      folio_line_id: r.folioLineId,
+      to_slot_id: r.toSlotId,
+      to_slot_date: r.toSlotDate,
+      to_slot_start_time: r.toSlotStartTime,
     })),
     // US-A85 (D7) — the worst of the lines. Computed from the same readings the array carries, so
     // the summary and the breakdown are one number and its parts, never two opinions.
@@ -1192,8 +1214,9 @@ const approveRescheduleRequest = async (
   }
 
   // Everything the counter path checks, in the same order and with the same compensation.
+  let moved: Awaited<ReturnType<typeof rescheduleFolio>> | null = null
   try {
-    await rescheduleFolio({
+    moved = await rescheduleFolio({
       db,
       org,
       actorId,
@@ -1216,20 +1239,51 @@ const approveRescheduleRequest = async (
         )
         .limit(1)
       const [orgRow] = await db
-        .select({ tz: organizations.timezone, cutoff: organizations.salesCutoffOffsetMinutes })
+        .select({
+          tz: organizations.timezone,
+          cutoff: organizations.salesCutoffOffsetMinutes,
+          creationCutoff: organizations.bookingCreationCutoffHours,
+          buffer: organizations.bookingPreDepartureBufferHours,
+          grace: organizations.bookingGraceOffsetMinutes,
+        })
         .from(organizations)
         .where(eq(organizations.id, org))
+        .limit(1)
+      const [folioRow] = await db
+        .select({ status: folios.status })
+        .from(folios)
+        .where(and(eq(folios.id, request.folioId), eq(folios.organizationId, org)))
         .limit(1)
       if (line) {
         alternatives = await viableAlternatives(
           db, org, line.serviceId, line.quantity, nowSec,
           orgRow?.tz ?? 'America/Mexico_City', orgRow?.cutoff ?? 0,
+          // Rules 5/5b bind an apartado's destinations, so they bind its suggestions too — a slot
+          // the move would refuse with BOOKING_TOO_LATE must not be offered as viable.
+          folioRow?.status === 'booking'
+            ? {
+                creationCutoffHours: orgRow?.creationCutoff ?? 0,
+                bufferHours: orgRow?.buffer ?? 24,
+                graceMinutes: orgRow?.grace ?? 15,
+              }
+            : undefined,
         )
       }
     }
     const note =
       err instanceof ApiError ? err.message : 'No se pudo mover a ese horario.'
     return rejectWith(note, alternatives)
+  }
+
+  // D16 / rule 11 — the origin does not change what a paid folio needs: its QR names the old slot
+  // and carries an `expires_at` derived from the OLD departure, so a ticket moved further out would
+  // die before its tour. The counter path re-signs; approving a portal request must too, or the
+  // customer whose request was GRANTED is the one left holding a dead ticket.
+  if (moved && moved.folio.status === 'paid' && moved.folio.paymentVerification !== 'pending') {
+    await reissueTicketsAfterReschedule(
+      db, c.env, org, request.folioId,
+      moved.folio.agentId, !!moved.folio.customerEmail, moved.tz,
+    )
   }
 
   await db

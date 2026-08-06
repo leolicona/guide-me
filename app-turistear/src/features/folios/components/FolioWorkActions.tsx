@@ -61,6 +61,14 @@ export function FolioWorkActions({ folio }: { folio: FolioDetail }) {
 
   const requests = folio.folio_requests ?? []
   const pending = requests.find((r) => r.status === 'pending')
+  // US-AG52 — the review surface must know WHAT it is approving. The backend already branched on
+  // `kind`; a sheet that says "Aprobar y cancelar folio" over a petition that MOVES a date is a
+  // button that lies about the destructive half. Absent on pre-rename rows → cancellation.
+  const pendingIsReschedule = pending?.kind === 'reschedule'
+  // The line the tourist asked to move, for the "from → to" the seller decides on.
+  const pendingLine = pendingIsReschedule
+    ? folio.lines?.find((l) => l.id === pending?.folio_line_id)
+    : undefined
   // The live request is already presented above, in full, as WORK. Repeating it in the history
   // below put the same request on screen twice, with the same reason under each — a defect no test
   // could have found, and one that only showed up when the component was actually rendered.
@@ -77,23 +85,36 @@ export function FolioWorkActions({ folio }: { folio: FolioDetail }) {
       {pending && (
         <SectionCard>
           <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 0.5 }}>
-            El cliente pidió cancelar
+            {pendingIsReschedule ? 'El cliente pidió reagendar' : 'El cliente pidió cancelar'}
           </Typography>
           <Typography variant="body2" color="text.secondary">
             {formatDate(pending.created_at)}
             {pending.reason ? ` — ${pending.reason}` : ''}
           </Typography>
+          {pendingIsReschedule && (
+            <Typography variant="body2" sx={{ mt: 0.5 }}>
+              {pendingLine
+                ? `${pendingLine.service_name} · ${pendingLine.slot_date} ${pendingLine.slot_start_time}`
+                : 'Servicio'}
+              {' → '}
+              <strong>
+                {pending.to_slot_date} {pending.to_slot_start_time}
+              </strong>
+            </Typography>
+          )}
           <Stack direction="row" spacing={1} sx={{ mt: 2, flexWrap: 'wrap', gap: 1 }}>
+            {/* A reschedule approval is NOT destructive — nothing ends, no ladder runs — so it
+                takes the primary accent; the cancellation keeps error red. */}
             <Button
               variant="contained"
               disableElevation
-              color="error"
+              color={pendingIsReschedule ? 'primary' : 'error'}
               onClick={() => {
                 setClawback(false)
                 setConfirming('approve')
               }}
             >
-              Aprobar cancelación
+              {pendingIsReschedule ? 'Aprobar reagenda' : 'Aprobar cancelación'}
             </Button>
             <Button
               color="inherit"
@@ -151,8 +172,16 @@ export function FolioWorkActions({ folio }: { folio: FolioDetail }) {
             {resolved.map((r) => (
               <Box key={r.id}>
                 <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                  {r.kind === 'reschedule' ? 'Reagenda' : 'Cancelación'} ·{' '}
                   {REQUEST_LABEL[r.status] ?? r.status} · {formatDate(r.created_at)}
                 </Typography>
+                {/* US-AG52 — an approved reschedule's history says the useful thing: the date
+                    moved, and to where (D14's mitigation lives here). */}
+                {r.kind === 'reschedule' && r.to_slot_date && (
+                  <Typography variant="body2" color="text.secondary">
+                    Nuevo horario: {r.to_slot_date} {r.to_slot_start_time}
+                  </Typography>
+                )}
                 {r.reason && (
                   <Typography variant="body2" color="text.secondary">
                     Motivo del cliente: {r.reason}
@@ -183,11 +212,23 @@ export function FolioWorkActions({ folio }: { folio: FolioDetail }) {
       <ConfirmSheet
         open={confirming === 'approve'}
         onClose={() => setConfirming(null)}
-        title="¿Aprobar la cancelación?"
-        description="Esto cancela el folio completo: libera todos los lugares, notifica al cliente por correo y — si el folio tiene pago registrado — genera un PIN de reembolso que el cliente verá en su portal."
-        confirmLabel={approveRequest.isPending ? 'Aprobando…' : 'Aprobar y cancelar folio'}
+        title={pendingIsReschedule ? '¿Aprobar la reagenda?' : '¿Aprobar la cancelación?'}
+        description={
+          pendingIsReschedule
+            ? 'Se mueve el servicio al horario que pidió el cliente y se libera el anterior. Si el folio está pagado, el boleto anterior deja de funcionar y se envía uno nuevo. Si ya no hay lugar, la solicitud se rechaza sola con el motivo y fechas alternativas.'
+            : 'Esto cancela el folio completo: libera todos los lugares, notifica al cliente por correo y — si el folio tiene pago registrado — genera un PIN de reembolso que el cliente verá en su portal.'
+        }
+        confirmLabel={
+          approveRequest.isPending
+            ? 'Aprobando…'
+            : pendingIsReschedule
+              ? 'Aprobar reagenda'
+              : 'Aprobar y cancelar folio'
+        }
+        confirmColor={pendingIsReschedule ? 'primary' : undefined}
         busy={approveRequest.isPending}
         detail={
+          pendingIsReschedule ? null : (
           <FormControlLabel
             sx={{ alignItems: 'flex-start' }}
             control={
@@ -208,6 +249,7 @@ export function FolioWorkActions({ folio }: { folio: FolioDetail }) {
               </Box>
             }
           />
+          )
         }
         error={
           approveRequest.isError ? (
@@ -217,7 +259,11 @@ export function FolioWorkActions({ folio }: { folio: FolioDetail }) {
         onConfirm={() =>
           pending &&
           approveRequest.mutate(
-            { id: pending.id, input: { clawback } },
+            // A reschedule approval is an authorisation with nothing to configure — the guards and
+            // the destination live on the petition itself.
+            pendingIsReschedule
+              ? { id: pending.id }
+              : { id: pending.id, input: { clawback } },
             { onSuccess: () => setConfirming(null) },
           )
         }

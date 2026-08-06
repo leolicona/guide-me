@@ -215,8 +215,10 @@ Cross-org → **`404`**, never `403`.
 ### `POST /api/pos/folios/:id/reschedule` *(counter origin)*
 
 ```jsonc
-// One entry per line being moved. Explicit rather than "move everything": a folio with two tours
-// may only need one moved, and guessing is how a customer loses the other.
+// One entry per line being moved — and at most ONE per line (400 on a repeat: two moves naming the
+// same line would take capacity in two destinations and leave phantom booked seats in the first).
+// Explicit rather than "move everything": a folio with two tours may only need one moved, and
+// guessing is how a customer loses the other.
 { "moves": [{ "folio_line_id": "…", "to_slot_id": "…" }] }
 ```
 
@@ -269,14 +271,21 @@ Design system: `.design/design-system/DESIGN_TOKENS.md`. No new primitive.
 gains **Reagendar** — on a live apartado beside *Liquidar saldo* and *Cancelar*, and on a **paid**
 folio beside the delivery actions (D16).
 
-**The reschedule sheet** is a `FormSheet` (never a Dialog): it shows the current departure, a slot
-picker reusing the POS date/time matrix — **restricted to the same service** (D11) and to slots that
-pass the guards — and a confirm whose copy names both parties, because D2 is the point:
+**The reschedule sheet** is a `FormSheet` (never a Dialog): it shows the current departure, then a
+**date-first picker — pick the day, and it answers with that day's remaining times** *(user
+decision; supersedes this spec's first idea of reusing the POS date/time matrix — the counter
+conversation is "¿puedo el domingo?", a day answered with hours, and two selects fit a FormSheet
+where the matrix does not)*. The options come from the **selected line's** service (D11), look 60
+days ahead (the POS default window is 3 days — right for walk-ups, useless for "¿la otra
+semana?"), and only days with room for the whole party appear, using the same effective-capacity
+arithmetic the POS sale applies. The confirm's copy names both parties, because D2 is the point:
 *"Acordado con el cliente · reagenda registrada a tu nombre."*
 
 **The tourist's portal** gains the same picker behind *"Cambiar mi fecha"*, which creates a request
 rather than a move — and says so, because a customer who believes their date changed and finds it
-did not is worse off than one who was never offered the button.
+did not is worse off than one who was never offered the button. **→ Next increment** *(user
+decision at close-out): the endpoint exists and is tested; the screen that submits it ships with
+the tourist-self-service increment. Until then every reschedule enters through a seller.*
 
 **A pending reschedule reaches the seller through the rung that already exists** — `Revisar
 solicitud`, the first of the action ladder. No new surface: the review sheet branches on `kind`.
@@ -299,8 +308,11 @@ the card rather than one tap away: an agent who cannot see the credit cannot dec
 
 **With a limit that must be stated to the agent, not discovered by them:** the discount floor is the
 service's **minimum price**, so a large credit **may not be fully honourable** that way. The sheet
-shows both numbers — the credit and how much of it the discount can actually cover — because the
-alternative is a seller promising a customer something the form will refuse.
+showing both numbers — the credit and how much of it the discount can actually cover — **ships with
+the credit-spending increment** (see *Deferred*): a NEW sale's discount sheet has no link to the
+closed folio the credit lives on, and inventing one by hand is the checkout-integration problem
+deferred there. Until then the credit is visible on the card and the detail, and the floor is the
+discount form's existing validation.
 
 ---
 
@@ -346,13 +358,22 @@ all — exactly the hole BUG-029 found on the sale path.)*
 **S-6 — a departed destination is refused**
 Then `409 SLOT_CLOSED`.
 
-**S-7 — only a live apartado**
-Given a `paid` folio, and separately a `cancelled` one
-Then both return `409 NOT_RESCHEDULABLE`.
+**S-7 — only a live folio** *(amended when D16 made paid folios reschedulable — the original text
+predated D16 and refused `paid`, contradicting rule 1)*
+Given a `cancelled` folio
+Then `409 NOT_RESCHEDULABLE`. A `paid` folio is NOT refused — that is S-8b.
+
+**S-7b — past the release instant, `status` alone is not enough**
+Given a live apartado whose grace instant passed 5 minutes ago, with the sweep not yet run
+When a reschedule is attempted
+Then `409 NOT_RESCHEDULABLE` — the hold ended at the instant the CLOCK says, not the instant the
+sweep gets around to it (apartado-stages S7). Without this, a reschedule extends stage ② by up to
+one cron interval.
 
 **S-8 — the agreement is recorded**
-Then one `folio_reschedules` row exists per line moved, carrying both departures and
-`agreed_by` = the caller (D13).
+Then one `folio_requests` row of `kind = 'reschedule'` exists per line moved, carrying both slots
+and `resolved_by` = the caller (D13). *(The first draft named a `folio_reschedules` table and an
+`agreed_by` column; D13 reversed the table and the column went with it.)*
 
 **S-9 — the new deadline gets its own warning**
 Given the folio had already been warned (`reminder_status = 'sent'`, a `booking_grace_entered` row)
@@ -438,7 +459,7 @@ Then **`404`** — never `403` — and org B's slots are untouched.
 **S-17 — a destination slot in another org is not a destination**
 Given org A's folio and org B's slot
 Then `404`, and neither org's `booked` moves.
-*(Mutation-verify BOTH org predicates, and record the result: on `folio_reschedules` the folio's
+*(Mutation-verify BOTH org predicates, and record the result: on `folio_requests` the folio's
 scope may make the line's redundant, exactly as it did in `folio-state-machine.spec.md` S-18.)*
 
 ---
@@ -483,12 +504,33 @@ scope may make the line's redundant, exactly as it did in `folio-state-machine.s
       the second full) is the smallest case with teeth
 - [x] S-8c (one open petition of either kind) — a pending cancellation refuses a reschedule
       request, which is the assertion the table rename exists for
-- [ ] S-12, S-14 (the credit horizon's independence) — not written
+- [x] S-12, S-14 (the credit's snapshot and the horizon's independence) — two closes under two
+      settings prove the horizon is read at each close and never rewrites a folio already closed
 - [x] Reschedule sheet (counter) + the credit on the card's money axis + the credit-validity setting
-- [ ] The **portal's own picker** (a server-rendered `<select>` in `hono/jsx`) and the request
-      **history** on the folio detail. The endpoint accepts the tourist's request today; what is
-      missing is the screen that submits it — recorded rather than ticked.
+- [ ] The **portal's own picker** (a server-rendered `<select>` in `hono/jsx`) → **next
+      increment** (user decision at close-out). The endpoint accepts the tourist's request today
+      and is tested; the screen that submits it ships with tourist self-service.
 - [x] `SPEC.md`: registered and struck through in #67
+
+### Phase 2 close-out — what review found missing, all built *(same PR)*
+
+- [x] **Approving a portal request re-signs a paid folio's QR** — rule 11 held on the counter path
+      only; the customer whose request was GRANTED was the one left holding a dead ticket
+- [x] **The review sheet branches on `kind`** — a reschedule petition rendered as *"Aprobar y
+      cancelar folio"*: a button that executed a reschedule while telling the seller it cancels.
+      The detail now serializes `kind` + the requested destination, and the history names both
+- [x] **Reagendar on a PAID folio** — the API half of D16 shipped with tests and no button;
+      `BookingActions` returned null for anything but a live apartado
+- [x] **The date-first picker**, fetching the SELECTED line's calendar — the first cut fetched the
+      FIRST line's service, offering a two-service folio the wrong calendar for every line but one,
+      and filtered by `remaining > 0` instead of room-for-the-party
+- [x] **S-7b** — the release-instant guard: `status` alone let an apartado reschedule inside the
+      up-to-15-minute gap between its grace instant and the next sweep run
+- [x] **Duplicate `moves` refused** (400) — two moves naming one line left phantom booked seats
+- [x] **Auto-rejection alternatives obey rules 5/5b** — an apartado was offered slots the move
+      itself would refuse with `BOOKING_TOO_LATE`
+- [x] The credit + expiry on the **folio detail** (`MoneyText`, semantic green), beside the
+      request history that now includes reschedules
 
 ---
 
@@ -496,6 +538,7 @@ scope may make the line's redundant, exactly as it did in `folio-state-machine.s
 
 | What | Why it can wait |
 |---|---|
+| **The tourist reschedules by themselves from the portal** *(next increment — user decision at close-out)* | The hard half already exists and is tested: `POST /portal/:token/reschedule-request`, the widened one-open-petition index, the approval that runs the seven guards, the auto-rejection with alternatives, and the review sheet that names the petition honestly. What ships later is only the portal's own screen (a server-rendered picker in `hono/jsx`). Until then every reschedule enters through a seller — which is D2's agreement with one door instead of two, not a different feature. |
 | **Rescheduling to a different SERVICE** | It requires re-quoting, and a deposit that silently over- or under-covers a new price is exactly the kind of quiet money bug this spec's Scope boundary exists to prevent. Same-service covers the case the counter actually has: *"can I come Sunday instead?"* |
 | **Spending the credit automatically** | Phase 2 grants and expires it; applying it to a new sale is the checkout's problem, not the apartado's. **The interim mechanism is not nothing**: the credit is shown on the card, and the agent's existing manual discount — bounded by the minimum price — is how they honour it, with a record. Recorded openly all the same: **until the checkout applies it, the credit is a promise the product honours by hand**, which is why D8's default of zero matters — no organization is handed an obligation it cannot discharge. |
 | **Rescheduling a lodging stay** | Nights are a per-night guard rather than a slot; the shape differs enough to deserve its own scenarios instead of an `if`. |

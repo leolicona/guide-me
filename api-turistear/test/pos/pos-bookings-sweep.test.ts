@@ -268,6 +268,81 @@ describe('US-A77 — the settle deadline notifies instead of cancelling', () => 
     expect(row.credit_expires_at).toBeNull()
   })
 
+  // S-12 — SNAPSHOTTED, not re-derived. The ladder is time-based and the clock has moved: deriving
+  // the credit on read would give a different answer every day, and a different one again after the
+  // org edits its tiers. The customer was told a figure; the figure must not drift under them.
+  it('S-12 — editing the ladder after the close does not change the credit', async () => {
+    const { organizationId } = await seedUser({ email: 'agent@empresa.com', role: 'agent' })
+    await env.DB.prepare(
+      `UPDATE organizations SET cancellation_policy = ?, booking_credit_valid_days = 30 WHERE id = ?`,
+    )
+      .bind(
+        JSON.stringify({
+          version: 1,
+          tiers: [{ min_hours: null, refund_pct: 95, agent_commission_pct: 100 }],
+        }),
+        organizationId,
+      )
+      .run()
+    const serviceId = await seedService(organizationId)
+    const slotId = await seedSlot(organizationId, serviceId)
+    const folioId = await createBooking('agent@empresa.com', slotId)
+    await arriveAtGrace(folioId)
+    await sweepExpiredBookings(env)
+
+    const before = await getFolio(folioId)
+    expect(before.credit_amount).toBe(30000)
+
+    // The org turns stingy: terminal tier back to retain-everything.
+    await env.DB.prepare(`UPDATE organizations SET cancellation_policy = NULL WHERE id = ?`)
+      .bind(organizationId)
+      .run()
+    await sweepExpiredBookings(env)
+
+    const after = await getFolio(folioId)
+    expect(after.credit_amount).toBe(30000)
+    expect(after.credit_expires_at).toBe(before.credit_expires_at)
+  })
+
+  // S-14 — the credit horizon is its OWN number: an accounting decision, read at each close, never
+  // a clock that moves already-closed folios. Two closes under two settings prove both halves.
+  it('S-14 — changing the horizon reaches the next close, never a folio already closed', async () => {
+    const { organizationId } = await seedUser({ email: 'agent@empresa.com', role: 'agent' })
+    await env.DB.prepare(
+      `UPDATE organizations SET cancellation_policy = ?, booking_credit_valid_days = 30 WHERE id = ?`,
+    )
+      .bind(
+        JSON.stringify({
+          version: 1,
+          tiers: [{ min_hours: null, refund_pct: 95, agent_commission_pct: 100 }],
+        }),
+        organizationId,
+      )
+      .run()
+    const serviceId = await seedService(organizationId)
+    const firstSlot = await seedSlot(organizationId, serviceId, '06:00')
+    const firstFolio = await createBooking('agent@empresa.com', firstSlot)
+    await arriveAtGrace(firstFolio)
+    await sweepExpiredBookings(env)
+    const first = await getFolio(firstFolio)
+
+    // The org lengthens the horizon AFTER the first close…
+    await env.DB.prepare(`UPDATE organizations SET booking_credit_valid_days = 300 WHERE id = ?`)
+      .bind(organizationId)
+      .run()
+    const secondSlot = await seedSlot(organizationId, serviceId, '08:00')
+    const secondFolio = await createBooking('agent@empresa.com', secondSlot)
+    await arriveAtGrace(secondFolio)
+    await sweepExpiredBookings(env)
+    const second = await getFolio(secondFolio)
+
+    // …and only the SECOND close carries it. ~300 days vs ~30: the gap is months, so a day of
+    // clock skew cannot blur the assertion.
+    expect(second.credit_expires_at - first.credit_expires_at).toBeGreaterThan(200 * 86_400)
+    // The folio already closed keeps the date its customer was told.
+    expect((await getFolio(firstFolio)).credit_expires_at).toBe(first.credit_expires_at)
+  })
+
   it('US-T09 — a second run cannot announce the same close twice', async () => {
     const { organizationId } = await seedUser({ email: 'agent@empresa.com', role: 'agent' })
     const serviceId = await seedService(organizationId)

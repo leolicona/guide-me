@@ -47,15 +47,15 @@ export function useCancelBooking() {
 // showing its departure is stale, and on a paid folio the ticket was re-issued too.
 export interface RescheduleLine {
   id: string
+  /** D11 — the sheet fetches THIS service's calendar; a different service is a different sale. */
+  service_id: string
   service_name: string
+  /** The line's current slot, excluded from the options — moving onto itself is not a move. */
+  slot_id: string | null
   slot_date: string | null
   slot_start_time: string | null
-}
-export interface RescheduleSlot {
-  id: string
-  date: string
-  start_time: string
-  remaining: number
+  /** The whole party must fit the destination; the sheet filters with the POS arithmetic. */
+  quantity: number
 }
 export interface RescheduleInput {
   folioId: string

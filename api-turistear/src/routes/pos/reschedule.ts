@@ -54,6 +54,18 @@ interface Ctx {
 export const rescheduleFolio = async (ctx: Ctx) => {
   const { db, org, folioId, moves, nowSec, actorId } = ctx
 
+  // One move per line per call. Two moves naming the same line would both resolve against the
+  // line's ORIGINAL slot: capacity taken in two destinations, the source released twice, and the
+  // first destination left carrying booked seats no line points at — phantom inventory.
+  const lineIds = moves.map((m) => m.folio_line_id)
+  if (new Set(lineIds).size !== lineIds.length) {
+    throw new ApiError(
+      'VALIDATION_ERROR',
+      400,
+      'Cada línea solo puede moverse una vez por operación.',
+    )
+  }
+
   const [folio] = await db
     .select({
       id: folios.id,
@@ -94,6 +106,31 @@ export const rescheduleFolio = async (ctx: Ctx) => {
   const grace = org_?.grace ?? 15
   const buffer = org_?.buffer ?? 24
   const creationCutoff = org_?.creationCutoff ?? 0
+
+  // Rule 1's second half — "only before the line's release instant". `status` alone is not enough:
+  // the sweep runs every 15 minutes, so an apartado past its grace instant can sit un-cancelled for
+  // up to one cron interval. Rescheduling it there would extend stage ② by cron jitter — the hold
+  // ended at the instant the CLOCK says, not the instant the sweep gets around to it (the same
+  // stage-is-derived principle as apartado-stages S7).
+  if (folio.status === 'booking') {
+    const currentLines = await db
+      .select({ slotDate: folioLines.slotDate, slotStartTime: folioLines.slotStartTime })
+      .from(folioLines)
+      .where(and(eq(folioLines.folioId, folioId), eq(folioLines.organizationId, org)))
+    const currentDepartures = currentLines
+      .map((l) => (l.slotDate ? naiveEpoch(l.slotDate, l.slotStartTime ?? '00:00', tz) : null))
+      .filter((e): e is number => e !== null)
+    if (
+      currentDepartures.length > 0 &&
+      nowSec >= Math.min(...currentDepartures) - grace * 60
+    ) {
+      throw new ApiError(
+        'NOT_RESCHEDULABLE',
+        409,
+        'El apartado ya llegó a su instante de liberación; los lugares vuelven al inventario.',
+      )
+    }
+  }
 
   // --- Resolve every move before touching a single seat -----------------------------------------
 
@@ -424,6 +461,12 @@ export const viableAlternatives = async (
   nowSec: number,
   tz: string,
   salesCutoffMinutes: number,
+  /**
+   * Present when the folio is a live APARTADO: rules 5 and 5b apply to it, so a slot the
+   * reschedule itself would refuse with BOOKING_TOO_LATE must not be suggested. A stale
+   * suggestion is a snapshot; a slot that was NEVER takeable is a false promise.
+   */
+  hold?: { creationCutoffHours: number; bufferHours: number; graceMinutes: number },
   limit = 3,
 ): Promise<{ id: string; date: string; startTime: string; remaining: number }[]> => {
   const rows = await db
@@ -458,9 +501,18 @@ export const viableAlternatives = async (
         epoch: naiveEpoch(r.date, r.startTime, tz),
       }
     })
-    // Same two conditions the reschedule itself would apply: room for the whole party, and still
-    // sellable. Offering a departed slot would be a suggestion that cannot be taken.
-    .filter((r) => r.remaining >= quantity && r.epoch > nowSec + salesCutoffMinutes * 60)
+    // The same conditions the reschedule itself would apply: room for the whole party, still
+    // sellable — and, for an apartado, a hold that would be born alive (rules 5/5b). Offering a
+    // slot the move would refuse is a suggestion that cannot be taken.
+    .filter((r) => {
+      if (r.remaining < quantity || r.epoch <= nowSec + salesCutoffMinutes * 60) return false
+      if (!hold) return true
+      const { creationCutoffHours, bufferHours, graceMinutes } = hold
+      if (creationCutoffHours > 0 && (r.epoch - nowSec) / 3600 < creationCutoffHours) return false
+      const nearDeparture = r.epoch - nowSec < bufferHours * 3_600
+      const expiry = r.epoch - (nearDeparture ? graceMinutes * 60 : bufferHours * 3_600)
+      return expiry > nowSec
+    })
     .sort((a, b) => a.epoch - b.epoch)
     .slice(0, limit)
     .map(({ id, date, startTime, remaining }) => ({ id, date, startTime, remaining }))
