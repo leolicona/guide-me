@@ -77,12 +77,12 @@ describe('RescheduleSheet — the day pager', () => {
     expect(await screen.findByRole('button', { name: /14:00/ })).toBeInTheDocument()
   })
 
-  it('the calendar jumps the pager to a tapped day with room', async () => {
+  it('the calendar is on screen from the start, and a tap jumps the pager', async () => {
     serveSlots()
     renderWithProviders(<RescheduleSheet {...props} />)
     await screen.findByRole('button', { name: /14:00/ })
 
-    await userEvent.click(screen.getByRole('button', { name: 'Elegir fecha' }))
+    // No toggle to find: the month grid IS the first thing after the current departure.
     await userEvent.click(await screen.findByRole('button', { name: iso(5) }))
     // The pager now shows the tapped day's times.
     expect(await screen.findByRole('button', { name: /07:30/ })).toBeInTheDocument()
@@ -93,7 +93,6 @@ describe('RescheduleSheet — the day pager', () => {
     renderWithProviders(<RescheduleSheet {...props} />)
     await screen.findByRole('button', { name: /14:00/ })
 
-    await userEvent.click(screen.getByRole('button', { name: 'Elegir fecha' }))
     // Day +2's only slot seats 2 of a party of 4 — the calendar must not let the tap happen.
     expect(await screen.findByRole('button', { name: iso(2) })).toBeDisabled()
   })
@@ -102,8 +101,6 @@ describe('RescheduleSheet — the day pager', () => {
     serveSlots()
     renderWithProviders(<RescheduleSheet {...props} />)
     await screen.findByRole('button', { name: /14:00/ })
-
-    await userEvent.click(screen.getByRole('button', { name: 'Elegir fecha' }))
     await screen.findByRole('button', { name: iso(5) })
     // The dot is the same promise the POS calendar makes: "this day fits the group." Day +5
     // earns one; the too-small day +2 must not — a dot on it would promise what the tap refuses.
@@ -140,6 +137,58 @@ describe('RescheduleSheet — the day pager', () => {
     expect(
       await screen.findByText(/el boleto actual deja de funcionar/),
     ).toBeInTheDocument()
+  })
+
+  // D16, second half — the sheet does not end at the confirm on a paid folio. The move just
+  // killed a ticket the customer may have saved, so the replacement's send must be ONE tap away
+  // from the person who promised it — the same WhatsApp send the receipt uses.
+  it('a paid move chains straight into sending the new ticket', async () => {
+    serveSlots()
+    const onClose = vi.fn()
+    server.use(
+      http.post('/api/pos/folios/:id/reschedule', () =>
+        HttpResponse.json({
+          folio: {
+            id: 'folio-1',
+            customer_name: 'Ana',
+            customer_phone: '+529981234567',
+            total: 240_000,
+            amount_paid: 240_000,
+            lines: [],
+            portal_link: 'https://api.local/portal/tok-new',
+          },
+        }),
+      ),
+    )
+    renderWithProviders(<RescheduleSheet {...props} isPaid onClose={onClose} />)
+
+    await userEvent.click(await screen.findByRole('button', { name: /14:00/ }))
+    await userEvent.click(screen.getByRole('button', { name: 'Reagendar' }))
+
+    // The sheet became the handoff instead of closing.
+    expect(await screen.findByText('Fecha movida')).toBeInTheDocument()
+    expect(onClose).not.toHaveBeenCalled()
+    expect(
+      screen.getByRole('button', { name: /Enviar boletos por WhatsApp/ }),
+    ).toBeInTheDocument()
+    // Skipping is allowed: the footer turned into Listo, and the outbox keeps the send visible.
+    await userEvent.click(screen.getByRole('button', { name: 'Listo' }))
+    expect(onClose).toHaveBeenCalled()
+  })
+
+  it('a live apartado’s move just closes — no ticket existed to replace', async () => {
+    serveSlots()
+    const onClose = vi.fn()
+    server.use(
+      http.post('/api/pos/folios/:id/reschedule', () =>
+        HttpResponse.json({ folio: { id: 'folio-1' } }),
+      ),
+    )
+    renderWithProviders(<RescheduleSheet {...props} onClose={onClose} />)
+
+    await userEvent.click(await screen.findByRole('button', { name: /14:00/ }))
+    await userEvent.click(screen.getByRole('button', { name: 'Reagendar' }))
+    expect(onClose).toHaveBeenCalled()
   })
 
   it('says plainly when no other date can seat the group', async () => {

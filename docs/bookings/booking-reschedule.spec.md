@@ -275,20 +275,28 @@ Design system: `.design/design-system/DESIGN_TOKENS.md`. No new primitive.
 gains **Reagendar** — on a live apartado beside *Liquidar saldo* and *Cancelar*, and on a **paid**
 folio beside the delivery actions (D16).
 
-**The reschedule sheet** is a `FormSheet` (never a Dialog): the current departure, then a
-**one-day pager that opens on the FIRST day with room** — `◀ Viernes 7 ago ▶` with that day's
-remaining times as chips — whose arrows step **only between days that can seat the whole group**
-*(user decision, refined twice: first from the POS matrix to two selects, then to the pager —
-the counter's real question is "¿cuándo puedes?", best answered by the nearest actual options
-with zero taps)*. A day the service does not operate, or whose slots cannot seat the party,
-simply does not exist on the axis (US-AG33's rule: never present a day the group cannot take).
-For *"¿y en dos semanas?"* the sheet embeds the **same `DateRangeCalendar` the POS already
-taught the seller**, behind *Elegir fecha*: days without room disabled, one tap jumps the pager.
-The options come from the **selected line's** service (D11), look 60 days ahead (the POS default
-window is 3 days — right for walk-ups, useless for "¿la otra semana?"), filtered by the same
-effective-capacity arithmetic the POS sale applies. The submit reads **Reagendar**, and the copy
-names both parties, because D2 is the point: *"Acordado con el cliente · reagenda registrada a tu
-nombre."*
+**The reschedule sheet** is a `FormSheet` (never a Dialog), and reads top to bottom the way the
+counter conversation runs *(user decision, refined three times: POS matrix → two selects → day
+pager behind a toggle → **calendar first**)*: the line being moved and its current departure
+(*"Ahora: Sábado 22 ago · 08:00"* — the FROM of a from→to move, which is what keeps the wrong
+line from being moved), then the **month grid the POS already taught the seller**
+(`DateRangeCalendar`), **availability-dotted** — a dot means *this day fits the group*, days
+without room disabled — then the landed day: `◀ Viernes 7 ago ▶` with that day's remaining times
+as chips, arrows stepping **only between days that can seat everyone**. The pager opens on the
+FIRST day with room, so the nearest real options are on screen before anybody taps. A day the
+service does not operate simply does not exist on the axis (US-AG33's rule). Options come from
+the **selected line's** service (D11), 60 days ahead, filtered by the POS's effective-capacity
+arithmetic. The submit reads **Reagendar**, and the caption states D2's enforcement as the fact
+it is — *"La reagenda queda registrada a tu nombre."* *(An earlier draft prefixed "Acordado con
+el cliente ·", withdrawn: the UI cannot verify an agreement, and the registered name is the half
+that deters.)*
+
+**On a `paid` folio the sheet does not end at the confirm** (D16, second half): the move just
+killed a ticket the customer may have saved, so the success state **chains straight into the
+same WhatsApp send the receipt uses** — *Fecha movida → Enviar boletos por WhatsApp*, one tap
+away from the person who promised it. Skipping is allowed (*Listo*): the outbox row keeps the
+pending send visible as work either way, so a skipped handoff cannot silently strand the
+customer with a dead QR.
 
 **The tourist's portal** gains the same picker behind *"Cambiar mi fecha"*, which creates a request
 rather than a move — and says so, because a customer who believes their date changed and finds it
