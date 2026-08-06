@@ -187,8 +187,12 @@ now than after a second table exists.
 10. A reschedule sets `reminder_status = 'none'` and deletes the folio's `booking_grace_entered`
     outbox rows, so the new deadline gets its own warning (D14).
 11. **On a `paid` folio** the reschedule additionally re-signs the moved line's QR, deletes the
-    folio's `tickets_delivered` outbox rows and re-emits (D16). The previous `/t/<token>` link stops
-    resolving; the replacement travels in the re-emitted message.
+    folio's `tickets_delivered` outbox rows and re-emits (D16). The replacement travels in the
+    re-emitted message.
+11b. **The replaced ticket must be REFUSED at the scanner** — `SUPERSEDED`, no pass consumed. The
+    scan compares the presented token against the line's current `qr_token`; a line with no token
+    is left alone (pre-feature rows keep whatever validity they had). *(BUG-030: re-signing alone
+    did not make the old ticket stop working — see Known behaviour change 4.)*
 12. **The hold release may not precede the sales cutoff** (D4). Both are signed the same way
     (+ before / − after), so the rule is `booking_grace_offset_minutes ≤ sales_cutoff_offset_minutes`
     → `422 RELEASE_BEFORE_SALES_CUTOFF`. The form mirrors it.
@@ -411,6 +415,16 @@ again for the new deadline (D14).
 *(The mutation this must catch: keeping the flag, which is what makes the second cycle silent
 today.)*
 
+**S-8b(iii) — the replaced ticket is refused, and burns no pass** *(BUG-030)*
+Given a paid folio rescheduled to a LATER departure, so the old ticket's own expiry is still ahead
+When the OLD token is scanned
+Then `invalid / SUPERSEDED`, with the ticket's context so the staffer can ask for the newer one
+And `redeemed_count` is unchanged — the correct date must not read `ALREADY_CONSUMED` afterwards.
+And the NEW token scans `valid`, reading the NEW departure.
+And a line whose `qr_token` is NULL is unaffected (pre-feature rows keep their validity).
+*(The mutation this must catch: dropping the comparison, which is the state this PR shipped in
+until the e2e was written.)*
+
 **S-8b — a paid folio moves, and its ticket moves with it**
 Given a `paid` folio whose line has a signed QR and a delivered `tickets_delivered` outbox row
 When it is rescheduled to another slot of the same service
@@ -559,6 +573,13 @@ scope may make the line's redundant, exactly as it did in `folio-state-machine.s
       itself would refuse with `BOOKING_TOO_LATE`
 - [x] The credit + expiry on the **folio detail** (`MoneyText`, semantic green), beside the
       request history that now includes reschedules
+- [x] **BUG-030 — the replaced ticket is refused at the scanner** (`SUPERSEDED`, S-8b·iii), found
+      by writing the e2e below and mutation-verified at both layers
+- [x] **E2E `paid-reschedule.spec.ts`** — the journey no tier below can see: the picker fed by the
+      REAL catalog, the handoff's WhatsApp send **enabled** (it shipped disabled once, with every
+      layer below green), and the old QR refused by the real scanner. Seeds and cancels its own
+      paid sale rather than sharing the apartado fixture. Verified against a live stack, and
+      mutation-verified: removing the scanner guard turns it red
 - [x] **D19 / S-7c / S-7d** — a paid no-show does not move: the door closes per line at the
       no-show margin (one clock with the fulfilment axis), redeemed lines are refused for the
       stronger reason, and the paid folio's button offers only lines the server would accept.
@@ -587,6 +608,16 @@ scope may make the line's redundant, exactly as it did in `folio-state-machine.s
 4. **A rescheduled paid folio's existing ticket stops working** (D16). The replacement is sent in
    the same gesture, but a customer who screenshotted the old QR will find it invalid — which is
    why the sheet says so before the move, not after.
+   **BUG-030, found while writing the e2e and fixed in this PR:** re-signing did NOT make the old
+   ticket stop working. Its signature is genuine, its line still resolves, its folio is still paid,
+   and its `expires_at` came from the OLD departure — so on a move to a *later* date it was still
+   in the future, and the scan returned **`valid`, consuming a pass**. The customer we told *"tu
+   boleto anterior deja de funcionar"* could arrive on the ORIGINAL date, be admitted to a
+   departure whose seat we had already returned to the pool, and burn a pass belonging to the new
+   one — leaving the correct date reading `ALREADY_CONSUMED` at the dock. Nothing below the
+   scanner could see it: the API suite asserted the token *changed*, the sheet asserted the copy.
+   The scanner now answers `SUPERSEDED` with the ticket's context, so the staffer knows to ask for
+   the newer one instead of turning a paying customer away.
 2. **Organizations whose release precedes their sales cutoff cannot save Settings** until they fix
    it. Every org on the shipped defaults is in exactly that state (release −15 min, cutoff 0), so
    **this will greet most operators on the first visit** — the form must say what to change, not

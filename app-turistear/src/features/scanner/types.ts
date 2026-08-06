@@ -8,6 +8,8 @@ export type ScanReason =
   | 'CANCELLED'
   | 'NOT_PAID'
   | 'NOT_FOUND'
+  /** US-AG52 (D16) — a reschedule replaced this ticket; the customer has a newer one. */
+  | 'SUPERSEDED'
 
 export interface ScannedTicket {
   client_identity: string
