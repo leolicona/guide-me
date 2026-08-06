@@ -10,7 +10,7 @@
 
 import { and, asc, eq, type SQL } from 'drizzle-orm'
 import type { Db } from '../db/client'
-import { cancellationRequests, folioAccessTokens, folioLines, folios } from '../db/schema'
+import { folioRequests, folioAccessTokens, folioLines, folios } from '../db/schema'
 import { lineFulfillment, type Fulfillment } from './folioFulfillment'
 
 /** The lean line shape the card and `renderItinerary()` share (spec D14). */
@@ -143,10 +143,10 @@ export const readListCancellationRequests = async (
   filters: SQL[],
 ): Promise<Map<string, CancellationRequestMark>> => {
   const rows = await db
-    .select({ folioId: cancellationRequests.folioId, status: cancellationRequests.status })
-    .from(cancellationRequests)
-    .innerJoin(folios, eq(cancellationRequests.folioId, folios.id))
-    .where(and(eq(cancellationRequests.organizationId, org), ...filters))
+    .select({ folioId: folioRequests.folioId, status: folioRequests.status })
+    .from(folioRequests)
+    .innerJoin(folios, eq(folioRequests.folioId, folios.id))
+    .where(and(eq(folioRequests.organizationId, org), ...filters))
 
   const byFolio = new Map<string, CancellationRequestMark>()
   for (const r of rows) {

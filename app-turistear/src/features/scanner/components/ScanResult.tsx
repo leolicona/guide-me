@@ -14,6 +14,9 @@ const REASON_COPY: Record<ScanReason, string> = {
   CANCELLED: 'Este folio fue cancelado.',
   NOT_PAID: 'Este folio aún no está totalmente pagado.',
   NOT_FOUND: 'Boleto no encontrado.',
+  // The one reason the staffer can FIX on the spot: the reservation is fine, the tourist is just
+  // holding the ticket from before the change. Says what to ask for, not merely what went wrong.
+  SUPERSEDED: 'Este boleto fue reemplazado al cambiar la fecha. Pídele al cliente el más reciente.',
 }
 
 const reasonCopy = (reason: ScanReason, t: ScannedTicket | null): string => {

@@ -36,9 +36,6 @@ export const bookingHandlers = [
   http.post('/api/pos/folios/:id/cancel', () =>
     HttpResponse.json({ folio: { id: 'folio-1', status: 'cancelled' } }),
   ),
-  http.post('/api/pos/folios/:id/reactivate', () =>
-    HttpResponse.json({ folio: { id: 'folio-1', status: 'booking' } }),
-  ),
   http.post('/api/pos/folios/:id/reminder', () =>
     HttpResponse.json({ folio: { id: 'folio-1', reminder_status: 'sent' } }),
   ),

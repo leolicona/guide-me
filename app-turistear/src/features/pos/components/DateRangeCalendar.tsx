@@ -32,6 +32,10 @@ interface DateRangeCalendarProps {
   dayRemaining?: Map<string, number>
   /** Rooms the agent wants (D12); a night needs `remaining ≥ requiredQuantity`. Default 1. */
   requiredQuantity?: number
+  /** US-AG52 — mark days that fit the group with the same availability dot the POS calendar
+   * (`PosDatePickerSheet`) already taught the seller. Opt-in: only days PRESENT in `dayRemaining`
+   * can earn one (absent days merely count as "server decides", which is not a promise). */
+  availabilityDots?: boolean
 }
 
 // US-AG36/AG37 — the US-AG35 day grid extended to RANGE selection: first tap = check-in, second =
@@ -44,6 +48,7 @@ export function DateRangeCalendar({
   today,
   dayRemaining,
   requiredQuantity = 1,
+  availabilityDots = false,
 }: DateRangeCalendarProps) {
   const currentMonth = monthOf(today)
   const [visibleMonth, setVisibleMonth] = useState(() => monthOf(value.check_in ?? today))
@@ -120,6 +125,14 @@ export function DateRangeCalendar({
           const disabled = isPast || unavailable
           const isEndpoint = date === value.check_in || date === value.check_out
           const isInRange = inRange(date)
+          // The dot promises "this day fits the group", so only a day the map KNOWS earns one —
+          // and never on an endpoint, where the fill already says it (PosDatePickerSheet's rule).
+          const hasDot =
+            availabilityDots &&
+            !isPast &&
+            !isEndpoint &&
+            remaining !== undefined &&
+            remaining >= requiredQuantity
 
           return (
             <Box
@@ -138,6 +151,7 @@ export function DateRangeCalendar({
                 aspectRatio: '1 / 1',
                 borderRadius: 2,
                 display: 'flex',
+                flexDirection: availabilityDots ? 'column' : 'row',
                 alignItems: 'center',
                 justifyContent: 'center',
                 cursor: disabled ? 'default' : 'pointer',
@@ -171,6 +185,20 @@ export function DateRangeCalendar({
               }}
             >
               {day}
+              {/* Availability dot — the same 5px promise the POS calendar makes. Rendered for
+                  every cell (transparent when absent) so the numbers stay vertically aligned. */}
+              {availabilityDots && (
+                <Box
+                  data-testid={hasDot ? 'availability-dot' : undefined}
+                  sx={{
+                    width: 5,
+                    height: 5,
+                    mt: 0.25,
+                    borderRadius: '50%',
+                    bgcolor: hasDot ? 'primary.main' : 'transparent',
+                  }}
+                />
+              )}
             </Box>
           )
         })}

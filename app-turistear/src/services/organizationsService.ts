@@ -19,6 +19,8 @@ export interface MyOrganization {
   /** US-A85 (D23) — signed minutes (+ before / − after departure) at which an unscanned paid seat
    *  starts reading as wasted. 0 = the departure instant. Its own number, never one of the two above. */
   no_show_margin_minutes?: number
+  /** US-A87 (D10) — how long a closed apartado's credit stays spendable. */
+  booking_credit_valid_days?: number
   // US-A60/A63 — lodging org settings. weekend days as ISO weekday ints (0=Sun…6=Sat; default
   // [5,6] = Fri+Sat); free-cancel window (days) + penalty (%) for paid-stay cancellations.
   lodging_weekend_days: number[]
@@ -57,6 +59,8 @@ export interface UpdateOrganizationInput {
   lodging_weekend_days?: number[]
   lodging_free_cancel_days?: number
   lodging_cancel_penalty_pct?: number
+  /** US-A87 (D10) — how long a closed apartado's credit stays spendable (1–730). */
+  booking_credit_valid_days?: number
   // null resets to the shipped default; a string must contain {portal_link} (server-validated).
   wa_ticket_template?: string | null
   wa_reminder_template?: string | null

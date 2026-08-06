@@ -45,6 +45,9 @@ export interface FolioListItem {
   operator_name?: string | null
   // US-A78 — the debt. 'pending' = cancelled, money owed, nobody confirmed the hand-back.
   refund_status?: RefundStatus
+  /** US-A87 — what a closed apartado left the customer, and until when. */
+  credit_amount?: number | null
+  credit_expires_at?: number | null
   refund_amount?: number
   // US-A82 — what was sold (the card's title) and the {itinerary} the ticket send renders.
   lines?: FolioListLine[]
@@ -138,6 +141,10 @@ export interface FolioDetail {
   refund_note: string | null // the admin's audit note on a no-PIN override confirm
   refunded_at: number | null
   refunded_by: string | null
+  /** US-A87 — what a closed apartado left the customer, and until when. Honoured by manual
+   * discount while the checkout cannot spend it. */
+  credit_amount?: number | null
+  credit_expires_at?: number | null
   // whatsapp-qr-delivery — portal_link drives the admin Reenviar action; sent/viewed → the badge.
   portal_link?: string | null
   tickets_sent_at?: number | null
@@ -146,19 +153,26 @@ export interface FolioDetail {
   lines: FolioDetailLine[]
   // US-A84 rule 7 — the absorbed Solicitudes history, newest first. This is the ONLY surface that
   // can carry a rejected request: rejecting it left the folio untouched, so nothing else records it.
-  cancellation_requests?: FolioCancellationRequest[]
+  folio_requests?: FolioCancellationRequest[]
 }
 
 // One row of a folio's own request history (US-A84 D2). Leaner than `CancellationRequest`, which
 // carries folio context the detail page already has.
 export interface FolioCancellationRequest {
   id: string
+  /** US-AG52 (D13) — what the petition asks for. Absent on pre-rename rows → 'cancellation'. */
+  kind?: 'cancellation' | 'reschedule'
   status: CancellationRequestStatus
   reason: string | null
   resolution_note: string | null
   resolved_by: string | null
   resolved_at: number | null
   created_at: number
+  /** Reschedule-only: the line to move and the requested destination, resolved to a human date. */
+  folio_line_id?: string | null
+  to_slot_id?: string | null
+  to_slot_date?: string | null
+  to_slot_start_time?: string | null
 }
 
 export interface FolioFilters {

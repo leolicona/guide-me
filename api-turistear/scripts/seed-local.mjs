@@ -51,6 +51,12 @@ const serviceIds = [randomUUID(), randomUUID(), randomUUID(), randomUUID()]
 // Held rather than inlined, so the outbox rows below can point at real folios.
 const reminderFolioId = randomUUID()
 const graceFolioId = randomUUID()
+// The PAID reschedule demo: needs a portal token, or the post-move WhatsApp handoff renders its
+// button disabled ("Los boletos aún no están listos") — a real sale gets the token at confirm.
+const leoFolioId = randomUUID()
+// US-AG52 — the two ways a tourist's reschedule petition can end at review time.
+const reqViableFolioId = randomUUID()
+const reqDoomedFolioId = randomUUID()
 
 // A folio + its line, so the list has cards with a real service name on them.
 const folio = ({
@@ -58,7 +64,7 @@ const folio = ({
   // US-A85 — fulfilment is DERIVED from these two against the line's departure, so a seed that
   // leaves them at their defaults can only ever produce 'pending'. Overriding the date is what lets
   // a folio be genuinely departed rather than merely old.
-  quantity = 2, redeemed = 0, departsOn,
+  quantity = 2, redeemed = 0, departsOn, slot,
 }) => {
   const cols = {
     id: q(id),
@@ -82,13 +88,21 @@ const folio = ({
     `INSERT INTO folio_lines (id, organization_id, folio_id, service_id, slot_id, service_name,
        slot_date, slot_start_time, quantity, base_price, minimum_price, unit_price, line_total,
        qr_token, redeemed_count, created_at)
-     VALUES (${q(lineId)}, ${q(ORG_ID)}, ${q(id)}, ${q(service.id)}, NULL, ${q(service.name)},
-       ${q(departsOn ?? service.date)}, '08:00', ${quantity},
+     VALUES (${q(lineId)}, ${q(ORG_ID)}, ${q(id)}, ${q(service.id)},
+       ${slot ? q(slot.id) : 'NULL'}, ${q(service.name)},
+       ${q(departsOn ?? slot?.date ?? service.date)}, ${q(slot?.startTime ?? '08:00')}, ${quantity},
        ${Math.round(total / quantity)}, ${Math.round(total / quantity)},
        ${Math.round(total / quantity)}, ${total},
        NULL, ${redeemed}, ${createdAt});`,
   ].join('\n')
 }
+
+// US-AG52 — the reschedule needs REAL slots: a line with `slot_id = NULL` is refused outright
+// ("solo se reagendan líneas de tour"). Every service gets the departure its folios sit on plus two
+// alternatives, so the picker has somewhere to move to and the guards have something to guard.
+const slotFor = (serviceId, date, startTime, capacity = 20, booked = 0) => ({
+  id: randomUUID(), serviceId, date, startTime, capacity, booked,
+})
 
 const svc = [
   { id: serviceIds[0], name: 'Tour Isla Mujeres', date: '2026-08-20' },
@@ -100,13 +114,33 @@ const svc = [
   { id: serviceIds[3], name: 'Nado con delfines', date: '2025-12-02' },
 ]
 
+// One departure per service where its folios live, plus two alternatives on the SAME service so
+// Reagendar has real options — D11 only offers the same service, so alternatives on another one
+// would leave the picker empty.
+const slots = [
+  slotFor(svc[0].id, dayOffset(16), '08:00'),   // where the Isla Mujeres folios sit
+  slotFor(svc[0].id, dayOffset(18), '08:00'),   // an alternative with room
+  slotFor(svc[0].id, dayOffset(19), '14:00', 2, 2), // FULL — the refusal path, on purpose
+  slotFor(svc[1].id, dayOffset(18), '07:00'),
+  slotFor(svc[1].id, dayOffset(21), '07:00'),
+  slotFor(svc[2].id, dayOffset(21), '17:00'),
+  slotFor(svc[2].id, dayOffset(23), '17:00'),
+  slotFor(svc[3].id, '2025-12-02', '09:00'),
+]
+const slotOf = (serviceId, i = 0) => slots.filter((s) => s.serviceId === serviceId)[i]
+
 const sql = `
 -- Clean slate: children first, then the org itself.
 DELETE FROM notifications WHERE organization_id = ${q(ORG_ID)};
+-- The portal token seeded below references folios — without this, the SECOND run dies on the FK.
+DELETE FROM folio_access_tokens WHERE organization_id = ${q(ORG_ID)};
+-- 0060 renamed cancellation_requests, and its new folio_line_id FK means it must go BEFORE the lines.
+DELETE FROM folio_requests WHERE organization_id = ${q(ORG_ID)};
 DELETE FROM folio_lines WHERE organization_id = ${q(ORG_ID)};
 DELETE FROM folio_payments WHERE organization_id = ${q(ORG_ID)};
-DELETE FROM cancellation_requests WHERE organization_id = ${q(ORG_ID)};
+
 DELETE FROM folios WHERE organization_id = ${q(ORG_ID)};
+DELETE FROM slots WHERE organization_id = ${q(ORG_ID)};
 DELETE FROM services WHERE organization_id = ${q(ORG_ID)};
 DELETE FROM users WHERE organization_id = ${q(ORG_ID)};
 DELETE FROM organizations WHERE id = ${q(ORG_ID)};
@@ -132,21 +166,34 @@ ${svc
   )
   .join('\n')}
 
+${slots
+  .map(
+    (sl) => `INSERT INTO slots (id, organization_id, service_id, date, start_time, capacity, booked, status)
+     VALUES (${q(sl.id)}, ${q(ORG_ID)}, ${q(sl.serviceId)}, ${q(sl.date)}, ${q(sl.startTime)},
+       ${sl.capacity}, ${sl.booked}, 'active');`,
+  )
+  .join('\n')}
+
 -- One folio per state the Ventas screen can show, so every pill in the pending-work bar has
 -- something behind it and the search has more than one row to narrow.
 ${folio({
-  id: randomUUID(), customer: 'Leo Licona', phone: '+529981234567', status: 'paid',
-  total: 240000, paid: 240000, createdAt: now - 3600, service: svc[0],
+  id: leoFolioId, customer: 'Leo Licona', phone: '+529981234567', status: 'paid',
+  total: 240000, paid: 240000, createdAt: now - 3600, service: svc[0], slot: slotOf(svc[0].id),
   extra: { payment_verification: q('verified'), tickets_sent_at: 'NULL', tickets_viewed_at: 'NULL' },
 })}
+-- The portal token a real sale issues at confirm. Without it the folio has no portal_link, and
+-- every WhatsApp send (incl. the post-reschedule handoff) is disabled.
+INSERT INTO folio_access_tokens (id, organization_id, folio_id, token, expires_at, created_at)
+VALUES (${q(randomUUID())}, ${q(ORG_ID)}, ${q(leoFolioId)}, ${q(`tok-${randomUUID()}`)},
+        ${now + 30 * DAY}, ${now - 3600});
 ${folio({
   id: randomUUID(), customer: null, phone: '+529985554444', status: 'paid',
-  total: 180000, paid: 180000, createdAt: now - 26 * 3600, service: svc[1],
+  total: 180000, paid: 180000, createdAt: now - 26 * 3600, service: svc[1], slot: slotOf(svc[1].id),
   extra: { payment_verification: q('pending'), payment_reference: q('SPEI 4471'), sale_mode: q('express') },
 })}
 ${folio({
   id: randomUUID(), customer: 'María Fernández', phone: '+529982223333', status: 'booking',
-  total: 300000, paid: 90000, createdAt: now - 5 * 3600, service: svc[2],
+  total: 300000, paid: 90000, createdAt: now - 5 * 3600, service: svc[2], slot: slotOf(svc[2].id),
   extra: { booking_expires_at: now - 2 * DAY },
 })}
 ${folio({
@@ -189,8 +236,8 @@ ${folio({
 -- An apartado past its settle deadline: stage 2, the OTHER clock-produced notification (D19).
 ${folio({
   id: graceFolioId, customer: 'Norma Escalante', phone: '+529981110006', status: 'booking',
-  total: 400000, paid: 120000, createdAt: now - 6 * DAY, service: svc[2],
-  departsOn: dayOffset(2), quantity: 4,
+  total: 400000, paid: 120000, createdAt: now - 6 * DAY, service: svc[2], slot: slotOf(svc[2].id),
+  quantity: 4,
   extra: { booking_expires_at: now - 3600, reminder_status: q('sent') },
 })}
 -- BUG-027 - cancelled and owed NOTHING back: the ladder retained everything. This folio used to
@@ -204,6 +251,47 @@ ${folio({
     cancellation_source: q('admin'),
   },
 })}
+
+-- US-A87 (D6) — a closed apartado that left a CREDIT. Needs a ladder generous enough that the
+-- retention is smaller than the deposit: the ladder retains a share of what was SOLD, not of what
+-- was collected, so at 40% a 30% deposit still leaves nothing (US-A76). This one paid 120,000 of
+-- 400,000 and kept 90,000 back.
+${folio({
+  id: randomUUID(), customer: 'Beatriz Solano', phone: '+529981110007', status: 'cancelled',
+  total: 400000, paid: 120000, createdAt: now - 20 * DAY, service: svc[1],
+  extra: {
+    cancelled_at: now - 15 * DAY, refund_status: q('none'), refund_amount: 0,
+    cancellation_source: q('system_expiry'),
+    credit_amount: 90000,
+    credit_expires_at: now + 60 * DAY,
+  },
+})}
+
+-- US-AG52 — the TOURIST origin, at its two review outcomes. Both render the review card that
+-- branches on kind ("El cliente pidió reagendar", never "Aprobar y cancelar folio").
+--   Carlos Peña   -> the destination still has room: Aprobar reagenda moves the seats.
+--   Lucía Ortega  -> the destination FILLED after she asked: approving auto-rejects with the
+--                    reason and viable alternatives, because a petition holds no seats.
+${folio({
+  id: reqViableFolioId, customer: 'Carlos Peña', phone: '+529981110008', status: 'booking',
+  total: 240000, paid: 72000, createdAt: now - 4 * 3600, service: svc[0], slot: slotOf(svc[0].id),
+  extra: { booking_expires_at: now + 2 * DAY },
+})}
+${folio({
+  id: reqDoomedFolioId, customer: 'Lucía Ortega', phone: '+529981110009', status: 'booking',
+  total: 240000, paid: 72000, createdAt: now - 3 * 3600, service: svc[0], slot: slotOf(svc[0].id),
+  extra: { booking_expires_at: now + 2 * DAY },
+})}
+INSERT INTO folio_requests (id, organization_id, folio_id, kind, status, reason,
+                            folio_line_id, from_slot_id, to_slot_id, created_at, updated_at)
+VALUES (${q(randomUUID())}, ${q(ORG_ID)}, ${q(reqViableFolioId)}, 'reschedule', 'pending',
+        'Nos cambió el vuelo, ¿puede ser dos días después?',
+        (SELECT id FROM folio_lines WHERE folio_id = ${q(reqViableFolioId)}),
+        ${q(slotOf(svc[0].id).id)}, ${q(slotOf(svc[0].id, 1).id)}, ${now - 7200}, ${now - 7200}),
+       (${q(randomUUID())}, ${q(ORG_ID)}, ${q(reqDoomedFolioId)}, 'reschedule', 'pending',
+        'Preferimos la salida de la tarde',
+        (SELECT id FROM folio_lines WHERE folio_id = ${q(reqDoomedFolioId)}),
+        ${q(slotOf(svc[0].id).id)}, ${q(slotOf(svc[0].id, 2).id)}, ${now - 5400}, ${now - 5400});
 
 -- US-A86 - the outbox with something in it: work to drain, and a failure that must not stay
 -- invisible. Seeded DIRECTLY because wrangler dev does not fire a cron trigger on its own, so an
@@ -244,7 +332,7 @@ console.log(`
    Email     ${EMAIL}
    Password  ${PASSWORD}
 
-   Also seeded: an agent (ana@local.test, same password), 4 services, and 11 sales — one per
+   Also seeded: an agent (ana@local.test, same password), 4 services, and 13 sales — one per
    state the Ventas screen can show, plus one from 200 days ago that ONLY search or a date
    range can reach.
 
@@ -254,4 +342,19 @@ console.log(`
                  Estado -> Pendiente -> "Sin usar".
      /mensajes   the admin outbox: two WhatsApp rows to drain, one recorded failure.
      Ajustes     "Marcar como no usado" - set it to 2 h Despues and the no-shows go quiet.
+
+   For the reschedule (US-AG52):
+     Maria Fernandez / Norma Escalante  apartados vivos con horario real -> Reagendar
+                                        (fecha primero, luego los horarios de ese dia)
+     Leo Licona                          venta PAGADA -> Reagendar re-firma su QR
+     Carlos Pena                         pidio reagendar desde el portal -> "Aprobar reagenda"
+                                        mueve los lugares (el review sheet ya no dice cancelar)
+     Lucia Ortega                        pidio un horario que se LLENO despues -> aprobar la
+                                        auto-rechaza con el motivo y fechas alternativas
+     Beatriz Solano                      apartado cerrado con $900.00 a favor (en la card y
+                                        en el detalle, con su vigencia)
+     Ajustes                             "Liberacion de apartado" te va a frenar: cada
+                                         organizacion nace liberando 15 min antes de dejar
+                                         de vender. Eso es la regla D4, y es el cambio que
+                                         mas se nota.
 `)

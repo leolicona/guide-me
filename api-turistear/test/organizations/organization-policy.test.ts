@@ -110,15 +110,21 @@ describe('US-A46 — org booking policy', () => {
     await seedUser({ email: 'admin@empresa.com', role: 'admin' })
     // Grace +120 min: the hold is released two hours before departure. A cutoff of 1 h would let an
     // apartado be created an hour AFTER its own release instant.
+    //
+    // The sales cutoff moves with it (US-A87 D4): releasing at salida−2h while the slot still sells
+    // until departure would give back seats nobody can buy. The two settings describe the same
+    // moment from different sides and now have to agree about it.
     expect(
       (await put('admin@empresa.com', {
         booking_grace_offset_minutes: 120,
+        sales_cutoff_offset_minutes: 120,
         booking_creation_cutoff_hours: 1,
       })).status,
     ).toBe(400)
     expect(
       (await put('admin@empresa.com', {
         booking_grace_offset_minutes: 120,
+        sales_cutoff_offset_minutes: 120,
         booking_creation_cutoff_hours: 3,
       })).status,
     ).toBe(200)
@@ -141,7 +147,10 @@ describe('US-A46 — org booking policy', () => {
     // Raising the GRACE alone now makes the stored cutoff incoherent. Validating the body alone
     // would have let this through — which is the half of the original rule worth keeping.
     expect(
-      (await put('admin@empresa.com', { booking_grace_offset_minutes: 180 })).status,
+      (await put('admin@empresa.com', {
+        booking_grace_offset_minutes: 180,
+        sales_cutoff_offset_minutes: 180,
+      })).status,
     ).toBe(400)
   })
 
@@ -171,6 +180,46 @@ describe('US-A46 — org booking policy', () => {
     expect((await get('admin@empresa.com')).json.organization).not.toHaveProperty(
       'booking_hold_days',
     )
+  })
+
+  // US-A87 (D4) — the third coherence rule. Two settings describe the same moment from opposite
+  // sides; releasing an apartado's seats before the slot stops selling them is loss with no
+  // beneficiary. Both are signed + = before departure / − = after.
+  it('US-A87 — the shipped default is REFUSED: it releases 15 min before it stops selling', async () => {
+    await seedUser({ email: 'admin@empresa.com', role: 'admin' })
+    // grace +15 against cutoff 0. This is what every organization ships with.
+    const res = await put('admin@empresa.com', { booking_grace_offset_minutes: 15 })
+    expect(res.status).toBe(422)
+    expect(JSON.stringify(res.json)).toContain('RELEASE_BEFORE_SALES_CUTOFF')
+  })
+
+  it('US-A87 — releasing exactly at the close, or after it, is coherent', async () => {
+    await seedUser({ email: 'admin@empresa.com', role: 'admin' })
+    // Exactly at departure: the seat goes back the instant it stops being sellable.
+    expect((await put('admin@empresa.com', { booking_grace_offset_minutes: 0 })).status).toBe(200)
+    // Thirty minutes AFTER: the seat is worthless by then, so holding it costs nothing and the
+    // customer may still walk up.
+    expect((await put('admin@empresa.com', { booking_grace_offset_minutes: -30 })).status).toBe(200)
+  })
+
+  it('US-A87 — the rule bites from the OTHER side too', async () => {
+    await seedUser({ email: 'admin@empresa.com', role: 'admin' })
+    expect((await put('admin@empresa.com', { booking_grace_offset_minutes: 0 })).status).toBe(200)
+    // Now sell 30 min past departure while still releasing AT departure: thirty minutes of seats
+    // handed back that the slot would still have sold.
+    const res = await put('admin@empresa.com', { sales_cutoff_offset_minutes: -30 })
+    expect(res.status).toBe(422)
+    // ...and moving them together is fine. THREE settings, not two: pushing the sales cutoff past
+    // departure drags the no-show margin with it as well (US-A85 D23), because marking a customer
+    // absent while their seat is still on sale is the same incoherence seen from a third side.
+    // Every one of them answers "what happens around the departure instant", so they move as a set.
+    expect(
+      (await put('admin@empresa.com', {
+        sales_cutoff_offset_minutes: -30,
+        booking_grace_offset_minutes: -30,
+        no_show_margin_minutes: -30,
+      })).status,
+    ).toBe(200)
   })
 
   it('an agent may not edit the policy → 403', async () => {

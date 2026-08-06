@@ -7,7 +7,6 @@ import { aFolio } from '../../../test/handlers/folios'
 import {
   useSettleBooking,
   useCancelBooking,
-  useReactivateBooking,
   useClaimReminder,
   useVerifyPayment,
   useRejectPayment,
@@ -92,15 +91,8 @@ describe('each action hits its own endpoint', () => {
     expect(seen[0].body).toMatchObject({ method: 'transfer', payment_reference: 'REF-123' })
   })
 
-  it('reactivates through the POS surface (US-AG07.5)', async () => {
-    const seen = capture('/api/pos/folios/:id/reactivate')
-    const { wrapper } = withProviders()
-    const { result } = renderHook(() => useReactivateBooking(), { wrapper })
-
-    result.current.mutate('folio-1')
-    await waitFor(() => expect(result.current.isSuccess).toBe(true))
-    expect(seen).toHaveLength(1)
-  })
+  // `useReactivateBooking` is RETIRED with its endpoint (booking-reschedule.spec.md D3), so its
+  // test goes with it rather than being pointed at something else.
 
   it('claims the reminder atomically before WhatsApp opens (US-AG07.3)', async () => {
     const seen = capture('/api/pos/folios/:id/reminder')

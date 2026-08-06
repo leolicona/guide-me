@@ -35,6 +35,10 @@ export const organizations = sqliteTable('organizations', {
   // Enforced coherent with `salesCutoffOffsetMinutes` — a customer may not be marked absent while
   // their seat is still sellable. Fulfilment ITSELF is derived and stored nowhere (D4).
   noShowMarginMinutes: integer('no_show_margin_minutes').notNull().default(0),
+  // US-A87 (D10) — how long the operator carries a closed apartado's credit on its books. Its OWN
+  // column: an accounting horizon, not one of the four departure clocks, and nothing about a
+  // departure should move it. A perpetual credit is an unbounded liability.
+  bookingCreditValidDays: integer('booking_credit_valid_days').notNull().default(90),
   // Accommodation/lodging settings (docs/lodging/accommodation-stays.spec.md §2.5). weekendDays:
   // CSV of ISO weekday ints (0=Sun … 6=Sat) — which nights use a unit's weekend_rate (default
   // Fri+Sat). A PAID stay cancels free until lodgingFreeCancelDays before check-in; inside that
@@ -423,6 +427,12 @@ export const folios = sqliteTable('folios', {
   // once they act — idempotent last-write-wins, D13). ticketsViewedAt: the tourist opened the
   // portal (the bot-proof "Visto" beacon, first-view). A folio is "pendiente de enviar" once a
   // portal link exists and ticketsSentAt is null.
+  // US-A87 (D6/D10) — what the ladder did NOT retain when an apartado's hold ended, held as a
+  // credit rather than paid out: the close is produced by a clock, so nobody is there to hand cash
+  // to. SNAPSHOTTED — re-deriving it later gives a different answer, because the ladder is
+  // time-based and the clock has moved. Zero for every org on the inherited default (US-A76).
+  creditAmount: integer('credit_amount').notNull().default(0),
+  creditExpiresAt: integer('credit_expires_at', { mode: 'timestamp' }),
   ticketsSentAt: integer('tickets_sent_at', { mode: 'timestamp' }),
   ticketsSentBy: text('tickets_sent_by').references(() => users.id),
   ticketsViewedAt: integer('tickets_viewed_at', { mode: 'timestamp' }),
@@ -624,7 +634,7 @@ export const folioAccessTokens = sqliteTable('folio_access_tokens', {
 // Tourist-initiated cancellation requests (US-T04). A REQUEST, never a cancel: it touches no
 // inventory or folio status — only an admin approval funnels into the existing cancelFolio
 // path (US-A21). At most one open `pending` row per folio (partial unique index).
-export const cancellationRequests = sqliteTable('cancellation_requests', {
+export const folioRequests = sqliteTable('folio_requests', {
   id: text('id').primaryKey(),
   organizationId: text('organization_id')
     .notNull()
@@ -632,6 +642,18 @@ export const cancellationRequests = sqliteTable('cancellation_requests', {
   folioId: text('folio_id')
     .notNull()
     .references(() => folios.id),
+  // US-AG52 (D13) — what KIND of petition. The table was `cancellation_requests`; it was renamed
+  // rather than duplicated because `uq_folio_requests_open` (one open petition per folio) is an
+  // invariant two tables could not express — a folio must never carry a pending cancellation AND a
+  // pending reschedule at once.
+  kind: text('kind', { enum: ['cancellation', 'reschedule'] })
+    .notNull()
+    .default('cancellation'),
+  // Reschedule-only; null on a cancellation. `from_slot_id` is snapshotted at approval so the
+  // history reads as a move rather than as a destination with no origin.
+  folioLineId: text('folio_line_id').references(() => folioLines.id),
+  fromSlotId: text('from_slot_id').references(() => slots.id),
+  toSlotId: text('to_slot_id').references(() => slots.id),
   status: text('status', { enum: ['pending', 'approved', 'rejected'] })
     .notNull()
     .default('pending'),
@@ -1021,8 +1043,8 @@ export type Payout = typeof payouts.$inferSelect
 export type NewPayout = typeof payouts.$inferInsert
 export type FolioAccessToken = typeof folioAccessTokens.$inferSelect
 export type NewFolioAccessToken = typeof folioAccessTokens.$inferInsert
-export type CancellationRequest = typeof cancellationRequests.$inferSelect
-export type NewCancellationRequest = typeof cancellationRequests.$inferInsert
+export type CancellationRequest = typeof folioRequests.$inferSelect
+export type NewCancellationRequest = typeof folioRequests.$inferInsert
 export type AccommodationUnitType = typeof accommodationUnitTypes.$inferSelect
 export type NewAccommodationUnitType = typeof accommodationUnitTypes.$inferInsert
 export type AccommodationSeason = typeof accommodationSeasons.$inferSelect

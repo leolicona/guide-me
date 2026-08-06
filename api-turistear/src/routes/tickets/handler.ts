@@ -21,6 +21,9 @@ type ScanReason =
   | 'CANCELLED'
   | 'NOT_PAID'
   | 'NOT_FOUND'
+  // US-AG52 (D16) — the ticket was REPLACED by a reschedule. Its signature is still genuine and
+  // its own expiry may still be ahead, so nothing else here would catch it.
+  | 'SUPERSEDED'
 
 interface TicketContext {
   client_identity: string
@@ -69,6 +72,8 @@ export const scanTicket = async (c: TicketsContext) => {
       id: folioLines.id,
       quantity: folioLines.quantity,
       redeemedCount: folioLines.redeemedCount,
+      // US-AG52 (D16) — the line's CURRENT ticket, to reject a superseded one.
+      qrToken: folioLines.qrToken,
       serviceName: folioLines.serviceName,
       slotDate: folioLines.slotDate,
       slotStartTime: folioLines.slotStartTime,
@@ -107,6 +112,23 @@ export const scanTicket = async (c: TicketsContext) => {
   }
   if (row.folioStatus !== 'paid') {
     return invalid(c, 'NOT_PAID', ctx)
+  }
+
+  // 3b. SUPERSEDED — US-AG52 (D16). A reschedule RE-SIGNS the line's ticket, and until this check
+  // existed the replaced one still admitted: its signature is genuine, the line still resolves, the
+  // folio is still paid, and its `expires_at` came from the OLD departure — which on a move to a
+  // later date is still in the future. So the customer we told "tu boleto anterior deja de
+  // funcionar" could walk up on the ORIGINAL date, be admitted to a departure whose seat we had
+  // already returned to the pool, and BURN a pass belonging to the new one — leaving the correct
+  // date reading ALREADY_CONSUMED.
+  //
+  // Compared against the line's own column rather than a revocation list: `qr_token` is already
+  // the single record of which ticket is current, and the reschedule is the ONLY path that
+  // overwrites it (every other minting call site — confirmSale, settle, verifyPayment — writes a
+  // token where there was none). A line with no token at all is left alone: pre-feature rows keep
+  // whatever validity they had, exactly as the zone_name note above.
+  if (row.qrToken && row.qrToken !== token) {
+    return invalid(c, 'SUPERSEDED', ctx)
   }
 
   // 4. EXPIRY — enforced from the signed payload.

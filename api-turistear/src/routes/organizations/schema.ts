@@ -39,6 +39,9 @@ export const updateOrganizationSchema = z.object({
   // `booking_grace_offset_minutes`, same ±4h bound: + = before departure, − = after.
   // The coherence rule against the sales cutoff is enforced in the handler, where both are in scope.
   no_show_margin_minutes: z.number().int().min(-240).max(240).optional(),
+  // US-A87 (D10) — how long a closed apartado's credit stays spendable. 1–730 days: a credit that
+  // outlives two years is a liability nobody reconciles.
+  booking_credit_valid_days: z.number().int().min(1).max(730).optional(),
   // Lodging settings (docs/lodging/accommodation-stays.spec.md §2.5). Weekend days as ISO
   // weekday ints (0=Sun … 6=Sat), distinct; free-cancel window in days; penalty percent.
   lodging_weekend_days: z

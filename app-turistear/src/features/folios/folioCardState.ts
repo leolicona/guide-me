@@ -60,6 +60,8 @@ export type MoneyReading =
   | { kind: 'refundSettled'; cents: number }
   /** Cancelled and never owed anything back — the ladder retained everything (BUG-027). */
   | { kind: 'refundNone'; cents: number }
+  /** US-A87 — a closed apartado that left the customer a credit. */
+  | { kind: 'credit'; cents: number }
 
 export interface MoneyAxis {
   rail: RailTone
@@ -81,6 +83,7 @@ export function folioMoneyAxis(folio: {
   payment_verification?: 'not_required' | 'pending' | 'verified'
   refund_status?: 'none' | 'pending' | 'refunded'
   refund_amount?: number | null
+  credit_amount?: number | null
 }): MoneyAxis {
   // A cancelled folio has THREE money readings, not two (BUG-027). `refund_status = 'none'` means
   // the ladder retained everything and the customer received nothing — the US-A76 case, where a
@@ -89,6 +92,12 @@ export function folioMoneyAxis(folio: {
   if (folio.status === 'cancelled') {
     if (folio.refund_status === 'pending') {
       return { rail: 'error', reading: { kind: 'refundOwed', cents: folio.refund_amount ?? 0 } }
+    }
+    // US-A87 (D6) — a credit outranks the "(sin reembolso)" reading, because it is the one thing on
+    // this folio a seller can still act on: the customer standing in front of them owns it, and it
+    // cannot be applied if it is one tap away instead of on the card.
+    if ((folio.credit_amount ?? 0) > 0) {
+      return { rail: 'error', reading: { kind: 'credit', cents: folio.credit_amount! } }
     }
     if (folio.refund_status === 'refunded') {
       return {

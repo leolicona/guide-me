@@ -43,10 +43,10 @@ foliosRouter.get('/counts', listFolioCounts)
 
 // US-T04 — tourist cancellation requests (review queue + approve/reject). Literal routes
 // registered BEFORE /:id so the param route can never shadow them.
-foliosRouter.get('/cancellation-requests', listCancellationRequests)
-foliosRouter.post('/cancellation-requests/:requestId/approve', approveCancellationRequest)
+foliosRouter.get('/requests', listCancellationRequests)
+foliosRouter.post('/requests/:requestId/approve', approveCancellationRequest)
 foliosRouter.post(
-  '/cancellation-requests/:requestId/reject',
+  '/requests/:requestId/reject',
   zValidator('json', rejectCancellationRequestSchema, validationHook),
   rejectCancellationRequest,
 )

@@ -22,7 +22,7 @@ import {
   type SQL,
 } from 'drizzle-orm'
 import type { Db } from '../db/client'
-import { cancellationRequests, folios } from '../db/schema'
+import { folioRequests, folios } from '../db/schema'
 import { naiveEpoch, orgToday } from './tz'
 
 /** How many days of ordinary sales the list carries by default (D9). A parameter, not a law: the
@@ -73,12 +73,12 @@ export const requestPendingFilter = (db: Db, org: string): SQL =>
   exists(
     db
       .select({ one: sql`1` })
-      .from(cancellationRequests)
+      .from(folioRequests)
       .where(
         and(
-          eq(cancellationRequests.folioId, folios.id),
-          eq(cancellationRequests.organizationId, org),
-          eq(cancellationRequests.status, 'pending'),
+          eq(folioRequests.folioId, folios.id),
+          eq(folioRequests.organizationId, org),
+          eq(folioRequests.status, 'pending'),
         ),
       ),
   )

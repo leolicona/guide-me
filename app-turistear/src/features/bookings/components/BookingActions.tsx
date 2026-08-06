@@ -2,8 +2,10 @@ import { useState } from 'react'
 import { Alert, Box, Button, Skeleton, Stack, Typography } from '@mui/material'
 import EventBusyRounded from '@mui/icons-material/EventBusyRounded'
 import PaidRounded from '@mui/icons-material/PaidRounded'
-import { useCancelBooking, useReactivateBooking } from '../hooks/useBookingActions'
+import { useCancelBooking } from '../hooks/useBookingActions'
 import { SettleSheet } from './SettleSheet'
+import { RescheduleSheet } from './RescheduleSheet'
+import EventRepeatRounded from '@mui/icons-material/EventRepeatRounded'
 import { ConfirmSheet, MoneyText } from '../../../components'
 import type { DisplayMethod, PaymentMethod } from '../../pos/types'
 import type { PosCancellationQuote } from '../../../services/posService'
@@ -19,6 +21,21 @@ export interface BookingFolio {
   amount_paid?: number
   pending_balance?: number
   payment_method?: DisplayMethod
+  /** D16 — while a transfer awaits verification there is no ticket yet, so nothing to warn about. */
+  payment_verification?: string
+  /** US-AG52 — the lines the reschedule sheet offers to move (tour lines only). */
+  lines?: {
+    id?: string
+    service_id?: string
+    slot_id?: string | null
+    service_name: string
+    slot_date: string | null
+    slot_start_time: string | null
+    quantity?: number
+    line_type?: 'slot' | 'stay'
+    /** D19 — a line with redeemed passes was consumed and cannot move. */
+    redeemed_count?: number
+  }[]
 }
 
 // What the ladder decided, read BEFORE confirming. Money reads first — the refund is the figure the
@@ -108,8 +125,8 @@ export function ExpiredBookingBanner({ folio }: { folio: BookingFolio }) {
   if (!isExpiredBooking(folio)) return null
   return (
     <Alert severity="warning" icon={<EventBusyRounded />}>
-      Apartado Expirado — Cupos Liberados. Reactívalo para volver a bloquear los lugares (si aún
-      hay cupo) y cobrar el saldo.
+      Apartado vencido — los lugares se liberaron. Si el cliente llega, es una venta nueva: aplica
+      su saldo a favor si lo tiene.
     </Alert>
   )
 }
@@ -130,10 +147,26 @@ export function BookingActions({
   quoteLoading?: boolean
 }) {
   const cancel = useCancelBooking()
-  const reactivate = useReactivateBooking()
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [settleOpen, setSettleOpen] = useState(false)
-  const busy = cancel.isPending || reactivate.isPending
+  const [rescheduleOpen, setRescheduleOpen] = useState(false)
+
+  // D11 — same service only. A stay is nights under a per-night guard rather than a slot, and is
+  // deferred with its own scenarios. The sheet fetches the SELECTED line's calendar itself — the
+  // options used to come from the FIRST line's service, which offered a two-service folio the
+  // wrong calendar for every line but one.
+  const rescheduleLines = (folio.lines ?? [])
+    .filter((l) => l.line_type !== 'stay' && !!l.id && !!l.service_id)
+    .map((l) => ({
+      id: l.id!,
+      service_id: l.service_id!,
+      slot_id: l.slot_id ?? null,
+      service_name: l.service_name,
+      slot_date: l.slot_date,
+      slot_start_time: l.slot_start_time,
+      quantity: l.quantity ?? 1,
+    }))
+  const busy = cancel.isPending
 
   if (isLiveBooking(folio)) {
     // The amount this settle collects, and the deposit's method to pre-select the picker. A live
@@ -154,10 +187,30 @@ export function BookingActions({
           >
             Liquidar saldo
           </Button>
+          {/* US-AG52 — the cheap operation, and the one the product never had. Here the seats are
+              still the customer's: moving a hold you own takes nothing from anybody, and no money
+              is re-decided. It sits ABOVE Cancelar because cancelling prices the customer and this
+              does not — the destructive verb should never be the easier one to reach. */}
+          <Button
+            color="inherit"
+            startIcon={<EventRepeatRounded />}
+            disabled={busy}
+            onClick={() => setRescheduleOpen(true)}
+          >
+            Reagendar
+          </Button>
           <Button color="inherit" disabled={busy} onClick={() => setConfirmOpen(true)}>
             Cancelar apartado
           </Button>
         </Stack>
+
+        <RescheduleSheet
+          open={rescheduleOpen}
+          onClose={() => setRescheduleOpen(false)}
+          folioId={folio.id}
+          lines={rescheduleLines}
+          isPaid={false}
+        />
 
         <SettleSheet
           open={settleOpen}
@@ -192,34 +245,51 @@ export function BookingActions({
     )
   }
 
-  if (isExpiredBooking(folio)) {
+  // D16 — a PAID folio reschedules too: the customer who cannot make Friday has exactly the same
+  // need, and before this their only option was cancelling, which runs the ladder against them.
+  // The sheet warns that the current ticket dies and a new one is sent — unless the transfer is
+  // still awaiting verification, in which case no ticket exists yet and there is nothing to kill.
+  //
+  // D19 — the door is per line and closes at departure: a departed line reads no-show and does not
+  // move (the courtesy is a discount on a NEW sale), and a line with redeemed passes was consumed.
+  // Client-clock date compare is a pre-filter only; the server holds the real guard.
+  const todayIso = new Date().toISOString().slice(0, 10)
+  const movablePaidLines = rescheduleLines.filter((l) => {
+    const src = folio.lines?.find((f) => f.id === l.id)
+    if ((src?.redeemed_count ?? 0) > 0) return false
+    return !l.slot_date || l.slot_date >= todayIso
+  })
+  if (folio.status === 'paid' && movablePaidLines.length > 0) {
     return (
-      <Stack spacing={1.5}>
-        <Button
-          variant="contained"
-          size="large"
-          disableElevation
-          disabled={busy}
-          onClick={() => reactivate.mutate(folio.id)}
-        >
-          {reactivate.isPending ? 'Reactivando…' : 'Reactivar y Liquidar'}
-        </Button>
-        {reactivate.isError && (
-          <Alert severity="error">
-            El tour ya no tiene cupo para reactivar este apartado.
-          </Alert>
-        )}
-        <Stack direction="row" spacing={1.5}>
-          <Button fullWidth disabled>
-            Reagendar (Próximamente)
-          </Button>
-          <Button fullWidth disabled>
-            Generar cupón (Próximamente)
+      <>
+        <Stack spacing={1.5}>
+          <Button
+            color="inherit"
+            startIcon={<EventRepeatRounded />}
+            onClick={() => setRescheduleOpen(true)}
+          >
+            Reagendar
           </Button>
         </Stack>
-      </Stack>
+        <RescheduleSheet
+          open={rescheduleOpen}
+          onClose={() => setRescheduleOpen(false)}
+          folioId={folio.id}
+          lines={movablePaidLines}
+          isPaid={folio.payment_verification !== 'pending'}
+        />
+      </>
     )
   }
+
+  // US-AG07.5 RETIRED (booking-reschedule.spec.md D3). This branch offered `Reactivar y Liquidar`,
+  // which resurrected a folio the system had cancelled and told the customer it had cancelled — and
+  // two buttons marked "Próximamente" that never arrived. Reagendar now lives on a LIVE apartado
+  // and on a PAID folio (above), where the seats are still the customer's and moving them takes
+  // nothing from anybody.
+  //
+  // A customer arriving after the hold ended makes an ordinary sale; the banner says so, and the
+  // credit is on the folio for the seller to apply.
 
   return null
 }
