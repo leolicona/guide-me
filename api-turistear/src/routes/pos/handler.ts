@@ -991,6 +991,7 @@ export const confirmSale = async (c: PosContext) => {
       lodgingWeekendDays: organizations.lodgingWeekendDays,
       timezone: organizations.timezone,
       cancellationPolicy: organizations.cancellationPolicy,
+      paymentReferenceRequired: organizations.paymentReferenceRequired,
     })
     .from(organizations)
     .where(eq(organizations.id, org))
@@ -1378,6 +1379,21 @@ export const confirmSale = async (c: PosContext) => {
   // (verifyPayment). Cash clears immediately, exactly as before. `cleared` = the money is usable now.
   const method = input.payment_method ?? 'cash'
   const needsVerification = method === 'transfer'
+  // US-AG41, relaxed by US-A88 — a transfer must carry its bank reference unless the org switched
+  // the requirement off (`payment_reference_required`). Formerly a schema refine; it lives here now
+  // because it reads the org row. Optionality never weakens verification: an unreferenced transfer
+  // still lands `pending` below with its QR deferred.
+  if (
+    needsVerification &&
+    (orgRow?.paymentReferenceRequired ?? true) &&
+    !input.payment_reference
+  ) {
+    throw new ApiError(
+      'VALIDATION_ERROR',
+      400,
+      'A payment reference is required for a bank transfer',
+    )
+  }
   const cleared = !needsVerification
   const paymentVerification: 'not_required' | 'pending' = needsVerification
     ? 'pending'
@@ -2279,11 +2295,21 @@ export const settleBooking = async (c: PosContext) => {
   const settleMethod = body.method ?? folio.paymentMethod
   const balanceNeedsVerification = settleMethod === 'transfer'
   if (balanceNeedsVerification && !body.payment_reference) {
-    throw new ApiError(
-      'VALIDATION_ERROR',
-      400,
-      'A payment reference is required to settle a bank transfer',
-    )
+    // US-A88 — the reference is only demanded while the org keeps the requirement on. Read lazily:
+    // most settles are cash and never pay for this query. An unreferenced transfer still re-arms
+    // `pending` below — optionality never weakens verification (US-A67).
+    const [orgRef] = await db
+      .select({ required: organizations.paymentReferenceRequired })
+      .from(organizations)
+      .where(eq(organizations.id, org))
+      .limit(1)
+    if (orgRef?.required ?? true) {
+      throw new ApiError(
+        'VALIDATION_ERROR',
+        400,
+        'A payment reference is required to settle a bank transfer',
+      )
+    }
   }
   // The QR can mint now only if THIS balance clears AND no earlier payment is still awaiting an admin.
   const cleared = !balanceNeedsVerification && folio.paymentVerification !== 'pending'

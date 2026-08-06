@@ -15,8 +15,9 @@ const extraSchema = z.object({
 })
 
 // US-AG41 — the bank reference for an electronic (transfer) payment. Free text (bank confirmation
-// numbers vary), trimmed, 4–64 chars. Required only when the method is 'transfer' (enforced by the
-// refine below / the settle handler); absent for cash.
+// numbers vary), trimmed, 4–64 chars. Whether a transfer REQUIRES one is an org setting (US-A88,
+// `payment_reference_required`) enforced in the confirm/settle handlers — a Zod refine cannot read
+// the org row. Absent for cash.
 export const paymentReferenceSchema = z.string().trim().min(4).max(64)
 
 // A tour/activity line — a slot + quantity + (discountable) unit price.
@@ -72,8 +73,8 @@ export const confirmSaleSchema = z
     // and the pre-feature behaviour). Every non-cash method is electronic: it still earns
     // commission but adds no cash debt (US-AG24 path).
     payment_method: z.enum(['cash', 'card', 'transfer', 'link']).optional().default('cash'),
-    // US-AG41 — the transfer's bank reference; required iff payment_method is 'transfer' (see the
-    // refine below). Ignored for cash.
+    // US-AG41 — the transfer's bank reference; required for a transfer unless the org opted out
+    // (US-A88, enforced in the handler where the org row is in scope). Ignored for cash.
     payment_reference: paymentReferenceSchema.optional(),
     // US-AG07 — present ⇒ BOOKING (apartado) mode: the deposit in minor units. Absent ⇒ the
     // existing full paid sale (byte-unchanged). The bounds (0 < deposit < total and ≥ the org
@@ -95,12 +96,8 @@ export const confirmSaleSchema = z
     },
     { message: 'Each slot (zone) may appear at most once', path: ['lines'] },
   )
-  // US-AG41 — a transfer payment must carry its bank reference (WhatsApp/QR is held until an admin
-  // verifies it against this reference; US-A67).
-  .refine((v) => v.payment_method !== 'transfer' || !!v.payment_reference, {
-    message: 'A payment reference is required for a bank transfer',
-    path: ['payment_reference'],
-  })
+  // US-AG41's transfer ⇒ reference rule moved to the handler (US-A88): it now depends on the org's
+  // `payment_reference_required`, which a schema-level refine cannot read.
   // US-AG45 (D17) — the name stays required for every non-Express sale (whatsapp-qr-delivery D2).
   .refine((v) => v.sale_mode === 'express' || !!v.customer_name, {
     message: 'A customer name is required',

@@ -40,6 +40,9 @@ export interface MyOrganization {
   // US-A81 (group-redemption) — how a scan consumes a ticket's passes: one per scan (default) or
   // the whole party at once. Read live at scan time from the SCANNING org.
   qr_redemption_mode: 'per_pass' | 'all_passes'
+  // US-A88 (payment-verification D10) — must a transfer carry its bank reference at checkout and
+  // settle? When false the field turns optional; the admin still verifies the money (US-A67).
+  payment_reference_required: boolean
 }
 
 export const getMyOrganization = async (): Promise<MyOrganization> => {
@@ -70,6 +73,8 @@ export interface UpdateOrganizationInput {
   // US-A81 — admin-only, org-wide, deliberately not an agent-facing toggle (D7: nothing can
   // un-redeem a pass).
   qr_redemption_mode?: 'per_pass' | 'all_passes'
+  // US-A88 — the transfer-reference requirement toggle in Settings.
+  payment_reference_required?: boolean
 }
 
 // US-A46 — admin updates the org booking policy.

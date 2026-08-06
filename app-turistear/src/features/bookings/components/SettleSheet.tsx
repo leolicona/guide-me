@@ -5,6 +5,7 @@ import PaymentsRounded from '@mui/icons-material/PaymentsRounded'
 import AccountBalanceRounded from '@mui/icons-material/AccountBalanceRounded'
 import { FormSheet } from '../../../components/FormSheet'
 import { MoneyText } from '../../../components/MoneyText'
+import { useMyOrganization } from '../../organization'
 import type { PaymentMethod } from '../../pos/types'
 import { useSettleBooking } from '../hooks/useBookingActions'
 
@@ -26,7 +27,14 @@ export function SettleSheet({ open, onClose, folioId, balance, defaultMethod }: 
   const [method, setMethod] = useState<PaymentMethod>(defaultMethod)
   const [reference, setReference] = useState('')
 
-  const referenceValid = method !== 'transfer' || reference.trim().length >= 4
+  // US-A88 — the org decides whether a transfer demands its reference. Optional still means
+  // "4–64 chars if present": an empty field passes, a partial one doesn't.
+  const { data: org } = useMyOrganization()
+  const referenceRequired = org?.payment_reference_required ?? true
+  const referenceValid =
+    method !== 'transfer' ||
+    reference.trim().length >= 4 ||
+    (!referenceRequired && reference.trim().length === 0)
 
   const onSubmit = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault()
@@ -36,7 +44,10 @@ export function SettleSheet({ open, onClose, folioId, balance, defaultMethod }: 
         id: folioId,
         payload: {
           method,
-          ...(method === 'transfer' ? { payment_reference: reference.trim() } : {}),
+          // An empty optional reference is omitted, not sent as ''.
+          ...(method === 'transfer' && reference.trim()
+            ? { payment_reference: reference.trim() }
+            : {}),
         },
       },
       { onSuccess: onClose },
@@ -89,10 +100,15 @@ export function SettleSheet({ open, onClose, folioId, balance, defaultMethod }: 
           </ToggleButtonGroup>
         </Stack>
 
-        {/* US-AG41 — a transfer requires its bank reference; the QR is held until an admin verifies. */}
+        {/* US-AG41 — a transfer carries its bank reference (optional per org, US-A88); the QR is
+            held until an admin verifies either way. */}
         {method === 'transfer' && (
           <TextField
-            label="Referencia de la transferencia"
+            label={
+              referenceRequired
+                ? 'Referencia de la transferencia'
+                : 'Referencia de la transferencia (opcional)'
+            }
             placeholder="Ej. BBVA 0099887766"
             value={reference}
             onChange={(e) => setReference(e.target.value)}

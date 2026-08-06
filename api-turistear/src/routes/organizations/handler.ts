@@ -33,6 +33,7 @@ const orgColumns = {
   cancellationPolicy: organizations.cancellationPolicy,
   agentCancellationEnabled: organizations.agentCancellationEnabled,
   qrRedemptionMode: organizations.qrRedemptionMode,
+  paymentReferenceRequired: organizations.paymentReferenceRequired,
 } as const
 
 const serializeOrg = (o: {
@@ -53,6 +54,7 @@ const serializeOrg = (o: {
   cancellationPolicy: string | null
   agentCancellationEnabled: boolean
   qrRedemptionMode: 'per_pass' | 'all_passes'
+  paymentReferenceRequired: boolean
 }) => ({
   id: o.id,
   name: o.name,
@@ -80,6 +82,8 @@ const serializeOrg = (o: {
   agent_cancellation_enabled: o.agentCancellationEnabled,
   // US-A81 (docs/scanner/group-redemption.spec.md) — how a scan consumes a ticket's passes.
   qr_redemption_mode: o.qrRedemptionMode,
+  // US-A88 — must a transfer carry its bank reference? The checkout/settle forms read this.
+  payment_reference_required: o.paymentReferenceRequired,
 })
 
 export const getMyOrganization = async (c: OrganizationsContext) => {
@@ -228,6 +232,9 @@ export const updateMyOrganization = async (c: OrganizationsContext) => {
   // US-A81 — the scan-consumption mode (group-redemption D1); enum-validated in the schema.
   if (input.qr_redemption_mode !== undefined)
     updates.qrRedemptionMode = input.qr_redemption_mode
+  // US-A88 — the transfer-reference requirement (payment-verification D10).
+  if (input.payment_reference_required !== undefined)
+    updates.paymentReferenceRequired = input.payment_reference_required
 
   await db
     .update(organizations)

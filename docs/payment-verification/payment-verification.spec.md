@@ -2,7 +2,8 @@
 
 **User stories:** US-AG41 (agent/affiliate records the payment method + a reference for electronic
 transactions at checkout), US-A67 (admin verifies each electronic payment before tickets are
-released — a "Por verificar" queue, verify/reject, and one-step delivery). To register in
+released — a "Por verificar" queue, verify/reject, and one-step delivery), US-A88 (admin decides
+whether the transfer reference is required — the D10 amendment to D2). Registered in
 `docs/SPEC.md`. **Phase:** 2 (Core Enhancements) · **agent/affiliate + admin surface.**
 
 **Depends on:** *POS Checkout* (`confirmSale`, `settle`) — the paid/booking flow this gates ·
@@ -50,8 +51,12 @@ machinery a rejected payment reuses.
   method.)
 - **D2 — `payment_reference`** (text, nullable). **Required iff `method = transfer`** (trimmed,
   min 4 / max 64 chars — free text, no format regex; bank confirmation numbers vary). Ignored/absent
-  for cash. Shared Zod refine: `method === 'transfer' ⇒ reference present`. Recorded by the
-  **agent/affiliate** at checkout (and at settle, if settling by transfer).
+  for cash. ~~Shared Zod refine: `method === 'transfer' ⇒ reference present`.~~ Recorded by the
+  **agent/affiliate** at checkout (and at settle, if settling by transfer). **Amended by D10
+  (US-A88):** *required* is now the org **default**, not a hard rule — the rule reads
+  `organizations.payment_reference_required`, so it moved out of the Zod refine (a schema cannot
+  read the org row) into the confirm/settle handlers. The 4–64 bounds still apply whenever a
+  reference IS present, whatever the setting.
 - **D3 — Verification is a separate, RE-ARMABLE axis, not a new status.** `status` stays `paid`;
   add `payment_verification`: `not_required` (all-cash) · `pending` · `verified`. It **re-arms to
   `pending`** on each new electronic payment — a folio can carry two (a transfer deposit, then a
@@ -82,6 +87,17 @@ machinery a rejected payment reuses.
      WhatsApp pre-filled, stamps `Enviado`) for when the agent isn't around.
 - **D9 — Grandfather** every existing `transfer`/`card`/`link` folio → `verified`, every `cash`
   folio → `not_required`. New transfer payments start `pending`.
+- **D10 (US-A88, amends D2) — The reference requirement is an org setting.** Some orgs verify
+  against the bank statement by **amount + time** and find typing a reference at the point of sale
+  pure friction; others depend on it to match the money. `organizations.payment_reference_required`
+  (boolean, **default `true`** = the D2 rule, so no org changes behaviour on the day it lands) is a
+  Switch in Settings → *Punto de venta* («Referencia obligatoria en transferencias»), admin-only,
+  commit-on-tap like the scanner toggle. **The toggle relaxes the INPUT only** — an unreferenced
+  transfer still lands `payment_verification = 'pending'` with its QR deferred (D3/D5 untouched);
+  the "Por verificar" queue row simply shows no reference. Enforcement lives in the **handlers**
+  (confirm reads the org row it already loads; settle reads the flag lazily, only when a transfer
+  arrives without a reference). The checkout and settle forms label the field *(opcional)* and let
+  an **empty** field pass — a partial (<4 chars) reference is still rejected.
 
 ---
 
@@ -108,13 +124,23 @@ paymentVerifiedBy: text('payment_verified_by').references(() => users.id),
 **Migration backfill (D9):** `payment_verification = 'verified'` where `payment_method != 'cash'`,
 else `'not_required'`.
 
+**US-A88 (D10) adds** — additive migration `0060_optional_payment_reference.sql`:
+
+```ts
+// organizations — must a transfer carry its bank reference at checkout/settle? ON by default
+// (the D2 rule). OFF relaxes the input only; the verification axis (D3/D5) is untouched.
+paymentReferenceRequired: integer('payment_reference_required', { mode: 'boolean' })
+  .notNull().default(true),
+```
+
 ---
 
 ## Server changes (`api-turistear/`)
 
 - **`pos/schema.ts`** — `payment_method` accepted set unchanged server-side (still validates the
   enum); add `payment_reference` + the conditional `transfer ⇒ reference` refine to the confirm and
-  settle bodies.
+  settle bodies. *(D10 moved that refine into the confirm/settle handlers — it now reads the org's
+  `payment_reference_required`; the schema keeps only the 4–64 shape of the field.)*
 - **`confirmSale`** — set `paymentVerification`: `pending` when the paying method is `transfer`
   (full sale **or** deposit), else `not_required`. **Gate QR signing + `dispatchTicketEmail`** on the
   D5 invariant — a `pending` electronic full sale is created **without** QR (defers to verify).
@@ -136,7 +162,9 @@ else `'not_required'`.
 ## Client changes (`app-turistear/`)
 
 - **`PosCheckoutPage`** — the toggle shows **Efectivo + Transferencia** only (card/link removed from
-  the group). Selecting Transferencia reveals a **required "Referencia"** field (4–64). On submit
+  the group). Selecting Transferencia reveals a **required "Referencia"** field (4–64) — *required
+  per the org's `payment_reference_required` (D10); when off, labeled "(opcional)" and an empty
+  field submits*. On submit
   for a transfer, the confirmation UI reads **"Pago en verificación — los boletos se envían al
   confirmar"**; the receipt shows no QR yet.
 - **Delivery buttons** (`TicketWhatsAppButton`, email resend) — **disabled with a tooltip**
@@ -175,6 +203,18 @@ else `'not_required'`.
 10. Existing (pre-migration) transfer/card/link folios are `verified` (deliver unchanged); cash are
     `not_required`.
 
+**US-A88 (admin — the reference requirement is theirs to set; D10)**
+11. `GET /organizations/me` exposes `payment_reference_required` (default `true`);
+    `PUT /organizations/me` (admin-only) round-trips it. Settings → *Punto de venta* renders the
+    Switch, commit-on-tap.
+12. With the requirement **on** (default), criterion 2 holds byte-for-byte — the pre-feature suites
+    (`payment-verification.test.ts`, `settle-method.test.ts`) pass **unedited**.
+13. With the requirement **off**: a transfer confirm/settle **without** a reference succeeds — and
+    still lands `payment_verification = 'pending'` with no QR and no portal link until verify. A
+    reference, when given, is stored and still validated 4–64. The forms label the field
+    *(opcional)* and an empty field submits.
+14. **Isolation** — org B opting out never relaxes org A's requirement.
+
 ## Definition of Done
 
 - Migration `0047` applied local + remote; `cf-typegen` clean.
@@ -183,3 +223,12 @@ else `'not_required'`.
   isolation (`seedTwoOrgs`); grandfather backfill. Full API suite green.
 - `pnpm build:app` + `pnpm lint:app` clean; checkout + admin queue verified end-to-end.
 - Registered in `docs/SPEC.md` (US-AG41 + US-A67 + a Phase-2 feature entry).
+
+**US-A88 (D10) adds**
+- Migration `0060` applied local + remote.
+- Tests: `test/pos/optional-payment-reference.test.ts` (setting round-trip + admin-only; confirm
+  and settle with the requirement off → success, still `pending`, no QR; reference-if-given stored;
+  cross-org isolation) — with `payment-verification.test.ts` and `settle-method.test.ts` passing
+  **unedited** as the scope boundary.
+- `SettleSheet.test.tsx` covers the *(opcional)* mode; the Settings Switch commits on tap.
+- US-A88 + the feature line registered in `docs/SPEC.md`; US-AG41's story annotated.
