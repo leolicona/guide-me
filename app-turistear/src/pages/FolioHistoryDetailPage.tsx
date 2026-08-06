@@ -10,6 +10,7 @@ import {
   Fade,
   Stack,
   Divider,
+  Chip,
 } from '@mui/material'
 import ArrowBackRounded from '@mui/icons-material/ArrowBackRounded'
 import { useFolio, useFolioCancellationQuote } from '../features/pos/hooks'
@@ -19,13 +20,12 @@ import WarningAmberRounded from '@mui/icons-material/WarningAmberRounded'
 import {
   BookingActions,
   ExpiredBookingBanner,
-  venceLabel,
   TicketWhatsAppButton,
   DeliveryBadge,
 } from '../features/bookings'
 import { deliveryState } from '../features/pos/delivery'
-import { FolioStatusChip } from '../features/folios'
-import { MoneyText, SectionCard } from '../components'
+import { FolioStatusChip, folioTimeChip, useNowSeconds } from '../features/folios'
+import { MoneyText, SectionCard, StatusChip } from '../components'
 import { formatMoney } from '../features/catalog/types'
 import { folioLineMeta } from '../features/folios/folioLineLabel'
 import { ROUTES } from '../config/routes'
@@ -47,8 +47,13 @@ export default function FolioHistoryDetailPage() {
   const { data: folio, isLoading, isError } = useFolio(id)
   // Same request as above (shared query key) — US-A76: what cancelling now would cost.
   const { data: quote, isLoading: quoteLoading } = useFolioCancellationQuote(id)
+  // US-A84 D19 — the clock resolves in an effect, never `Date.now()` in render: this page sits
+  // open while the agent talks to the customer, and a frozen countdown is a wrong screen.
+  const nowSeconds = useNowSeconds()
 
   const isBooking = folio?.status === 'booking'
+  // The same time channel the list card derives — one clock, whichever the folio runs against.
+  const timeChip = folio ? folioTimeChip(folio, nowSeconds) : null
 
   return (
     <Fade in timeout={400}>
@@ -84,20 +89,28 @@ export default function FolioHistoryDetailPage() {
                 <Typography variant="h5" component="h1">
                   Folio
                 </Typography>
-                <FolioStatusChip status={folio.status} />
+                <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+                  {/* One StatusChip per active axis, same vocabulary as the admin detail (D8):
+                      an axis at its default value says nothing here. */}
+                  {folio.payment_verification === 'pending' && (
+                    <StatusChip status="pending" label="Por verificar" />
+                  )}
+                  <FolioStatusChip status={folio.status} />
+                </Stack>
               </Stack>
               <Typography variant="caption" color="text.secondary">
                 {folio.id} · {formatDate(folio.created_at)}
               </Typography>
-              {/* US-AG07.3 — live apartado countdown, inline on the existing detail. */}
-              {isBooking && folio.booking_expires_at != null && (
-                <Typography
-                  variant="caption"
-                  color="warning.main"
-                  sx={{ display: 'block', mt: 0.5, fontWeight: 600 }}
-                >
-                  {venceLabel(folio.booking_expires_at)}
-                </Typography>
+              {/* US-AG07.3 — the folio's clock, drawn exactly as the list card draws its time
+                  chip. Derives from useNowSeconds (D19), never Date.now() in render. */}
+              {timeChip && (
+                <Chip
+                  size="small"
+                  variant="outlined"
+                  color={timeChip.tone}
+                  label={timeChip.label}
+                  sx={{ mt: 0.5, display: 'flex', width: 'fit-content' }}
+                />
               )}
             </Box>
 

@@ -22,7 +22,14 @@ import {
   Switch,
 } from '@mui/material'
 import ArrowBackRounded from '@mui/icons-material/ArrowBackRounded'
-import { useFolio, useCancelFolio, useConfirmRefund, FolioStatusChip } from '../features/folios'
+import {
+  useFolio,
+  useCancelFolio,
+  useConfirmRefund,
+  FolioStatusChip,
+  folioTimeChip,
+  useNowSeconds,
+} from '../features/folios'
 import { refundReceiptUrl } from '../features/folios/refundReceipt'
 import { FolioWorkActions } from '../features/folios/components/FolioWorkActions'
 import type { FolioDetail } from '../features/folios/types'
@@ -32,7 +39,6 @@ import WarningAmberRounded from '@mui/icons-material/WarningAmberRounded'
 import {
   BookingActions,
   ExpiredBookingBanner,
-  venceLabel,
   TicketWhatsAppButton,
   DeliveryBadge,
 } from '../features/bookings'
@@ -40,7 +46,7 @@ import { deliveryState } from '../features/pos/delivery'
 import { ServiceError } from '../services/authService'
 import { formatMoney } from '../features/catalog/types'
 import { folioLineMeta } from '../features/folios/folioLineLabel'
-import { ConfirmSheet, MoneyText, SectionCard } from '../components'
+import { ConfirmSheet, MoneyText, SectionCard, StatusChip } from '../components'
 import { ROUTES } from '../config/routes'
 
 const DATE_FMT: Intl.DateTimeFormatOptions = {
@@ -71,6 +77,9 @@ export default function FolioDetailPage() {
   const { id } = useParams<{ id: string }>()
   const { data, isLoading, isError } = useFolio(id)
   const folio = data?.folio
+  // US-A84 D19 — the clock resolves in an effect, never `Date.now()` in render: this page sits
+  // open while an admin works, and a countdown frozen at load time is a wrong screen.
+  const nowSeconds = useNowSeconds()
   // US-A69 — what cancelling right now would cost, priced by the org's ladder. Every org has one
   // (D17), so this is null only for a folio that is already cancelled: nothing left to quote.
   const quote = data?.quote ?? null
@@ -87,6 +96,8 @@ export default function FolioDetailPage() {
   const isCancelled = folio?.status === 'cancelled'
   // US-AG07/D5 — a live apartado: it gets the booking actions instead of the US-A21 cancel.
   const isBooking = folio?.status === 'booking'
+  // The same time channel the list card derives — one clock, whichever the folio runs against.
+  const timeChip = folio ? folioTimeChip(folio, nowSeconds) : null
 
   const closeDialog = () => {
     setConfirmOpen(false)
@@ -174,24 +185,31 @@ export default function FolioDetailPage() {
                   {/* US-A68 — the affiliate shift operator who took the sale, when applicable. */}
                   {folio.operator_name ? ` · ${folio.operator_name}` : ''}
                 </Typography>
-                {/* US-AG07.3 — live apartado countdown, inline on the existing detail. */}
-                {isBooking && folio.booking_expires_at != null && (
-                  <Typography
-                    variant="caption"
-                    color="warning.main"
-                    sx={{ display: 'block', mt: 0.5, fontWeight: 600 }}
-                  >
-                    {venceLabel(folio.booking_expires_at)}
-                  </Typography>
+                {/* US-AG07.3 — the folio's clock, drawn exactly as the list card draws its time
+                    chip: the apartado countdown, or once cancelled with money owed, the age of
+                    the debt. Derives from useNowSeconds (D19), never Date.now() in render. */}
+                {timeChip && (
+                  <Chip
+                    size="small"
+                    variant="outlined"
+                    color={timeChip.tone}
+                    label={timeChip.label}
+                    sx={{ mt: 0.5, display: 'flex', width: 'fit-content' }}
+                  />
                 )}
               </Box>
               <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+                {/* One StatusChip per active axis, in the list's vocabulary (D8): an axis at its
+                    default value says nothing here. Icon-paired functional colors, never teal. */}
+                {folio.payment_verification === 'pending' && (
+                  <StatusChip status="pending" label="Por verificar" />
+                )}
                 {/* US-A23 — refund status at a glance, next to the folio status. */}
                 {folio.refund_status === 'pending' && (
-                  <Chip size="small" color="warning" variant="outlined" label="Reembolso pendiente" />
+                  <StatusChip status="pending" label="Reembolso pendiente" />
                 )}
                 {folio.refund_status === 'refunded' && (
-                  <Chip size="small" color="success" variant="outlined" label="Reembolsado" />
+                  <StatusChip status="paid" label="Reembolsado" />
                 )}
                 <FolioStatusChip status={folio.status} />
               </Stack>
