@@ -301,11 +301,17 @@ makes the replaced QR actually stop admitting, which is the enforcement the warn
 in for.
 
 **On a `paid` folio the sheet does not end at the confirm** (D16, second half): the move just
-killed a ticket the customer may have saved, so the success state **chains straight into the
-same WhatsApp send the receipt uses** — *Fecha movida → Enviar boletos por WhatsApp*, one tap
-away from the person who promised it. Skipping is allowed (*Listo*): the outbox row keeps the
-pending send visible as work either way, so a skipped handoff cannot silently strand the
-customer with a dead QR.
+killed a ticket the customer may have saved, so the success state **chains straight into the same
+WhatsApp send the receipt uses** — *Fecha movida → Enviar boletos por WhatsApp*.
+
+**That send is the whole footer, and it is ONE tap for three things** *(user decision)*: it opens
+WhatsApp with the customer's message, **records the delivery** (`ticket-delivery`, so the folio
+stops reading *pendiente de enviar*), and **closes the sheet**. A *Listo* button beside it was a
+tap that bought nothing and competed with the only action worth taking there, so `FormSheet`
+learns to omit its footer when a terminal state's one action lives in the body — dismissal stays
+the sheet contract (X / backdrop / swipe), which is how a seller who will send later gets out.
+Either way the outbox row keeps the pending send visible as work, so a skipped handoff cannot
+silently strand the customer with a dead QR.
 
 **The tourist's portal** gains the same picker behind *"Cambiar mi fecha"*, which creates a request
 rather than a move — and says so, because a customer who believes their date changed and finds it

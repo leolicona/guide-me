@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import { http, HttpResponse } from 'msw'
 import { server } from '../../../test/server'
-import { renderWithProviders, screen, userEvent } from '../../../test/renderWithProviders'
+import { renderWithProviders, screen, userEvent, waitFor } from '../../../test/renderWithProviders'
 import { RescheduleSheet } from './RescheduleSheet'
 
 // US-AG52 — the day pager. It opens on the FIRST day with room for the group, shows that day's
@@ -146,9 +146,7 @@ describe('RescheduleSheet — the day pager', () => {
   // D16, second half — the sheet does not end at the confirm on a paid folio. The move just
   // killed a ticket the customer may have saved, so the replacement's send must be ONE tap away
   // from the person who promised it — the same WhatsApp send the receipt uses.
-  it('a paid move chains straight into sending the new ticket', async () => {
-    serveSlots()
-    const onClose = vi.fn()
+  const servePaidMove = () =>
     server.use(
       http.post('/api/pos/folios/:id/reschedule', () =>
         HttpResponse.json({
@@ -164,6 +162,11 @@ describe('RescheduleSheet — the day pager', () => {
         }),
       ),
     )
+
+  it('a paid move chains straight into sending the new ticket', async () => {
+    serveSlots()
+    servePaidMove()
+    const onClose = vi.fn()
     renderWithProviders(<RescheduleSheet {...props} isPaid onClose={onClose} />)
 
     await userEvent.click(await screen.findByRole('button', { name: /14:00/ }))
@@ -172,12 +175,41 @@ describe('RescheduleSheet — the day pager', () => {
     // The sheet became the handoff instead of closing.
     expect(await screen.findByText('Fecha movida')).toBeInTheDocument()
     expect(onClose).not.toHaveBeenCalled()
-    expect(
-      screen.getByRole('button', { name: /Enviar boletos por WhatsApp/ }),
-    ).toBeInTheDocument()
-    // Skipping is allowed: the footer turned into Listo, and the outbox keeps the send visible.
-    await userEvent.click(screen.getByRole('button', { name: 'Listo' }))
-    expect(onClose).toHaveBeenCalled()
+    expect(screen.getByRole('button', { name: /Enviar boletos por WhatsApp/ })).toBeEnabled()
+  })
+
+  // ONE tap does all three things. A second footer button ("Listo") beside the send was a tap
+  // that bought nothing and competed with the only action worth taking there.
+  it('the send opens WhatsApp, RECORDS the delivery and closes — in a single tap', async () => {
+    serveSlots()
+    servePaidMove()
+    const onClose = vi.fn()
+    const open = vi.spyOn(window, 'open').mockReturnValue(null)
+    const marked: string[] = []
+    server.use(
+      http.post('/api/pos/folios/:id/ticket-delivery', ({ params }) => {
+        marked.push(String(params.id))
+        return HttpResponse.json({ folio: { id: 'folio-1', tickets_sent_at: 1_800_000_000 } })
+      }),
+    )
+    renderWithProviders(<RescheduleSheet {...props} isPaid onClose={onClose} />)
+
+    await userEvent.click(await screen.findByRole('button', { name: /14:00/ }))
+    await userEvent.click(screen.getByRole('button', { name: 'Reagendar' }))
+    await screen.findByText('Fecha movida')
+
+    // The handoff carries NO footer button — the send is the whole footer.
+    expect(screen.queryByRole('button', { name: 'Listo' })).toBeNull()
+
+    await userEvent.click(screen.getByRole('button', { name: /Enviar boletos por WhatsApp/ }))
+
+    // 1. WhatsApp opened with the customer's message…
+    expect(open).toHaveBeenCalledWith(expect.stringContaining('wa.me'), '_blank')
+    // 2. …the delivery was RECORDED (the folio stops reading "pendiente de enviar")…
+    await waitFor(() => expect(marked).toEqual(['folio-1']))
+    // 3. …and the sheet closed itself. No second tap.
+    await waitFor(() => expect(onClose).toHaveBeenCalled())
+    open.mockRestore()
   })
 
   it('a live apartado’s move just closes — no ticket existed to replace', async () => {

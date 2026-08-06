@@ -154,11 +154,9 @@ export function RescheduleSheet({ open, onClose, folioId, lines, isPaid }: Resch
 
   const submit = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault()
-    if (done) {
-      onClose()
-      return
-    }
-    if (!lineId || !slotId) return
+    // The handoff has no footer button, so nothing submits this form there. Guarded anyway: a
+    // stray Enter must never re-fire the move that already succeeded.
+    if (done || !lineId || !slotId) return
     reschedule.mutate(
       { folioId, moves: [{ folio_line_id: lineId, to_slot_id: slotId }] },
       // A live apartado's move ends here. A PAID move just killed a ticket the customer may have
@@ -172,7 +170,12 @@ export function RescheduleSheet({ open, onClose, folioId, lines, isPaid }: Resch
       open={open}
       onClose={onClose}
       title="Reagendar"
-      submitLabel={done ? 'Listo' : 'Reagendar'}
+      // The handoff's ONE action is the send, and it already does everything a footer button
+      // would: it opens WhatsApp, records the delivery, and closes the sheet. A "Listo" beside it
+      // was a second exit competing with the only thing worth doing. Dismissing without sending
+      // stays available through the sheet contract (X / backdrop / swipe), and the outbox row
+      // keeps the unsent replacement visible as pending work.
+      submitLabel={done ? undefined : 'Reagendar'}
       onSubmit={submit}
       busy={reschedule.isPending}
       disabled={!done && (!lineId || !slotId)}
@@ -186,8 +189,10 @@ export function RescheduleSheet({ open, onClose, folioId, lines, isPaid }: Resch
     >
       {done ? (
         // D16, second half — the handoff. The old link is dead; the replacement travels NOW, in
-        // the same gesture, through the same send the receipt uses. Skipping this screen is
-        // allowed (Listo): the outbox row keeps the send visible as pending work either way.
+        // the same gesture, through the same send the receipt uses. ONE tap does all three things
+        // (open WhatsApp · record the delivery · close), which is why there is no footer button
+        // beside it. Skipping is dismissing the sheet; the outbox row keeps the send visible as
+        // pending work either way.
         <Stack spacing={2} sx={{ alignItems: 'stretch' }}>
           <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
             <CheckCircleRounded color="success" />
