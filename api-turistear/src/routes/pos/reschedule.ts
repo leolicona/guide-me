@@ -97,6 +97,7 @@ export const rescheduleFolio = async (ctx: Ctx) => {
       grace: organizations.bookingGraceOffsetMinutes,
       buffer: organizations.bookingPreDepartureBufferHours,
       creationCutoff: organizations.bookingCreationCutoffHours,
+      noShowMargin: organizations.noShowMarginMinutes,
     })
     .from(organizations)
     .where(eq(organizations.id, org))
@@ -106,6 +107,7 @@ export const rescheduleFolio = async (ctx: Ctx) => {
   const grace = org_?.grace ?? 15
   const buffer = org_?.buffer ?? 24
   const creationCutoff = org_?.creationCutoff ?? 0
+  const noShowMargin = org_?.noShowMargin ?? 0
 
   // Rule 1's second half — "only before the line's release instant". `status` alone is not enough:
   // the sweep runs every 15 minutes, so an apartado past its grace instant can sit un-cancelled for
@@ -156,6 +158,9 @@ export const rescheduleFolio = async (ctx: Ctx) => {
         quantity: folioLines.quantity,
         zoneId: folioLines.zoneId,
         lineType: folioLines.lineType,
+        slotDate: folioLines.slotDate,
+        slotStartTime: folioLines.slotStartTime,
+        redeemedCount: folioLines.redeemedCount,
       })
       .from(folioLines)
       .where(
@@ -176,6 +181,33 @@ export const rescheduleFolio = async (ctx: Ctx) => {
         409,
         'Por ahora solo se reagendan líneas de tour, no estancias.',
       )
+    }
+
+    // D19 — on a PAID folio the door closes per line, at the same instant the seat starts reading
+    // wasted (the no-show margin, one clock with the fulfilment axis). Rescheduling a departed
+    // line would erase the no-show reading retroactively — the wasted-seat count would be
+    // rewritable by whoever insists hardest at a counter, and the no-show policy would be
+    // optional. The courtesy path for a customer the seller wants to keep is a negotiated manual
+    // discount on a NEW sale: bounded by the minimum price, recorded, auditable. A line with
+    // redeemed passes is refused for the stronger reason: it was (partly) consumed.
+    if (folio.status === 'paid') {
+      if (line.redeemedCount > 0) {
+        throw new ApiError(
+          'NOT_RESCHEDULABLE',
+          409,
+          'Esa línea ya tiene pases usados; un servicio consumido no se mueve.',
+        )
+      }
+      const departed = line.slotDate
+        ? naiveEpoch(line.slotDate, line.slotStartTime ?? '00:00', tz)
+        : null
+      if (departed !== null && nowSec > departed - noShowMargin * 60) {
+        throw new ApiError(
+          'NOT_RESCHEDULABLE',
+          409,
+          'La salida ya pasó: un no-show no se reagenda. La cortesía, si se acuerda, es un descuento en una venta nueva.',
+        )
+      }
     }
 
     const [dest] = await db

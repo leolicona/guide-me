@@ -33,6 +33,8 @@ export interface BookingFolio {
     slot_start_time: string | null
     quantity?: number
     line_type?: 'slot' | 'stay'
+    /** D19 — a line with redeemed passes was consumed and cannot move. */
+    redeemed_count?: number
   }[]
 }
 
@@ -247,7 +249,17 @@ export function BookingActions({
   // need, and before this their only option was cancelling, which runs the ladder against them.
   // The sheet warns that the current ticket dies and a new one is sent — unless the transfer is
   // still awaiting verification, in which case no ticket exists yet and there is nothing to kill.
-  if (folio.status === 'paid' && rescheduleLines.length > 0) {
+  //
+  // D19 — the door is per line and closes at departure: a departed line reads no-show and does not
+  // move (the courtesy is a discount on a NEW sale), and a line with redeemed passes was consumed.
+  // Client-clock date compare is a pre-filter only; the server holds the real guard.
+  const todayIso = new Date().toISOString().slice(0, 10)
+  const movablePaidLines = rescheduleLines.filter((l) => {
+    const src = folio.lines?.find((f) => f.id === l.id)
+    if ((src?.redeemed_count ?? 0) > 0) return false
+    return !l.slot_date || l.slot_date >= todayIso
+  })
+  if (folio.status === 'paid' && movablePaidLines.length > 0) {
     return (
       <>
         <Stack spacing={1.5}>
@@ -263,7 +275,7 @@ export function BookingActions({
           open={rescheduleOpen}
           onClose={() => setRescheduleOpen(false)}
           folioId={folio.id}
-          lines={rescheduleLines}
+          lines={movablePaidLines}
           isPaid={folio.payment_verification !== 'pending'}
         />
       </>

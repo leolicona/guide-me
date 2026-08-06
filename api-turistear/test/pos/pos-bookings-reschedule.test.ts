@@ -401,6 +401,71 @@ describe('US-AG52 — a PAID folio moves, and its ticket moves with it (D16)', (
     expect(folio.amount_paid).toBe(300000)
   })
 
+  // D19 — the door closes per line at the instant the seat starts reading wasted. Rescheduling a
+  // departed line would erase the no-show reading RETROACTIVELY: fulfilment derives from the
+  // line's current departure, so yesterday's wasted seat would vanish from the count, rewritten by
+  // whoever insists hardest at a counter. The courtesy path is a manual discount on a NEW sale.
+  it('S-7c — a paid no-show does not move', async () => {
+    const { organizationId, userId } = await seedUser({ email: AGENT, role: 'agent' })
+    const serviceId = await seedService(organizationId)
+    // Departed yesterday, nobody redeemed: the line READS no-show.
+    const from = await seedSlot({ organizationId, serviceId, date: dayOffset(-1) })
+    const to = await seedSlot({ organizationId, serviceId, date: dayOffset(9) })
+    const { folioId, lineId } = await seedFolio({
+      organizationId, agentId: userId, slotId: from, serviceId, status: 'paid',
+    })
+
+    const res = await reschedule(AGENT, folioId, [{ folio_line_id: lineId, to_slot_id: to }])
+    expect(res.status).toBe(409)
+    expect(JSON.stringify(await res.json())).toContain('NOT_RESCHEDULABLE')
+    // Both slots untouched — and the line still reads no-show, because its departure did not move.
+    expect(await booked(from)).toBe(2)
+    expect(await booked(to)).toBe(0)
+    expect((await line(lineId)).slot_date).toBe(dayOffset(-1))
+  })
+
+  it('S-7d — the folio’s other, FUTURE line still moves: the door is per line', async () => {
+    const { organizationId, userId } = await seedUser({ email: AGENT, role: 'agent' })
+    const serviceId = await seedService(organizationId)
+    const departed = await seedSlot({ organizationId, serviceId, date: dayOffset(-1) })
+    const future = await seedSlot({ organizationId, serviceId, date: dayOffset(5), startTime: '11:00' })
+    const to = await seedSlot({ organizationId, serviceId, date: dayOffset(9) })
+    const { folioId } = await seedFolio({
+      organizationId, agentId: userId, slotId: departed, serviceId, status: 'paid',
+    })
+    // The second line, departing next week.
+    const futureLine = crypto.randomUUID()
+    await env.DB.prepare(
+      `INSERT INTO folio_lines (id, organization_id, folio_id, service_id, slot_id, service_name,
+         slot_date, slot_start_time, quantity, base_price, minimum_price, unit_price, line_total,
+         qr_token, redeemed_count, created_at)
+       VALUES (?, ?, ?, ?, ?, 'Tour Isla Mujeres', ?, '11:00', 2, 150000, 100000, 150000, 300000, 'tok-b', 0, ?)`,
+    ).bind(futureLine, organizationId, folioId, serviceId, future, dayOffset(5), nowSec()).run()
+    await env.DB.prepare(`UPDATE slots SET booked = booked + 2 WHERE id = ?`).bind(future).run()
+
+    const res = await reschedule(AGENT, folioId, [{ folio_line_id: futureLine, to_slot_id: to }])
+    expect(res.status).toBe(200)
+    expect(await booked(to)).toBe(2)
+    expect(await booked(future)).toBe(0)
+    // The missed departure is untouched: its no-show reading survives the sibling's move.
+    expect(await booked(departed)).toBe(2)
+  })
+
+  it('a line with redeemed passes was consumed and cannot move', async () => {
+    const { organizationId, userId } = await seedUser({ email: AGENT, role: 'agent' })
+    const serviceId = await seedService(organizationId)
+    const from = await seedSlot({ organizationId, serviceId })
+    const to = await seedSlot({ organizationId, serviceId, date: dayOffset(9) })
+    const { folioId, lineId } = await seedFolio({
+      organizationId, agentId: userId, slotId: from, serviceId, status: 'paid',
+    })
+    await env.DB.prepare(`UPDATE folio_lines SET redeemed_count = 1 WHERE id = ?`).bind(lineId).run()
+
+    const res = await reschedule(AGENT, folioId, [{ folio_line_id: lineId, to_slot_id: to }])
+    expect(res.status).toBe(409)
+    expect(await booked(from)).toBe(2)
+  })
+
   it('S-8b(ii) — the QR is RE-SIGNED, not merely re-announced', async () => {
     const { organizationId, userId } = await seedUser({ email: AGENT, role: 'agent' })
     const serviceId = await seedService(organizationId)

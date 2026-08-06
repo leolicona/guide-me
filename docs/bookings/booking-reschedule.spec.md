@@ -97,6 +97,7 @@ change meaning.
 | **D17** | **`booking_expires_at` is recalculated from the NEW earliest departure**, which is what `bookingExpiryDate` already does. | Three alternatives were weighed and the tiebreaker is **explainability**, which is the same thing this spec is for. Under D17 the sentence *"pagas 24 h antes de tu primer tour"* is **true**; under the alternatives it is false. *(2) Freezing the original deadline* closes the postpone-forever loophole but leaves the deadline arbitrarily earlier than any remaining departure. *(3) A ratchet, `min(old, new)`,* closes it too and still protects a customer who reschedules to something sooner — but produces *"¿por qué vence el lunes si mi tour es en tres semanas?"*, which nobody can answer at a counter. *(4) Per-line deadlines* is US-A22, blocked below. **The loophole is closed by a reschedule limit, not by a deadline rule** — *"puedes reagendar dos veces"* explains itself. |
 | **D18** | **Per-line release is NOT built**, although the sweep's use of the earliest departure means a two-service apartado is cancelled **whole** when the first service's grace passes — releasing seats that still had days to be paid for. | Real, and it is **US-A22** (*"Partial cancellations (per service within the folio) — Deferred to simplify inventory logic"*). The blocker is not inventory: `amount_paid` and `total` live on the **folio**, not the line, so a folio half-released has no defined balance. **Rescheduling resolves the case without opening it**: move the near service, the earliest departure moves with it (D17), and the later one is safe. Recorded so the next reader knows `sweep.ts:118`'s `Math.min(...departures)` is a known consequence, not an oversight. |
 | **D15** | **Authorization mirrors settle/cancel/reminder**: the folio's own seller, or an admin. Cross-org → `404`. | Rescheduling is a sale-shaped action on a sale the seller owns. Inventing a different rule for it would be the kind of drift that makes a permission model unlearnable. |
+| **D19** | **On a `paid` folio the door closes PER LINE, at the instant the seat starts reading wasted** (the no-show margin — one clock with the fulfilment axis). A departed line, or one with redeemed passes, returns `NOT_RESCHEDULABLE`. **The courtesy path for a no-show the seller wants to keep is a negotiated manual discount on a NEW sale** — bounded by the minimum price, recorded, auditable. | *(User decision.)* Fulfilment is DERIVED from the line's current departure, so rescheduling a departed line would erase the no-show reading **retroactively**: the wasted-seat count becomes rewritable by whoever insists hardest at a counter, and the no-show policy becomes optional. Per line rather than per folio, because a two-tour folio with one missed departure still owns its future seat — that line moves, the missed one does not. The already-collected money stays where the policy left it: retained in full. |
 
 ---
 
@@ -156,6 +157,9 @@ now than after a second table exists.
 
 1. A folio may be rescheduled while `status = 'booking'` **or `'paid'`** (D16), and only before the
    line's release instant. Anything else → `409 NOT_RESCHEDULABLE`.
+1b. **On a `paid` folio the refusal is per line** (D19): a line whose departure already reads
+    no-show (`now > salida − no_show_margin`, the fulfilment axis's own clock), or one with
+    `redeemed_count > 0`, is refused — the other lines of the folio remain movable.
 2. The destination slot must belong to the **same service** as the line being moved (D11); otherwise
    `422 DIFFERENT_SERVICE`.
 3. The destination must pass the **same atomic capacity guard** `confirmSale` applies, including the
@@ -370,6 +374,17 @@ Then `409 NOT_RESCHEDULABLE` — the hold ended at the instant the CLOCK says, n
 sweep gets around to it (apartado-stages S7). Without this, a reschedule extends stage ② by up to
 one cron interval.
 
+**S-7c — a paid no-show does not move (D19)**
+Given a `paid` folio whose line departed yesterday with `redeemed_count = 0`
+When the seller tries to reschedule it to next week
+Then `409 NOT_RESCHEDULABLE`, both slots untouched — and the line still READS no-show.
+*(The mutation this must catch: without the guard the move succeeds, and yesterday's wasted seat
+vanishes from the count because fulfilment derives from the line's CURRENT departure.)*
+
+**S-7d — but the folio's other, future line still moves**
+Given the same folio with a second line departing next Friday
+Then that line reschedules normally — the door is per line, not per folio.
+
 **S-8 — the agreement is recorded**
 Then one `folio_requests` row of `kind = 'reschedule'` exists per line moved, carrying both slots
 and `resolved_by` = the caller (D13). *(The first draft named a `folio_reschedules` table and an
@@ -531,6 +546,10 @@ scope may make the line's redundant, exactly as it did in `folio-state-machine.s
       itself would refuse with `BOOKING_TOO_LATE`
 - [x] The credit + expiry on the **folio detail** (`MoneyText`, semantic green), beside the
       request history that now includes reschedules
+- [x] **D19 / S-7c / S-7d** — a paid no-show does not move: the door closes per line at the
+      no-show margin (one clock with the fulfilment axis), redeemed lines are refused for the
+      stronger reason, and the paid folio's button offers only lines the server would accept.
+      The courtesy is a negotiated manual discount on a NEW sale — the mechanism already exists
 
 ---
 
