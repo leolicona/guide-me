@@ -6,7 +6,7 @@ Tracks confirmed bugs, root causes, and fixes. Each entry is immutable once clos
 
 ---
 
-## BUG-030 — Cancelling an Unverified-Transfer Folio Mints a Refund PIN for Money Never Confirmed — ⚠️ OPEN
+## BUG-030 — Cancelling an Unverified-Transfer Folio Mints a Refund PIN for Money Never Confirmed — ✅ FIXED
 
 **Found:** 2026-08-07, designing the folio detail's blocking-first action ladder (the question "should
 unverified money block the cancel?" turned out to have a money answer, not a UX answer).
@@ -25,9 +25,12 @@ clawback. The two entrances disagree about whether the money exists.
 **Mitigation shipped (frontend):** the detail hides `Cancelar folio` / `Cancelar apartado` while
 verification is pending; the work card offers `Verificar` / `Rechazar pago` instead.
 
-**Fix required (backend):** `cancelFolio` and `cancelBooking` refuse (`409`,
-`PAYMENT_UNVERIFIED`) while `payment_verification = 'pending'`, pointing at verify/reject — the
-UI mirror is already in place.
+**Fix (#80, merged 2026-08-07):** `cancelFolio` and `cancelBooking` refuse (`409`,
+`PAYMENT_UNVERIFIED`) while `payment_verification = 'pending'`, pointing at verify/reject.
+Deliberately narrow: `rejectPayment` remains the cancel path for unconfirmed money, and the
+expiry sweep is untouched (it enters via `cancelFolioPriced`) — an expired hold releases its
+seats regardless of what the money is waiting on, pinned by
+`test/folios/cancel-unverified-guard.test.ts` (5 scenarios). The UI mirror shipped in #77.
 
 ---
 
