@@ -1,5 +1,5 @@
-import type { ReactNode } from 'react'
-import { Box, Stack, Typography } from '@mui/material'
+import { useState, type ReactNode } from 'react'
+import { Box, Button, Collapse, Stack, Typography } from '@mui/material'
 import ReceiptLongRounded from '@mui/icons-material/ReceiptLongRounded'
 import PaymentsRounded from '@mui/icons-material/PaymentsRounded'
 import TaskAltRounded from '@mui/icons-material/TaskAltRounded'
@@ -195,14 +195,25 @@ export interface FolioTimelineProps {
    * `cancelled`/`rescheduled` events and get no second row. Supersedes the separate
    * "Historial de solicitudes" card. */
   requests?: FolioCancellationRequest[]
+  /** Collapsed mode for a high position on the page: the LATEST row as a one-line summary plus
+   * "Ver todo (n)" — context above the money without pushing the money down (the detail sits the
+   * timeline between the status chips and the payment card; a mature folio carries 10-15 rows). */
+  collapsible?: boolean
 }
 
 // US-A24 / US-AG53 — the sale as a story (docs/folios/folio-timeline.spec.md D8): a plain
 // oldest-first list inside `Historial`. Events arrive already sorted server-side; the ONLY
 // reordering here is inserting the derived Salida marker at its chronological slot. Admin and
 // seller render the identical component (D6) — no role variants.
-export function FolioTimeline({ events, lines, fulfillment, requests }: FolioTimelineProps) {
+export function FolioTimeline({
+  events,
+  lines,
+  fulfillment,
+  requests,
+  collapsible = false,
+}: FolioTimelineProps) {
   const formatDate = useOrgDateFormatter(DATE_FMT) // US-A66 — org-local audit timestamps
+  const [expanded, setExpanded] = useState(false)
 
   const eventRows: TimelineRow[] = (events ?? []).map((ev) => {
     // D10 — actor NULL is the system's sweep, except the Visto beacon, which only the tourist fires.
@@ -284,37 +295,53 @@ export function FolioTimeline({ events, lines, fulfillment, requests }: FolioTim
   })
   while (di < derived.length) rows.push(derived[di++].row)
 
+  const renderRow = (row: TimelineRow) => (
+    <Stack key={row.key} direction="row" spacing={1.5} sx={{ alignItems: 'flex-start' }}>
+      <Box sx={{ color: row.color, display: 'flex', mt: '2px' }}>{row.icon}</Box>
+      <Box sx={{ minWidth: 0 }}>
+        <Typography variant="body2" sx={{ fontWeight: 600 }}>
+          {row.primary}
+        </Typography>
+        {row.details?.map((detail) => (
+          <Typography key={detail} variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+            {detail}
+          </Typography>
+        ))}
+        <Typography variant="caption" color="text.secondary">
+          {row.caption}
+        </Typography>
+      </Box>
+    </Stack>
+  )
+
+  const latest = rows[rows.length - 1]
+  const collapsed = collapsible && !expanded
+
   return (
     <SectionCard title="Historial">
       {rows.length === 0 ? (
         <Typography variant="body2" color="text.secondary">
           Sin historial
         </Typography>
+      ) : collapsed ? (
+        <Stack spacing={1}>
+          {renderRow(latest)}
+          {rows.length > 1 && (
+            <Button size="small" onClick={() => setExpanded(true)} sx={{ alignSelf: 'flex-start' }}>
+              Ver todo ({rows.length})
+            </Button>
+          )}
+        </Stack>
       ) : (
         <Stack spacing={2}>
-          {rows.map((row) => (
-            <Stack key={row.key} direction="row" spacing={1.5} sx={{ alignItems: 'flex-start' }}>
-              <Box sx={{ color: row.color, display: 'flex', mt: '2px' }}>{row.icon}</Box>
-              <Box sx={{ minWidth: 0 }}>
-                <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                  {row.primary}
-                </Typography>
-                {row.details?.map((detail) => (
-                  <Typography
-                    key={detail}
-                    variant="caption"
-                    color="text.secondary"
-                    sx={{ display: 'block' }}
-                  >
-                    {detail}
-                  </Typography>
-                ))}
-                <Typography variant="caption" color="text.secondary">
-                  {row.caption}
-                </Typography>
-              </Box>
-            </Stack>
-          ))}
+          <Collapse in appear={collapsible}>
+            <Stack spacing={2}>{rows.map(renderRow)}</Stack>
+          </Collapse>
+          {collapsible && (
+            <Button size="small" onClick={() => setExpanded(false)} sx={{ alignSelf: 'flex-start' }}>
+              Ver menos
+            </Button>
+          )}
         </Stack>
       )}
     </SectionCard>

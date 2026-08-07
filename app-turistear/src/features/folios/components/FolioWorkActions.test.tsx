@@ -134,4 +134,15 @@ describe('US-AG52 — a reschedule petition is reviewed as a reschedule', () => 
     expect(screen.getByText('El cliente pidió cancelar')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Aprobar cancelación' })).toBeInTheDocument()
   })
+
+  it('the ladder: an open petition parks the verification — one pending action at a time', () => {
+    renderWithProviders(
+      <FolioWorkActions
+        folio={folio({ payment_verification: 'pending', folio_requests: [req({})] })}
+      />,
+    )
+    expect(screen.getByText('El cliente pidió cancelar')).toBeInTheDocument()
+    // The unverified transfer waits its turn; the header chip still says it exists.
+    expect(screen.queryByText('Pago por verificar')).toBeNull()
+  })
 })

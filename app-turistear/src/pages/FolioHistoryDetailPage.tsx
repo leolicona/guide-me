@@ -120,6 +120,11 @@ export default function FolioHistoryDetailPage() {
             )}
             <ExpiredBookingBanner folio={folio} />
 
+            {/* US-AG53 — the sale as a story, COLLAPSED between the state and the money (D6:
+                identical placement to the admin detail). The POS detail carries no folio-level
+                fulfilment, so the Salida marker ships date-only here. */}
+            <FolioTimeline events={events} lines={folio.lines} collapsible />
+
             <Card>
               <CardContent>
                 {(folio.customer_name || folio.customer_email) && (
@@ -238,9 +243,6 @@ export default function FolioHistoryDetailPage() {
                 incorporated into this existing detail. Renders nothing for paid/plain folios. */}
             <BookingActions folio={folio} quote={quote} quoteLoading={quoteLoading} />
 
-            {/* US-AG53 — the sale as a story, last section (timeline D8). The POS detail carries
-                no folio-level fulfilment, so the Salida marker ships date-only here. */}
-            <FolioTimeline events={events} lines={folio.lines} />
           </Stack>
         )}
       </Box>

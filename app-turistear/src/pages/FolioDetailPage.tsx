@@ -12,6 +12,7 @@ import {
   Stack,
   Divider,
   Chip,
+  IconButton,
   TextField,
   Dialog,
   DialogTitle,
@@ -41,6 +42,8 @@ import RemoveDoneRounded from '@mui/icons-material/RemoveDoneRounded'
 import CheckCircleRounded from '@mui/icons-material/CheckCircleRounded'
 import PhoneRounded from '@mui/icons-material/PhoneRounded'
 import MailOutlineRounded from '@mui/icons-material/MailOutlineRounded'
+import WhatsAppIcon from '@mui/icons-material/WhatsApp'
+import { isSendablePhone, normalizePhone } from '../features/pos/phone'
 import {
   BookingActions,
   ExpiredBookingBanner,
@@ -105,6 +108,22 @@ export default function FolioDetailPage() {
   const isCancelled = folio?.status === 'cancelled'
   // US-AG07/D5 — a live apartado: it gets the booking actions instead of the US-A21 cancel.
   const isBooking = folio?.status === 'booking'
+  // The blocking-first ladder (US-A82 D12), mirrored on the detail: an open petition parks every
+  // other verb — resolving it IS the path (approving cancels priced by the ladder; rejecting
+  // unblocks), and a counter action alongside it would orphan the petition against a folio that
+  // already moved. Unverified money parks the cancel too: US-A21 would run the ladder over an
+  // amount the company never confirmed and mint a refund PIN for it (BUG-030) — `Rechazar pago`
+  // is the cancel path for unconfirmed money.
+  const hasOpenPetition = !!folio?.folio_requests?.some((r) => r.status === 'pending')
+  const awaitingVerification = folio?.payment_verification === 'pending' && !isCancelled
+  // Every dated line already departed → the folio is a countable fact (its fulfilment reading),
+  // not something to cancel: no seats to release, terminal-tier money. Client-clock pre-filter,
+  // date granularity — the same call BookingActions makes for its movable lines.
+  const todayIso = new Date().toISOString().slice(0, 10)
+  const allDeparted =
+    !!folio &&
+    (folio.lines?.length ?? 0) > 0 &&
+    folio.lines.every((l) => l.slot_date && l.slot_date < todayIso)
   // The same time channel the list card derives — one clock, whichever the folio runs against.
   const timeChip = folio ? folioTimeChip(folio, nowSeconds) : null
 
@@ -204,9 +223,10 @@ export default function FolioDetailPage() {
                 {folio.customer_name ?? 'Sin nombre'}
               </Typography>
               <Typography variant="caption" color="text.secondary">
-                {formatDate(folio.created_at)} · {folio.agent.name}
+                Agente: {folio.agent.name}
                 {/* US-A68 — the affiliate shift operator who took the sale, when applicable. */}
-                {folio.operator_name ? ` · ${folio.operator_name}` : ''}
+                {folio.operator_name ? ` (op. ${folio.operator_name})` : ''} •{' '}
+                {formatDate(folio.created_at)}
               </Typography>
               {/* One StatusChip per active axis in a FIXED order — money · clearance · debt ·
                   time — so the eye learns one position per axis (the list's one-channel-per-axis
@@ -284,6 +304,17 @@ export default function FolioDetailPage() {
               </Alert>
             )}
 
+            {/* US-A24 — the sale as a story, COLLAPSED between the state and the money so context
+                reads first without pushing the dominant figure down (money reads first — law #1).
+                Rejected petitions interleave as derived rows: one Historial, not two. */}
+            <FolioTimeline
+              events={data?.events}
+              lines={folio.lines}
+              fulfillment={folio.fulfillment}
+              requests={folio.folio_requests}
+              collapsible
+            />
+
             <Card>
               <CardContent>
                 {/* Contact reads as contact — icon-paired rows, and the phone dials on tap —
@@ -303,6 +334,22 @@ export default function FolioDetailPage() {
                           >
                             {folio.customer_phone}
                           </Typography>
+                          <Box sx={{ flex: 1 }} />
+                          {/* Continuous contact lives WITH the contact, not in the work card: the
+                              rain call — notify, negotiate, then decide — needs no pending action
+                              to exist. Empty compose; records nothing (US-A82 D7). */}
+                          {isSendablePhone(folio.customer_phone) && (
+                            <IconButton
+                              aria-label="Enviar mensaje por WhatsApp"
+                              onClick={() => {
+                                const phone = normalizePhone(folio.customer_phone).e164
+                                if (phone) window.open(`https://wa.me/${phone}`, '_blank')
+                              }}
+                              sx={{ width: 48, height: 48, color: 'primary.main' }}
+                            >
+                              <WhatsAppIcon />
+                            </IconButton>
+                          )}
                         </Stack>
                       )}
                       {folio.customer_email && (
@@ -428,9 +475,11 @@ export default function FolioDetailPage() {
               <Alert severity="error">No se pudo cancelar este folio. Inténtalo de nuevo.</Alert>
             )}
 
-            {/* whatsapp-qr-delivery — admin oversight: re-send the tickets over WhatsApp on the
-                seller's behalf (D15). Uses the seller's name in the message. */}
-            {folio.status === 'paid' && folio.portal_link && (
+            {/* whatsapp-qr-delivery — admin oversight: (re-)send the tickets over WhatsApp on the
+                seller's behalf (D15). A ladder rung: an open petition or unverified money parks
+                it — delivering tickets for a sale the customer asked to cancel (or whose money is
+                unconfirmed) is exactly what blocking-first exists to prevent. */}
+            {folio.status === 'paid' && folio.portal_link && !hasOpenPetition && !awaitingVerification && (
               <SectionCard>
                 <Stack spacing={1.5}>
                   <Stack
@@ -456,32 +505,28 @@ export default function FolioDetailPage() {
 
             {/* One action block, not floating verbs (design review, Should Fix 2): the booking
                 actions and the US-A21 cancel share a tight stack — secondary above destructive.
-                The cancel below is hidden for bookings so the two never overlap. */}
-            <Stack spacing={1.5}>
-              {/* US-AG07/07.4 — a live apartado settles, reschedules or cancels here (priced by
-                  the ladder since US-A76 — it is no longer a non-refundable flow). */}
-              <BookingActions folio={folio} quote={quote} quoteLoading={isLoading} />
+                The whole block parks while a petition is open (resolving it IS the action), the
+                cancel additionally parks on unverified money (BUG-030 — `Rechazar pago` is that
+                cancel) and on a fully departed folio (a countable fact, not a cancellable sale). */}
+            {!hasOpenPetition && (
+              <Stack spacing={1.5}>
+                {/* US-AG07/07.4 — a live apartado settles, reschedules or cancels here (priced by
+                    the ladder since US-A76 — it is no longer a non-refundable flow). */}
+                <BookingActions folio={folio} quote={quote} quoteLoading={isLoading} />
 
-              {!isCancelled && !isBooking && (
-                <Button
-                  variant="outlined"
-                  color="error"
-                  size="large"
-                  onClick={() => setConfirmOpen(true)}
-                >
-                  Cancelar folio
-                </Button>
-              )}
-            </Stack>
+                {!isCancelled && !isBooking && !awaitingVerification && !allDeparted && (
+                  <Button
+                    variant="outlined"
+                    color="error"
+                    size="large"
+                    onClick={() => setConfirmOpen(true)}
+                  >
+                    Cancelar folio
+                  </Button>
+                )}
+              </Stack>
+            )}
 
-            {/* US-A24 — the sale as a story, last section (timeline D8). Petitions ride along:
-                rejected ones interleave as derived rows — one Historial, not two. */}
-            <FolioTimeline
-              events={data?.events}
-              lines={folio.lines}
-              fulfillment={folio.fulfillment}
-              requests={folio.folio_requests}
-            />
           </Stack>
         )}
 

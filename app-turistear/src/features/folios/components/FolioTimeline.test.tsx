@@ -227,6 +227,30 @@ describe('the absorbed petition history — one Historial, not two', () => {
   })
 })
 
+describe('collapsible — context above the money without pushing the money down', () => {
+  const three = () => [
+    anEvent({ type: 'created', at: 1000 }),
+    anEvent({ type: 'payment', at: 2000, payload: { amount: 260000, method: 'cash', kind: 'full' } }),
+    anEvent({ type: 'tickets_sent', at: 3000 }),
+  ]
+
+  it('collapsed shows only the LATEST row plus Ver todo (n)', async () => {
+    const { container } = renderWithProviders(<FolioTimeline events={three()} collapsible />)
+    expect(screen.getByText('Boletos enviados')).toBeInTheDocument()
+    expect(container.textContent).not.toContain('Creado')
+    const toggle = screen.getByRole('button', { name: 'Ver todo (3)' })
+    toggle.click()
+    expect(await screen.findByText('Creado')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Ver menos' })).toBeInTheDocument()
+  })
+
+  it('without the flag the full list renders, as the tests above assume', () => {
+    const { container } = renderWithProviders(<FolioTimeline events={three()} />)
+    expect(container.textContent).toContain('Creado')
+    expect(screen.queryByRole('button', { name: /Ver todo/ })).toBeNull()
+  })
+})
+
 describe('the empty timeline', () => {
   it('an empty events array still renders the card with its empty line', () => {
     renderWithProviders(<FolioTimeline events={[]} />)

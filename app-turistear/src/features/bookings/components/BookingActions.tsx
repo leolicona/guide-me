@@ -201,15 +201,20 @@ export function BookingActions({
           >
             Reagendar
           </Button>
-          <Button
-            variant="outlined"
-            color="error"
-            size="large"
-            disabled={busy}
-            onClick={() => setConfirmOpen(true)}
-          >
-            Cancelar apartado
-          </Button>
+          {/* BUG-030 — an unverified transfer deposit parks the cancel: the ladder would price
+              money the company never confirmed and mint a refund PIN for it. `Rechazar pago`
+              (the work card) is the cancel path for unconfirmed money. */}
+          {folio.payment_verification !== 'pending' && (
+            <Button
+              variant="outlined"
+              color="error"
+              size="large"
+              disabled={busy}
+              onClick={() => setConfirmOpen(true)}
+            >
+              Cancelar apartado
+            </Button>
+          )}
         </Stack>
 
         <RescheduleSheet

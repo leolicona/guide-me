@@ -121,7 +121,9 @@ export function FolioWorkActions({ folio }: { folio: FolioDetail }) {
         </SectionCard>
       )}
 
-      {awaitingVerification && (
+      {/* The ladder, made literal: an open petition parks the verification below — one pending
+          action at a time, the header chip still says the unverified money exists. */}
+      {!pending && awaitingVerification && (
         <SectionCard>
           <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 0.5 }}>
             Pago por verificar
