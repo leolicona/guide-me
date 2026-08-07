@@ -5,6 +5,7 @@ import type {
   CancellationRequestStatus,
   ConfirmRefundInput,
   FolioDetail,
+  FolioEvent,
   FolioFilters,
   FolioListItem,
   RejectCancellationRequestInput,
@@ -73,12 +74,14 @@ export const getFolioCounts = (): Promise<FolioCounts> =>
 // would cost when the org has a cancellation policy (`cancellation_quote`, null otherwise).
 export const getFolio = async (
   id: string,
-): Promise<{ folio: FolioDetail; quote: CancellationQuote | null }> => {
+): Promise<{ folio: FolioDetail; quote: CancellationQuote | null; events: FolioEvent[] }> => {
   const res = await request<{
     folio: FolioDetail
     cancellation_quote?: CancellationQuote | null
+    // US-A24 — the narrative rides the detail (timeline D5); absent pre-timeline ⇒ none.
+    events?: FolioEvent[]
   }>(`/api/folios/${id}`)
-  return { folio: res.folio, quote: res.cancellation_quote ?? null }
+  return { folio: res.folio, quote: res.cancellation_quote ?? null, events: res.events ?? [] }
 }
 
 // D10 — `reason` is the ONLY thing a caller may send. The `clawback` (US-A26) and
