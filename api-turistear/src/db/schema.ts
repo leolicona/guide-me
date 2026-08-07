@@ -969,6 +969,43 @@ export const folioPayments = sqliteTable('folio_payments', {
     .default(sql`(unixepoch())`),
 })
 
+// US-A24 / US-AG53 (docs/folios/folio-timeline.spec.md) — the folio's append-only narrative. One
+// row per USER ACTION (D9), written in the SAME batch as its mutation (D3, the BUG-013 lesson).
+// A narrative, never an authority: no money or state computation reads it — every fact stays
+// authoritative where it already lives (folios, folio_payments). actor NULL renders "Sistema"
+// (the expiry sweep) or "Cliente" (the Visto beacon). Backfilled rows (migration 0061) carry the
+// SOURCE column's timestamp as created_at, never the migration's clock.
+export const folioEvents = sqliteTable('folio_events', {
+  id: text('id').primaryKey(),
+  organizationId: text('organization_id')
+    .notNull()
+    .references(() => organizations.id),
+  folioId: text('folio_id')
+    .notNull()
+    .references(() => folios.id),
+  eventType: text('event_type', {
+    enum: [
+      'created',
+      'payment',
+      'payment_verified',
+      'transfer_rejected',
+      'tickets_sent',
+      'tickets_viewed',
+      'reminder_sent',
+      'rescheduled',
+      'cancelled',
+      'refund_confirmed',
+    ],
+  }).notNull(),
+  actorId: text('actor_id').references(() => users.id),
+  // The PIN shift that acted (US-A68); null for an in-house (agent/admin) action.
+  operatorId: text('operator_id').references((): any => affiliateOperators.id),
+  payload: text('payload'), // JSON, shape per event_type (spec § Data Model)
+  backfilled: integer('backfilled', { mode: 'boolean' }).notNull().default(false),
+  // The event's OWN moment — the mutation's clock, never the insert's (business rule 3).
+  createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+})
+
 // US-A86 / US-AG51 (docs/folios/folio-state-machine.spec.md) — the notification outbox. One row per
 // (folio, event, channel) the system decided to emit, unique on that triple so a re-run of a cron or
 // a double-tapped button cannot duplicate a message.
@@ -1052,6 +1089,8 @@ export type FolioAccessToken = typeof folioAccessTokens.$inferSelect
 export type NewFolioAccessToken = typeof folioAccessTokens.$inferInsert
 export type CancellationRequest = typeof folioRequests.$inferSelect
 export type NewCancellationRequest = typeof folioRequests.$inferInsert
+export type FolioEvent = typeof folioEvents.$inferSelect
+export type NewFolioEvent = typeof folioEvents.$inferInsert
 export type AccommodationUnitType = typeof accommodationUnitTypes.$inferSelect
 export type NewAccommodationUnitType = typeof accommodationUnitTypes.$inferInsert
 export type AccommodationSeason = typeof accommodationSeasons.$inferSelect

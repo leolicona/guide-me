@@ -239,6 +239,7 @@ const clearDb = async () => {
   for (const t of [
     'folio_access_tokens',
     'folio_line_extras',
+    'folio_events',
     'folio_requests',
     'folio_lines',
     'folio_payments',

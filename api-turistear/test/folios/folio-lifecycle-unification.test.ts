@@ -97,6 +97,7 @@ beforeEach(async () => {
   await env.DB.exec('DELETE FROM folio_requests')
   await env.DB.exec('DELETE FROM folio_payments')
   await env.DB.exec('DELETE FROM notifications')
+  await env.DB.exec('DELETE FROM folio_events')
   await env.DB.exec('DELETE FROM folios')
   await clearTenancyDb()
 })

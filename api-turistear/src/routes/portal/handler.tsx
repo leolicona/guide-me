@@ -11,6 +11,7 @@ import {
   organizations,
   services,
 } from '../../db/schema'
+import { folioEventRow } from '../../utils/folioEvents'
 
 // Tourist self-service portal (US-T01–T05) — PUBLIC Worker-rendered pages (spec D1).
 // No session, no role: the folio-scoped access token in the URL IS the credential (D2).
@@ -378,10 +379,11 @@ export const markPortalSeen = async (c: PortalContext) => {
   const resolution = await resolveToken(db, c.req.param('token'))
   if (resolution.kind !== 'ok') return c.body(null, 204)
 
+  const now = new Date()
   c.executionCtx.waitUntil(
     db
       .update(folios)
-      .set({ ticketsViewedAt: new Date() })
+      .set({ ticketsViewedAt: now })
       .where(
         and(
           eq(folios.id, resolution.folioId),
@@ -389,7 +391,19 @@ export const markPortalSeen = async (c: PortalContext) => {
           isNull(folios.ticketsViewedAt), // first view wins the timestamp
         ),
       )
-      .then(() => undefined)
+      .returning({ id: folios.id })
+      // US-A24 — the narrative row, first view ONLY: a repeat open matches 0 rows and narrates
+      // nothing. The actor is the tourist, so actor_id stays NULL (renders "Cliente").
+      .then((won) =>
+        won.length > 0
+          ? folioEventRow(db, {
+              organizationId: resolution.organizationId,
+              folioId: resolution.folioId,
+              type: 'tickets_viewed',
+              at: now,
+            }).then(() => undefined)
+          : undefined,
+      )
       .catch(() => undefined),
   )
   return c.body(null, 204)

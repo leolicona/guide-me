@@ -43,6 +43,7 @@ import {
   type RescheduleMove,
 } from './reschedule'
 import { emitNotification } from '../../utils/notifications'
+import { folioEventRow, readFolioEvents } from '../../utils/folioEvents'
 import {
   nightsBetween,
   parseCsvInts,
@@ -1817,6 +1818,31 @@ export const confirmSale = async (c: PosContext) => {
     )
   }
 
+  // US-A24 — the narrative rows ride the sale's own batch (D3), on the request clock (one clock
+  // domain for the whole narrative — see folioEventRow). `created` is pushed first so the rowid
+  // tiebreak keeps it before the deposit at equal timestamps.
+  const saleNow = new Date()
+  statements.push(
+    folioEventRow(db, {
+      organizationId: org,
+      folioId,
+      type: 'created',
+      actorId: agent.userId,
+      operatorId: c.get('operator')?.operatorId ?? null,
+      payload: { sale_mode: isExpress ? 'express' : 'standard', initial_status: status },
+      at: saleNow,
+    }),
+    folioEventRow(db, {
+      organizationId: org,
+      folioId,
+      type: 'payment',
+      actorId: agent.userId,
+      operatorId: c.get('operator')?.operatorId ?? null,
+      payload: { amount: amountPaid, method, kind: status === 'booking' ? 'deposit' : 'full' },
+      at: saleNow,
+    }),
+  )
+
   // The folio + its inventory holds were committed above (the folio must precede the reservation
   // FK). If persisting the lines fails, compensate everything (re-increment slots, drop the
   // reservations + the folio) so no orphaned folio is left behind — restoring the all-or-nothing
@@ -2197,6 +2223,10 @@ export const getFolio = async (c: PosContext) => {
       ? null
       : await quoteCancellation(db, agent.organizationId, id, new Date())
 
+  // US-A24 / US-AG53 — the seller reads the SAME narrative the admin reads (D6): it is their sale,
+  // and they answer the customer in the field. No filtering, no second shape.
+  const events = await readFolioEvents(db, agent.organizationId, id)
+
   return c.json({
     folio,
     cancellation_quote: quote
@@ -2207,6 +2237,7 @@ export const getFolio = async (c: PosContext) => {
           reversed_commission: quote.reversedCommission,
         }
       : null,
+    events,
   })
 }
 
@@ -2233,6 +2264,15 @@ export const markTicketsSent = async (c: PosContext) => {
 
   const row = updated[0]
   if (!row) throw new ApiError('NOT_FOUND', 404, 'Folio not found')
+  // US-A24 — EACH send appends a row (the column is last-write-wins; the narrative is not).
+  // After the ownership-scoped update confirms, same residual class as claimReminder.
+  await folioEventRow(db, {
+    organizationId: agent.organizationId,
+    folioId: id,
+    type: 'tickets_sent',
+    actorId: agent.userId,
+    at: now,
+  })
   return c.json({
     tickets_sent_at: row.sentAt ? Math.floor(row.sentAt.getTime() / 1000) : null,
     tickets_viewed_at: row.viewedAt ? Math.floor(row.viewedAt.getTime() / 1000) : null,
@@ -2396,6 +2436,7 @@ export const settleBooking = async (c: PosContext) => {
     const deferUpdate = balanceNeedsVerification
       ? { paymentReference: body.payment_reference ?? null, paymentVerification: 'pending' as const }
       : {}
+    const settledNow = new Date()
     const transferStatements: BatchItem<'sqlite'>[] = [
       db
         .update(folios)
@@ -2403,13 +2444,23 @@ export const settleBooking = async (c: PosContext) => {
           status: 'paid',
           amountPaid: folio.total,
           commissionAmount,
-          settledAt: new Date(),
+          settledAt: settledNow,
           settledBy: agent.userId,
           ...deferUpdate,
-          updatedAt: new Date(),
+          updatedAt: settledNow,
         })
         .where(and(eq(folios.id, id), eq(folios.organizationId, org))),
       ...settleLedgerRows(),
+      // US-A24 — the settlement's narrative row, on the same clock as settled_at (S-6).
+      folioEventRow(db, {
+        organizationId: org,
+        folioId: id,
+        type: 'payment',
+        actorId: agent.userId,
+        operatorId: c.get('operator')?.operatorId ?? null,
+        payload: { amount: balanceAmount, method: settleMethod, kind: 'settlement' },
+        at: settledNow,
+      }),
     ]
     await db.batch(transferStatements as [BatchItem<'sqlite'>, ...BatchItem<'sqlite'>[]])
     const pending = await readFolio(db, org, agent.userId, id, c.env.QR_SECRET, c.env.API_BASE_URL)
@@ -2436,6 +2487,7 @@ export const settleBooking = async (c: PosContext) => {
     tz,
   )
 
+  const settledNow = new Date()
   const statements: BatchItem<'sqlite'>[] = [
     db
       .update(folios)
@@ -2443,12 +2495,22 @@ export const settleBooking = async (c: PosContext) => {
         status: 'paid',
         amountPaid: folio.total,
         commissionAmount,
-        settledAt: new Date(),
+        settledAt: settledNow,
         settledBy: agent.userId,
-        updatedAt: new Date(),
+        updatedAt: settledNow,
       })
       .where(and(eq(folios.id, id), eq(folios.organizationId, org))),
     ...settleLedgerRows(),
+    // US-A24 — the settlement's narrative row, on the same clock as settled_at (S-6).
+    folioEventRow(db, {
+      organizationId: org,
+      folioId: id,
+      type: 'payment',
+      actorId: agent.userId,
+      operatorId: c.get('operator')?.operatorId ?? null,
+      payload: { amount: balanceAmount, method: settleMethod, kind: 'settlement' },
+      at: settledNow,
+    }),
   ]
   for (const line of slotLineRows) {
     statements.push(
@@ -2546,6 +2608,7 @@ export const verifyPayment = async (c: PosContext) => {
       status: folios.status,
       paymentMethod: displayMethodSql,
       paymentVerification: folios.paymentVerification,
+      paymentReference: folios.paymentReference,
       customerName: folios.customerName,
       customerEmail: folios.customerEmail,
       total: folios.total,
@@ -2582,6 +2645,17 @@ export const verifyPayment = async (c: PosContext) => {
       ),
     )
 
+  // US-A24 — the clearance's narrative row, on the same clock as payment_verified_at.
+  const verifiedEventRow = () =>
+    folioEventRow(db, {
+      organizationId: org,
+      folioId: id,
+      type: 'payment_verified',
+      actorId: admin.userId,
+      payload: { reference: folio.paymentReference },
+      at: now,
+    })
+
   // A booking (deposit) is confirmed but mints no QR — its tickets wait for settle.
   if (folio.status !== 'paid') {
     await db.batch([
@@ -2590,6 +2664,7 @@ export const verifyPayment = async (c: PosContext) => {
         .set(verifyFields)
         .where(and(eq(folios.id, id), eq(folios.organizationId, org))),
       verifyPaymentRows,
+      verifiedEventRow(),
     ])
     const out = await readFolio(db, org, folio.agentId, id, c.env.QR_SECRET, c.env.API_BASE_URL)
     // US-A86 — the inbound this prevents is the most repeated one in the product: "¿ya les llegó
@@ -2644,6 +2719,7 @@ export const verifyPayment = async (c: PosContext) => {
       .set(verifyFields)
       .where(and(eq(folios.id, id), eq(folios.organizationId, org))),
     verifyPaymentRows,
+    verifiedEventRow(),
   ]
   for (const line of slotLineRows) {
     statements.push(
@@ -2736,7 +2812,11 @@ export const rejectPayment = async (c: PosContext) => {
   const body = (await c.req.json().catch(() => ({}))) as { reason?: string }
 
   const folioRows = await db
-    .select({ agentId: folios.agentId, paymentVerification: folios.paymentVerification })
+    .select({
+      agentId: folios.agentId,
+      paymentVerification: folios.paymentVerification,
+      paymentReference: folios.paymentReference,
+    })
     .from(folios)
     .where(and(eq(folios.id, id), eq(folios.organizationId, org)))
     .limit(1)
@@ -2769,6 +2849,19 @@ export const rejectPayment = async (c: PosContext) => {
         updatedAt: now,
       })
       .where(and(eq(folios.id, id), eq(folios.organizationId, org))),
+    // US-A24 — one action, one row (D9): the rejection IS the cancellation, so no second
+    // `cancelled` event is written for the same tap.
+    folioEventRow(db, {
+      organizationId: org,
+      folioId: id,
+      type: 'transfer_rejected',
+      actorId: admin.userId,
+      payload: {
+        reference: folio.paymentReference,
+        reason: body.reason ?? 'Pago electrónico rechazado',
+      },
+      at: now,
+    }),
   ]
   // Release the held spots (mirrors cancelBooking): zone counter + slot reconcile, or the slot total.
   for (const line of lineRows) {
@@ -3049,9 +3142,25 @@ export const voidExpressSale = async (c: PosContext) => {
       }),
     )
   }
-  if (statements.length > 0) {
-    await db.batch(statements as [BatchItem<'sqlite'>, ...BatchItem<'sqlite'>[]])
-  }
+  // US-A24 — one action, one row (D9): the void IS the cancellation, and the across-the-counter
+  // hand-back travels in the payload rather than as a second refund_confirmed row.
+  statements.push(
+    folioEventRow(db, {
+      organizationId: org,
+      folioId: id,
+      type: 'cancelled',
+      actorId: agent.userId,
+      payload: {
+        source: 'agent',
+        reason: 'Venta Express anulada por el vendedor',
+        clawback: folio.commissionAmount > 0,
+        refund_amount: folio.amountPaid,
+        kind: 'express_void',
+      },
+      at: now,
+    }),
+  )
+  await db.batch(statements as [BatchItem<'sqlite'>, ...BatchItem<'sqlite'>[]])
 
   return c.json({
     id,
@@ -3090,11 +3199,24 @@ export const claimReminder = async (c: PosContext) => {
   const nowSec = Math.floor(now.getTime() / 1000)
   const claim = { reminderStatus: 'sent' as const, reminderSentAt: now, reminderSentBy: agent.userId, updatedAt: now }
 
+  // US-A24 — written right after the claim wins rather than batched with it: the guarded UPDATE's
+  // RETURNING decides victory, and only the winner may narrate. Same crash-window residual class
+  // applyCancellation already accepts between its flip and its batch.
+  const reminderEvent = () =>
+    folioEventRow(db, {
+      organizationId: org,
+      folioId: id,
+      type: 'reminder_sent',
+      actorId: agent.userId,
+      at: now,
+    })
+
   if (body.force) {
     await db
       .update(folios)
       .set(claim)
       .where(and(eq(folios.id, id), eq(folios.organizationId, org)))
+    await reminderEvent()
     return c.json({ claimed: true, reminder_sent_at: nowSec, reminder_sent_by: agent.userId })
   }
 
@@ -3111,6 +3233,7 @@ export const claimReminder = async (c: PosContext) => {
     .returning({ id: folios.id })
 
   if (won.length > 0) {
+    await reminderEvent()
     return c.json({ claimed: true, reminder_sent_at: nowSec, reminder_sent_by: agent.userId })
   }
   // Already claimed by someone else — surface who/when so the UI can offer ¿Reenviar?
@@ -3169,6 +3292,7 @@ export const rescheduleBooking = async (c: PosContext) => {
     folioId: id,
     moves,
     nowSec: Math.floor(Date.now() / 1000),
+    origin: 'counter',
   })
 
   // D16 — a paid folio's QR names the old slot. Re-mint and re-deliver, or the customer is holding
