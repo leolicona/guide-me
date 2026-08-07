@@ -104,9 +104,11 @@ export default function FolioDetailPage() {
   const isCancelled = folio?.status === 'cancelled'
   // US-AG07/D5 — a live apartado: it gets the booking actions instead of the US-A21 cancel.
   const isBooking = folio?.status === 'booking'
-  // The blocking-first ladder (US-A82 D12), mirrored on the detail: an open petition parks every
-  // other verb — resolving it IS the path (approving cancels priced by the ladder; rejecting
-  // unblocks), and a counter action alongside it would orphan the petition against a folio that
+  // The blocking-first ladder (US-A82 D12), mirrored on the detail — solicitud → verificación →
+  // reembolso → entrega, one pending action at a time. An open petition parks every other verb,
+  // the refund CTA included (the orphan case: a petition left pending on a cancelled folio) —
+  // resolving it IS the path (approving cancels priced by the ladder; rejecting unblocks), and a
+  // counter action alongside it would orphan the petition against a folio that
   // already moved. Unverified money parks the cancel too: US-A21 would run the ladder over an
   // amount the company never confirmed and mint a refund PIN for it (BUG-030) — `Rechazar pago`
   // is the cancel path for unconfirmed money.
@@ -254,17 +256,10 @@ export default function FolioDetailPage() {
               </Stack>
             </Box>
 
-            {/* An expired apartado (cancelled + booking_expires_at) gets the reactivation
-                banner; a plain admin cancellation keeps the audit notice. */}
-            {isCancelled && folio.booking_expires_at == null && (
-              <Alert severity="error">
-                Cancelado{folio.cancelled_at ? ` el ${formatDate(folio.cancelled_at)}` : ''}
-                {folio.cancellation_reason ? ` — ${folio.cancellation_reason}` : ''}
-                {folio.cancellation_clawback
-                  ? ' · comisión del agente recuperada'
-                  : ' · comisión absorbida por la empresa'}
-              </Alert>
-            )}
+            {/* The cancellation AUDIT banner is gone: a historical fact is not an alert. The
+                Historial's `cancelled` row carries the date, the reason and the commission
+                outcome — the chip row above already says the state. Only the instructional
+                banner (what to do if the customer arrives) keeps banner rank. */}
             <ExpiredBookingBanner folio={folio} />
 
             {/* US-A84 (D14) — the work this folio needs, and the cancellation-request history that
@@ -272,9 +267,12 @@ export default function FolioDetailPage() {
             <FolioWorkActions folio={folio} />
 
             {/* US-A23 / US-T05 — the open refund obligation: the client reads their PIN in
-                the portal and hands it over to receive the cash; confirming here closes
-                the loop. */}
-            {folio.refund_status === 'pending' && (
+                the portal and hands it over to receive the cash; confirming here closes the
+                loop. A warning that carries a BUTTON is work, not a notice — so it is a rung
+                of the ladder (the list's D12 order: solicitud → verificación → reembolso →
+                entrega) and an open petition parks it: an orphaned petition on a cancelled
+                folio gets resolved before cash leaves the drawer. */}
+            {folio.refund_status === 'pending' && !hasOpenPetition && (
               <Alert severity="warning">
                 <Stack spacing={1.5} sx={{ alignItems: 'flex-start' }}>
                   <span>
@@ -295,13 +293,9 @@ export default function FolioDetailPage() {
                 </Stack>
               </Alert>
             )}
-            {folio.refund_status === 'refunded' && (
-              <Alert severity="success" icon={false}>
-                Reembolso confirmado
-                {folio.refunded_at ? ` el ${formatDate(folio.refunded_at)}` : ''}
-                {folio.refund_note ? ` — sin PIN: ${folio.refund_note}` : ' — con PIN del cliente'}
-              </Alert>
-            )}
+            {/* The refund-CONFIRMED banner is gone too — same reasoning: the obligation (pending)
+                is an alert; the outcome is history. The Historial's `refund_confirmed` row says
+                when, with PIN or with the override note (passed below). */}
 
             {/* US-A24 — the sale as a story, COLLAPSED between the state and the money so context
                 reads first without pushing the dominant figure down (money reads first — law #1).
@@ -311,6 +305,7 @@ export default function FolioDetailPage() {
               lines={folio.lines}
               fulfillment={folio.fulfillment}
               requests={folio.folio_requests}
+              refundNote={folio.refund_note}
               collapsible
             />
 

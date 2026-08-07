@@ -64,6 +64,8 @@ const str = (p: Record<string, unknown> | null, key: string): string | undefined
   typeof p?.[key] === 'string' ? (p[key] as string) : undefined
 const num = (p: Record<string, unknown> | null, key: string): number | undefined =>
   typeof p?.[key] === 'number' ? (p[key] as number) : undefined
+const bool = (p: Record<string, unknown> | null, key: string): boolean | undefined =>
+  typeof p?.[key] === 'boolean' ? (p[key] as boolean) : undefined
 
 // The one-line copy per event (spec D8 vocabulary — never "Reserva"). Money renders through
 // MoneyText (D11): small, neutral semantic.
@@ -163,18 +165,30 @@ interface TimelineLine {
   slot_start_time?: string | null
 }
 
-// D7 — the marker is DERIVED at read, never an event: the folio's earliest dated departure. The
-// epoch is naive UTC against org-local date strings, so it can sit off by the org's UTC offset —
-// which only shifts the marker's slot between same-day neighbours, never invents or loses a row.
+// D7 (as amended) — the marker is DERIVED at read, never an event, and it renders only once the
+// departure has OCCURRED: history records facts, and a departed marker can finally say what
+// happened (completada · uso parcial · sin uso). A still-future departure is the SERVICE LINE's
+// fact ("Salida: 13 ago 2026, 11:30"), not the narrative's. Day-granularity client clock (the
+// same call BookingActions makes); the epoch is naive UTC against org-local date strings, so it
+// can sit off by the org's UTC offset — which only shifts the marker's slot between same-day
+// neighbours, never invents or loses a row.
 function deriveSalida(lines: TimelineLine[] | undefined, fulfillment?: Fulfillment) {
   const dated = (lines ?? []).filter((l) => l.slot_date)
   if (dated.length === 0) return null
   const earliest = dated.reduce((a, b) =>
     `${b.slot_date} ${b.slot_start_time ?? ''}` < `${a.slot_date} ${a.slot_start_time ?? ''}` ? b : a,
   )
+  const todayIso = new Date().toISOString().slice(0, 10)
+  if ((earliest.slot_date as string) >= todayIso) return null
   const time = earliest.slot_start_time
   const suffix =
-    fulfillment === 'no_show' ? ' — sin uso' : fulfillment === 'partial' ? ' — uso parcial' : ''
+    fulfillment === 'no_show'
+      ? ' — sin uso'
+      : fulfillment === 'partial'
+        ? ' — uso parcial'
+        : fulfillment === 'fulfilled'
+          ? ' — completada'
+          : ''
   return {
     epoch: Date.parse(`${earliest.slot_date}T${time || '00:00'}:00Z`) / 1000,
     primary: `Salida${suffix}`,
@@ -195,6 +209,9 @@ export interface FolioTimelineProps {
    * `cancelled`/`rescheduled` events and get no second row. Supersedes the separate
    * "Historial de solicitudes" card. */
   requests?: FolioCancellationRequest[]
+  /** The no-PIN override's audit note (`folios.refund_note`) — the refund_confirmed payload only
+   * says `via`, and retiring the outcome banner must not lose the note it displayed. */
+  refundNote?: string | null
   /** Collapsed mode for a high position on the page: the LATEST row as a one-line summary plus
    * "Ver todo (n)" — context above the money without pushing the money down (the detail sits the
    * timeline between the status chips and the payment card; a mature folio carries 10-15 rows). */
@@ -210,6 +227,7 @@ export function FolioTimeline({
   lines,
   fulfillment,
   requests,
+  refundNote,
   collapsible = false,
 }: FolioTimelineProps) {
   const formatDate = useOrgDateFormatter(DATE_FMT) // US-A66 — org-local audit timestamps
@@ -225,16 +243,29 @@ export function FolioTimeline({
     const via = str(ev.payload, 'via')
     if (ev.type === 'refund_confirmed' && via)
       caption += via === 'override' ? ' · con nota de anulación' : ' · con PIN'
-    const reason =
-      ev.type === 'transfer_rejected' || ev.type === 'cancelled'
-        ? str(ev.payload, 'reason')
-        : undefined
+    const details: string[] = []
+    if (ev.type === 'transfer_rejected' || ev.type === 'cancelled') {
+      const reason = str(ev.payload, 'reason')
+      if (reason) details.push(reason)
+    }
+    // The commission outcome rode the payload all along — rendering it here is what let the
+    // cancellation AUDIT banner retire: history carries its own facts.
+    if (ev.type === 'cancelled') {
+      const clawback = bool(ev.payload, 'clawback')
+      if (clawback !== undefined) {
+        details.push(clawback ? 'Comisión del agente recuperada' : 'Comisión absorbida por la empresa')
+      }
+    }
+    // The no-PIN override's audit note (the folio column — the payload only says `via`).
+    if (ev.type === 'refund_confirmed' && via === 'override' && refundNote) {
+      details.push(`Nota: ${refundNote}`)
+    }
     return {
       key: ev.id,
       icon: EVENT_ICON[ev.type],
       color: EVENT_TONE[ev.type],
       primary: eventPrimary(ev),
-      details: reason ? [reason] : undefined,
+      details: details.length > 0 ? details : undefined,
       caption,
     }
   })
@@ -314,6 +345,8 @@ export function FolioTimeline({
     </Stack>
   )
 
+  // The collapsed summary is simply the last row: every row is a FACT now — the Salida marker
+  // only exists once departed (deriveSalida), so nothing future can claim the slot.
   const latest = rows[rows.length - 1]
   const collapsed = collapsible && !expanded
 

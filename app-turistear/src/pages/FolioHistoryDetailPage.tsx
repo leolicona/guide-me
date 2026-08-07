@@ -112,12 +112,8 @@ export default function FolioHistoryDetailPage() {
 
             {/* A plain (admin) cancellation keeps the neutral notice; an expired apartado gets
                 the reactivation banner instead (US-AG07.5). */}
-            {folio.status === 'cancelled' && folio.booking_expires_at == null && (
-              <Alert severity="error">
-                Este folio fue cancelado
-                {folio.cancelled_at ? ` el ${formatDate(folio.cancelled_at)}` : ''}.
-              </Alert>
-            )}
+            {/* The cancellation notice moved into the Historial (D6: same anatomy as the admin
+                detail) — the chip says the state, the `cancelled` row says when and why. */}
             <ExpiredBookingBanner folio={folio} />
 
             {/* US-AG53 — the sale as a story, COLLAPSED between the state and the money (D6:
