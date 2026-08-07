@@ -273,9 +273,13 @@ Then `404` — never `403` — and no event row of org B is reachable through an
 - [x] `SPEC.md`: US-AG53 story, Features-by-Phase line updated to this spec, glossary — in this PR
 
 **Phase 2 — the story renders (`feat(folios)` PR, frontend)**
-- [ ] `FolioTimeline` in both detail pages, oldest-first, Salida marker derived (S-7 UI assertions)
-- [ ] Component tests: ordering, Sistema/Cliente actors, backfilled rows, `no_show` marker copy
-- [ ] Scope-boundary suites still pass unedited
+- [x] `FolioTimeline` in both detail pages, oldest-first, Salida marker derived (S-7 UI assertions)
+- [x] Component tests: ordering, Sistema/Cliente actors, backfilled rows, `no_show` marker copy
+- [x] Scope-boundary suites still pass unedited
+- Shipped as #74 → re-landed as #76: #74 was based on the stacked `fix/folio-detail-header`
+  branch and GitHub does not retarget when the base survives its merge, so the squash landed off
+  `develop`. Caught by the design review of `/folios/:id`; the seller's Salida marker ships
+  date-only (the POS payload carries no folio-level fulfilment — see Deferred).
 
 ## Deferred — and why each is safe to defer
 
