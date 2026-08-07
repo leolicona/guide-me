@@ -165,21 +165,32 @@ interface TimelineLine {
   slot_start_time?: string | null
 }
 
-// D7 — the marker is DERIVED at read, never an event: the folio's earliest dated departure. The
-// epoch is naive UTC against org-local date strings, so it can sit off by the org's UTC offset —
-// which only shifts the marker's slot between same-day neighbours, never invents or loses a row.
+// D7 (as amended) — the marker is DERIVED at read, never an event, and it renders only once the
+// departure has OCCURRED: history records facts, and a departed marker can finally say what
+// happened (completada · uso parcial · sin uso). A still-future departure is the SERVICE LINE's
+// fact ("Salida: 13 ago 2026, 11:30"), not the narrative's. Day-granularity client clock (the
+// same call BookingActions makes); the epoch is naive UTC against org-local date strings, so it
+// can sit off by the org's UTC offset — which only shifts the marker's slot between same-day
+// neighbours, never invents or loses a row.
 function deriveSalida(lines: TimelineLine[] | undefined, fulfillment?: Fulfillment) {
   const dated = (lines ?? []).filter((l) => l.slot_date)
   if (dated.length === 0) return null
   const earliest = dated.reduce((a, b) =>
     `${b.slot_date} ${b.slot_start_time ?? ''}` < `${a.slot_date} ${a.slot_start_time ?? ''}` ? b : a,
   )
+  const todayIso = new Date().toISOString().slice(0, 10)
+  if ((earliest.slot_date as string) >= todayIso) return null
   const time = earliest.slot_start_time
   const suffix =
-    fulfillment === 'no_show' ? ' — sin uso' : fulfillment === 'partial' ? ' — uso parcial' : ''
+    fulfillment === 'no_show'
+      ? ' — sin uso'
+      : fulfillment === 'partial'
+        ? ' — uso parcial'
+        : fulfillment === 'fulfilled'
+          ? ' — completada'
+          : ''
   return {
     epoch: Date.parse(`${earliest.slot_date}T${time || '00:00'}:00Z`) / 1000,
-    date: earliest.slot_date as string,
     primary: `Salida${suffix}`,
     caption: `${earliest.slot_date}${time ? ` · ${time}` : ''}`,
   }
@@ -334,16 +345,9 @@ export function FolioTimeline({
     </Stack>
   )
 
-  // The collapsed summary is the latest FACT. A future departure sorts its Salida marker last,
-  // which would summarize a cancelled-and-refunded folio as "Salida" — so a marker whose date is
-  // still ahead yields to the row before it. A departed marker ("Salida — sin uso") IS the latest
-  // fact and keeps the slot. Day-granularity client clock, the same call BookingActions makes.
-  const todayIso = new Date().toISOString().slice(0, 10)
-  const last = rows[rows.length - 1]
-  const latest =
-    rows.length > 1 && last?.key === 'salida' && salida && salida.date > todayIso
-      ? rows[rows.length - 2]
-      : last
+  // The collapsed summary is simply the last row: every row is a FACT now — the Salida marker
+  // only exists once departed (deriveSalida), so nothing future can claim the slot.
+  const latest = rows[rows.length - 1]
   const collapsed = collapsible && !expanded
 
   return (

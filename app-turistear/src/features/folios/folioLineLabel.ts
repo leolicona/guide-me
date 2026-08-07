@@ -35,5 +35,20 @@ export function folioLineMeta(line: LabelableLine): string {
     } · ${guests} ${guests === 1 ? 'huésped' : 'huéspedes'}${rooms}`
   }
   const zone = line.zone_name ? ` · ${line.zone_name}` : ''
-  return `${line.slot_date ?? ''} · ${line.slot_start_time ?? ''}${zone} · ${line.quantity}×`
+  const when = line.slot_date ? `Salida: ${salidaLabel(line.slot_date, line.slot_start_time)}` : ''
+  return `${when}${zone} · ${line.quantity}×`
+}
+
+// "Salida: 13 ago 2026, 11:30 a.m." — the departure as a human sentence, not a raw ISO pair.
+// Slot strings are naive org-local wall-clock (US-A66): parse and format in UTC so nothing shifts.
+const SALIDA_DATETIME = new Intl.DateTimeFormat('es-MX', {
+  day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit', timeZone: 'UTC',
+})
+const SALIDA_DATE = new Intl.DateTimeFormat('es-MX', {
+  day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC',
+})
+function salidaLabel(date: string, time?: string | null): string {
+  return time
+    ? SALIDA_DATETIME.format(new Date(`${date}T${time}:00Z`))
+    : SALIDA_DATE.format(new Date(`${date}T00:00:00Z`))
 }

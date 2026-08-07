@@ -108,9 +108,12 @@ describe('D11 — payment copy by kind, amount through MoneyText', () => {
   })
 })
 
-describe('D7 — the derived Salida marker', () => {
-  const departure = Date.parse('2026-08-08T09:00:00Z') / 1000
-  const lines = [{ slot_date: '2026-08-08', slot_start_time: '09:00' }]
+describe('D7 (as amended) — the Salida marker renders only once the departure occurred', () => {
+  // History records FACTS: a departed marker exists and says what happened; a future one does not.
+  const pastDate = new Date(Date.now() - 5 * 86_400_000).toISOString().slice(0, 10)
+  const futureDate = new Date(Date.now() + 5 * 86_400_000).toISOString().slice(0, 10)
+  const departure = Date.parse(`${pastDate}T09:00:00Z`) / 1000
+  const lines = [{ slot_date: pastDate, slot_start_time: '09:00' }]
 
   it('interleaves at its chronological slot among the events', () => {
     const { container } = renderWithProviders(
@@ -132,7 +135,25 @@ describe('D7 — the derived Salida marker', () => {
   it('a departure nobody used reads Salida — sin uso', () => {
     renderWithProviders(<FolioTimeline events={[]} lines={lines} fulfillment="no_show" />)
     expect(screen.getByText('Salida — sin uso')).toBeInTheDocument()
-    expect(screen.getByText('2026-08-08 · 09:00')).toBeInTheDocument()
+    expect(screen.getByText(`${pastDate} · 09:00`)).toBeInTheDocument()
+  })
+
+  it('a used departure reads Salida — completada', () => {
+    renderWithProviders(<FolioTimeline events={[]} lines={lines} fulfillment="fulfilled" />)
+    expect(screen.getByText('Salida — completada')).toBeInTheDocument()
+  })
+
+  it('a FUTURE departure renders no marker — it is the service line\'s fact, not history', () => {
+    const { container } = renderWithProviders(
+      <FolioTimeline
+        events={[anEvent({ type: 'created', at: 1000 })]}
+        lines={[{ slot_date: futureDate, slot_start_time: '08:00' }]}
+        collapsible
+      />,
+    )
+    expect(container.textContent).not.toContain('Salida')
+    // Only the created event: no phantom row inflates the count.
+    expect(screen.queryByRole('button', { name: /Ver todo/ })).toBeNull()
   })
 
   it('a folio with no dated lines renders no marker', () => {
@@ -300,11 +321,11 @@ describe('the absorbed outcome banners — history carries its own facts', () =>
   })
 })
 
-describe('the collapsed summary is the latest FACT, not the future marker', () => {
-  const future = new Date(Date.now() + 5 * 86_400_000).toISOString().slice(0, 10)
+describe('the collapsed summary is the latest FACT', () => {
   const past = new Date(Date.now() - 5 * 86_400_000).toISOString().slice(0, 10)
 
-  it('a future Salida yields the summary slot to the last event', () => {
+  it('a cancelled-and-refunded folio summarizes as its last event, never as a phantom departure', () => {
+    const future = new Date(Date.now() + 5 * 86_400_000).toISOString().slice(0, 10)
     const { container } = renderWithProviders(
       <FolioTimeline
         events={[
@@ -317,10 +338,9 @@ describe('the collapsed summary is the latest FACT, not the future marker', () =
     )
     expect(screen.getByText('Cancelado por administración')).toBeInTheDocument()
     expect(container.textContent).not.toContain('Salida')
-    expect(screen.getByRole('button', { name: 'Ver todo (3)' })).toBeInTheDocument()
   })
 
-  it('a departed Salida IS the latest fact and keeps the summary', () => {
+  it('a departed Salida IS the latest fact and takes the summary', () => {
     const pastEpoch = Math.floor(Date.parse(`${past}T08:00:00Z`) / 1000)
     renderWithProviders(
       <FolioTimeline
