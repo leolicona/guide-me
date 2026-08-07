@@ -36,14 +36,17 @@ import { FolioWorkActions } from '../features/folios/components/FolioWorkActions
 import type { FolioDetail } from '../features/folios/types'
 import { useOrgDateFormatter } from '../features/organization'
 import type { CancellationQuote } from '../features/organization/types'
-import WarningAmberRounded from '@mui/icons-material/WarningAmberRounded'
+import BlockRounded from '@mui/icons-material/BlockRounded'
+import RemoveDoneRounded from '@mui/icons-material/RemoveDoneRounded'
+import CheckCircleRounded from '@mui/icons-material/CheckCircleRounded'
+import PhoneRounded from '@mui/icons-material/PhoneRounded'
+import MailOutlineRounded from '@mui/icons-material/MailOutlineRounded'
 import {
   BookingActions,
   ExpiredBookingBanner,
   TicketWhatsAppButton,
   DeliveryBadge,
 } from '../features/bookings'
-import { deliveryState } from '../features/pos/delivery'
 import { ServiceError } from '../services/authService'
 import { formatMoney } from '../features/catalog/types'
 import { folioLineMeta } from '../features/folios/folioLineLabel'
@@ -58,18 +61,23 @@ const DATE_FMT: Intl.DateTimeFormatOptions = {
   minute: '2-digit',
 }
 
-// US-A85 — what a line says about whether it was used. Functional color only, and only when there
-// is something to say: a line still ahead of its departure says nothing, because "not used yet" is
-// not a fact about the sale. Never teal (it carries no state meaning).
+// US-A85 — what a line says about whether it was used. Functional color, icon-paired (state is
+// never color-alone), and only when there is something to say: a line still ahead of its
+// departure says nothing, because "not used yet" is not a fact about the sale. Never teal.
 const lineFulfillmentNote = (line: { fulfillment?: string; quantity: number; redeemed_count?: number }) => {
-  if (line.fulfillment === 'no_show') return { text: 'Nadie usó estos lugares', color: 'error.main' }
+  if (line.fulfillment === 'no_show') {
+    return { text: 'Nadie usó estos lugares', color: 'error.main', Icon: BlockRounded }
+  }
   if (line.fulfillment === 'partial') {
     return {
       text: `Usaron ${line.redeemed_count ?? 0} de ${line.quantity}`,
       color: 'warning.main',
+      Icon: RemoveDoneRounded,
     }
   }
-  if (line.fulfillment === 'fulfilled') return { text: 'Usado', color: 'success.main' }
+  if (line.fulfillment === 'fulfilled') {
+    return { text: 'Usado', color: 'success.main', Icon: CheckCircleRounded }
+  }
   return null
 }
 
@@ -176,32 +184,36 @@ export default function FolioDetailPage() {
 
         {folio && (
           <Stack spacing={3}>
-            <Stack direction="row" sx={{ justifyContent: 'space-between', alignItems: 'center' }}>
-              <Box sx={{ minWidth: 0 }}>
-                <Typography variant="h5" component="h1" noWrap>
-                  {folio.customer_name ?? 'Sin nombre'}
-                </Typography>
-                <Typography variant="caption" color="text.secondary">
-                  {formatDate(folio.created_at)} · {folio.agent.name}
-                  {/* US-A68 — the affiliate shift operator who took the sale, when applicable. */}
-                  {folio.operator_name ? ` · ${folio.operator_name}` : ''}
-                </Typography>
-                {/* US-AG07.3 — the folio's clock, drawn exactly as the list card draws its time
-                    chip: the apartado countdown, or once cancelled with money owed, the age of
-                    the debt. Derives from useNowSeconds (D19), never Date.now() in render. */}
-                {timeChip && (
-                  <Chip
-                    size="small"
-                    variant="outlined"
-                    color={timeChip.tone}
-                    label={timeChip.label}
-                    sx={{ mt: 0.5, display: 'flex', width: 'fit-content' }}
-                  />
-                )}
-              </Box>
-              <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
-                {/* One StatusChip per active axis, in the list's vocabulary (D8): an axis at its
-                    default value says nothing here. Icon-paired functional colors, never teal. */}
+            {/* Stacked header: title → meta → ONE chip row. A side-by-side layout gave the
+                natural-width chips 273 of 343px and squeezed the title to 69 (design review,
+                Must Fix 1-3); stacking lets the name breathe and the chips wrap. */}
+            <Box>
+              <Typography
+                variant="h5"
+                component="h1"
+                sx={{
+                  // Two lines then ellipsis — never a one-line chop to "E2E …". The right
+                  // padding keeps the first line clear of the fixed avatar chip on mobile.
+                  display: '-webkit-box',
+                  WebkitLineClamp: 2,
+                  WebkitBoxOrient: 'vertical',
+                  overflow: 'hidden',
+                  pr: { xs: 7, md: 0 },
+                }}
+              >
+                {folio.customer_name ?? 'Sin nombre'}
+              </Typography>
+              <Typography variant="caption" color="text.secondary">
+                {formatDate(folio.created_at)} · {folio.agent.name}
+                {/* US-A68 — the affiliate shift operator who took the sale, when applicable. */}
+                {folio.operator_name ? ` · ${folio.operator_name}` : ''}
+              </Typography>
+              {/* One StatusChip per active axis in a FIXED order — money · clearance · debt ·
+                  time — so the eye learns one position per axis (the list's one-channel-per-axis
+                  logic). An axis at its default value says nothing here. The time chip derives
+                  from useNowSeconds (D19), never Date.now() in render. */}
+              <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: 'wrap', mt: 1 }}>
+                <FolioStatusChip status={folio.status} />
                 {folio.payment_verification === 'pending' && (
                   <StatusChip status="pending" label="Por verificar" />
                 )}
@@ -212,9 +224,16 @@ export default function FolioDetailPage() {
                 {folio.refund_status === 'refunded' && (
                   <StatusChip status="paid" label="Reembolsado" />
                 )}
-                <FolioStatusChip status={folio.status} />
+                {timeChip && (
+                  <Chip
+                    size="small"
+                    variant="outlined"
+                    color={timeChip.tone}
+                    label={timeChip.label}
+                  />
+                )}
               </Stack>
-            </Stack>
+            </Box>
 
             {/* An expired apartado (cancelled + booking_expires_at) gets the reactivation
                 banner; a plain admin cancellation keeps the audit notice. */}
@@ -237,16 +256,24 @@ export default function FolioDetailPage() {
                 the portal and hands it over to receive the cash; confirming here closes
                 the loop. */}
             {folio.refund_status === 'pending' && (
-              <Alert
-                severity="warning"
-                action={
-                  <Button color="inherit" size="small" onClick={openRefundDialog}>
+              <Alert severity="warning">
+                <Stack spacing={1.5} sx={{ alignItems: 'flex-start' }}>
+                  <span>
+                    Reembolso pendiente de {formatMoney(folio.refund_amount ?? folio.amount_paid)}{' '}
+                    — pide al cliente el PIN de su portal al entregarle el efectivo.
+                  </span>
+                  {/* The action that hands cash across the counter reads as a BUTTON, not as
+                      floating text (design review, Must Fix 5). Contained teal: the one accent
+                      always marks the next action. Full-width on the phone, natural on desktop. */}
+                  <Button
+                    variant="contained"
+                    disableElevation
+                    onClick={openRefundDialog}
+                    sx={{ whiteSpace: 'nowrap', alignSelf: { xs: 'stretch', sm: 'flex-start' } }}
+                  >
                     Confirmar reembolso
                   </Button>
-                }
-              >
-                Reembolso pendiente de {formatMoney(folio.refund_amount ?? folio.amount_paid)} —
-                pide al cliente el PIN de su portal al entregarle el efectivo.
+                </Stack>
               </Alert>
             )}
             {folio.refund_status === 'refunded' && (
@@ -259,16 +286,45 @@ export default function FolioDetailPage() {
 
             <Card>
               <CardContent>
+                {/* Contact reads as contact — icon-paired rows, and the phone dials on tap —
+                    instead of a bare number floating over the money (design review, Should
+                    Fix 3). The divider marks where contact ends and the breakdown begins. */}
                 {(folio.customer_email || folio.customer_phone) && (
-                  <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                    {folio.customer_email}
-                    {folio.customer_email && folio.customer_phone ? ' · ' : ''}
-                    {folio.customer_phone}
-                  </Typography>
+                  <>
+                    <Stack spacing={0.5} sx={{ mb: 2 }}>
+                      {folio.customer_phone && (
+                        <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+                          <PhoneRounded sx={{ fontSize: 16, color: 'text.secondary' }} />
+                          <Typography
+                            variant="body2"
+                            component="a"
+                            href={`tel:${folio.customer_phone}`}
+                            sx={{ color: 'text.primary', textDecoration: 'none' }}
+                          >
+                            {folio.customer_phone}
+                          </Typography>
+                        </Stack>
+                      )}
+                      {folio.customer_email && (
+                        <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+                          <MailOutlineRounded sx={{ fontSize: 16, color: 'text.secondary' }} />
+                          <Typography variant="body2" color="text.primary">
+                            {folio.customer_email}
+                          </Typography>
+                        </Stack>
+                      )}
+                    </Stack>
+                    <Divider sx={{ mb: 2 }} />
+                  </>
                 )}
 
                 <Stack spacing={2} divider={<Divider flexItem />}>
-                  {folio.lines.map((line) => (
+                  {folio.lines.map((line) => {
+                    // US-A85 (D2) — fulfilment lives on the LINE, and the detail is the only
+                    // place the breakdown can be read: "the Tuesday tour was used, nobody came
+                    // to Thursday's". The card shows only the worst of them.
+                    const note = lineFulfillmentNote(line)
+                    return (
                     <Stack
                       key={line.id}
                       direction="row"
@@ -279,15 +335,19 @@ export default function FolioDetailPage() {
                         <Typography variant="caption" color="text.secondary">
                           {folioLineMeta(line)} · {formatMoney(line.unit_price)}
                         </Typography>
-                        {/* US-A85 (D2) — fulfilment lives on the LINE, and the detail is the only
-                            place the breakdown can be read: "the Tuesday tour was used, nobody came
-                            to Thursday's". The card shows only the worst of them. */}
-                        {lineFulfillmentNote(line) && (
+                        {note && (
                           <Typography
                             variant="caption"
-                            sx={{ display: 'block', color: lineFulfillmentNote(line)!.color, fontWeight: 600 }}
+                            sx={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: 0.5,
+                              color: note.color,
+                              fontWeight: 600,
+                            }}
                           >
-                            {lineFulfillmentNote(line)!.text}
+                            <note.Icon sx={{ fontSize: 14 }} />
+                            {note.text}
                           </Typography>
                         )}
                         {line.extras.map((e) => (
@@ -303,7 +363,8 @@ export default function FolioDetailPage() {
                       </Box>
                       <Typography variant="subtitle2">{formatMoney(line.line_total)}</Typography>
                     </Stack>
-                  ))}
+                    )
+                  })}
                 </Stack>
 
                 <Divider sx={{ my: 2 }} />
@@ -387,35 +448,31 @@ export default function FolioDetailPage() {
                     variant="primary"
                     agentName={folio.agent.name}
                   />
-                  {deliveryState(folio) === 'pending' && (
-                    <Stack
-                      direction="row"
-                      spacing={0.5}
-                      sx={{ alignItems: 'center', color: 'warning.main' }}
-                    >
-                      <WarningAmberRounded fontSize="small" />
-                      <Typography variant="caption">Aún no enviado al cliente</Typography>
-                    </Stack>
-                  )}
+                  {/* The "Pendiente de enviar" chip above already states this fact — a second
+                      amber line saying it again is noise (design review, Should Fix 1). */}
                 </Stack>
               </SectionCard>
             )}
 
-            {/* US-AG07/07.4/07.5 — a live apartado settles or cancels here (priced by the ladder
-                since US-A76 — it is no longer a non-refundable flow), or once expired, reactivates.
-                The US-A21 cancel below is hidden for bookings so the two never overlap. */}
-            <BookingActions folio={folio} quote={quote} quoteLoading={isLoading} />
+            {/* One action block, not floating verbs (design review, Should Fix 2): the booking
+                actions and the US-A21 cancel share a tight stack — secondary above destructive.
+                The cancel below is hidden for bookings so the two never overlap. */}
+            <Stack spacing={1.5}>
+              {/* US-AG07/07.4 — a live apartado settles, reschedules or cancels here (priced by
+                  the ladder since US-A76 — it is no longer a non-refundable flow). */}
+              <BookingActions folio={folio} quote={quote} quoteLoading={isLoading} />
 
-            {!isCancelled && !isBooking && (
-              <Button
-                variant="outlined"
-                color="error"
-                size="large"
-                onClick={() => setConfirmOpen(true)}
-              >
-                Cancelar folio
-              </Button>
-            )}
+              {!isCancelled && !isBooking && (
+                <Button
+                  variant="outlined"
+                  color="error"
+                  size="large"
+                  onClick={() => setConfirmOpen(true)}
+                >
+                  Cancelar folio
+                </Button>
+              )}
+            </Stack>
 
             {/* US-A24 — the sale as a story, last section (timeline D8). */}
             <FolioTimeline

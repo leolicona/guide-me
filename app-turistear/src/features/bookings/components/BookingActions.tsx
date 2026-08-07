@@ -192,14 +192,22 @@ export function BookingActions({
               is re-decided. It sits ABOVE Cancelar because cancelling prices the customer and this
               does not — the destructive verb should never be the easier one to reach. */}
           <Button
+            variant="outlined"
             color="inherit"
+            size="large"
             startIcon={<EventRepeatRounded />}
             disabled={busy}
             onClick={() => setRescheduleOpen(true)}
           >
             Reagendar
           </Button>
-          <Button color="inherit" disabled={busy} onClick={() => setConfirmOpen(true)}>
+          <Button
+            variant="outlined"
+            color="error"
+            size="large"
+            disabled={busy}
+            onClick={() => setConfirmOpen(true)}
+          >
             Cancelar apartado
           </Button>
         </Stack>
@@ -264,7 +272,9 @@ export function BookingActions({
       <>
         <Stack spacing={1.5}>
           <Button
+            variant="outlined"
             color="inherit"
+            size="large"
             startIcon={<EventRepeatRounded />}
             onClick={() => setRescheduleOpen(true)}
           >
