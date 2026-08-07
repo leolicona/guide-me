@@ -1,0 +1,180 @@
+import { describe, it, expect, beforeAll } from 'vitest'
+import { http, HttpResponse } from 'msw'
+import { renderWithProviders, screen } from '../../../test/renderWithProviders'
+import { server } from '../../../test/server'
+import { FolioTimeline } from './FolioTimeline'
+import type { FolioEvent } from '../types'
+
+// US-A24 / US-AG53 — the timeline as RENDERED (docs/folios/folio-timeline.spec.md, Phase 2):
+// server order preserved, the D10 actor fallbacks, the D8 copy per event, and the derived Salida
+// marker (D7) interleaving without ever being an event.
+
+// The date caption reads through useOrgDateFormatter, which fetches the org.
+beforeAll(() => {
+  server.use(
+    http.get('/api/organizations/me', () =>
+      HttpResponse.json({
+        organization: { id: 'o1', name: 'Turistear Ya!', timezone: 'America/Cancun' },
+      }),
+    ),
+  )
+})
+
+let seq = 0
+const anEvent = (over: Partial<FolioEvent> = {}): FolioEvent => ({
+  id: `e${++seq}`,
+  type: 'created',
+  at: 1000,
+  actor: { id: 'u1', name: 'Ana R.' },
+  operator_name: null,
+  backfilled: false,
+  payload: null,
+  ...over,
+})
+
+/** DOM position of the first row containing `text` — for order assertions. */
+const posOf = (container: HTMLElement, text: string) => {
+  const idx = container.textContent!.indexOf(text)
+  expect(idx, `"${text}" not rendered`).toBeGreaterThanOrEqual(0)
+  return idx
+}
+
+describe('D8 — server order is preserved, never re-sorted', () => {
+  it('renders events in array order even when their timestamps disagree', () => {
+    // A backfill tie can arrive with `at` out of order; the server order (rowid) is the truth.
+    const { container } = renderWithProviders(
+      <FolioTimeline
+        events={[
+          anEvent({ type: 'created', at: 1000, payload: { sale_mode: 'standard', initial_status: 'booking' } }),
+          anEvent({ type: 'tickets_sent', at: 3000 }),
+          anEvent({ type: 'tickets_viewed', at: 2000, actor: null }),
+        ]}
+      />,
+    )
+    const created = posOf(container, 'Creado (apartado)')
+    const sent = posOf(container, 'Boletos enviados')
+    const viewed = posOf(container, 'Visto por el cliente')
+    expect(created).toBeLessThan(sent)
+    expect(sent).toBeLessThan(viewed)
+  })
+})
+
+describe('D10 — the null actor renders Sistema, or Cliente on the Visto beacon', () => {
+  it("the sweep's cancellation names the system", () => {
+    renderWithProviders(
+      <FolioTimeline
+        events={[anEvent({ type: 'cancelled', actor: null, payload: { source: 'system_expiry', clawback: false } })]}
+      />,
+    )
+    expect(screen.getByText('Apartado vencido — cancelado por el sistema')).toBeInTheDocument()
+    expect(screen.getByText(/^Sistema · /)).toBeInTheDocument()
+  })
+
+  it('the Visto beacon names the client', () => {
+    renderWithProviders(<FolioTimeline events={[anEvent({ type: 'tickets_viewed', actor: null })]} />)
+    expect(screen.getByText('Visto por el cliente')).toBeInTheDocument()
+    expect(screen.getByText(/^Cliente · /)).toBeInTheDocument()
+  })
+})
+
+describe('D11 — payment copy by kind, amount through MoneyText', () => {
+  it('a deposit reads Abono with its formatted amount and method', () => {
+    const { container } = renderWithProviders(
+      <FolioTimeline
+        events={[anEvent({ type: 'payment', payload: { amount: 50000, method: 'cash', kind: 'deposit' } })]}
+      />,
+    )
+    // MoneyText's SR label proves the copy and the figure travel together.
+    expect(screen.getByLabelText('Abono: $500.00')).toBeInTheDocument()
+    expect(container.textContent).toContain('en efectivo')
+  })
+
+  it('a settlement reads Saldo liquidado', () => {
+    renderWithProviders(
+      <FolioTimeline
+        events={[anEvent({ type: 'payment', payload: { amount: 190000, method: 'card', kind: 'settlement' } })]}
+      />,
+    )
+    expect(screen.getByLabelText('Saldo liquidado: $1,900.00')).toBeInTheDocument()
+  })
+
+  it('a backfilled row without kind falls back to Pago', () => {
+    renderWithProviders(
+      <FolioTimeline
+        events={[anEvent({ type: 'payment', backfilled: true, payload: { amount: 240000, method: 'cash' } })]}
+      />,
+    )
+    expect(screen.getByLabelText('Pago: $2,400.00')).toBeInTheDocument()
+  })
+})
+
+describe('D7 — the derived Salida marker', () => {
+  const departure = Date.parse('2026-08-08T09:00:00Z') / 1000
+  const lines = [{ slot_date: '2026-08-08', slot_start_time: '09:00' }]
+
+  it('interleaves at its chronological slot among the events', () => {
+    const { container } = renderWithProviders(
+      <FolioTimeline
+        events={[
+          anEvent({ type: 'created', at: departure - 86400, payload: { sale_mode: 'standard', initial_status: 'booking' } }),
+          anEvent({ type: 'cancelled', actor: null, at: departure + 3600, payload: { source: 'system_expiry', clawback: false } }),
+        ]}
+        lines={lines}
+      />,
+    )
+    const created = posOf(container, 'Creado (apartado)')
+    const salida = posOf(container, 'Salida')
+    const cancelled = posOf(container, 'Apartado vencido')
+    expect(created).toBeLessThan(salida)
+    expect(salida).toBeLessThan(cancelled)
+  })
+
+  it('a departure nobody used reads Salida — sin uso', () => {
+    renderWithProviders(<FolioTimeline events={[]} lines={lines} fulfillment="no_show" />)
+    expect(screen.getByText('Salida — sin uso')).toBeInTheDocument()
+    expect(screen.getByText('2026-08-08 · 09:00')).toBeInTheDocument()
+  })
+
+  it('a folio with no dated lines renders no marker', () => {
+    renderWithProviders(
+      <FolioTimeline events={[anEvent()]} lines={[{ slot_date: null, slot_start_time: null }]} />,
+    )
+    expect(screen.queryByText(/Salida/)).not.toBeInTheDocument()
+  })
+})
+
+describe('D8 — a reschedule finally reads as a move', () => {
+  it('states from → to with times', () => {
+    const { container } = renderWithProviders(
+      <FolioTimeline
+        events={[
+          anEvent({
+            type: 'rescheduled',
+            payload: {
+              origin: 'counter',
+              from_date: '2026-08-08',
+              from_time: '09:00',
+              to_date: '2026-08-10',
+              to_time: '14:00',
+            },
+          }),
+        ]}
+      />,
+    )
+    expect(container.textContent).toContain('Reagendado: 2026-08-08 09:00 → 2026-08-10 14:00')
+  })
+})
+
+describe('the empty timeline', () => {
+  it('an empty events array still renders the card with its empty line', () => {
+    renderWithProviders(<FolioTimeline events={[]} />)
+    expect(screen.getByText('Historial')).toBeInTheDocument()
+    expect(screen.getByText('Sin historial')).toBeInTheDocument()
+  })
+
+  it('a stale cache without events renders the same empty state', () => {
+    renderWithProviders(<FolioTimeline />)
+    expect(screen.getByText('Historial')).toBeInTheDocument()
+    expect(screen.getByText('Sin historial')).toBeInTheDocument()
+  })
+})

@@ -36,3 +36,12 @@ export function useFolioCancellationQuote(id: string | undefined) {
     select: (r: Awaited<ReturnType<typeof getFolio>>) => r.quote,
   })
 }
+
+// US-AG53 — the folio's narrative, riding the same detail read (timeline D5/D6). A cache entry
+// written before the timeline shipped has no `events`; missing ⇒ [].
+export function useFolioEvents(id: string | undefined) {
+  return useQuery({
+    ...folioQuery(id),
+    select: (r: Awaited<ReturnType<typeof getFolio>>) => r.events ?? [],
+  })
+}

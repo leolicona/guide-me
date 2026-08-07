@@ -12,3 +12,5 @@ export { FolioSearchField } from './components/FolioSearchField'
 // US-A83 — the local search, mirroring the server's `?q=` field-for-field.
 export * from './folioSearch'
 export { PendingWorkBar } from './components/PendingWorkBar'
+// US-A24 / US-AG53 — the sale as a story, on both detail pages (D6).
+export { FolioTimeline } from './components/FolioTimeline'

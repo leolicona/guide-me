@@ -13,7 +13,7 @@ import {
   Chip,
 } from '@mui/material'
 import ArrowBackRounded from '@mui/icons-material/ArrowBackRounded'
-import { useFolio, useFolioCancellationQuote } from '../features/pos/hooks'
+import { useFolio, useFolioCancellationQuote, useFolioEvents } from '../features/pos/hooks'
 import { useOrgDateFormatter } from '../features/organization'
 import { TicketQr } from '../features/pos/components/TicketQr'
 import WarningAmberRounded from '@mui/icons-material/WarningAmberRounded'
@@ -24,7 +24,7 @@ import {
   DeliveryBadge,
 } from '../features/bookings'
 import { deliveryState } from '../features/pos/delivery'
-import { FolioStatusChip, folioTimeChip, useNowSeconds } from '../features/folios'
+import { FolioStatusChip, FolioTimeline, folioTimeChip, useNowSeconds } from '../features/folios'
 import { MoneyText, SectionCard, StatusChip } from '../components'
 import { formatMoney } from '../features/catalog/types'
 import { folioLineMeta } from '../features/folios/folioLineLabel'
@@ -47,6 +47,8 @@ export default function FolioHistoryDetailPage() {
   const { data: folio, isLoading, isError } = useFolio(id)
   // Same request as above (shared query key) — US-A76: what cancelling now would cost.
   const { data: quote, isLoading: quoteLoading } = useFolioCancellationQuote(id)
+  // US-AG53 — same request again: the narrative the admin reads, identical here (timeline D6).
+  const { data: events } = useFolioEvents(id)
   // US-A84 D19 — the clock resolves in an effect, never `Date.now()` in render: this page sits
   // open while the agent talks to the customer, and a frozen countdown is a wrong screen.
   const nowSeconds = useNowSeconds()
@@ -249,6 +251,10 @@ export default function FolioHistoryDetailPage() {
             {/* US-AG07/07.4/07.5 — Liquidar/Cancelar (live) or Reactivar (expired), dynamically
                 incorporated into this existing detail. Renders nothing for paid/plain folios. */}
             <BookingActions folio={folio} quote={quote} quoteLoading={quoteLoading} />
+
+            {/* US-AG53 — the sale as a story, last section (timeline D8). The POS detail carries
+                no folio-level fulfilment, so the Salida marker ships date-only here. */}
+            <FolioTimeline events={events} lines={folio.lines} />
           </Stack>
         )}
       </Box>

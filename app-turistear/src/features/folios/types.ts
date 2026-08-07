@@ -175,6 +175,34 @@ export interface FolioCancellationRequest {
   to_slot_start_time?: string | null
 }
 
+// US-A24 / US-AG53 — one row of the folio's narrative, embedded oldest-first in BOTH detail GETs
+// (docs/folios/folio-timeline.spec.md D5). Server-derived in its entirety; display-only — no money
+// or state computation may read it (rule 7).
+export type FolioEventType =
+  | 'created'
+  | 'payment'
+  | 'payment_verified'
+  | 'transfer_rejected'
+  | 'tickets_sent'
+  | 'tickets_viewed'
+  | 'reminder_sent'
+  | 'rescheduled'
+  | 'cancelled'
+  | 'refund_confirmed'
+
+export interface FolioEvent {
+  id: string
+  type: FolioEventType
+  at: number
+  /** Resolved at read (D10). null ⇒ Sistema (the sweep) — or Cliente on `tickets_viewed`. */
+  actor: { id: string; name: string | null } | null
+  operator_name: string | null
+  backfilled: boolean
+  /** Shape per event type (spec § Data Model); amounts in minor units. Backfilled rows may omit
+   * keys that were unknowable retroactively (a payment's `kind`, a reschedule's `origin`). */
+  payload: Record<string, unknown> | null
+}
+
 export interface FolioFilters {
   status?: FolioStatus
   date?: string
