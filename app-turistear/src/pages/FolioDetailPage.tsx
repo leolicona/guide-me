@@ -104,9 +104,11 @@ export default function FolioDetailPage() {
   const isCancelled = folio?.status === 'cancelled'
   // US-AG07/D5 — a live apartado: it gets the booking actions instead of the US-A21 cancel.
   const isBooking = folio?.status === 'booking'
-  // The blocking-first ladder (US-A82 D12), mirrored on the detail: an open petition parks every
-  // other verb — resolving it IS the path (approving cancels priced by the ladder; rejecting
-  // unblocks), and a counter action alongside it would orphan the petition against a folio that
+  // The blocking-first ladder (US-A82 D12), mirrored on the detail — solicitud → verificación →
+  // reembolso → entrega, one pending action at a time. An open petition parks every other verb,
+  // the refund CTA included (the orphan case: a petition left pending on a cancelled folio) —
+  // resolving it IS the path (approving cancels priced by the ladder; rejecting unblocks), and a
+  // counter action alongside it would orphan the petition against a folio that
   // already moved. Unverified money parks the cancel too: US-A21 would run the ladder over an
   // amount the company never confirmed and mint a refund PIN for it (BUG-030) — `Rechazar pago`
   // is the cancel path for unconfirmed money.
@@ -265,9 +267,12 @@ export default function FolioDetailPage() {
             <FolioWorkActions folio={folio} />
 
             {/* US-A23 / US-T05 — the open refund obligation: the client reads their PIN in
-                the portal and hands it over to receive the cash; confirming here closes
-                the loop. */}
-            {folio.refund_status === 'pending' && (
+                the portal and hands it over to receive the cash; confirming here closes the
+                loop. A warning that carries a BUTTON is work, not a notice — so it is a rung
+                of the ladder (the list's D12 order: solicitud → verificación → reembolso →
+                entrega) and an open petition parks it: an orphaned petition on a cancelled
+                folio gets resolved before cash leaves the drawer. */}
+            {folio.refund_status === 'pending' && !hasOpenPetition && (
               <Alert severity="warning">
                 <Stack spacing={1.5} sx={{ alignItems: 'flex-start' }}>
                   <span>
