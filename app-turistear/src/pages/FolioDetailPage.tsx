@@ -40,7 +40,7 @@ import { deliveryState } from '../features/pos/delivery'
 import { ServiceError } from '../services/authService'
 import { formatMoney } from '../features/catalog/types'
 import { folioLineMeta } from '../features/folios/folioLineLabel'
-import { MoneyText, SectionCard } from '../components'
+import { ConfirmSheet, MoneyText, SectionCard } from '../components'
 import { ROUTES } from '../config/routes'
 
 const DATE_FMT: Intl.DateTimeFormatOptions = {
@@ -400,48 +400,42 @@ export default function FolioDetailPage() {
           </Stack>
         )}
 
-        <Dialog open={confirmOpen} onClose={closeDialog} fullWidth maxWidth="xs">
-          <DialogTitle>¿Cancelar este folio?</DialogTitle>
-          <DialogContent>
-            <DialogContentText sx={{ mb: 2 }}>
-              Esto libera todos los lugares de cada servicio en el folio y no se puede deshacer.
-              Los boletos de acceso del cliente dejarán de ser válidos.
-            </DialogContentText>
+        {/* The US-A21 cancel confirmation on the canonical overlay (ConfirmSheet), like every
+            other confirmation in the app — not a centered Dialog. */}
+        <ConfirmSheet
+          open={confirmOpen}
+          onClose={closeDialog}
+          title="¿Cancelar este folio?"
+          description="Esto libera todos los lugares de cada servicio en el folio y no se puede deshacer. Los boletos de acceso del cliente dejarán de ser válidos."
+          detail={
+            <>
+              {/* US-A69 — the money, before committing. Computed server-side by the same function
+                  the cancel endpoint uses, so what is shown here is what gets written.
 
-            {/* US-A69 — the money, before committing. Computed server-side by the same function
-                the cancel endpoint uses, so what is shown here is what gets written.
+                  D10 — there are no switches in this dialog any more. The clawback choice (US-A26)
+                  and the company-cancellation override (US-A71) are both withdrawn: a cancellation
+                  is priced by the company's ladder and by nothing the person cancelling decides. An
+                  admin who wants a different outcome changes the policy, where the terms are visible
+                  and apply to everyone — not this one folio, silently. */}
+              {quote && <RefundQuote quote={quote} folio={folio} />}
 
-                D10 — there are no switches in this dialog any more. The clawback choice (US-A26)
-                and the company-cancellation override (US-A71) are both withdrawn: a cancellation
-                is priced by the company's ladder and by nothing the person cancelling decides. An
-                admin who wants a different outcome changes the policy, where the terms are visible
-                and apply to everyone — not this one folio, silently. */}
-            {quote && <RefundQuote quote={quote} folio={folio} />}
-
-            <TextField
-              label="Motivo (opcional)"
-              size="small"
-              fullWidth
-              multiline
-              minRows={2}
-              value={reason}
-              onChange={(e) => setReason(e.target.value)}
-              sx={{ mt: quote ? 2 : 0 }}
-            />
-          </DialogContent>
-          <DialogActions>
-            <Button onClick={closeDialog}>Conservar folio</Button>
-            <Button
-              variant="contained"
-              color="error"
-              disableElevation
-              onClick={handleCancel}
-              disabled={cancel.isPending}
-            >
-              {cancel.isPending ? 'Cancelando…' : 'Cancelar folio'}
-            </Button>
-          </DialogActions>
-        </Dialog>
+              <TextField
+                label="Motivo (opcional)"
+                size="small"
+                fullWidth
+                multiline
+                minRows={2}
+                value={reason}
+                onChange={(e) => setReason(e.target.value)}
+                sx={{ mt: quote ? 2 : 0 }}
+              />
+            </>
+          }
+          confirmLabel="Cancelar folio"
+          onConfirm={handleCancel}
+          busy={cancel.isPending}
+          cancelLabel="Conservar folio"
+        />
 
         {/* US-A23 / US-T05 — confirm the physical cash refund. The PIN proves the client
             was present to receive it; the override is for lost-link cases and requires a
