@@ -2948,7 +2948,7 @@ export const cancelBooking = async (c: PosContext) => {
   const body = (await c.req.json().catch(() => ({}))) as { reason?: string }
 
   const folioRows = await db
-    .select({ status: folios.status })
+    .select({ status: folios.status, paymentVerification: folios.paymentVerification })
     .from(folios)
     .where(folioActionFilter(id, agent))
     .limit(1)
@@ -2956,6 +2956,16 @@ export const cancelBooking = async (c: PosContext) => {
   if (!folio) throw new ApiError('NOT_FOUND', 404, 'Folio not found')
   if (folio.status !== 'booking') {
     throw new ApiError('NOT_A_BOOKING', 409, 'Only a live booking can be cancelled here')
+  }
+  // BUG-030 — an unverified transfer deposit: the ladder would price money the company never
+  // confirmed and mint a refund PIN for it. Verify or reject the payment first (rejectPayment is
+  // the no-refund cancel). The expiry sweep is untouched: it enters via `cancelFolioPriced`.
+  if (folio.paymentVerification === 'pending') {
+    throw new ApiError(
+      'PAYMENT_UNVERIFIED',
+      409,
+      'El pago está por verificar — verifica o rechaza el pago antes de cancelar',
+    )
   }
 
   const lineRows = await db

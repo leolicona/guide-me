@@ -1076,7 +1076,11 @@ export const cancelFolio = async (c: FoliosContext) => {
   const db = getDb(c.env)
 
   const folioRows = await db
-    .select({ id: folios.id, status: folios.status })
+    .select({
+      id: folios.id,
+      status: folios.status,
+      paymentVerification: folios.paymentVerification,
+    })
     .from(folios)
     .where(and(eq(folios.id, id), eq(folios.organizationId, org)))
     .limit(1)
@@ -1087,6 +1091,17 @@ export const cancelFolio = async (c: FoliosContext) => {
   }
   if (folio.status === 'cancelled') {
     throw new ApiError('CONFLICT', 409, 'This folio is already cancelled')
+  }
+  // BUG-030 — the ladder would price `amount_paid`, which counts the unconfirmed transfer, and
+  // `refundFieldsFor` would mint a cash-refund PIN for money that may never have arrived. The
+  // cancel path for unconfirmed money is `rejectPayment` (no refund, clawback); this entrance
+  // refuses until the money is decided. The sweep is untouched: it enters via `cancelFolioPriced`.
+  if (folio.paymentVerification === 'pending') {
+    throw new ApiError(
+      'PAYMENT_UNVERIFIED',
+      409,
+      'El pago está por verificar — verifica o rechaza el pago antes de cancelar',
+    )
   }
 
   const lines = await db
