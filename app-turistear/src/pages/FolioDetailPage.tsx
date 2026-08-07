@@ -27,6 +27,7 @@ import {
   useCancelFolio,
   useConfirmRefund,
   FolioStatusChip,
+  FolioTimeline,
   folioTimeChip,
   useNowSeconds,
 } from '../features/folios'
@@ -415,6 +416,13 @@ export default function FolioDetailPage() {
                 Cancelar folio
               </Button>
             )}
+
+            {/* US-A24 — the sale as a story, last section (timeline D8). */}
+            <FolioTimeline
+              events={data?.events}
+              lines={folio.lines}
+              fulfillment={folio.fulfillment}
+            />
           </Stack>
         )}
 
