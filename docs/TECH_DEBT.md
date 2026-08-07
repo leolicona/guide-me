@@ -2,7 +2,13 @@
 
 This document tracks known technical debt, deferred tasks, and architectural improvements that are planned for future phases.
 
-## 24. Two Date Vocabularies: `useOrgDateFormatter` Follows the BROWSER's Locale — ⚠️ OPEN
+## 24. Two Date Vocabularies: `useOrgDateFormatter` Follows the BROWSER's Locale — ✅ CLOSED (2026-08-07)
+
+**Closed:** the locale is pinned to `'es-MX'` inside the hook, matching `folioSoldAtLabel` (US-A82
+D16) — one date vocabulary. Surfaced again by the folio-detail design review
+(`.design/design-system/DESIGN_REVIEW-folio-detail.md`, Could Improve 1). The re-render check the
+entry asked for (Spanish `month: 'short'` widths on Caja/Reportes/detail rows) is a visual pass on
+dev after deploy; Spanish short months (`ago.`, `ene.`) are no wider than English ones.
 
 **Status:** `useOrgDateFormatter` formats with `toLocaleString(undefined, { timeZone: tz, ...opts })`
 (`useOrgDateFormatter.ts:16`). The **time zone** is the organization's, correctly — but the
