@@ -474,11 +474,13 @@ export default function FolioDetailPage() {
               )}
             </Stack>
 
-            {/* US-A24 — the sale as a story, last section (timeline D8). */}
+            {/* US-A24 — the sale as a story, last section (timeline D8). Petitions ride along:
+                rejected ones interleave as derived rows — one Historial, not two. */}
             <FolioTimeline
               events={data?.events}
               lines={folio.lines}
               fulfillment={folio.fulfillment}
+              requests={folio.folio_requests}
             />
           </Stack>
         )}
