@@ -16,14 +16,12 @@ import ArrowBackRounded from '@mui/icons-material/ArrowBackRounded'
 import { useFolio, useFolioCancellationQuote, useFolioEvents } from '../features/pos/hooks'
 import { useOrgDateFormatter } from '../features/organization'
 import { TicketQr } from '../features/pos/components/TicketQr'
-import WarningAmberRounded from '@mui/icons-material/WarningAmberRounded'
 import {
   BookingActions,
   ExpiredBookingBanner,
   TicketWhatsAppButton,
   DeliveryBadge,
 } from '../features/bookings'
-import { deliveryState } from '../features/pos/delivery'
 import { FolioStatusChip, FolioTimeline, folioTimeChip, useNowSeconds } from '../features/folios'
 import { MoneyText, SectionCard, StatusChip } from '../components'
 import { formatMoney } from '../features/catalog/types'
@@ -83,37 +81,33 @@ export default function FolioHistoryDetailPage() {
 
         {folio && (
           <Stack spacing={3}>
+            {/* Stacked header, ONE chip row in the admin detail's fixed order — money ·
+                clearance · time — so both surfaces teach the same position per axis (design
+                review, Must Fix 2). */}
             <Box>
-              <Stack
-                direction="row"
-                sx={{ justifyContent: 'space-between', alignItems: 'center' }}
-              >
-                <Typography variant="h5" component="h1">
-                  Folio
-                </Typography>
-                <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
-                  {/* One StatusChip per active axis, same vocabulary as the admin detail (D8):
-                      an axis at its default value says nothing here. */}
-                  {folio.payment_verification === 'pending' && (
-                    <StatusChip status="pending" label="Por verificar" />
-                  )}
-                  <FolioStatusChip status={folio.status} />
-                </Stack>
-              </Stack>
+              <Typography variant="h5" component="h1" sx={{ pr: { xs: 7, md: 0 } }}>
+                Folio
+              </Typography>
               <Typography variant="caption" color="text.secondary">
                 {folio.id} · {formatDate(folio.created_at)}
               </Typography>
-              {/* US-AG07.3 — the folio's clock, drawn exactly as the list card draws its time
-                  chip. Derives from useNowSeconds (D19), never Date.now() in render. */}
-              {timeChip && (
-                <Chip
-                  size="small"
-                  variant="outlined"
-                  color={timeChip.tone}
-                  label={timeChip.label}
-                  sx={{ mt: 0.5, display: 'flex', width: 'fit-content' }}
-                />
-              )}
+              {/* One StatusChip per active axis, same vocabulary as the admin detail (D8): an
+                  axis at its default value says nothing here. The time chip derives from
+                  useNowSeconds (D19), never Date.now() in render. */}
+              <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: 'wrap', mt: 1 }}>
+                <FolioStatusChip status={folio.status} />
+                {folio.payment_verification === 'pending' && (
+                  <StatusChip status="pending" label="Por verificar" />
+                )}
+                {timeChip && (
+                  <Chip
+                    size="small"
+                    variant="outlined"
+                    color={timeChip.tone}
+                    label={timeChip.label}
+                  />
+                )}
+              </Stack>
             </Box>
 
             {/* A plain (admin) cancellation keeps the neutral notice; an expired apartado gets
@@ -125,6 +119,11 @@ export default function FolioHistoryDetailPage() {
               </Alert>
             )}
             <ExpiredBookingBanner folio={folio} />
+
+            {/* US-AG53 — the sale as a story, COLLAPSED between the state and the money (D6:
+                identical placement to the admin detail). The POS detail carries no folio-level
+                fulfilment, so the Salida marker ships date-only here. */}
+            <FolioTimeline events={events} lines={folio.lines} collapsible />
 
             <Card>
               <CardContent>
@@ -216,16 +215,8 @@ export default function FolioHistoryDetailPage() {
                     <DeliveryBadge folio={folio} />
                   </Stack>
                   <TicketWhatsAppButton folio={folio} surface="seller" variant="primary" />
-                  {deliveryState(folio) === 'pending' && (
-                    <Stack
-                      direction="row"
-                      spacing={0.5}
-                      sx={{ alignItems: 'center', color: 'warning.main' }}
-                    >
-                      <WarningAmberRounded fontSize="small" />
-                      <Typography variant="caption">Aún no enviado al cliente</Typography>
-                    </Stack>
-                  )}
+                  {/* The "Pendiente de enviar" chip above already states this fact — a second
+                      amber line saying it again is noise (design review, Should Fix 1). */}
                 </Stack>
               </SectionCard>
             )}
@@ -252,9 +243,6 @@ export default function FolioHistoryDetailPage() {
                 incorporated into this existing detail. Renders nothing for paid/plain folios. */}
             <BookingActions folio={folio} quote={quote} quoteLoading={quoteLoading} />
 
-            {/* US-AG53 — the sale as a story, last section (timeline D8). The POS detail carries
-                no folio-level fulfilment, so the Salida marker ships date-only here. */}
-            <FolioTimeline events={events} lines={folio.lines} />
           </Stack>
         )}
       </Box>

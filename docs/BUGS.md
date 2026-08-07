@@ -6,6 +6,31 @@ Tracks confirmed bugs, root causes, and fixes. Each entry is immutable once clos
 
 ---
 
+## BUG-030 — Cancelling an Unverified-Transfer Folio Mints a Refund PIN for Money Never Confirmed — ⚠️ OPEN
+
+**Found:** 2026-08-07, designing the folio detail's blocking-first action ladder (the question "should
+unverified money block the cancel?" turned out to have a money answer, not a UX answer).
+
+**What happens:** `cancelFolio` (US-A21, `api-turistear/src/routes/folios/handler.ts`) guards only
+against `status = 'cancelled'`. On a folio whose `payment_verification` is `pending`, the ladder
+prices the cancellation over `amount_paid` — which **includes the unconfirmed transfer** — and
+`refundFieldsFor` opens `refund_status = 'pending'` with a `refund_amount` and a **refund PIN**: a
+physical-cash hand-back obligation for money the company never confirmed receiving. The same hole
+exists via the agent's `cancelBooking` on an apartado with an unverified transfer deposit.
+
+**The correct path already exists:** `rejectPayment` (US-A67 D6) cancels the same folio with
+`refund_status: 'none'` — "nothing was collected, so nothing to refund" — plus the commission
+clawback. The two entrances disagree about whether the money exists.
+
+**Mitigation shipped (frontend):** the detail hides `Cancelar folio` / `Cancelar apartado` while
+verification is pending; the work card offers `Verificar` / `Rechazar pago` instead.
+
+**Fix required (backend):** `cancelFolio` and `cancelBooking` refuse (`409`,
+`PAYMENT_UNVERIFIED`) while `payment_verification = 'pending'`, pointing at verify/reject — the
+UI mirror is already in place.
+
+---
+
 ## BUG-027 — A Cancellation That Refunded Nothing Renders As "(reembolsado)" — ✅ FIXED
 
 **Discovered:** 2026-08-01, while enumerating every reachable folio case for a lifecycle table

@@ -165,6 +165,92 @@ describe('D8 — a reschedule finally reads as a move', () => {
   })
 })
 
+describe('the absorbed petition history — one Historial, not two', () => {
+  const request = (over: Record<string, unknown> = {}) => ({
+    id: 'r1',
+    status: 'rejected' as const,
+    reason: 'Nos cambió el vuelo',
+    resolution_note: 'Fuera de ventana',
+    resolved_by: null,
+    resolved_at: 2000,
+    created_at: 1500,
+    ...over,
+  })
+
+  it('a rejected cancellation petition interleaves as a derived row, with motivo and resolución', () => {
+    const { container } = renderWithProviders(
+      <FolioTimeline
+        events={[
+          anEvent({ type: 'created', at: 1000 }),
+          anEvent({ type: 'tickets_sent', at: 3000 }),
+        ]}
+        requests={[request()]}
+      />,
+    )
+    // The rejection left the folio untouched — this derived row is its ONLY surface.
+    const rejectedAt = posOf(container, 'Solicitud de cancelación rechazada')
+    expect(posOf(container, 'Creado')).toBeLessThan(rejectedAt)
+    expect(rejectedAt).toBeLessThan(posOf(container, 'Boletos enviados'))
+    expect(screen.getByText('Motivo del cliente: Nos cambió el vuelo')).toBeInTheDocument()
+    expect(screen.getByText('Resolución: Fuera de ventana')).toBeInTheDocument()
+  })
+
+  it('a rejected reschedule petition names the departure it asked for', () => {
+    renderWithProviders(
+      <FolioTimeline
+        events={[anEvent({ at: 1000 })]}
+        requests={[
+          request({
+            id: 'r2',
+            kind: 'reschedule',
+            to_slot_date: '2026-06-21',
+            to_slot_start_time: '09:00',
+          }),
+        ]}
+      />,
+    )
+    expect(screen.getByText('Solicitud de reagenda rechazada')).toBeInTheDocument()
+    expect(screen.getByText('Horario solicitado: 2026-06-21 09:00')).toBeInTheDocument()
+  })
+
+  it('approved and pending petitions get no derived row — their events tell the story', () => {
+    const { container } = renderWithProviders(
+      <FolioTimeline
+        events={[anEvent({ at: 1000 })]}
+        requests={[
+          request({ id: 'r3', status: 'approved' }),
+          request({ id: 'r4', status: 'pending', resolved_at: null }),
+        ]}
+      />,
+    )
+    expect(container.textContent).not.toContain('Solicitud')
+  })
+})
+
+describe('collapsible — context above the money without pushing the money down', () => {
+  const three = () => [
+    anEvent({ type: 'created', at: 1000 }),
+    anEvent({ type: 'payment', at: 2000, payload: { amount: 260000, method: 'cash', kind: 'full' } }),
+    anEvent({ type: 'tickets_sent', at: 3000 }),
+  ]
+
+  it('collapsed shows only the LATEST row plus Ver todo (n)', async () => {
+    const { container } = renderWithProviders(<FolioTimeline events={three()} collapsible />)
+    expect(screen.getByText('Boletos enviados')).toBeInTheDocument()
+    expect(container.textContent).not.toContain('Creado')
+    const toggle = screen.getByRole('button', { name: 'Ver todo (3)' })
+    toggle.click()
+    expect(await screen.findByText('Creado')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Ver menos' })).toBeInTheDocument()
+  })
+
+  it('without the flag the full list renders, as the tests above assume', () => {
+    const { container } = renderWithProviders(<FolioTimeline events={three()} />)
+    expect(container.textContent).toContain('Creado')
+    expect(screen.queryByRole('button', { name: /Ver todo/ })).toBeNull()
+  })
+})
+
 describe('the empty timeline', () => {
   it('an empty events array still renders the card with its empty line', () => {
     renderWithProviders(<FolioTimeline events={[]} />)

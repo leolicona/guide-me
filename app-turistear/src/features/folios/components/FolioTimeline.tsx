@@ -1,5 +1,5 @@
-import type { ReactNode } from 'react'
-import { Box, Stack, Typography } from '@mui/material'
+import { useState, type ReactNode } from 'react'
+import { Box, Button, Collapse, Stack, Typography } from '@mui/material'
 import ReceiptLongRounded from '@mui/icons-material/ReceiptLongRounded'
 import PaymentsRounded from '@mui/icons-material/PaymentsRounded'
 import TaskAltRounded from '@mui/icons-material/TaskAltRounded'
@@ -10,9 +10,10 @@ import NotificationsActiveRounded from '@mui/icons-material/NotificationsActiveR
 import EventRepeatRounded from '@mui/icons-material/EventRepeatRounded'
 import CurrencyExchangeRounded from '@mui/icons-material/CurrencyExchangeRounded'
 import EventRounded from '@mui/icons-material/EventRounded'
+import RuleRounded from '@mui/icons-material/RuleRounded'
 import { MoneyText, SectionCard } from '../../../components'
 import { useOrgDateFormatter } from '../../organization'
-import type { FolioEvent, FolioEventType, Fulfillment } from '../types'
+import type { FolioCancellationRequest, FolioEvent, FolioEventType, Fulfillment } from '../types'
 
 const DATE_FMT: Intl.DateTimeFormatOptions = {
   year: 'numeric',
@@ -151,8 +152,8 @@ interface TimelineRow {
   icon: ReactNode
   color: string
   primary: ReactNode
-  /** The transfer rejection's / cancellation's stated reason, when there is one. */
-  reason?: string
+  /** Secondary lines: a stated reason, the client's motivo, a resolution note. */
+  details?: string[]
   caption: string
 }
 
@@ -189,16 +190,32 @@ export interface FolioTimelineProps {
   /** Folio-level fulfilment (US-A85) — the POS detail does not carry it, so the seller's marker
    * ships date-only. */
   fulfillment?: Fulfillment
+  /** The folio's petitions (US-A84 rule 7). REJECTED ones interleave as derived rows — rejecting
+   * left the folio untouched, so no event records it; approved ones already appear as their
+   * `cancelled`/`rescheduled` events and get no second row. Supersedes the separate
+   * "Historial de solicitudes" card. */
+  requests?: FolioCancellationRequest[]
+  /** Collapsed mode for a high position on the page: the LATEST row as a one-line summary plus
+   * "Ver todo (n)" — context above the money without pushing the money down (the detail sits the
+   * timeline between the status chips and the payment card; a mature folio carries 10-15 rows). */
+  collapsible?: boolean
 }
 
 // US-A24 / US-AG53 — the sale as a story (docs/folios/folio-timeline.spec.md D8): a plain
 // oldest-first list inside `Historial`. Events arrive already sorted server-side; the ONLY
 // reordering here is inserting the derived Salida marker at its chronological slot. Admin and
 // seller render the identical component (D6) — no role variants.
-export function FolioTimeline({ events, lines, fulfillment }: FolioTimelineProps) {
+export function FolioTimeline({
+  events,
+  lines,
+  fulfillment,
+  requests,
+  collapsible = false,
+}: FolioTimelineProps) {
   const formatDate = useOrgDateFormatter(DATE_FMT) // US-A66 — org-local audit timestamps
+  const [expanded, setExpanded] = useState(false)
 
-  const rows: TimelineRow[] = (events ?? []).map((ev) => {
+  const eventRows: TimelineRow[] = (events ?? []).map((ev) => {
     // D10 — actor NULL is the system's sweep, except the Visto beacon, which only the tourist fires.
     const who = ev.actor?.name ?? (ev.type === 'tickets_viewed' ? 'Cliente' : 'Sistema')
     const op = ev.operator_name ? ` (op. ${ev.operator_name})` : ''
@@ -208,31 +225,97 @@ export function FolioTimeline({ events, lines, fulfillment }: FolioTimelineProps
     const via = str(ev.payload, 'via')
     if (ev.type === 'refund_confirmed' && via)
       caption += via === 'override' ? ' · con nota de anulación' : ' · con PIN'
+    const reason =
+      ev.type === 'transfer_rejected' || ev.type === 'cancelled'
+        ? str(ev.payload, 'reason')
+        : undefined
     return {
       key: ev.id,
       icon: EVENT_ICON[ev.type],
       color: EVENT_TONE[ev.type],
       primary: eventPrimary(ev),
-      reason:
-        ev.type === 'transfer_rejected' || ev.type === 'cancelled'
-          ? str(ev.payload, 'reason')
-          : undefined,
+      details: reason ? [reason] : undefined,
       caption,
     }
   })
 
+  // Derived rows (the D7 pattern): never events. The Salida marker, and the REJECTED petitions —
+  // rejecting one left the folio untouched, so no event records it and this is now its only
+  // surface. Approved petitions already appear as their `cancelled`/`rescheduled` events.
+  const derived: { epoch: number; row: TimelineRow }[] = []
+
   const salida = deriveSalida(lines, fulfillment)
   if (salida) {
-    const marker: TimelineRow = {
-      key: 'salida',
-      icon: <EventRounded fontSize="small" />,
-      color: 'text.secondary',
-      primary: salida.primary,
-      caption: salida.caption,
-    }
-    const at = (events ?? []).findIndex((ev) => ev.at > salida.epoch)
-    rows.splice(at === -1 ? rows.length : at, 0, marker)
+    derived.push({
+      epoch: salida.epoch,
+      row: {
+        key: 'salida',
+        icon: <EventRounded fontSize="small" />,
+        color: 'text.secondary',
+        primary: salida.primary,
+        caption: salida.caption,
+      },
+    })
   }
+
+  for (const r of requests ?? []) {
+    if (r.status !== 'rejected') continue
+    const at = r.resolved_at ?? r.created_at
+    const isReschedule = r.kind === 'reschedule'
+    derived.push({
+      epoch: at,
+      row: {
+        key: `request-${r.id}`,
+        icon: <RuleRounded fontSize="small" />,
+        // A rejected petition changed nothing on the sale — history, not an alert: neutral ink.
+        color: 'text.secondary',
+        primary: isReschedule
+          ? 'Solicitud de reagenda rechazada'
+          : 'Solicitud de cancelación rechazada',
+        details: [
+          isReschedule && r.to_slot_date
+            ? `Horario solicitado: ${r.to_slot_date}${r.to_slot_start_time ? ` ${r.to_slot_start_time}` : ''}`
+            : null,
+          r.reason ? `Motivo del cliente: ${r.reason}` : null,
+          r.resolution_note ? `Resolución: ${r.resolution_note}` : null,
+        ].filter((d): d is string => d !== null),
+        caption: formatDate(at),
+      },
+    })
+  }
+
+  // Stable merge: event order is the server's, untouched; each derived row slots before the
+  // first strictly-later event (ties land after the equal-timestamp event, as the marker always did).
+  derived.sort((a, b) => a.epoch - b.epoch)
+  const rows: TimelineRow[] = []
+  let di = 0
+  ;(events ?? []).forEach((ev, i) => {
+    while (di < derived.length && derived[di].epoch < ev.at) rows.push(derived[di++].row)
+    rows.push(eventRows[i])
+  })
+  while (di < derived.length) rows.push(derived[di++].row)
+
+  const renderRow = (row: TimelineRow) => (
+    <Stack key={row.key} direction="row" spacing={1.5} sx={{ alignItems: 'flex-start' }}>
+      <Box sx={{ color: row.color, display: 'flex', mt: '2px' }}>{row.icon}</Box>
+      <Box sx={{ minWidth: 0 }}>
+        <Typography variant="body2" sx={{ fontWeight: 600 }}>
+          {row.primary}
+        </Typography>
+        {row.details?.map((detail) => (
+          <Typography key={detail} variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+            {detail}
+          </Typography>
+        ))}
+        <Typography variant="caption" color="text.secondary">
+          {row.caption}
+        </Typography>
+      </Box>
+    </Stack>
+  )
+
+  const latest = rows[rows.length - 1]
+  const collapsed = collapsible && !expanded
 
   return (
     <SectionCard title="Historial">
@@ -240,26 +323,25 @@ export function FolioTimeline({ events, lines, fulfillment }: FolioTimelineProps
         <Typography variant="body2" color="text.secondary">
           Sin historial
         </Typography>
+      ) : collapsed ? (
+        <Stack spacing={1}>
+          {renderRow(latest)}
+          {rows.length > 1 && (
+            <Button size="small" onClick={() => setExpanded(true)} sx={{ alignSelf: 'flex-start' }}>
+              Ver todo ({rows.length})
+            </Button>
+          )}
+        </Stack>
       ) : (
         <Stack spacing={2}>
-          {rows.map((row) => (
-            <Stack key={row.key} direction="row" spacing={1.5} sx={{ alignItems: 'flex-start' }}>
-              <Box sx={{ color: row.color, display: 'flex', mt: '2px' }}>{row.icon}</Box>
-              <Box sx={{ minWidth: 0 }}>
-                <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                  {row.primary}
-                </Typography>
-                {row.reason && (
-                  <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
-                    {row.reason}
-                  </Typography>
-                )}
-                <Typography variant="caption" color="text.secondary">
-                  {row.caption}
-                </Typography>
-              </Box>
-            </Stack>
-          ))}
+          <Collapse in appear={collapsible}>
+            <Stack spacing={2}>{rows.map(renderRow)}</Stack>
+          </Collapse>
+          {collapsible && (
+            <Button size="small" onClick={() => setExpanded(false)} sx={{ alignSelf: 'flex-start' }}>
+              Ver menos
+            </Button>
+          )}
         </Stack>
       )}
     </SectionCard>

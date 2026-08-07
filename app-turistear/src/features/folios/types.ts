@@ -151,8 +151,9 @@ export interface FolioDetail {
   tickets_viewed_at?: number | null
   created_at: number
   lines: FolioDetailLine[]
-  // US-A84 rule 7 — the absorbed Solicitudes history, newest first. This is the ONLY surface that
-  // can carry a rejected request: rejecting it left the folio untouched, so nothing else records it.
+  // US-A84 rule 7 — the folio's petition history, newest first. Rendered by the timeline: a
+  // rejected request left the folio untouched, so no event records it and its derived row there
+  // is the only surface that shows it ever happened.
   folio_requests?: FolioCancellationRequest[]
 }
 

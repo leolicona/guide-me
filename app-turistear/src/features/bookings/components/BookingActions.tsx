@@ -192,16 +192,29 @@ export function BookingActions({
               is re-decided. It sits ABOVE Cancelar because cancelling prices the customer and this
               does not — the destructive verb should never be the easier one to reach. */}
           <Button
+            variant="outlined"
             color="inherit"
+            size="large"
             startIcon={<EventRepeatRounded />}
             disabled={busy}
             onClick={() => setRescheduleOpen(true)}
           >
             Reagendar
           </Button>
-          <Button color="inherit" disabled={busy} onClick={() => setConfirmOpen(true)}>
-            Cancelar apartado
-          </Button>
+          {/* BUG-030 — an unverified transfer deposit parks the cancel: the ladder would price
+              money the company never confirmed and mint a refund PIN for it. `Rechazar pago`
+              (the work card) is the cancel path for unconfirmed money. */}
+          {folio.payment_verification !== 'pending' && (
+            <Button
+              variant="outlined"
+              color="error"
+              size="large"
+              disabled={busy}
+              onClick={() => setConfirmOpen(true)}
+            >
+              Cancelar apartado
+            </Button>
+          )}
         </Stack>
 
         <RescheduleSheet
@@ -264,7 +277,9 @@ export function BookingActions({
       <>
         <Stack spacing={1.5}>
           <Button
+            variant="outlined"
             color="inherit"
+            size="large"
             startIcon={<EventRepeatRounded />}
             onClick={() => setRescheduleOpen(true)}
           >

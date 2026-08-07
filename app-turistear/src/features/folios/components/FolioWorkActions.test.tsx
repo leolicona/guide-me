@@ -35,8 +35,8 @@ describe('US-A84 — the folio detail carries its own work', () => {
     expect(screen.getAllByText(/Nos cambió el vuelo/)).toHaveLength(1)
   })
 
-  it('shows resolved requests as history — the only surface that can', () => {
-    renderWithProviders(
+  it('renders NOTHING for a folio whose only requests are resolved — the timeline owns history', () => {
+    const { container } = renderWithProviders(
       <FolioWorkActions
         folio={folio({
           folio_requests: [
@@ -46,11 +46,9 @@ describe('US-A84 — the folio detail carries its own work', () => {
       />,
     )
 
-    // A rejected request left the folio untouched, so nothing else on the record shows it happened.
-    // Losing this is how the absorbed tab's history would silently disappear.
-    expect(screen.getByText('Historial de solicitudes')).toBeInTheDocument()
-    expect(screen.getByText(/Fuera de ventana/)).toBeInTheDocument()
-    expect(screen.queryByText('El cliente pidió cancelar')).toBeNull()
+    // The rejected petition's ONLY surface is now its derived row in FolioTimeline — this
+    // component carries WORK, and resolved history is not work.
+    expect(container).toBeEmptyDOMElement()
   })
 
   it('offers verification only while the folio is alive', () => {
@@ -114,8 +112,8 @@ describe('US-AG52 — a reschedule petition is reviewed as a reschedule', () => 
     expect(screen.queryByText('El cliente pidió cancelar')).toBeNull()
   })
 
-  it('a resolved reschedule reads as one in the history, with the destination', () => {
-    renderWithProviders(
+  it('an approved reschedule renders nothing here — its `rescheduled` event tells the story', () => {
+    const { container } = renderWithProviders(
       <FolioWorkActions
         folio={folio({
           folio_requests: [
@@ -128,13 +126,23 @@ describe('US-AG52 — a reschedule petition is reviewed as a reschedule', () => 
       />,
     )
 
-    expect(screen.getByText(/Reagenda · Aprobada/)).toBeInTheDocument()
-    expect(screen.getByText(/Nuevo horario: 2026-06-21 09:00/)).toBeInTheDocument()
+    expect(container).toBeEmptyDOMElement()
   })
 
   it('a request without kind is a cancellation — the pre-rename rows keep their meaning', () => {
     renderWithProviders(<FolioWorkActions folio={folio({ folio_requests: [req({})] })} />)
     expect(screen.getByText('El cliente pidió cancelar')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Aprobar cancelación' })).toBeInTheDocument()
+  })
+
+  it('the ladder: an open petition parks the verification — one pending action at a time', () => {
+    renderWithProviders(
+      <FolioWorkActions
+        folio={folio({ payment_verification: 'pending', folio_requests: [req({})] })}
+      />,
+    )
+    expect(screen.getByText('El cliente pidió cancelar')).toBeInTheDocument()
+    // The unverified transfer waits its turn; the header chip still says it exists.
+    expect(screen.queryByText('Pago por verificar')).toBeNull()
   })
 })

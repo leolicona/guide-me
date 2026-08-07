@@ -155,8 +155,9 @@ export function AppLayout() {
             to={landingRoute}
             aria-label="Inicio"
             sx={{
-              width: 44,
-              height: 44,
+              // ≥48px touch target (design brief) — 44 was under the floor the system sets.
+              width: 48,
+              height: 48,
               borderRadius: 'var(--radius-md, 12px)', // crisp app-icon brand mark
               mb: 2,
               fontWeight: 700,

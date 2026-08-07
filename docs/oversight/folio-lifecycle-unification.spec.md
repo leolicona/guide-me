@@ -249,7 +249,9 @@ ladder; a new `folioTimeChip()` owns the time channel (`Vence en 3 h` · `Venci�
 element.
 
 **`pages/FolioDetailPage.tsx`** — gains `Rechazar pago`, `Aprobar` / `Rechazar solicitud` and the
-request history, all in `ConfirmSheet` (D14).
+request history, all in `ConfirmSheet` (D14). *(The request-history CARD was later absorbed into
+the US-A24 timeline — `folio-timeline.spec.md` D12: approved petitions read as their events,
+rejected ones as derived rows. Rule 7's API contract is unchanged.)*
 
 **`pages/FolioHistoryPage.tsx`** — the extended card only (D15).
 

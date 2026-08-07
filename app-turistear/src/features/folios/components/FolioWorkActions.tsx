@@ -32,12 +32,6 @@ import type { FolioDetail } from '../types'
 // design system forbids for confirmations and entity edits (`CLAUDE.md`); moving them is the
 // occasion to stop carrying that exception.
 
-const REQUEST_LABEL: Record<string, string> = {
-  pending: 'Pendiente',
-  approved: 'Aprobada',
-  rejected: 'Rechazada',
-}
-
 const DATE_FMT: Intl.DateTimeFormatOptions = {
   month: 'short',
   day: 'numeric',
@@ -69,14 +63,12 @@ export function FolioWorkActions({ folio }: { folio: FolioDetail }) {
   const pendingLine = pendingIsReschedule
     ? folio.lines?.find((l) => l.id === pending?.folio_line_id)
     : undefined
-  // The live request is already presented above, in full, as WORK. Repeating it in the history
-  // below put the same request on screen twice, with the same reason under each — a defect no test
-  // could have found, and one that only showed up when the component was actually rendered.
-  const resolved = requests.filter((r) => r.status !== 'pending')
   const awaitingVerification =
     folio.payment_verification === 'pending' && folio.status !== 'cancelled'
 
-  if (!pending && !awaitingVerification && resolved.length === 0) return null
+  // Resolved petitions no longer render here — the timeline carries them (approved ones as their
+  // events, rejected ones as derived rows) — so a folio with only history renders nothing.
+  if (!pending && !awaitingVerification) return null
 
   return (
     <>
@@ -129,7 +121,9 @@ export function FolioWorkActions({ folio }: { folio: FolioDetail }) {
         </SectionCard>
       )}
 
-      {awaitingVerification && (
+      {/* The ladder, made literal: an open petition parks the verification below — one pending
+          action at a time, the header chip still says the unverified money exists. */}
+      {!pending && awaitingVerification && (
         <SectionCard>
           <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 0.5 }}>
             Pago por verificar
@@ -160,43 +154,9 @@ export function FolioWorkActions({ folio }: { folio: FolioDetail }) {
         </SectionCard>
       )}
 
-      {/* US-A84 rule 7 — the absorbed history. This is the ONLY surface that can carry a rejected
-          request: rejecting it left the folio untouched, so nothing else on the record shows it
-          ever happened. */}
-      {resolved.length > 0 && (
-        <SectionCard>
-          <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 1 }}>
-            Historial de solicitudes
-          </Typography>
-          <Stack spacing={1.5}>
-            {resolved.map((r) => (
-              <Box key={r.id}>
-                <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                  {r.kind === 'reschedule' ? 'Reagenda' : 'Cancelación'} ·{' '}
-                  {REQUEST_LABEL[r.status] ?? r.status} · {formatDate(r.created_at)}
-                </Typography>
-                {/* US-AG52 — an approved reschedule's history says the useful thing: the date
-                    moved, and to where (D14's mitigation lives here). */}
-                {r.kind === 'reschedule' && r.to_slot_date && (
-                  <Typography variant="body2" color="text.secondary">
-                    Nuevo horario: {r.to_slot_date} {r.to_slot_start_time}
-                  </Typography>
-                )}
-                {r.reason && (
-                  <Typography variant="body2" color="text.secondary">
-                    Motivo del cliente: {r.reason}
-                  </Typography>
-                )}
-                {r.resolution_note && (
-                  <Typography variant="body2" color="text.secondary">
-                    Resolución: {r.resolution_note}
-                  </Typography>
-                )}
-              </Box>
-            ))}
-          </Stack>
-        </SectionCard>
-      )}
+      {/* US-A84 rule 7's history moved into the timeline (`FolioTimeline`): approved petitions
+          already appear there as their `cancelled`/`rescheduled` events, and REJECTED ones
+          interleave as derived rows — one Historial, not two. */}
 
       <ConfirmSheet
         open={confirming === 'verify'}
