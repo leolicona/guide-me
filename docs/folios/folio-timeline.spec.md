@@ -17,13 +17,13 @@ The questions a dispute actually asks have no screen:
   around it: the deposit taken three days earlier, the reminder sent, the deadline passing, the
   system sweep firing.
 
-Worse, some transitions leave **no trace at all** today: a transfer rejection reads identically
-to an ordinary cancellation, and a **counter reschedule** (US-AG52) moves the departure leaving
-the folio asserting it was always on the new date — only the tourist-origin path leaves a
-`folio_requests` row. This repo has already paid once for history that rewrites itself: US-AG52
-retired reactivation precisely because it *"left the history asserting an expiry never
-happened."* When the seller and the admin disagree about what happened, the database genuinely
-does not know.
+Worse, some transitions leave **no readable trace** today: a transfer rejection reads identically
+to an ordinary cancellation, and a **reschedule** (US-AG52) moves the departure leaving the folio
+itself asserting it was always on the new date — D13's `folio_requests` record keeps the move
+auditable, but it is a petition table keyed by slot ids, rendered nowhere on the folio. This repo
+has already paid once for history that rewrites itself: US-AG52 retired reactivation precisely
+because it *"left the history asserting an expiry never happened."* When the seller and the admin
+disagree about what happened, the database genuinely does not know how to tell them.
 
 The unification spec already paid for part of this: its *Known behaviour change* records that
 org-wide cancellation-request history stopped being browsable — *"the question 'show me every
@@ -36,7 +36,10 @@ This feature is **additive**. Machine-checkable statement:
 
 - `api-turistear/test/folios/folio-cancellation.test.ts`,
   `folio-lifecycle-unification.test.ts` and `folio-list-scanability.test.ts` pass **unedited** —
-  event writes ride along in existing batches and change no existing behaviour.
+  event writes ride along in existing batches and change no existing behaviour. *(Amended in
+  build: "unedited" carries the one mechanical exception migration 0060 already set precedent
+  for — every shared `clearDb` cleanup list gains `folio_events` before `folios`, because the new
+  table FK-references the one the cleanups truncate. No assertion changed.)*
 - `app-turistear/src/features/folios/folioCardState.test.ts`, `components/FolioCard.test.tsx` and
   `pages/FoliosListPage.test.tsx` pass **unedited** — the **list and card are untouched**. D11 of
   the unification spec stands: no new badge, no new channel on the card.
@@ -102,12 +105,12 @@ or state.
 |---|---|---|
 | `created` | `confirmSale` (standard & express) | `{ sale_mode, initial_status }` |
 | `payment` | `confirmSale` (deposit/full) · `settleBooking` | `{ amount, method, kind: 'deposit'\|'full'\|'settlement' }` |
-| `payment_verified` | `verifyPayment` | `{ amount, reference }` |
-| `transfer_rejected` | `rejectPayment` | `{ reference, reason? }` |
+| `payment_verified` | `verifyPayment` | `{ reference }` *(amended in build: `amount` dropped — verify moves no money, and the sum of just-cleared rows is not at hand in the handler)* |
+| `transfer_rejected` | `rejectPayment` | `{ reference, reason }` |
 | `tickets_sent` | the WhatsApp send handler — **each** send appends | `{}` |
 | `tickets_viewed` | the tourist portal beacon (first view only, actor NULL) | `{}` |
 | `reminder_sent` | the reminder claim (US-AG07.3) | `{}` |
-| `rescheduled` | `rescheduleBooking` (counter) · the portal reschedule-request approval | `{ from_departure, to_departure, origin: 'counter'\|'tourist_request' }` |
+| `rescheduled` | `rescheduleFolio` — ONE site covering both the counter and the portal-approval origins | `{ origin: 'counter'\|'tourist_request', from_date, from_time, to_date, to_time }` — *amended in build: one event per **moved line**, mirroring D13's per-line `folio_requests` record; a multi-line reschedule is still one tap but several moves* |
 | `cancelled` | `cancelBooking` · `cancelFolio` · the `folio_requests` cancellation approval · the expiry sweep (actor NULL) · `voidExpressSale` | `{ source, reason?, clawback, refund_amount?, credit_amount?, kind?: 'express_void' }` |
 | `refund_confirmed` | refund confirm | `{ amount, via: 'pin'\|'override' }` |
 
@@ -123,16 +126,26 @@ or state.
 | `reminder_sent` | `reminder_sent_at` | `reminder_sent_by` |
 | `cancelled` | `cancelled_at` + `cancellation_source` / `cancellation_reason` / `cancellation_clawback` | `cancelled_by` (NULL for `system_expiry`) |
 | `refund_confirmed` | `refunded_at`; `via` = `refund_note` NULL → `'pin'`, else `'override'` | `refunded_by` |
-| **Not backfillable** | `transfer_rejected`, `rescheduled` — no surviving trace (only tourist-origin reschedules leave a `folio_requests` row, and its slot columns describe the petition, not the executed move); honestly absent | — |
+| `rescheduled` *(added in build)* | `folio_requests` where `kind='reschedule' AND status='approved'`, its `resolved_at`; the slot joins recover the from/to departures. `origin` is unknowable retroactively (a counter move is written already-approved, D13b) and is omitted. | `resolved_by` |
+| **Not backfillable** | `transfer_rejected` — indistinguishable from an ordinary admin cancellation in the surviving columns; honestly absent | — |
 
 ## Business rules (enforced server-side)
 
 1. Every handler that mutates a folio axis writes its `folio_events` row **inside the same D1
    batch** as the mutation. A mutation without its event, or an event without its mutation, is a
-   bug of the BUG-013 class.
+   bug of the BUG-013 class. *(Amended in build: where the mutation is a single guarded UPDATE
+   whose RETURNING decides victory — the reminder claim, the tickets-sent mark, the Visto beacon —
+   the event is written immediately after the win instead, because a batch cannot conditionally
+   include a row. Same crash-window residual class `applyCancellation` already accepts between its
+   flip and its batch.)*
 2. `folio_events` is append-only; no route updates or deletes a row.
 3. A backfilled event carries `backfilled = 1` and the **source column's timestamp** as
-   `created_at` — never the migration's clock.
+   `created_at` — never the migration's clock. *(Amended in build: live events all stamp the
+   REQUEST clock — one clock domain, because the Workers runtime freezes `Date.now()` per request
+   while `unixepoch()` keeps moving, and a mixed-domain narrative can sort a later action before
+   an earlier one. Where the mutation stamps a JS date (`settled_at`, `cancelled_at`, …) the event
+   carries that exact date; against `confirmSale`'s DB-default `created_at` a sub-second drift is
+   accepted. Equal timestamps are tiebroken by rowid — insertion order.)*
 4. One event per user action (D9); a single tap never yields two rows.
 5. The departure marker is derived at read and **never inserted** into `folio_events` (D7).
 6. Events are readable **only** through the folio detail; the folio's own org check governs —
@@ -199,13 +212,14 @@ When the admin opens the detail
 Then the `cancelled` event has `actor: null` (renders **Sistema**) and `payload.source =
 'system_expiry'` — and the derived Salida marker places the departure in the narrative.
 
-**S-3 — A counter reschedule finally leaves a trace**
-Given a paid folio rescheduled at the counter to another departure (US-AG52), which re-signs and
-re-sends the QR
+**S-3 — A counter reschedule finally leaves a readable trace**
+Given a live apartado rescheduled at the counter to another departure (US-AG52)
 When the admin opens the detail
-Then a `rescheduled` event appears with `from_departure`, `to_departure`, `origin: 'counter'` and
-the seller's name — followed by the `tickets_sent` event of the re-send — and the derived Salida
-marker sits at the **new** departure.
+Then a `rescheduled` event appears with the from/to departure dates, `origin: 'counter'` and the
+seller as actor — and (Phase 2) the derived Salida marker sits at the **new** departure.
+*(Amended in build: the QR re-issue on a paid folio is a delivery side effect with its own
+notification, not a `tickets_sent` tap — the original assertion described an event no action
+produces.)*
 
 **S-4 — One tap, one row**
 Given an admin rejects a pending transfer
@@ -222,8 +236,9 @@ transitions.
 **S-6 — The event's clock is the mutation's clock**
 Given a settlement performed at T
 When the detail is read
-Then the `payment` event's `at` equals the ledger row's `created_at`, not the request's arrival
-time on any retry.
+Then the `payment(settlement)` event's `at` equals the folio's `settled_at` exactly *(amended in
+build: the ledger row keeps its DB-default clock — pre-existing, not this feature's to change —
+so the folio column is the comparison that must hold)*.
 
 ### US-AG53 — the seller sees the same story
 
@@ -247,12 +262,14 @@ Then `404` — never `403` — and no event row of org B is reachable through an
 ## Definition of Done
 
 **Phase 1 — the log exists (`feat(folios)` PR, backend)**
-- [ ] Migration `0061_folio_events.sql` + Drizzle schema + backfill
-- [ ] All ten event types written live, each inside its mutation's existing batch
-- [ ] `events` embedded in both detail GETs, actors resolved
-- [ ] Scenarios S-1…S-6, S-8, S-9 in `api-turistear/test/folios/folio-timeline.test.ts`
-- [ ] Cross-org isolation via `seedTwoOrgs`
-- [ ] `SPEC.md`: US-AG53 story, Features-by-Phase line updated to this spec, glossary — in this PR
+- [x] Migration `0061_folio_events.sql` + Drizzle schema + backfill (9 mappings incl. `rescheduled`)
+- [x] All ten event types written live — batched with their mutation, or post-win where RETURNING
+      decides (rule 1 as amended)
+- [x] `events` embedded in both detail GETs, actors resolved (`readFolioEvents`)
+- [x] Scenarios S-1…S-6, S-8, S-9 (+ S-4b, + S-7's API half) in
+      `api-turistear/test/folios/folio-timeline.test.ts` — S-5 replays the migration's own INSERTs
+- [x] Cross-org isolation via `seedTwoOrgs`
+- [x] `SPEC.md`: US-AG53 story, Features-by-Phase line updated to this spec, glossary — in this PR
 
 **Phase 2 — the story renders (`feat(folios)` PR, frontend)**
 - [ ] `FolioTimeline` in both detail pages, oldest-first, Salida marker derived (S-7 UI assertions)

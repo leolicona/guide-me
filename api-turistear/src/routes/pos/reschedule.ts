@@ -12,6 +12,7 @@ import {
 import { ApiError } from '../../types/errors'
 import { naiveEpoch } from '../../utils/tz'
 import { emitNotification } from '../../utils/notifications'
+import { folioEventRow } from '../../utils/folioEvents'
 import { signLineTickets } from './handler'
 
 // US-AG52 — reagendar mientras el lugar es tuyo.
@@ -41,6 +42,8 @@ interface Ctx {
   folioId: string
   moves: RescheduleMove[]
   nowSec: number
+  /** US-A24 — how the move was agreed: at the counter, or a portal petition the admin approved. */
+  origin: 'counter' | 'tourist_request'
 }
 
 /**
@@ -52,7 +55,7 @@ interface Ctx {
  * than refusing.
  */
 export const rescheduleFolio = async (ctx: Ctx) => {
-  const { db, org, folioId, moves, nowSec, actorId } = ctx
+  const { db, org, folioId, moves, nowSec, actorId, origin } = ctx
 
   // One move per line per call. Two moves naming the same line would both resolve against the
   // line's ORIGINAL slot: capacity taken in two destinations, the source released twice, and the
@@ -139,6 +142,8 @@ export const rescheduleFolio = async (ctx: Ctx) => {
   const resolved: {
     lineId: string
     fromSlotId: string
+    fromDate: string | null
+    fromTime: string | null
     toSlotId: string
     quantity: number
     zoneId: string | null
@@ -278,6 +283,8 @@ export const rescheduleFolio = async (ctx: Ctx) => {
     resolved.push({
       lineId: line.id,
       fromSlotId: line.slotId,
+      fromDate: line.slotDate,
+      fromTime: line.slotStartTime,
       toSlotId: dest.id,
       quantity: line.quantity,
       zoneId: line.zoneId,
@@ -360,6 +367,24 @@ export const rescheduleFolio = async (ctx: Ctx) => {
       toSlotId: r.toSlotId,
       resolvedBy: actorId,
       resolvedAt: now,
+    })
+
+    // US-A24 — the narrative row, one per moved line (mirrors D13's per-line record). This is the
+    // trace a counter reschedule never left on the folio itself: the line now asserts it was
+    // always on the new date, and only this row says otherwise.
+    await folioEventRow(db, {
+      organizationId: org,
+      folioId,
+      type: 'rescheduled',
+      actorId,
+      payload: {
+        origin,
+        from_date: r.fromDate,
+        from_time: r.fromTime,
+        to_date: r.toDate,
+        to_time: r.toTime,
+      },
+      at: now,
     })
   }
 

@@ -92,7 +92,7 @@ const clearPosDb = async () => {
     'accommodation_reservations',
     'folio_payments',
     'notifications',
-    'folios',
+    'folio_events', 'folios',
     'slots',
     'services',
   ]) {

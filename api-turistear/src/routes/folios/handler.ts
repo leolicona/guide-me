@@ -36,6 +36,7 @@ import {
 } from '../pos/reschedule'
 import { emitNotification, recordEmailOutcome } from '../../utils/notifications'
 import { buildCancellationReversal, displayMethodSql, readFolioPayments } from '../../utils/folioPayments'
+import { folioEventRow, readFolioEvents } from '../../utils/folioEvents'
 import {
   readListCancellationRequests,
   readListLines,
@@ -654,7 +655,10 @@ export const getFolioDetail = async (c: FoliosContext) => {
       ? null
       : await quoteCancellation(db, admin.organizationId, id, new Date())
 
-  return c.json({ folio, cancellation_quote: quote ? serializeQuote(quote) : null })
+  // US-A24 — the narrative rides the detail ("the folio is one object" applies to the API too).
+  const events = await readFolioEvents(db, admin.organizationId, id)
+
+  return c.json({ folio, cancellation_quote: quote ? serializeQuote(quote) : null, events })
 }
 
 const serializeQuote = (o: CancellationOutcome) => ({
@@ -688,6 +692,14 @@ export const markTicketsSentAdmin = async (c: FoliosContext) => {
 
   const row = updated[0]
   if (!row) throw new ApiError('NOT_FOUND', 404, 'Folio not found')
+  // US-A24 — EACH send appends a row (the column is last-write-wins; the narrative is not).
+  await folioEventRow(db, {
+    organizationId: admin.organizationId,
+    folioId: id,
+    type: 'tickets_sent',
+    actorId: admin.userId,
+    at: now,
+  })
   return c.json({
     tickets_sent_at: tsOrNull(row.sentAt),
     tickets_viewed_at: tsOrNull(row.viewedAt),
@@ -808,6 +820,27 @@ const applyCancellation = async (
           eq(accommodationReservations.status, 'active'),
         ),
       ),
+  )
+  // US-A24 — the narrative row, derived from the same folioUpdate the flip wrote, so the event and
+  // the audit columns can never disagree. It rides the WINNER's batch: only the guarded flip's
+  // winner reaches this point, so a racing cancellation can never write a second `cancelled` row.
+  // This one edit covers every cancelFolioPriced entrance: admin (US-A21), agent apartado,
+  // tourist-request approval, and the expiry sweep (cancelled_by NULL renders "Sistema").
+  statements.push(
+    folioEventRow(db, {
+      organizationId: org,
+      folioId,
+      type: 'cancelled',
+      actorId: folioUpdate.cancelledBy ?? null,
+      payload: {
+        source: folioUpdate.cancellationSource,
+        reason: folioUpdate.cancellationReason,
+        clawback: folioUpdate.cancellationClawback === true,
+        refund_amount: folioUpdate.refundAmount,
+        credit_amount: folioUpdate.creditAmount,
+      },
+      at: now,
+    }),
   )
   await db.batch(statements as [BatchItem<'sqlite'>, ...BatchItem<'sqlite'>[]])
   return true
@@ -1223,6 +1256,7 @@ const approveRescheduleRequest = async (
       folioId: request.folioId,
       moves: [{ folio_line_id: request.folioLineId, to_slot_id: request.toSlotId }],
       nowSec,
+      origin: 'tourist_request',
     })
   } catch (err) {
     // The one refusal a customer can do something about. Everything else (a departed slot, a folio
@@ -1472,6 +1506,7 @@ export const confirmRefund = async (c: FoliosContext) => {
     .select({
       id: folios.id,
       refundStatus: folios.refundStatus,
+      refundAmount: folios.refundAmount,
       creditAmount: folios.creditAmount,
       creditExpiresAt: folios.creditExpiresAt,
       refundPin: folios.refundPin,
@@ -1518,22 +1553,35 @@ export const confirmRefund = async (c: FoliosContext) => {
   }
 
   const now = new Date()
-  await db
-    .update(folios)
-    .set({
-      refundStatus: 'refunded',
-      refundNote: overrideNote,
-      refundedAt: now,
-      refundedBy: admin.userId,
-      updatedAt: now,
-    })
-    .where(
-      and(
-        eq(folios.id, id),
-        eq(folios.organizationId, org),
-        eq(folios.refundStatus, 'pending'),
+  await db.batch([
+    db
+      .update(folios)
+      .set({
+        refundStatus: 'refunded',
+        refundNote: overrideNote,
+        refundedAt: now,
+        refundedBy: admin.userId,
+        updatedAt: now,
+      })
+      .where(
+        and(
+          eq(folios.id, id),
+          eq(folios.organizationId, org),
+          eq(folios.refundStatus, 'pending'),
+        ),
       ),
-    )
+    // US-A24 — the hand-back's narrative row, same batch, same clock as refunded_at. The `pending`
+    // pre-check above already 409s a resolved refund, so a raced double-confirm is the same
+    // pre-check-then-batch residual rejectPayment accepts.
+    folioEventRow(db, {
+      organizationId: org,
+      folioId: id,
+      type: 'refund_confirmed',
+      actorId: admin.userId,
+      payload: { amount: folio.refundAmount, via: pin ? 'pin' : 'override' },
+      at: now,
+    }),
+  ])
 
   const folioOut = await readFolio(db, org, id)
 

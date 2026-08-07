@@ -107,7 +107,7 @@ const expectReconciled = async (folioId: string) => {
 
 const clearPosDb = async () => {
   for (const t of ['folio_line_extras', 'folio_lines', 'folio_access_tokens', 'folio_payments', 'notifications',
-    'folios', 'slots', 'services']) {
+    'folio_events', 'folios', 'slots', 'services']) {
     await env.DB.exec(`DELETE FROM ${t}`)
   }
 }
