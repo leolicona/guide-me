@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import type { FormEvent } from 'react'
 import { useParams, Link as RouterLink } from 'react-router-dom'
 import {
   Box,
@@ -13,11 +14,6 @@ import {
   Divider,
   Chip,
   TextField,
-  Dialog,
-  DialogTitle,
-  DialogContent,
-  DialogContentText,
-  DialogActions,
   FormControlLabel,
   Switch,
 } from '@mui/material'
@@ -46,7 +42,7 @@ import { deliveryState } from '../features/pos/delivery'
 import { ServiceError } from '../services/authService'
 import { formatMoney } from '../features/catalog/types'
 import { folioLineMeta } from '../features/folios/folioLineLabel'
-import { ConfirmSheet, MoneyText, SectionCard, StatusChip } from '../components'
+import { ConfirmSheet, FormSheet, MoneyText, SectionCard, StatusChip } from '../components'
 import { ROUTES } from '../config/routes'
 
 const DATE_FMT: Intl.DateTimeFormatOptions = {
@@ -126,8 +122,11 @@ export default function FolioDetailPage() {
     if (url) window.open(url, '_blank')
   }
 
-  const handleConfirmRefund = () => {
-    if (!id) return
+  // FormSheet wires this to a real <form>, so Enter in the PIN field submits too — the guard
+  // repeats the footer's disabled condition because implicit submission does not check it.
+  const handleRefundSubmit = (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault()
+    if (!id || refundSubmitDisabled) return
     const input = useOverride
       ? { override_note: overrideNote.trim() }
       : { pin: pin.trim() }
@@ -455,16 +454,27 @@ export default function FolioDetailPage() {
           cancelLabel="Conservar folio"
         />
 
-        {/* US-A23 / US-T05 — confirm the physical cash refund. The PIN proves the client
-            was present to receive it; the override is for lost-link cases and requires a
-            note for the audit trail. */}
-        <Dialog open={refundOpen} onClose={() => setRefundOpen(false)} fullWidth maxWidth="xs">
-          <DialogTitle>Confirmar reembolso</DialogTitle>
-          <DialogContent>
-            <DialogContentText sx={{ mb: 2 }}>
+        {/* US-A23 / US-T05 — confirm the physical cash refund, on the canonical form host
+            (FormSheet). The PIN proves the client was present to receive it; the override is for
+            lost-link cases and requires a note for the audit trail. The PIN/note validation gates
+            the fixed footer submit; dismissal is the sheet contract (puller / X / backdrop). */}
+        <FormSheet
+          open={refundOpen}
+          onClose={() => setRefundOpen(false)}
+          title="Confirmar reembolso"
+          submitLabel="Confirmar reembolso"
+          onSubmit={handleRefundSubmit}
+          busy={refund.isPending}
+          disabled={useOverride ? !overrideNote.trim() : !pin.trim()}
+          error={
+            refund.isError ? <Alert severity="error">{refundErrorMessage}</Alert> : undefined
+          }
+        >
+          <Stack spacing={2}>
+            <Typography variant="body2" color="text.secondary">
               Captura el PIN que el cliente ve en su portal — es su comprobante de que recibió
               el efectivo. Esto no mueve ningún monto: solo registra que el reembolso se entregó.
-            </DialogContentText>
+            </Typography>
             {!useOverride ? (
               <TextField
                 label="PIN del cliente"
@@ -488,7 +498,7 @@ export default function FolioDetailPage() {
               />
             )}
             <FormControlLabel
-              sx={{ mt: 1 }}
+              sx={{ mx: 0 }}
               control={
                 <Switch checked={useOverride} onChange={(e) => setUseOverride(e.target.checked)} />
               }
@@ -496,24 +506,8 @@ export default function FolioDetailPage() {
                 <Typography variant="body2">Registrar sin PIN (con nota)</Typography>
               }
             />
-            {refund.isError && (
-              <Alert severity="error" sx={{ mt: 2 }}>
-                {refundErrorMessage}
-              </Alert>
-            )}
-          </DialogContent>
-          <DialogActions>
-            <Button onClick={() => setRefundOpen(false)}>Volver</Button>
-            <Button
-              variant="contained"
-              disableElevation
-              onClick={handleConfirmRefund}
-              disabled={refundSubmitDisabled}
-            >
-              {refund.isPending ? 'Confirmando…' : 'Confirmar reembolso'}
-            </Button>
-          </DialogActions>
-        </Dialog>
+          </Stack>
+        </FormSheet>
       </Box>
     </Fade>
   )
