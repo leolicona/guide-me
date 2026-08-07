@@ -64,6 +64,8 @@ const str = (p: Record<string, unknown> | null, key: string): string | undefined
   typeof p?.[key] === 'string' ? (p[key] as string) : undefined
 const num = (p: Record<string, unknown> | null, key: string): number | undefined =>
   typeof p?.[key] === 'number' ? (p[key] as number) : undefined
+const bool = (p: Record<string, unknown> | null, key: string): boolean | undefined =>
+  typeof p?.[key] === 'boolean' ? (p[key] as boolean) : undefined
 
 // The one-line copy per event (spec D8 vocabulary — never "Reserva"). Money renders through
 // MoneyText (D11): small, neutral semantic.
@@ -177,6 +179,7 @@ function deriveSalida(lines: TimelineLine[] | undefined, fulfillment?: Fulfillme
     fulfillment === 'no_show' ? ' — sin uso' : fulfillment === 'partial' ? ' — uso parcial' : ''
   return {
     epoch: Date.parse(`${earliest.slot_date}T${time || '00:00'}:00Z`) / 1000,
+    date: earliest.slot_date as string,
     primary: `Salida${suffix}`,
     caption: `${earliest.slot_date}${time ? ` · ${time}` : ''}`,
   }
@@ -195,6 +198,9 @@ export interface FolioTimelineProps {
    * `cancelled`/`rescheduled` events and get no second row. Supersedes the separate
    * "Historial de solicitudes" card. */
   requests?: FolioCancellationRequest[]
+  /** The no-PIN override's audit note (`folios.refund_note`) — the refund_confirmed payload only
+   * says `via`, and retiring the outcome banner must not lose the note it displayed. */
+  refundNote?: string | null
   /** Collapsed mode for a high position on the page: the LATEST row as a one-line summary plus
    * "Ver todo (n)" — context above the money without pushing the money down (the detail sits the
    * timeline between the status chips and the payment card; a mature folio carries 10-15 rows). */
@@ -210,6 +216,7 @@ export function FolioTimeline({
   lines,
   fulfillment,
   requests,
+  refundNote,
   collapsible = false,
 }: FolioTimelineProps) {
   const formatDate = useOrgDateFormatter(DATE_FMT) // US-A66 — org-local audit timestamps
@@ -225,16 +232,29 @@ export function FolioTimeline({
     const via = str(ev.payload, 'via')
     if (ev.type === 'refund_confirmed' && via)
       caption += via === 'override' ? ' · con nota de anulación' : ' · con PIN'
-    const reason =
-      ev.type === 'transfer_rejected' || ev.type === 'cancelled'
-        ? str(ev.payload, 'reason')
-        : undefined
+    const details: string[] = []
+    if (ev.type === 'transfer_rejected' || ev.type === 'cancelled') {
+      const reason = str(ev.payload, 'reason')
+      if (reason) details.push(reason)
+    }
+    // The commission outcome rode the payload all along — rendering it here is what let the
+    // cancellation AUDIT banner retire: history carries its own facts.
+    if (ev.type === 'cancelled') {
+      const clawback = bool(ev.payload, 'clawback')
+      if (clawback !== undefined) {
+        details.push(clawback ? 'Comisión del agente recuperada' : 'Comisión absorbida por la empresa')
+      }
+    }
+    // The no-PIN override's audit note (the folio column — the payload only says `via`).
+    if (ev.type === 'refund_confirmed' && via === 'override' && refundNote) {
+      details.push(`Nota: ${refundNote}`)
+    }
     return {
       key: ev.id,
       icon: EVENT_ICON[ev.type],
       color: EVENT_TONE[ev.type],
       primary: eventPrimary(ev),
-      details: reason ? [reason] : undefined,
+      details: details.length > 0 ? details : undefined,
       caption,
     }
   })
@@ -314,7 +334,16 @@ export function FolioTimeline({
     </Stack>
   )
 
-  const latest = rows[rows.length - 1]
+  // The collapsed summary is the latest FACT. A future departure sorts its Salida marker last,
+  // which would summarize a cancelled-and-refunded folio as "Salida" — so a marker whose date is
+  // still ahead yields to the row before it. A departed marker ("Salida — sin uso") IS the latest
+  // fact and keeps the slot. Day-granularity client clock, the same call BookingActions makes.
+  const todayIso = new Date().toISOString().slice(0, 10)
+  const last = rows[rows.length - 1]
+  const latest =
+    rows.length > 1 && last?.key === 'salida' && salida && salida.date > todayIso
+      ? rows[rows.length - 2]
+      : last
   const collapsed = collapsible && !expanded
 
   return (

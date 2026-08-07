@@ -251,6 +251,89 @@ describe('collapsible — context above the money without pushing the money down
   })
 })
 
+describe('the absorbed outcome banners — history carries its own facts', () => {
+  it('a cancelled row states the commission outcome from its payload', () => {
+    renderWithProviders(
+      <FolioTimeline
+        events={[
+          anEvent({
+            type: 'cancelled',
+            payload: { source: 'admin', reason: 'Cliente no viaja', clawback: true },
+          }),
+        ]}
+      />,
+    )
+    expect(screen.getByText('Cliente no viaja')).toBeInTheDocument()
+    expect(screen.getByText('Comisión del agente recuperada')).toBeInTheDocument()
+  })
+
+  it('an absorbed cancellation reads so, when nothing was clawed back', () => {
+    renderWithProviders(
+      <FolioTimeline
+        events={[anEvent({ type: 'cancelled', payload: { source: 'agent', clawback: false } })]}
+      />,
+    )
+    expect(screen.getByText('Comisión absorbida por la empresa')).toBeInTheDocument()
+  })
+
+  it('a no-PIN refund shows the override note the retired banner used to carry', () => {
+    renderWithProviders(
+      <FolioTimeline
+        events={[
+          anEvent({ type: 'refund_confirmed', payload: { amount: 20000, via: 'override' } }),
+        ]}
+        refundNote="El cliente perdió su enlace"
+      />,
+    )
+    expect(screen.getByText(/con nota de anulación/)).toBeInTheDocument()
+    expect(screen.getByText('Nota: El cliente perdió su enlace')).toBeInTheDocument()
+  })
+
+  it('a PIN refund shows no note even when the folio carries one from elsewhere', () => {
+    const { container } = renderWithProviders(
+      <FolioTimeline
+        events={[anEvent({ type: 'refund_confirmed', payload: { amount: 20000, via: 'pin' } })]}
+        refundNote="irrelevante"
+      />,
+    )
+    expect(container.textContent).not.toContain('Nota:')
+  })
+})
+
+describe('the collapsed summary is the latest FACT, not the future marker', () => {
+  const future = new Date(Date.now() + 5 * 86_400_000).toISOString().slice(0, 10)
+  const past = new Date(Date.now() - 5 * 86_400_000).toISOString().slice(0, 10)
+
+  it('a future Salida yields the summary slot to the last event', () => {
+    const { container } = renderWithProviders(
+      <FolioTimeline
+        events={[
+          anEvent({ type: 'created', at: 1000 }),
+          anEvent({ type: 'cancelled', at: 2000, payload: { source: 'admin', clawback: false } }),
+        ]}
+        lines={[{ slot_date: future, slot_start_time: '08:00' }]}
+        collapsible
+      />,
+    )
+    expect(screen.getByText('Cancelado por administración')).toBeInTheDocument()
+    expect(container.textContent).not.toContain('Salida')
+    expect(screen.getByRole('button', { name: 'Ver todo (3)' })).toBeInTheDocument()
+  })
+
+  it('a departed Salida IS the latest fact and keeps the summary', () => {
+    const pastEpoch = Math.floor(Date.parse(`${past}T08:00:00Z`) / 1000)
+    renderWithProviders(
+      <FolioTimeline
+        events={[anEvent({ type: 'created', at: pastEpoch - 86400 })]}
+        lines={[{ slot_date: past, slot_start_time: '08:00' }]}
+        fulfillment="no_show"
+        collapsible
+      />,
+    )
+    expect(screen.getByText('Salida — sin uso')).toBeInTheDocument()
+  })
+})
+
 describe('the empty timeline', () => {
   it('an empty events array still renders the card with its empty line', () => {
     renderWithProviders(<FolioTimeline events={[]} />)
