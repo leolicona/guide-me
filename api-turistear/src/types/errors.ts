@@ -18,6 +18,9 @@ export type ErrorCode =
   // sales cutoff and applies to every folio: this one rejects only the DEPOSIT path, so the agent
   // can still sell the same slot by collecting the full amount.
   | 'BOOKING_TOO_LATE'
+  // BUG-030 — cancelling while a transfer awaits verification would run the ladder over money the
+  // company never confirmed and mint a refund PIN for it. Verify or reject the payment first.
+  | 'PAYMENT_UNVERIFIED'
   | 'SERVICE_INACTIVE'
   | 'SERVICE_NOT_ALLOWED'
   | 'SERVICE_HAS_FOLIOS'
