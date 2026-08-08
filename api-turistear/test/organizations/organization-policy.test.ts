@@ -31,7 +31,6 @@ describe('US-A46 — org booking policy', () => {
     expect(status).toBe(200)
     expect(json.organization).toMatchObject({
       booking_min_down_payment_pct: 0,
-      booking_hold_days: 7,
       // US-A47 — split policies: sales cutoff (default 0 = sellable until departure) +
       // booking grace (renamed same-day buffer; default 15 = cancel 15 min before departure).
       sales_cutoff_offset_minutes: 0,
@@ -45,7 +44,6 @@ describe('US-A46 — org booking policy', () => {
     await seedUser({ email: 'admin@empresa.com', role: 'admin' })
     const { status, json } = await put('admin@empresa.com', {
       booking_min_down_payment_pct: 50,
-      booking_hold_days: 3,
       // A positive cutoff (close sales 5 min before) and a NEGATIVE grace (cancel 10 min AFTER
       // departure — the "After" direction the UI translates to a negative integer).
       sales_cutoff_offset_minutes: 5,
@@ -55,7 +53,6 @@ describe('US-A46 — org booking policy', () => {
     expect(status).toBe(200)
     expect(json.organization).toMatchObject({
       booking_min_down_payment_pct: 50,
-      booking_hold_days: 3,
       sales_cutoff_offset_minutes: 5,
       booking_grace_offset_minutes: -10,
       booking_pre_departure_buffer_hours: 12,
@@ -67,7 +64,6 @@ describe('US-A46 — org booking policy', () => {
   it('rejects out-of-range values → 400', async () => {
     await seedUser({ email: 'admin@empresa.com', role: 'admin' })
     expect((await put('admin@empresa.com', { booking_min_down_payment_pct: 101 })).status).toBe(400)
-    expect((await put('admin@empresa.com', { booking_hold_days: 0 })).status).toBe(400)
     // Offsets are signed (±240). Negative is now VALID (a grace window); only out-of-bounds fails.
     expect((await put('admin@empresa.com', { booking_grace_offset_minutes: -30 })).status).toBe(200)
     expect((await put('admin@empresa.com', { sales_cutoff_offset_minutes: 999 })).status).toBe(400)
@@ -88,27 +84,80 @@ describe('US-A46 — org booking policy', () => {
     expect((await get('admin@empresa.com')).json.organization.booking_creation_cutoff_hours).toBe(48)
   })
 
-  it('rejects a cutoff below the settle deadline → 400, in BOTH directions', async () => {
+  // BUG-029 — this used to assert `cutoff >= buffer`, which was wrong at BOTH ends: it forbade the
+  // only useful configurations ("no apartados inside 2 hours") and, at its own boundary, accepted an
+  // apartado born with zero life. The rule now asks `bookingExpiryEpoch` what an apartado created at
+  // the tightest legal moment would get, and requires it to be alive.
+  it('BUG-029 — a same-day creation cutoff is legal, because stage ② is a legitimate birthplace', async () => {
     await seedUser({ email: 'admin@empresa.com', role: 'admin' })
-    // Default deadline is 24h. A 12h cutoff would let an apartado be created inside the window it
-    // is expected to be settled in — born owing money it has no time to pay.
-    expect((await put('admin@empresa.com', { booking_creation_cutoff_hours: 12 })).status).toBe(400)
+    // Default deadline 24 h, default grace +15 min. A 2 h cutoff means the tightest apartado is
+    // born 2 h out and released at salida−15min: one hour and forty-five minutes of life.
+    // `apartado-stages.spec.md` S2 — "sales made close to departure are BORN here".
+    expect((await put('admin@empresa.com', { booking_creation_cutoff_hours: 2 })).status).toBe(200)
+  })
 
-    // The other direction: a cutoff already stored, and a PATCH that raises the deadline past it.
-    // The check reads the STORED value of whichever field the request did not send, so this fails
-    // too — validating the body alone would have let it through.
-    expect((await put('admin@empresa.com', { booking_creation_cutoff_hours: 48 })).status).toBe(200)
-    expect(
-      (await put('admin@empresa.com', { booking_pre_departure_buffer_hours: 72 })).status,
-    ).toBe(400)
+  it('BUG-029 — cutoff == buffer is REJECTED: that apartado is born already dead', async () => {
+    await seedUser({ email: 'admin@empresa.com', role: 'admin' })
+    // `nearDeparture` is `distance < buffer`, so at EXACTLY the buffer the far branch applies and
+    // the expiry lands on the instant of sale. The old rule accepted this and rejected the case
+    // above — precisely backwards.
+    expect((await put('admin@empresa.com', { booking_creation_cutoff_hours: 24 })).status).toBe(400)
+    // One hour of daylight is enough to be legal.
+    expect((await put('admin@empresa.com', { booking_creation_cutoff_hours: 25 })).status).toBe(200)
+  })
 
-    // Both together, coherent, is fine.
+  it('BUG-029 — a cutoff inside the grace window is rejected', async () => {
+    await seedUser({ email: 'admin@empresa.com', role: 'admin' })
+    // Grace +120 min: the hold is released two hours before departure. A cutoff of 1 h would let an
+    // apartado be created an hour AFTER its own release instant.
+    //
+    // The sales cutoff moves with it (US-A87 D4): releasing at salida−2h while the slot still sells
+    // until departure would give back seats nobody can buy. The two settings describe the same
+    // moment from different sides and now have to agree about it.
     expect(
       (await put('admin@empresa.com', {
-        booking_creation_cutoff_hours: 96,
-        booking_pre_departure_buffer_hours: 72,
+        booking_grace_offset_minutes: 120,
+        sales_cutoff_offset_minutes: 120,
+        booking_creation_cutoff_hours: 1,
+      })).status,
+    ).toBe(400)
+    expect(
+      (await put('admin@empresa.com', {
+        booking_grace_offset_minutes: 120,
+        sales_cutoff_offset_minutes: 120,
+        booking_creation_cutoff_hours: 3,
       })).status,
     ).toBe(200)
+  })
+
+  it('BUG-029 — a NEGATIVE grace is courtesy after departure, so any cutoff is coherent', async () => {
+    await seedUser({ email: 'admin@empresa.com', role: 'admin' })
+    // −30 = released 30 min AFTER departure. An apartado created at the 1 h boundary lives 1 h 30.
+    expect(
+      (await put('admin@empresa.com', {
+        booking_grace_offset_minutes: -30,
+        booking_creation_cutoff_hours: 1,
+      })).status,
+    ).toBe(200)
+  })
+
+  it('the check reads the STORED value of whichever field the request did not send', async () => {
+    await seedUser({ email: 'admin@empresa.com', role: 'admin' })
+    expect((await put('admin@empresa.com', { booking_creation_cutoff_hours: 2 })).status).toBe(200)
+    // Raising the GRACE alone now makes the stored cutoff incoherent. Validating the body alone
+    // would have let this through — which is the half of the original rule worth keeping.
+    expect(
+      (await put('admin@empresa.com', {
+        booking_grace_offset_minutes: 180,
+        sales_cutoff_offset_minutes: 180,
+      })).status,
+    ).toBe(400)
+  })
+
+  it('0 means no restriction, so there is no boundary to evaluate', async () => {
+    await seedUser({ email: 'admin@empresa.com', role: 'admin' })
+    // And nothing a settings rule can promise — `confirmSale`'s guard is what covers that case.
+    expect((await put('admin@empresa.com', { booking_creation_cutoff_hours: 0 })).status).toBe(200)
   })
 
   it('0 means no restriction, so it is coherent with any deadline', async () => {
@@ -117,20 +166,76 @@ describe('US-A46 — org booking policy', () => {
     expect((await put('admin@empresa.com', { booking_creation_cutoff_hours: 0 })).status).toBe(200)
   })
 
+  // BUG-028 — `booking_hold_days` configured the retired `created_at + N days` model. It has been
+  // inert since the hold moved to time-distance-to-departure, so accepting it (with a min(1) that
+  // rejected a 0 and then ignored the 5) was the API promising a policy it does not have.
+  it('booking_hold_days is neither returned nor writable', async () => {
+    await seedUser({ email: 'admin@empresa.com', role: 'admin' })
+    expect((await get('admin@empresa.com')).json.organization).not.toHaveProperty(
+      'booking_hold_days',
+    )
+    // Accepted at the HTTP layer (Zod strips unknown keys) but written nowhere — and a value the
+    // old min(1) would have rejected no longer produces a 400 about a policy that does not exist.
+    expect((await put('admin@empresa.com', { booking_hold_days: 0 })).status).toBe(200)
+    expect((await get('admin@empresa.com')).json.organization).not.toHaveProperty(
+      'booking_hold_days',
+    )
+  })
+
+  // US-A87 (D4) — the third coherence rule. Two settings describe the same moment from opposite
+  // sides; releasing an apartado's seats before the slot stops selling them is loss with no
+  // beneficiary. Both are signed + = before departure / − = after.
+  it('US-A87 — the shipped default is REFUSED: it releases 15 min before it stops selling', async () => {
+    await seedUser({ email: 'admin@empresa.com', role: 'admin' })
+    // grace +15 against cutoff 0. This is what every organization ships with.
+    const res = await put('admin@empresa.com', { booking_grace_offset_minutes: 15 })
+    expect(res.status).toBe(422)
+    expect(JSON.stringify(res.json)).toContain('RELEASE_BEFORE_SALES_CUTOFF')
+  })
+
+  it('US-A87 — releasing exactly at the close, or after it, is coherent', async () => {
+    await seedUser({ email: 'admin@empresa.com', role: 'admin' })
+    // Exactly at departure: the seat goes back the instant it stops being sellable.
+    expect((await put('admin@empresa.com', { booking_grace_offset_minutes: 0 })).status).toBe(200)
+    // Thirty minutes AFTER: the seat is worthless by then, so holding it costs nothing and the
+    // customer may still walk up.
+    expect((await put('admin@empresa.com', { booking_grace_offset_minutes: -30 })).status).toBe(200)
+  })
+
+  it('US-A87 — the rule bites from the OTHER side too', async () => {
+    await seedUser({ email: 'admin@empresa.com', role: 'admin' })
+    expect((await put('admin@empresa.com', { booking_grace_offset_minutes: 0 })).status).toBe(200)
+    // Now sell 30 min past departure while still releasing AT departure: thirty minutes of seats
+    // handed back that the slot would still have sold.
+    const res = await put('admin@empresa.com', { sales_cutoff_offset_minutes: -30 })
+    expect(res.status).toBe(422)
+    // ...and moving them together is fine. THREE settings, not two: pushing the sales cutoff past
+    // departure drags the no-show margin with it as well (US-A85 D23), because marking a customer
+    // absent while their seat is still on sale is the same incoherence seen from a third side.
+    // Every one of them answers "what happens around the departure instant", so they move as a set.
+    expect(
+      (await put('admin@empresa.com', {
+        sales_cutoff_offset_minutes: -30,
+        booking_grace_offset_minutes: -30,
+        no_show_margin_minutes: -30,
+      })).status,
+    ).toBe(200)
+  })
+
   it('an agent may not edit the policy → 403', async () => {
     const { organizationId } = await seedUser({ email: 'admin@empresa.com', role: 'admin' })
     await seedUser({ email: 'agent@empresa.com', role: 'agent', organizationId })
-    expect((await put('agent@empresa.com', { booking_hold_days: 5 })).status).toBe(403)
+    expect((await put('agent@empresa.com', { booking_min_down_payment_pct: 5 })).status).toBe(403)
   })
 
   it('isolation — an admin only edits their own org', async () => {
     const { orgA, orgB } = await seedTwoOrgs()
-    await put(orgA.adminEmail, { booking_hold_days: 2 })
+    await put(orgA.adminEmail, { booking_min_down_payment_pct: 40 })
 
     const a = await get(orgA.adminEmail)
     const b = await get(orgB.adminEmail)
-    expect(a.json.organization.booking_hold_days).toBe(2)
-    expect(b.json.organization.booking_hold_days).toBe(7) // untouched default
+    expect(a.json.organization.booking_min_down_payment_pct).toBe(40)
+    expect(b.json.organization.booking_min_down_payment_pct).toBe(0) // untouched default
   })
 })
 
@@ -236,7 +341,7 @@ describe('US-A69 — cancellation policy ladder', () => {
   it('leaves the ladder alone when the field is absent from a partial update', async () => {
     await seedUser({ email: 'admin@empresa.com', role: 'admin' })
     await put('admin@empresa.com', { cancellation_policy: LADDER })
-    await put('admin@empresa.com', { booking_hold_days: 3 })
+    await put('admin@empresa.com', { booking_min_down_payment_pct: 30 })
     expect((await get('admin@empresa.com')).json.organization.cancellation_policy).not.toBeNull()
   })
 
@@ -273,10 +378,13 @@ describe('US-A69 — cancellation policy ladder', () => {
     expect((await get('admin@empresa.com')).json.organization.cancellation_policy).toBeNull()
   })
 
-  it('US-A73 — the agent-cancellation switch round-trips', async () => {
+  // BUG-028 — US-A73 is specified, NOT built: no endpoint reads the flag and every cancel route is
+  // still admin-only. The switch used to round-trip through PATCH, which told an admin they had
+  // enabled something. It is now refused (Zod strips it), and the read field stays for US-AG44.
+  it('US-A73 — the agent-cancellation switch is NOT writable while the endpoint does not exist', async () => {
     await seedUser({ email: 'admin@empresa.com', role: 'admin' })
     expect((await put('admin@empresa.com', { agent_cancellation_enabled: true })).status).toBe(200)
-    expect((await get('admin@empresa.com')).json.organization.agent_cancellation_enabled).toBe(true)
+    expect((await get('admin@empresa.com')).json.organization.agent_cancellation_enabled).toBe(false)
   })
 
   it('isolation — one org\'s ladder is invisible to another', async () => {

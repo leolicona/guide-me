@@ -6,6 +6,7 @@ import { ApiError } from '../../types/errors'
 import type { AppVariables } from '../../types/context'
 import type { UpdateOrganizationInput } from './schema'
 import { parseCancellationPolicy } from '../../utils/cancellationPolicy'
+import { bookingExpiryEpoch } from '../pos/handler'
 
 type OrganizationsContext = Context<{
   Bindings: CloudflareBindings
@@ -18,11 +19,12 @@ const orgColumns = {
   id: organizations.id,
   name: organizations.name,
   bookingMinDownPaymentPct: organizations.bookingMinDownPaymentPct,
-  bookingHoldDays: organizations.bookingHoldDays,
   salesCutoffOffsetMinutes: organizations.salesCutoffOffsetMinutes,
   bookingGraceOffsetMinutes: organizations.bookingGraceOffsetMinutes,
   bookingPreDepartureBufferHours: organizations.bookingPreDepartureBufferHours,
   bookingCreationCutoffHours: organizations.bookingCreationCutoffHours,
+  noShowMarginMinutes: organizations.noShowMarginMinutes,
+  bookingCreditValidDays: organizations.bookingCreditValidDays,
   lodgingWeekendDays: organizations.lodgingWeekendDays,
   lodgingFreeCancelDays: organizations.lodgingFreeCancelDays,
   lodgingCancelPenaltyPct: organizations.lodgingCancelPenaltyPct,
@@ -32,17 +34,19 @@ const orgColumns = {
   cancellationPolicy: organizations.cancellationPolicy,
   agentCancellationEnabled: organizations.agentCancellationEnabled,
   qrRedemptionMode: organizations.qrRedemptionMode,
+  paymentReferenceRequired: organizations.paymentReferenceRequired,
 } as const
 
 const serializeOrg = (o: {
   id: string
   name: string
   bookingMinDownPaymentPct: number
-  bookingHoldDays: number
   salesCutoffOffsetMinutes: number
   bookingGraceOffsetMinutes: number
   bookingPreDepartureBufferHours: number
   bookingCreationCutoffHours: number
+  noShowMarginMinutes: number
+  bookingCreditValidDays: number
   lodgingWeekendDays: string
   lodgingFreeCancelDays: number
   lodgingCancelPenaltyPct: number
@@ -52,15 +56,17 @@ const serializeOrg = (o: {
   cancellationPolicy: string | null
   agentCancellationEnabled: boolean
   qrRedemptionMode: 'per_pass' | 'all_passes'
+  paymentReferenceRequired: boolean
 }) => ({
   id: o.id,
   name: o.name,
   booking_min_down_payment_pct: o.bookingMinDownPaymentPct,
-  booking_hold_days: o.bookingHoldDays,
   sales_cutoff_offset_minutes: o.salesCutoffOffsetMinutes,
   booking_grace_offset_minutes: o.bookingGraceOffsetMinutes,
   booking_pre_departure_buffer_hours: o.bookingPreDepartureBufferHours,
   booking_creation_cutoff_hours: o.bookingCreationCutoffHours,
+  no_show_margin_minutes: o.noShowMarginMinutes,
+  booking_credit_valid_days: o.bookingCreditValidDays,
   lodging_weekend_days: o.lodgingWeekendDays
     ? o.lodgingWeekendDays.split(',').map(Number)
     : [],
@@ -79,6 +85,8 @@ const serializeOrg = (o: {
   agent_cancellation_enabled: o.agentCancellationEnabled,
   // US-A81 (docs/scanner/group-redemption.spec.md) — how a scan consumes a ticket's passes.
   qr_redemption_mode: o.qrRedemptionMode,
+  // US-A88 — must a transfer carry its bank reference? The checkout/settle forms read this.
+  payment_reference_required: o.paymentReferenceRequired,
 })
 
 export const getMyOrganization = async (c: OrganizationsContext) => {
@@ -112,8 +120,6 @@ export const updateMyOrganization = async (c: OrganizationsContext) => {
   const updates: Record<string, unknown> = { updatedAt: new Date() }
   if (input.booking_min_down_payment_pct !== undefined)
     updates.bookingMinDownPaymentPct = input.booking_min_down_payment_pct
-  if (input.booking_hold_days !== undefined)
-    updates.bookingHoldDays = input.booking_hold_days
   if (input.sales_cutoff_offset_minutes !== undefined)
     updates.salesCutoffOffsetMinutes = input.sales_cutoff_offset_minutes
   if (input.booking_grace_offset_minutes !== undefined)
@@ -123,21 +129,31 @@ export const updateMyOrganization = async (c: OrganizationsContext) => {
   if (input.booking_creation_cutoff_hours !== undefined)
     updates.bookingCreationCutoffHours = input.booking_creation_cutoff_hours
 
-  // US-A77 (S1) — the two apartado windows have to stay coherent, and the check needs the STORED
-  // value of whichever field this request did not send. A PATCH that raises the settle deadline
-  // above an existing creation cutoff is just as incoherent as one that lowers the cutoff below the
-  // deadline, so both directions are checked against the merged result rather than the body alone.
+  // US-A77 (S1), corrected by BUG-029 — the apartado windows have to stay coherent, and the check
+  // needs the STORED value of whichever field this request did not send.
   //
-  // An apartado created inside its own settle window is born owing money it has no time to pay:
-  // that is the shape that produced the one-minute apartado.
+  // The rule this replaces was `cutoff >= buffer`, on the reasoning that an apartado created inside
+  // its own settle window is born owing money it has no time to pay. That ignored the GRACE stage,
+  // which `apartado-stages.spec.md` S2 documents as a legitimate birthplace: *"sales made close to
+  // departure are BORN here"*. It was wrong at both ends —
+  //
+  //   · it forbade the only useful configurations ("no apartados inside 2 hours" → 400), and
+  //   · at its own boundary `cutoff == buffer` it ACCEPTED an apartado born with zero life:
+  //     `nearDeparture` is `distance < buffer`, so at exactly the buffer the FAR branch applies and
+  //     the expiry lands on the instant of sale.
+  //
+  // The rule now asks the real function what an apartado created at the tightest legal moment would
+  // get, and requires it to be alive. Same arithmetic as production, so it cannot drift from it.
   if (
     input.booking_creation_cutoff_hours !== undefined ||
-    input.booking_pre_departure_buffer_hours !== undefined
+    input.booking_pre_departure_buffer_hours !== undefined ||
+    input.booking_grace_offset_minutes !== undefined
   ) {
     const [stored] = await db
       .select({
         cutoff: organizations.bookingCreationCutoffHours,
         buffer: organizations.bookingPreDepartureBufferHours,
+        grace: organizations.bookingGraceOffsetMinutes,
       })
       .from(organizations)
       .where(eq(organizations.id, user.organizationId))
@@ -145,15 +161,93 @@ export const updateMyOrganization = async (c: OrganizationsContext) => {
 
     const cutoff = input.booking_creation_cutoff_hours ?? stored?.cutoff ?? 0
     const buffer = input.booking_pre_departure_buffer_hours ?? stored?.buffer ?? 24
-    // 0 means "no restriction", which is coherent with any deadline.
-    if (cutoff !== 0 && cutoff < buffer) {
+    const grace = input.booking_grace_offset_minutes ?? stored?.grace ?? 15
+
+    // `0` means "no restriction", so there is no tightest legal moment to evaluate — and nothing a
+    // settings rule can promise. The sale-time guard in `confirmSale` is what covers that case.
+    if (cutoff > 0) {
+      const departure = 0
+      const createdAt = -cutoff * 3_600
+      const expiry = bookingExpiryEpoch(
+        { preDepartureBufferHours: buffer, bookingGraceOffsetMinutes: grace },
+        createdAt,
+        departure,
+      )
+      if (expiry <= createdAt) {
+        throw new ApiError(
+          'VALIDATION_ERROR',
+          400,
+          `Con estos valores un apartado creado en el límite (${cutoff} h antes de la salida) nacería ya vencido. ` +
+            `Sube el límite para crear apartados, o baja el plazo para pagar el saldo (${buffer} h).`,
+        )
+      }
+    }
+  }
+  // US-A87 (D4) — the THIRD coherence rule: the hold release may not precede the sales cutoff.
+  // Releasing an apartado's spots before the slot stops selling them is loss with no beneficiary —
+  // the customer loses the seat and nobody gets it. Both settings are signed the same way
+  // (+ before departure / − after), so "release is not earlier than the close" is simply
+  // `grace <= cutoff`.
+  //
+  //   grace +15, cutoff 0   → 15 <= 0  false → refused. The shipped default, and the defect.
+  //   grace   0, cutoff 0   → accepted. Released exactly as the slot closes.
+  //   grace −30, cutoff 0   → accepted. Released after the close; the seat is worthless anyway.
+  //   grace   0, cutoff −30 → refused. Released while there were still 30 minutes of selling left.
+  if (
+    input.booking_grace_offset_minutes !== undefined ||
+    input.sales_cutoff_offset_minutes !== undefined
+  ) {
+    const [stored] = await db
+      .select({
+        grace: organizations.bookingGraceOffsetMinutes,
+        cutoff: organizations.salesCutoffOffsetMinutes,
+      })
+      .from(organizations)
+      .where(eq(organizations.id, user.organizationId))
+      .limit(1)
+
+    const grace = input.booking_grace_offset_minutes ?? stored?.grace ?? 15
+    const cutoff = input.sales_cutoff_offset_minutes ?? stored?.cutoff ?? 0
+    if (grace > cutoff) {
       throw new ApiError(
-        'VALIDATION_ERROR',
-        400,
-        `El límite para crear apartados (${cutoff} h) no puede ser menor que el plazo para pagar el saldo (${buffer} h).`,
+        'RELEASE_BEFORE_SALES_CUTOFF',
+        422,
+        'La liberación del apartado no puede ocurrir antes del cierre de ventas: liberarías lugares que ya no se pueden vender.',
       )
     }
   }
+
+  // US-A85 (D23) — the no-show margin may not mark a customer absent while their seat is still on
+  // sale. An org that keeps selling 30 minutes past departure and calls people no-shows at the
+  // departure instant would be declaring someone absent BEFORE it sold them their ticket. Both are
+  // signed the same way (+ before / − after), so "still sellable" is simply the LOWER number.
+  if (
+    input.no_show_margin_minutes !== undefined ||
+    input.sales_cutoff_offset_minutes !== undefined
+  ) {
+    const [stored] = await db
+      .select({
+        margin: organizations.noShowMarginMinutes,
+        cutoff: organizations.salesCutoffOffsetMinutes,
+      })
+      .from(organizations)
+      .where(eq(organizations.id, user.organizationId))
+      .limit(1)
+
+    const margin = input.no_show_margin_minutes ?? stored?.margin ?? 0
+    const cutoff = input.sales_cutoff_offset_minutes ?? stored?.cutoff ?? 0
+    if (margin > cutoff) {
+      throw new ApiError(
+        'NO_SHOW_MARGIN_TOO_EARLY',
+        422,
+        'El margen de no-show no puede marcar a un cliente como ausente mientras su lugar todavía está a la venta.',
+      )
+    }
+  }
+  if (input.no_show_margin_minutes !== undefined)
+    updates.noShowMarginMinutes = input.no_show_margin_minutes
+  if (input.booking_credit_valid_days !== undefined)
+    updates.bookingCreditValidDays = input.booking_credit_valid_days
   if (input.lodging_weekend_days !== undefined)
     updates.lodgingWeekendDays = input.lodging_weekend_days.join(',')
   if (input.lodging_free_cancel_days !== undefined)
@@ -174,11 +268,12 @@ export const updateMyOrganization = async (c: OrganizationsContext) => {
     updates.cancellationPolicy = input.cancellation_policy
       ? JSON.stringify(input.cancellation_policy)
       : null
-  if (input.agent_cancellation_enabled !== undefined)
-    updates.agentCancellationEnabled = input.agent_cancellation_enabled
   // US-A81 — the scan-consumption mode (group-redemption D1); enum-validated in the schema.
   if (input.qr_redemption_mode !== undefined)
     updates.qrRedemptionMode = input.qr_redemption_mode
+  // US-A88 — the transfer-reference requirement (payment-verification D10).
+  if (input.payment_reference_required !== undefined)
+    updates.paymentReferenceRequired = input.payment_reference_required
 
   await db
     .update(organizations)

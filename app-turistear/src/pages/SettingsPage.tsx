@@ -129,6 +129,10 @@ export default function SettingsPage() {
   const [cutoffDir, setCutoffDir] = useState<OffsetDir>('before')
   const [graceMag, setGraceMag] = useState('')
   const [graceDir, setGraceDir] = useState<OffsetDir>('before')
+  // US-A85 (D23) — when a departed line with nothing redeemed starts reading as "Sin usar".
+  const [creditDays, setCreditDays] = useState('')
+  const [noShowMag, setNoShowMag] = useState('')
+  const [noShowDir, setNoShowDir] = useState<OffsetDir>('after')
   const [saved, setSaved] = useState(false)
 
   // US-A60/A63 — lodging org policy: weekend days, free-cancel window, penalty %.
@@ -154,6 +158,10 @@ export default function SettingsPage() {
     const c = splitOffset(org.sales_cutoff_offset_minutes)
     setCutoffMag(String(c.mag))
     setCutoffDir(c.dir)
+    setCreditDays(String(org.booking_credit_valid_days ?? 90))
+    const n = splitOffset(org.no_show_margin_minutes ?? 0)
+    setNoShowMag(String(n.mag))
+    setNoShowDir(n.dir)
     const g = splitOffset(org.booking_grace_offset_minutes)
     setGraceMag(String(g.mag))
     setGraceDir(g.dir)
@@ -184,10 +192,37 @@ export default function SettingsPage() {
     m === '' || !Number.isInteger(n) || n < 0 || n > OFFSET_MAX
   const cutoffInvalid = magInvalid(cutoffMag, cutoffMagNum)
   const graceInvalid = magInvalid(graceMag, graceMagNum)
-  const invalid = pctInvalid || bufferInvalid || creationCutoffInvalid || cutoffInvalid || graceInvalid
+  const creditDaysNum = Number(creditDays)
+  const creditDaysInvalid =
+    creditDays !== '' && (!Number.isInteger(creditDaysNum) || creditDaysNum < 1 || creditDaysNum > 730)
+  const noShowMagNum = Number(noShowMag)
+  const noShowInvalid = magInvalid(noShowMag, noShowMagNum)
 
   const cutoffSigned = joinOffset(cutoffMagNum, cutoffDir)
   const graceSigned = joinOffset(graceMagNum, graceDir)
+  const noShowSigned = joinOffset(noShowMagNum, noShowDir)
+  // US-A85 (D23) — the same guard the endpoint enforces, mirrored so the admin is not told after
+  // the fact. Both are signed + = before / − = after, so "still sellable" is simply the lower
+  // number: a margin ABOVE the sales cutoff would mark a customer absent while their seat is on
+  // sale — declaring someone a no-show before we sold them their ticket.
+  const noShowTooEarly =
+    !noShowInvalid && !cutoffInvalid && noShowMag !== '' && noShowSigned > cutoffSigned
+  // US-A87 (D4) — the third coherence rule. Releasing an apartado's spots before the slot stops
+  // selling them hands back seats nobody can buy: the customer loses them and nobody gets them.
+  // EVERY organization ships in violation of this (release +15, cutoff 0), so the message has to
+  // say what to change rather than merely refuse.
+  const releaseTooEarly =
+    !graceInvalid && !cutoffInvalid && graceMag !== '' && graceSigned > cutoffSigned
+  const invalid =
+    pctInvalid ||
+    bufferInvalid ||
+    creationCutoffInvalid ||
+    cutoffInvalid ||
+    graceInvalid ||
+    noShowInvalid ||
+    noShowTooEarly ||
+    releaseTooEarly ||
+    creditDaysInvalid
 
   const dirty =
     !!org &&
@@ -196,7 +231,9 @@ export default function SettingsPage() {
       bufferNum !== org.booking_pre_departure_buffer_hours ||
       cutoffHoursNum !== org.booking_creation_cutoff_hours ||
       cutoffSigned !== org.sales_cutoff_offset_minutes ||
-      graceSigned !== org.booking_grace_offset_minutes)
+      graceSigned !== org.booking_grace_offset_minutes ||
+      noShowSigned !== (org.no_show_margin_minutes ?? 0) ||
+      creditDaysNum !== (org.booking_credit_valid_days ?? 90))
 
   const handleSave = () => {
     update.mutate(
@@ -207,6 +244,8 @@ export default function SettingsPage() {
         booking_creation_cutoff_hours: cutoffHoursNum,
         sales_cutoff_offset_minutes: cutoffSigned,
         booking_grace_offset_minutes: graceSigned,
+        no_show_margin_minutes: noShowSigned,
+        booking_credit_valid_days: creditDaysNum,
       },
       { onSuccess: () => setSaved(true) },
     )
@@ -430,6 +469,56 @@ export default function SettingsPage() {
                   invalid={graceInvalid}
                 />
 
+                {/* US-A85 (D23) — its OWN control, beside the two it must never borrow:
+                    `Cierre de ventas` gates the sale and `Liberación de apartado` releases the
+                    hold. One number cannot serve two intents. */}
+                <OffsetField
+                  label="Marcar como no usado"
+                  helper="Cuando un lugar pagado que nadie escaneó empieza a contar como desperdiciado. «Después» da un margen de cortesía tras la salida."
+                  mag={noShowMag}
+                  setMag={setNoShowMag}
+                  dir={noShowDir}
+                  setDir={setNoShowDir}
+                  invalid={noShowInvalid}
+                />
+
+                {/* US-A87 (D10) — how long the operator carries a closed apartado's credit. Its own
+                    number: an accounting horizon, not one of the departure clocks. A perpetual
+                    credit is an unbounded liability nobody reconciles. */}
+                <TextField
+                  label="Vigencia del saldo a favor"
+                  type="number"
+                  size="small"
+                  value={creditDays}
+                  onChange={(e) => setCreditDays(e.target.value)}
+                  error={creditDaysInvalid}
+                  helperText={
+                    creditDaysInvalid
+                      ? 'Captura entre 1 y 730 días.'
+                      : 'Cuánto dura el saldo que queda cuando un apartado vence sin liquidarse.'
+                  }
+                  slotProps={{
+                    input: { endAdornment: <InputAdornment position="end">días</InputAdornment> },
+                    htmlInput: { min: 1, max: 730, inputMode: 'numeric' },
+                  }}
+                  sx={{ width: 220 }}
+                />
+
+                {releaseTooEarly && (
+                  <Alert severity="warning">
+                    Con estos valores devolverías los lugares del apartado{' '}
+                    <strong>antes</strong> de dejar de venderlos — nadie podría comprarlos. Pon la
+                    «Liberación de apartado» igual o después del «Cierre de ventas».
+                  </Alert>
+                )}
+
+                {noShowTooEarly && (
+                  <Alert severity="warning">
+                    Este margen marcaría al cliente como ausente cuando su lugar todavía está a la
+                    venta. Ponlo igual o después del «Cierre de ventas».
+                  </Alert>
+                )}
+
                 {update.isError && (
                   <Alert severity="error">
                     No se pudo guardar la configuración. Inténtalo de nuevo.
@@ -597,6 +686,39 @@ export default function SettingsPage() {
                   </Typography>
                   <Typography variant="body2" color="text.secondary">
                     El catálogo de venta solo muestra servicios con disponibilidad.
+                  </Typography>
+                </Box>
+              }
+              sx={{ alignItems: 'flex-start', mx: 0 }}
+            />
+
+            <Divider sx={{ my: 2 }} />
+
+            {/* US-A88 (payment-verification D10) — org-wide, commits on tap like the scanner
+                toggle. Only the INPUT relaxes: the copy says so, because the admin still verifies
+                every transferencia (US-A67) — with or without a reference to match against. */}
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={org?.payment_reference_required ?? true}
+                  disabled={update.isPending}
+                  onChange={(e) =>
+                    update.mutate(
+                      { payment_reference_required: e.target.checked },
+                      { onSuccess: () => setSaved(true) },
+                    )
+                  }
+                />
+              }
+              label={
+                <Box>
+                  <Typography variant="body1" sx={{ fontWeight: 500 }}>
+                    Referencia obligatoria en transferencias
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Exigir el número de referencia al cobrar o liquidar por transferencia. Si lo
+                    desactivas, el campo se vuelve opcional — el pago igual pasa por verificación
+                    del administrador.
                   </Typography>
                 </Box>
               }

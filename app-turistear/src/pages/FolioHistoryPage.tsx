@@ -55,7 +55,7 @@ export default function FolioHistoryPage() {
         >
           <ToggleButton value="all">Todos</ToggleButton>
           <ToggleButton value="paid">Pagado</ToggleButton>
-          <ToggleButton value="booking">Reservas</ToggleButton>
+          <ToggleButton value="booking">Apartados</ToggleButton>
           <ToggleButton value="cancelled">Cancelado</ToggleButton>
           <ToggleButton value="undelivered">Sin entregar</ToggleButton>
         </ToggleButtonGroup>

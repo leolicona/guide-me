@@ -36,6 +36,14 @@ import {
 } from '../../utils/qr'
 import { generatePortalToken, portalTokenExpiry } from '../../utils/portal'
 import { naiveEpoch, orgToday, orgWallClockMinute } from '../../utils/tz'
+import { folioFulfillment } from '../../utils/folioFulfillment'
+import {
+  rescheduleFolio,
+  reissueTicketsAfterReschedule,
+  type RescheduleMove,
+} from './reschedule'
+import { emitNotification } from '../../utils/notifications'
+import { folioEventRow, readFolioEvents } from '../../utils/folioEvents'
 import {
   nightsBetween,
   parseCsvInts,
@@ -660,7 +668,6 @@ interface PreparedLine {
 
 interface BookingPolicy {
   minDownPaymentPct: number
-  holdDays: number
   bookingGraceOffsetMinutes: number
   preDepartureBufferHours: number
   /** US-A77 — hours before departure past which an apartado may no longer be CREATED. 0 = off. */
@@ -671,14 +678,12 @@ interface BookingPolicy {
 // precedence over the org global; this phase there are no overrides, so it returns the org globals.
 function resolveBookingPolicy(org: {
   bookingMinDownPaymentPct: number
-  bookingHoldDays: number
   bookingGraceOffsetMinutes: number
   bookingPreDepartureBufferHours: number
   bookingCreationCutoffHours?: number
 }): BookingPolicy {
   return {
     minDownPaymentPct: org.bookingMinDownPaymentPct,
-    holdDays: org.bookingHoldDays,
     bookingGraceOffsetMinutes: org.bookingGraceOffsetMinutes,
     preDepartureBufferHours: org.bookingPreDepartureBufferHours,
     creationCutoffHours: org.bookingCreationCutoffHours ?? 0,
@@ -719,18 +724,31 @@ const slotEpoch = (date: string, time: string, tz: string): number =>
 // after departure); a slot beyond it uses the full pre-departure buffer as the settle-by deadline.
 // This closes the born-expired booking bug — a slot that was calendar-tomorrow but < buffer away
 // previously took the flat 24h buffer and landed its expiry in the past. A negative grace pushes
-// expiry PAST departure. (The former createdAt + holdDays cap was removed — the hold now lasts until
-// the pre-departure buffer regardless of how far out the tour is; `holdDays` is retained inert.)
+// expiry PAST departure. (The former createdAt + holdDays cap was removed — the hold now lasts
+// until the pre-departure buffer regardless of how far out the tour is. `booking_hold_days` used to
+// be carried into this policy object unread; it is gone from here and from the API — BUG-028.)
+//
+// EXPORTED as epoch seconds (BUG-029) so the settings validation can ask this function what an
+// apartado created at the cutoff boundary would actually get, instead of re-deriving it. A
+// validation that re-implements the arithmetic it is validating drifts from it — which is exactly
+// how `cutoff >= buffer` came to reject the healthy configurations and accept a born-dead one.
+export function bookingExpiryEpoch(
+  policy: Pick<BookingPolicy, 'preDepartureBufferHours' | 'bookingGraceOffsetMinutes'>,
+  nowSec: number,
+  earliestSlotEpoch: number,
+): number {
+  const bufferSeconds = policy.preDepartureBufferHours * 3_600
+  const nearDeparture = earliestSlotEpoch - nowSec < bufferSeconds
+  const tourBuffer = nearDeparture ? policy.bookingGraceOffsetMinutes * 60 : bufferSeconds
+  return earliestSlotEpoch - tourBuffer
+}
+
 function bookingExpiryDate(
   policy: BookingPolicy,
   nowSec: number,
   earliestSlotEpoch: number,
 ): Date {
-  const bufferSeconds = policy.preDepartureBufferHours * 3_600
-  const nearDeparture = earliestSlotEpoch - nowSec < bufferSeconds
-  const tourBuffer = nearDeparture ? policy.bookingGraceOffsetMinutes * 60 : bufferSeconds
-  const expiry = earliestSlotEpoch - tourBuffer
-  return new Date(expiry * 1000)
+  return new Date(bookingExpiryEpoch(policy, nowSec, earliestSlotEpoch) * 1000)
 }
 
 // A dialable phone (US-AG07 D4): ≥ 8 digits after stripping formatting.
@@ -747,7 +765,7 @@ interface SignableLine {
 
 // Sign one QR access ticket per line from a server-owned payload (org from context). Shared by
 // the paid path of confirmSale and by settle (US-AG07) — returns the per-line token + UI echo.
-async function signLineTickets(
+export async function signLineTickets(
   env: CloudflareBindings,
   org: string,
   folioId: string,
@@ -972,7 +990,6 @@ export const confirmSale = async (c: PosContext) => {
     .select({
       name: organizations.name,
       bookingMinDownPaymentPct: organizations.bookingMinDownPaymentPct,
-      bookingHoldDays: organizations.bookingHoldDays,
       salesCutoffOffsetMinutes: organizations.salesCutoffOffsetMinutes,
       bookingGraceOffsetMinutes: organizations.bookingGraceOffsetMinutes,
       bookingPreDepartureBufferHours: organizations.bookingPreDepartureBufferHours,
@@ -980,6 +997,7 @@ export const confirmSale = async (c: PosContext) => {
       lodgingWeekendDays: organizations.lodgingWeekendDays,
       timezone: organizations.timezone,
       cancellationPolicy: organizations.cancellationPolicy,
+      paymentReferenceRequired: organizations.paymentReferenceRequired,
     })
     .from(organizations)
     .where(eq(organizations.id, org))
@@ -1357,7 +1375,6 @@ export const confirmSale = async (c: PosContext) => {
   // like a paid sale (the decrement below is shared). A booking defers QR/portal/ticket-email.
   const policy = resolveBookingPolicy({
     bookingMinDownPaymentPct: orgRow?.bookingMinDownPaymentPct ?? 0,
-    bookingHoldDays: orgRow?.bookingHoldDays ?? 7,
     bookingGraceOffsetMinutes: orgRow?.bookingGraceOffsetMinutes ?? 15,
     bookingPreDepartureBufferHours: orgRow?.bookingPreDepartureBufferHours ?? 24,
     bookingCreationCutoffHours: orgRow?.bookingCreationCutoffHours ?? 0,
@@ -1368,6 +1385,21 @@ export const confirmSale = async (c: PosContext) => {
   // (verifyPayment). Cash clears immediately, exactly as before. `cleared` = the money is usable now.
   const method = input.payment_method ?? 'cash'
   const needsVerification = method === 'transfer'
+  // US-AG41, relaxed by US-A88 — a transfer must carry its bank reference unless the org switched
+  // the requirement off (`payment_reference_required`). Formerly a schema refine; it lives here now
+  // because it reads the org row. Optionality never weakens verification: an unreferenced transfer
+  // still lands `pending` below with its QR deferred.
+  if (
+    needsVerification &&
+    (orgRow?.paymentReferenceRequired ?? true) &&
+    !input.payment_reference
+  ) {
+    throw new ApiError(
+      'VALIDATION_ERROR',
+      400,
+      'A payment reference is required for a bank transfer',
+    )
+  }
   const cleared = !needsVerification
   const paymentVerification: 'not_required' | 'pending' = needsVerification
     ? 'pending'
@@ -1418,6 +1450,19 @@ export const confirmSale = async (c: PosContext) => {
     // a completed sale near departure is fine, a promise to come back and pay is not. Without this
     // an agent could open an apartado twenty minutes out that expires fifteen minutes out — five
     // minutes of hold, and a customer who never had a chance to settle.
+    // BUG-029 — the guard that a SETTINGS rule cannot provide. Whether an apartado is born expired
+    // depends on WHEN the sale happens, not only on how the org is configured: with the default
+    // `creationCutoffHours = 0` ("no restriction") nothing below ran at all, so a sale five minutes
+    // before departure produced `booking_expires_at = salida − 15min` — a hold that was already over
+    // when it was written, cancelled by the next sweep. Checked against the same function that
+    // computes the real value, so the two can never disagree.
+    if (bookingExpiryEpoch(policy, nowSec, earliest.epoch) <= nowSec) {
+      throw new ApiError(
+        'BOOKING_TOO_LATE',
+        422,
+        'Ya no se puede abrir un apartado para esta salida: vencería antes de que el cliente pueda liquidarlo.',
+      )
+    }
     if (policy.creationCutoffHours > 0) {
       const hoursOut = (earliest.epoch - nowSec) / 3600
       if (hoursOut < policy.creationCutoffHours) {
@@ -1773,6 +1818,31 @@ export const confirmSale = async (c: PosContext) => {
     )
   }
 
+  // US-A24 — the narrative rows ride the sale's own batch (D3), on the request clock (one clock
+  // domain for the whole narrative — see folioEventRow). `created` is pushed first so the rowid
+  // tiebreak keeps it before the deposit at equal timestamps.
+  const saleNow = new Date()
+  statements.push(
+    folioEventRow(db, {
+      organizationId: org,
+      folioId,
+      type: 'created',
+      actorId: agent.userId,
+      operatorId: c.get('operator')?.operatorId ?? null,
+      payload: { sale_mode: isExpress ? 'express' : 'standard', initial_status: status },
+      at: saleNow,
+    }),
+    folioEventRow(db, {
+      organizationId: org,
+      folioId,
+      type: 'payment',
+      actorId: agent.userId,
+      operatorId: c.get('operator')?.operatorId ?? null,
+      payload: { amount: amountPaid, method, kind: status === 'booking' ? 'deposit' : 'full' },
+      at: saleNow,
+    }),
+  )
+
   // The folio + its inventory holds were committed above (the folio must precede the reservation
   // FK). If persisting the lines fails, compensate everything (re-increment slots, drop the
   // reservations + the folio) so no orphaned folio is left behind — restoring the all-or-nothing
@@ -1872,6 +1942,15 @@ export const confirmSale = async (c: PosContext) => {
     }
   }
 
+  // US-A86 — the two events a completed sale produces. An apartado gets its terms; a cleared sale
+  // gets its tickets. Both are ACTION-TAILS: the agent is standing with the customer, so the
+  // message rides the tap they already made (D12/D19).
+  await emitNotification(db, {
+    organizationId: org,
+    folioId,
+    event: isBooking ? 'booking_created' : 'tickets_delivered',
+    hasEmail: !!input.customer_email,
+  })
   return c.json(
     {
       folio: {
@@ -2144,6 +2223,10 @@ export const getFolio = async (c: PosContext) => {
       ? null
       : await quoteCancellation(db, agent.organizationId, id, new Date())
 
+  // US-A24 / US-AG53 — the seller reads the SAME narrative the admin reads (D6): it is their sale,
+  // and they answer the customer in the field. No filtering, no second shape.
+  const events = await readFolioEvents(db, agent.organizationId, id)
+
   return c.json({
     folio,
     cancellation_quote: quote
@@ -2154,6 +2237,7 @@ export const getFolio = async (c: PosContext) => {
           reversed_commission: quote.reversedCommission,
         }
       : null,
+    events,
   })
 }
 
@@ -2180,6 +2264,15 @@ export const markTicketsSent = async (c: PosContext) => {
 
   const row = updated[0]
   if (!row) throw new ApiError('NOT_FOUND', 404, 'Folio not found')
+  // US-A24 — EACH send appends a row (the column is last-write-wins; the narrative is not).
+  // After the ownership-scoped update confirms, same residual class as claimReminder.
+  await folioEventRow(db, {
+    organizationId: agent.organizationId,
+    folioId: id,
+    type: 'tickets_sent',
+    actorId: agent.userId,
+    at: now,
+  })
   return c.json({
     tickets_sent_at: row.sentAt ? Math.floor(row.sentAt.getTime() / 1000) : null,
     tickets_viewed_at: row.viewedAt ? Math.floor(row.viewedAt.getTime() / 1000) : null,
@@ -2247,11 +2340,21 @@ export const settleBooking = async (c: PosContext) => {
   const settleMethod = body.method ?? folio.paymentMethod
   const balanceNeedsVerification = settleMethod === 'transfer'
   if (balanceNeedsVerification && !body.payment_reference) {
-    throw new ApiError(
-      'VALIDATION_ERROR',
-      400,
-      'A payment reference is required to settle a bank transfer',
-    )
+    // US-A88 — the reference is only demanded while the org keeps the requirement on. Read lazily:
+    // most settles are cash and never pay for this query. An unreferenced transfer still re-arms
+    // `pending` below — optionality never weakens verification (US-A67).
+    const [orgRef] = await db
+      .select({ required: organizations.paymentReferenceRequired })
+      .from(organizations)
+      .where(eq(organizations.id, org))
+      .limit(1)
+    if (orgRef?.required ?? true) {
+      throw new ApiError(
+        'VALIDATION_ERROR',
+        400,
+        'A payment reference is required to settle a bank transfer',
+      )
+    }
   }
   // The QR can mint now only if THIS balance clears AND no earlier payment is still awaiting an admin.
   const cleared = !balanceNeedsVerification && folio.paymentVerification !== 'pending'
@@ -2333,6 +2436,7 @@ export const settleBooking = async (c: PosContext) => {
     const deferUpdate = balanceNeedsVerification
       ? { paymentReference: body.payment_reference ?? null, paymentVerification: 'pending' as const }
       : {}
+    const settledNow = new Date()
     const transferStatements: BatchItem<'sqlite'>[] = [
       db
         .update(folios)
@@ -2340,13 +2444,23 @@ export const settleBooking = async (c: PosContext) => {
           status: 'paid',
           amountPaid: folio.total,
           commissionAmount,
-          settledAt: new Date(),
+          settledAt: settledNow,
           settledBy: agent.userId,
           ...deferUpdate,
-          updatedAt: new Date(),
+          updatedAt: settledNow,
         })
         .where(and(eq(folios.id, id), eq(folios.organizationId, org))),
       ...settleLedgerRows(),
+      // US-A24 — the settlement's narrative row, on the same clock as settled_at (S-6).
+      folioEventRow(db, {
+        organizationId: org,
+        folioId: id,
+        type: 'payment',
+        actorId: agent.userId,
+        operatorId: c.get('operator')?.operatorId ?? null,
+        payload: { amount: balanceAmount, method: settleMethod, kind: 'settlement' },
+        at: settledNow,
+      }),
     ]
     await db.batch(transferStatements as [BatchItem<'sqlite'>, ...BatchItem<'sqlite'>[]])
     const pending = await readFolio(db, org, agent.userId, id, c.env.QR_SECRET, c.env.API_BASE_URL)
@@ -2373,6 +2487,7 @@ export const settleBooking = async (c: PosContext) => {
     tz,
   )
 
+  const settledNow = new Date()
   const statements: BatchItem<'sqlite'>[] = [
     db
       .update(folios)
@@ -2380,12 +2495,22 @@ export const settleBooking = async (c: PosContext) => {
         status: 'paid',
         amountPaid: folio.total,
         commissionAmount,
-        settledAt: new Date(),
+        settledAt: settledNow,
         settledBy: agent.userId,
-        updatedAt: new Date(),
+        updatedAt: settledNow,
       })
       .where(and(eq(folios.id, id), eq(folios.organizationId, org))),
     ...settleLedgerRows(),
+    // US-A24 — the settlement's narrative row, on the same clock as settled_at (S-6).
+    folioEventRow(db, {
+      organizationId: org,
+      folioId: id,
+      type: 'payment',
+      actorId: agent.userId,
+      operatorId: c.get('operator')?.operatorId ?? null,
+      payload: { amount: balanceAmount, method: settleMethod, kind: 'settlement' },
+      at: settledNow,
+    }),
   ]
   for (const line of slotLineRows) {
     statements.push(
@@ -2483,6 +2608,7 @@ export const verifyPayment = async (c: PosContext) => {
       status: folios.status,
       paymentMethod: displayMethodSql,
       paymentVerification: folios.paymentVerification,
+      paymentReference: folios.paymentReference,
       customerName: folios.customerName,
       customerEmail: folios.customerEmail,
       total: folios.total,
@@ -2519,6 +2645,17 @@ export const verifyPayment = async (c: PosContext) => {
       ),
     )
 
+  // US-A24 — the clearance's narrative row, on the same clock as payment_verified_at.
+  const verifiedEventRow = () =>
+    folioEventRow(db, {
+      organizationId: org,
+      folioId: id,
+      type: 'payment_verified',
+      actorId: admin.userId,
+      payload: { reference: folio.paymentReference },
+      at: now,
+    })
+
   // A booking (deposit) is confirmed but mints no QR — its tickets wait for settle.
   if (folio.status !== 'paid') {
     await db.batch([
@@ -2527,8 +2664,17 @@ export const verifyPayment = async (c: PosContext) => {
         .set(verifyFields)
         .where(and(eq(folios.id, id), eq(folios.organizationId, org))),
       verifyPaymentRows,
+      verifiedEventRow(),
     ])
     const out = await readFolio(db, org, folio.agentId, id, c.env.QR_SECRET, c.env.API_BASE_URL)
+    // US-A86 — the inbound this prevents is the most repeated one in the product: "¿ya les llegó
+    // mi transferencia?", asked until somebody answers it.
+    await emitNotification(db, {
+      organizationId: org,
+      folioId: id,
+      event: 'payment_verified',
+      hasEmail: !!out?.customer_email,
+    })
     return c.json({ folio: out })
   }
 
@@ -2573,6 +2719,7 @@ export const verifyPayment = async (c: PosContext) => {
       .set(verifyFields)
       .where(and(eq(folios.id, id), eq(folios.organizationId, org))),
     verifyPaymentRows,
+    verifiedEventRow(),
   ]
   for (const line of slotLineRows) {
     statements.push(
@@ -2641,6 +2788,16 @@ export const verifyPayment = async (c: PosContext) => {
   )
 
   const out = await readFolio(db, org, folio.agentId, id, c.env.QR_SECRET, c.env.API_BASE_URL)
+  // US-A86 — the money cleared AND the tickets exist now, so both events are real: one answers
+  // "¿ya les llegó mi transferencia?", the other IS the product.
+  await emitNotification(db, {
+    organizationId: org, folioId: id, event: 'payment_verified',
+    hasEmail: !!out?.customer_email,
+  })
+  await emitNotification(db, {
+    organizationId: org, folioId: id, event: 'tickets_delivered',
+    hasEmail: !!out?.customer_email,
+  })
   return c.json({ folio: out })
 }
 
@@ -2655,7 +2812,11 @@ export const rejectPayment = async (c: PosContext) => {
   const body = (await c.req.json().catch(() => ({}))) as { reason?: string }
 
   const folioRows = await db
-    .select({ agentId: folios.agentId, paymentVerification: folios.paymentVerification })
+    .select({
+      agentId: folios.agentId,
+      paymentVerification: folios.paymentVerification,
+      paymentReference: folios.paymentReference,
+    })
     .from(folios)
     .where(and(eq(folios.id, id), eq(folios.organizationId, org)))
     .limit(1)
@@ -2688,6 +2849,19 @@ export const rejectPayment = async (c: PosContext) => {
         updatedAt: now,
       })
       .where(and(eq(folios.id, id), eq(folios.organizationId, org))),
+    // US-A24 — one action, one row (D9): the rejection IS the cancellation, so no second
+    // `cancelled` event is written for the same tap.
+    folioEventRow(db, {
+      organizationId: org,
+      folioId: id,
+      type: 'transfer_rejected',
+      actorId: admin.userId,
+      payload: {
+        reference: folio.paymentReference,
+        reason: body.reason ?? 'Pago electrónico rechazado',
+      },
+      at: now,
+    }),
   ]
   // Release the held spots (mirrors cancelBooking): zone counter + slot reconcile, or the slot total.
   for (const line of lineRows) {
@@ -2741,6 +2915,12 @@ export const rejectPayment = async (c: PosContext) => {
   await db.batch(statements as [BatchItem<'sqlite'>, ...BatchItem<'sqlite'>[]])
 
   const out = await readFolio(db, org, folio.agentId, id, c.env.QR_SECRET, c.env.API_BASE_URL)
+  // US-A86 — obligatory rather than useful: their sale was cancelled because we could not confirm
+  // the money. Without it the complaint arrives anyway, later and more expensive.
+  await emitNotification(db, {
+    organizationId: org, folioId: id, event: 'payment_rejected',
+    hasEmail: !!out?.customer_email,
+  })
   return c.json({ folio: out ?? { id, status: 'cancelled' } })
 }
 
@@ -2768,7 +2948,7 @@ export const cancelBooking = async (c: PosContext) => {
   const body = (await c.req.json().catch(() => ({}))) as { reason?: string }
 
   const folioRows = await db
-    .select({ status: folios.status })
+    .select({ status: folios.status, paymentVerification: folios.paymentVerification })
     .from(folios)
     .where(folioActionFilter(id, agent))
     .limit(1)
@@ -2776,6 +2956,16 @@ export const cancelBooking = async (c: PosContext) => {
   if (!folio) throw new ApiError('NOT_FOUND', 404, 'Folio not found')
   if (folio.status !== 'booking') {
     throw new ApiError('NOT_A_BOOKING', 409, 'Only a live booking can be cancelled here')
+  }
+  // BUG-030 — an unverified transfer deposit: the ladder would price money the company never
+  // confirmed and mint a refund PIN for it. Verify or reject the payment first (rejectPayment is
+  // the no-refund cancel). The expiry sweep is untouched: it enters via `cancelFolioPriced`.
+  if (folio.paymentVerification === 'pending') {
+    throw new ApiError(
+      'PAYMENT_UNVERIFIED',
+      409,
+      'El pago está por verificar — verifica o rechaza el pago antes de cancelar',
+    )
   }
 
   const lineRows = await db
@@ -2962,9 +3152,25 @@ export const voidExpressSale = async (c: PosContext) => {
       }),
     )
   }
-  if (statements.length > 0) {
-    await db.batch(statements as [BatchItem<'sqlite'>, ...BatchItem<'sqlite'>[]])
-  }
+  // US-A24 — one action, one row (D9): the void IS the cancellation, and the across-the-counter
+  // hand-back travels in the payload rather than as a second refund_confirmed row.
+  statements.push(
+    folioEventRow(db, {
+      organizationId: org,
+      folioId: id,
+      type: 'cancelled',
+      actorId: agent.userId,
+      payload: {
+        source: 'agent',
+        reason: 'Venta Express anulada por el vendedor',
+        clawback: folio.commissionAmount > 0,
+        refund_amount: folio.amountPaid,
+        kind: 'express_void',
+      },
+      at: now,
+    }),
+  )
+  await db.batch(statements as [BatchItem<'sqlite'>, ...BatchItem<'sqlite'>[]])
 
   return c.json({
     id,
@@ -3003,11 +3209,24 @@ export const claimReminder = async (c: PosContext) => {
   const nowSec = Math.floor(now.getTime() / 1000)
   const claim = { reminderStatus: 'sent' as const, reminderSentAt: now, reminderSentBy: agent.userId, updatedAt: now }
 
+  // US-A24 — written right after the claim wins rather than batched with it: the guarded UPDATE's
+  // RETURNING decides victory, and only the winner may narrate. Same crash-window residual class
+  // applyCancellation already accepts between its flip and its batch.
+  const reminderEvent = () =>
+    folioEventRow(db, {
+      organizationId: org,
+      folioId: id,
+      type: 'reminder_sent',
+      actorId: agent.userId,
+      at: now,
+    })
+
   if (body.force) {
     await db
       .update(folios)
       .set(claim)
       .where(and(eq(folios.id, id), eq(folios.organizationId, org)))
+    await reminderEvent()
     return c.json({ claimed: true, reminder_sent_at: nowSec, reminder_sent_by: agent.userId })
   }
 
@@ -3024,6 +3243,7 @@ export const claimReminder = async (c: PosContext) => {
     .returning({ id: folios.id })
 
   if (won.length > 0) {
+    await reminderEvent()
     return c.json({ claimed: true, reminder_sent_at: nowSec, reminder_sent_by: agent.userId })
   }
   // Already claimed by someone else — surface who/when so the UI can offer ¿Reenviar?
@@ -3036,268 +3256,65 @@ export const claimReminder = async (c: PosContext) => {
   })
 }
 
-// US-AG07.5 — reactivate an EXPIRED booking (late-arrival contingency, reactivation only this
-// phase). Re-blocks the freed spots IFF effective capacity still allows it (same atomic,
-// compensating decrement + flex margin as confirmSale), flips back to `booking` with a fresh
-// expiry, and the client then settles. If the tour filled up → 409 NO_CAPACITY_AVAILABLE (the UI
-// offers the deferred Reagendar/Cupón). Owner-or-admin scoped; booking-only (it had an expiry).
-export const reactivateBooking = async (c: PosContext) => {
+// US-AG07.5 is RETIRED (docs/bookings/booking-reschedule.spec.md, D3).
+//
+// `reactivateBooking` lived here: it took a folio the system had cancelled — and told the customer
+// it had cancelled — and cleared `cancelled_at`, leaving the history asserting the expiry never
+// happened. It never reset `reminder_status` either, so a reactivated apartado was released a
+// second time in silence: the exact defect `apartado-stages.spec.md` was written to prevent,
+// reopened by the repair.
+//
+// It existed to cover the fifteen minutes between the hold release and the sales cutoff. US-A87's
+// coherence rule (D4) closes that window, so the case it was built for stops existing. A customer
+// who arrives after the hold ended now makes an ordinary sale with their credit applied; one who
+// arrives BEFORE it reschedules, which is `rescheduleFolio` below.
+
+// US-AG52 — reagendar. The guards and the seat arithmetic live in `./reschedule`; this is the HTTP
+// shell: authorize, validate the body, delegate, re-read.
+export const rescheduleBooking = async (c: PosContext) => {
   const agent = c.get('user')
-  const id = c.req.param('id')
-  const db = getDb(c.env)
   const org = agent.organizationId
+  const db = getDb(c.env)
+  const id = c.req.param('id')
 
-  const folioRows = await db
-    .select({ status: folios.status, bookingExpiresAt: folios.bookingExpiresAt })
+  const body = (await c.req.json().catch(() => null)) as { moves?: RescheduleMove[] } | null
+  const moves = body?.moves
+  if (!Array.isArray(moves) || moves.length === 0) {
+    throw new ApiError('VALIDATION_ERROR', 400, 'Indica al menos una línea y su nuevo horario.')
+  }
+
+  // D15 — the folio's own seller, or an admin. Same rule as settle/cancel/reminder; inventing a
+  // different one for this would make the permission model unlearnable.
+  const [owner] = await db
+    .select({ agentId: folios.agentId })
     .from(folios)
-    .where(folioActionFilter(id, agent))
-    .limit(1)
-  const folio = folioRows[0]
-  if (!folio) throw new ApiError('NOT_FOUND', 404, 'Folio not found')
-  if (folio.status !== 'cancelled' || folio.bookingExpiresAt === null) {
-    throw new ApiError('NOT_A_BOOKING', 409, 'Only a cancelled booking can be reactivated')
-  }
-
-  const lineRows = await db
-    .select({
-      slotId: folioLines.slotId,
-      quantity: folioLines.quantity,
-      slotDate: folioLines.slotDate,
-      slotStartTime: folioLines.slotStartTime,
-      zoneId: folioLines.zoneId,
-      isFlexible: services.isFlexible,
-      flexCapacityPct: services.flexCapacityPct,
-    })
-    .from(folioLines)
-    .innerJoin(slots, eq(folioLines.slotId, slots.id))
-    .innerJoin(services, eq(slots.serviceId, services.id))
-    .where(and(eq(folioLines.folioId, id), eq(folioLines.organizationId, org)))
-
-  // Current org policy — drives both the US-A47 sales cutoff guard and the fresh expiry below.
-  const orgRows = await db
-    .select({
-      bookingMinDownPaymentPct: organizations.bookingMinDownPaymentPct,
-      bookingHoldDays: organizations.bookingHoldDays,
-      salesCutoffOffsetMinutes: organizations.salesCutoffOffsetMinutes,
-      bookingGraceOffsetMinutes: organizations.bookingGraceOffsetMinutes,
-      bookingPreDepartureBufferHours: organizations.bookingPreDepartureBufferHours,
-      bookingCreationCutoffHours: organizations.bookingCreationCutoffHours,
-      timezone: organizations.timezone,
-    })
-    .from(organizations)
-    .where(eq(organizations.id, org))
-    .limit(1)
-  const policy = resolveBookingPolicy({
-    bookingMinDownPaymentPct: orgRows[0]?.bookingMinDownPaymentPct ?? 0,
-    bookingHoldDays: orgRows[0]?.bookingHoldDays ?? 7,
-    bookingGraceOffsetMinutes: orgRows[0]?.bookingGraceOffsetMinutes ?? 15,
-    bookingPreDepartureBufferHours: orgRows[0]?.bookingPreDepartureBufferHours ?? 24,
-    bookingCreationCutoffHours: orgRows[0]?.bookingCreationCutoffHours ?? 0,
-  })
-  // US-A66 — the cutoff guard + fresh same-day expiry below resolve in the org's time zone.
-  const tz = orgRows[0]?.timezone ?? 'America/Mexico_City'
-
-  // US-A47 — don't reactivate onto a slot whose departure has passed the sales cutoff (that
-  // would re-create an already-expired booking). Guard BEFORE re-blocking any spots.
-  const reactivateNowSec = Math.floor(Date.now() / 1000)
-  const salesCutoffOffset = orgRows[0]?.salesCutoffOffsetMinutes ?? 0
-  for (const line of lineRows) {
-    if (
-      !isSlotSellable(line.slotDate, line.slotStartTime, reactivateNowSec, salesCutoffOffset, tz)
-    ) {
-      throw new ApiError(
-        'SLOT_CLOSED',
-        409,
-        'This booking’s departure has passed the sales cutoff and cannot be reactivated',
-      )
-    }
-  }
-
-  // Re-decrement each slot atomically with the effective-capacity guard; compensate on failure.
-  // US-A64 — a zoned line re-blocks its OWN zone counter (a competing sale may have filled it while
-  // this booking was cancelled → 409, same as a filled tour); others re-block the raw slot.
-  const applied: { slotId: string; qty: number; zoneId?: string | null }[] = []
-  const revertApplied = async () => {
-    for (const a of applied) {
-      if (a.zoneId) {
-        await db
-          .update(slotZones)
-          .set({ booked: sql`${slotZones.booked} - ${a.qty}`, updatedAt: new Date() })
-          .where(
-            and(
-              eq(slotZones.slotId, a.slotId),
-              eq(slotZones.zoneId, a.zoneId),
-              eq(slotZones.organizationId, org),
-            ),
-          )
-        await reconcileSlotTotals(db, a.slotId)
-      } else {
-        await db
-          .update(slots)
-          .set({ booked: sql`${slots.booked} - ${a.qty}`, updatedAt: new Date() })
-          .where(and(eq(slots.id, a.slotId), eq(slots.organizationId, org)))
-      }
-    }
-  }
-  for (const line of lineRows) {
-    if (line.zoneId) {
-      const decremented = await db
-        .update(slotZones)
-        .set({ booked: sql`${slotZones.booked} + ${line.quantity}`, updatedAt: new Date() })
-        .where(
-          and(
-            eq(slotZones.slotId, line.slotId),
-            eq(slotZones.zoneId, line.zoneId),
-            eq(slotZones.organizationId, org),
-            eq(slotZones.status, 'active'),
-            gte(sql`${slotZones.capacity} - ${slotZones.booked}`, line.quantity),
-          ),
-        )
-        .returning({ id: slotZones.id })
-      if (decremented.length === 0) {
-        await revertApplied()
-        throw new ApiError(
-          'NO_CAPACITY_AVAILABLE',
-          409,
-          'No hay cupo disponible para reactivar este apartado',
-        )
-      }
-      await reconcileSlotTotals(db, line.slotId)
-      applied.push({ slotId: line.slotId, qty: line.quantity, zoneId: line.zoneId })
-      continue
-    }
-
-    const flexMargin =
-      line.isFlexible && line.flexCapacityPct > 0
-        ? sql`((${slots.capacity} * ${line.flexCapacityPct}) / 100)`
-        : sql`0`
-    const decremented = await db
-      .update(slots)
-      .set({ booked: sql`${slots.booked} + ${line.quantity}`, updatedAt: new Date() })
-      .where(
-        and(
-          eq(slots.id, line.slotId),
-          eq(slots.organizationId, org),
-          eq(slots.status, 'active'),
-          gte(sql`${slots.capacity} + ${flexMargin} - ${slots.booked}`, line.quantity),
-        ),
-      )
-      .returning({ id: slots.id })
-
-    if (decremented.length === 0) {
-      await revertApplied()
-      throw new ApiError(
-        'NO_CAPACITY_AVAILABLE',
-        409,
-        'No hay cupo disponible para reactivar este apartado',
-      )
-    }
-    applied.push({ slotId: line.slotId, qty: line.quantity })
-  }
-
-  // Lodging: re-claim each cancelled stay reservation under the SAME per-night count guard as
-  // the sale (D10 — competing bookings may have consumed the inventory while this one was
-  // expired). The lineRows above inner-join slots, so stays are queried separately here. The
-  // guard excludes the row being revived (o.id != ?) and re-checks every night of its range.
-  // On conflict → compensate (revert slots + re-cancel any already-reactivated stays) and 409.
-  const stayReservations = await db
-    .select({
-      id: accommodationReservations.id,
-      unitTypeId: accommodationReservations.unitTypeId,
-      quantity: accommodationReservations.quantity,
-      checkIn: accommodationReservations.checkIn,
-      checkOut: accommodationReservations.checkOut,
-    })
-    .from(accommodationReservations)
-    .where(
-      and(
-        eq(accommodationReservations.folioId, id),
-        eq(accommodationReservations.organizationId, org),
-        eq(accommodationReservations.status, 'cancelled'),
-      ),
-    )
-  const reactivatedReservations: string[] = []
-  for (const r of stayReservations) {
-    const upd = await c.env.DB.prepare(
-      `UPDATE accommodation_reservations
-         SET status = 'active', updated_at = unixepoch()
-       WHERE id = ? AND organization_id = ? AND status = 'cancelled'
-         AND NOT EXISTS (
-           WITH RECURSIVE nights(d) AS (
-             SELECT ?
-             UNION ALL
-             SELECT date(d, '+1 day') FROM nights WHERE date(d, '+1 day') < ?
-           )
-           SELECT 1 FROM nights n
-           WHERE COALESCE((SELECT SUM(o.quantity) FROM accommodation_reservations o
-                           WHERE o.unit_type_id = ? AND o.status = 'active' AND o.id != ?
-                             AND o.check_in <= n.d AND n.d < o.check_out), 0)
-               + COALESCE((SELECT SUM(b.quantity) FROM accommodation_blockouts b
-                           WHERE b.unit_type_id = ?
-                             AND b.start_date <= n.d AND n.d < b.end_date), 0)
-               + ?
-               > (SELECT t.inventory_count FROM accommodation_unit_types t WHERE t.id = ?)
-         )`,
-    )
-      .bind(
-        r.id,
-        org,
-        r.checkIn,
-        r.checkOut,
-        r.unitTypeId,
-        r.id,
-        r.unitTypeId,
-        r.quantity,
-        r.unitTypeId,
-      )
-      .run()
-    if (!upd.meta.changes) {
-      await revertApplied()
-      for (const rid of reactivatedReservations) {
-        await db
-          .update(accommodationReservations)
-          .set({ status: 'cancelled', updatedAt: new Date() })
-          .where(and(eq(accommodationReservations.id, rid), eq(accommodationReservations.organizationId, org)))
-      }
-      throw new ApiError(
-        'INSUFFICIENT_INVENTORY',
-        409,
-        'Esas fechas ya no están disponibles para reactivar el apartado',
-      )
-    }
-    reactivatedReservations.push(r.id)
-  }
-
-  // Fresh expiry from the current org policy (read above) + earliest departure — a slot start or a
-  // stay check-in (midnight), whichever comes first across the cart.
-  const departures: { epoch: number; date: string }[] = [
-    ...lineRows.map((l) => ({ epoch: slotEpoch(l.slotDate, l.slotStartTime, tz), date: l.slotDate })),
-    ...stayReservations.map((r) => ({ epoch: slotEpoch(r.checkIn!, '00:00', tz), date: r.checkIn! })),
-  ]
-  const earliest = departures.reduce(
-    (min, d) => (d.epoch < min.epoch ? d : min),
-    { epoch: Infinity, date: '' },
-  )
-  const bookingExpiresAt = bookingExpiryDate(
-    policy,
-    reactivateNowSec,
-    earliest.epoch,
-  )
-
-  await db
-    .update(folios)
-    .set({
-      status: 'booking',
-      bookingExpiresAt,
-      cancelledAt: null,
-      cancelledBy: null,
-      cancellationReason: null,
-      updatedAt: new Date(),
-    })
     .where(and(eq(folios.id, id), eq(folios.organizationId, org)))
+    .limit(1)
+  if (!owner) throw new ApiError('NOT_FOUND', 404, 'Folio not found')
+  if (agent.role !== 'admin' && owner.agentId !== agent.userId) {
+    throw new ApiError('NOT_FOUND', 404, 'Folio not found')
+  }
 
-  const updated = await readFolio(db, org, agent.userId, id, c.env.QR_SECRET, c.env.API_BASE_URL)
-  return c.json({ folio: updated ?? { id, status: 'booking' } })
+  const { folio, tz } = await rescheduleFolio({
+    db,
+    org,
+    actorId: agent.userId,
+    folioId: id,
+    moves,
+    nowSec: Math.floor(Date.now() / 1000),
+    origin: 'counter',
+  })
+
+  // D16 — a paid folio's QR names the old slot. Re-mint and re-deliver, or the customer is holding
+  // a ticket for a departure that no longer exists.
+  if (folio.status === 'paid' && folio.paymentVerification !== 'pending') {
+    await reissueTicketsAfterReschedule(
+      db, c.env, org, id, owner.agentId, !!folio.customerEmail, tz,
+    )
+  }
+
+  const out = await readFolio(db, org, owner.agentId, id, c.env.QR_SECRET, c.env.API_BASE_URL)
+  return c.json({ folio: out })
 }
 
 // US-AG20 — the caller agent's own folios (their read-only sales history). Caller-scoped:
@@ -3361,8 +3378,20 @@ export const listAgentFolios = async (c: PosContext) => {
   // US-AG49 — same decorations as the admin list; `filters` here is already caller-scoped to this
   // seller's own folios, so the join inherits that scope.
   const now = new Date()
+  // US-A85/US-AG50 — the seller reads the same fulfilment as the admin. Same derivation, same
+  // clock, same margin: the line between the two audiences is capability, never information.
+  const [fulfillmentOrg] = await db
+    .select({ tz: organizations.timezone, noShowMargin: organizations.noShowMarginMinutes })
+    .from(organizations)
+    .where(eq(organizations.id, org))
+    .limit(1)
+  const fulfillmentCtx = {
+    tz: fulfillmentOrg?.tz ?? 'America/Mexico_City',
+    marginMinutes: fulfillmentOrg?.noShowMargin ?? 0,
+    nowEpoch: Math.floor(now.getTime() / 1000),
+  }
   const [linesByFolio, portalLinkByFolio, requestByFolio] = await Promise.all([
-    readListLines(db, org, filters),
+    readListLines(db, org, filters, fulfillmentCtx),
     readListPortalLinks(db, org, filters, c.env.API_BASE_URL),
     readListCancellationRequests(db, org, filters),
   ])
@@ -3406,6 +3435,9 @@ export const listAgentFolios = async (c: PosContext) => {
       sale_mode: r.saleMode,
       portal_link: portalLinkByFolio.get(r.id) ?? null,
       lines: linesByFolio.get(r.id) ?? [],
+      fulfillment: folioFulfillment(
+        (linesByFolio.get(r.id) ?? []).map((l) => l.fulfillment),
+      ),
       // US-AG50 — the seller sees the state of their OWN sale: that a customer asked to cancel it,
       // and that their apartado's deadline passed. Information, not capability — no admin verb
       // follows from either field on this surface (US-A84 D15).

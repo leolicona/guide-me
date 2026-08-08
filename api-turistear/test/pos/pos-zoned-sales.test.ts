@@ -126,10 +126,12 @@ const clearDb = async () => {
   for (const t of [
     'folio_line_extras',
     'folio_access_tokens',
-    'cancellation_requests',
     'slot_zones',
+    'folio_events',
+    'folio_requests',
     'folio_lines',
     'folio_payments',
+    'notifications',
     'folios',
     'service_zones',
     'slots',

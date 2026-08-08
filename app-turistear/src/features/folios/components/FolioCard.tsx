@@ -21,7 +21,7 @@ import {
   type RailTone,
   type TimeChipTone,
 } from '../folioCardState'
-import type { CancellationRequestMark, FolioStatus, RefundStatus } from '../types'
+import type { CancellationRequestMark, FolioStatus, Fulfillment, RefundStatus } from '../types'
 import type { FolioListLine, PaymentVerification } from '../../pos/types'
 
 // US-A82/US-AG49 — the one folio card, shared by the admin list (/folios) and the seller's own
@@ -86,8 +86,28 @@ function MoneyLine({ reading }: { reading: MoneyReading }) {
     case 'refundSettled':
       return (
         <Stack direction="row" spacing={1} sx={{ alignItems: 'baseline', minWidth: 0 }}>
-          <MoneyText cents={reading.cents} variant="h6" sx={{ color: 'text.secondary' }} srLabel="Total" />
+          <MoneyText cents={reading.cents} variant="h6" sx={{ color: 'text.secondary' }} srLabel="Reembolsado" />
           {caption('(reembolsado)')}
+        </Stack>
+      )
+    // BUG-027 — cancelled and owed nothing back. It used to render here as "(reembolsado)", about
+    // money the organization kept. The figure is what the customer PAID, because that is the sum
+    // the retention was taken out of; the caption is what happened to it.
+    // US-A87 — the credit, on the axis money already owns. Load-bearing while the checkout cannot
+    // apply it automatically: the way an agent honours it is the manual discount they already have,
+    // and an agent who cannot SEE the credit cannot decide to honour it.
+    case 'credit':
+      return (
+        <Stack direction="row" spacing={1} sx={{ alignItems: 'baseline', minWidth: 0 }}>
+          {caption('A favor')}
+          <MoneyText cents={reading.cents} variant="h6" semantic="positive" srLabel="Saldo a favor" />
+        </Stack>
+      )
+    case 'refundNone':
+      return (
+        <Stack direction="row" spacing={1} sx={{ alignItems: 'baseline', minWidth: 0 }}>
+          <MoneyText cents={reading.cents} variant="h6" sx={{ color: 'text.secondary' }} srLabel="Pagado, sin reembolso" />
+          {caption('(sin reembolso)')}
         </Stack>
       )
   }
@@ -130,7 +150,11 @@ export interface FolioCardFolio {
   reminder_sent_at?: number | null
   payment_verification?: PaymentVerification
   refund_status?: RefundStatus
+  /** US-A85 — the folio's roll-up; the time chip renders it once the departure has passed. */
+  fulfillment?: Fulfillment
   refund_amount?: number | null
+  /** US-A87 — what a closed apartado left the customer. */
+  credit_amount?: number | null
   payment_reference?: string | null
   deliverable?: boolean
   portal_link?: string | null

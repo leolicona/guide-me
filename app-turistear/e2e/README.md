@@ -37,6 +37,12 @@ the resulting folio is *born expired*: `status: booking`, a real balance, and a 
 departure two days out and asserts the release timestamp is in the future before writing the
 fixture. The API-side gap that lets such a folio be created at all is BUG-024.
 
+The seed asks for that departure inside a **bounded window** (`?from=today+2&to=+14d`) rather than
+the service's whole calendar. It needs one bookable departure, not a year of them — and omitting
+`to` makes the request `500` on a zoned service with ≥100 sellable slots (BUG-025). Note that after
+this change **nothing in the E2E suite exercises the unbounded call**, so BUG-025's regression test
+belongs in the API suite, not here.
+
 ## What you provide
 
 Credentials come from the environment and are never committed; only cookies are persisted.

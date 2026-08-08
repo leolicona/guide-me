@@ -14,7 +14,9 @@ import { managerOperatorsRouter, operatorAccessRouter } from './routes/operators
 import portalRouter from './routes/portal'
 import posRouter from './routes/pos'
 import { sweepExpiredBookings } from './routes/pos/sweep'
+import { sweepDepartureReminders } from './routes/pos/reminders'
 import reportsRouter from './routes/reports'
+import notificationsRouter from './routes/notifications'
 import servicesRouter from './routes/services'
 import ticketRouter from './routes/ticket'
 import ticketsRouter from './routes/tickets'
@@ -47,6 +49,7 @@ app.route('/api/folios', foliosRouter)
 app.route('/api/tickets', ticketsRouter)
 app.route('/api/cash', cashRouter)
 app.route('/api/reports', reportsRouter)
+app.route('/api/notifications', notificationsRouter)
 app.route('/api/affiliate/operators', managerOperatorsRouter)
 app.route('/api/operator', operatorAccessRouter)
 
@@ -92,6 +95,20 @@ export default {
         // The sweep is fail-soft per folio, so reaching here means the run itself broke (a bad
         // connection, a missing binding) rather than one bad apartado.
         .catch((err) => console.error('[sweep] expired-bookings sweep failed', err)),
+    )
+    // US-T08 — the departure reminder and the review request (Phase 4). A SEPARATE waitUntil, so
+    // an apartado sweep that breaks does not take the reminders down with it, and vice versa: they
+    // share a cron trigger but not a failure. Both emit into the outbox and send nothing
+    // themselves, and emitting is idempotent through the unique index — so this may run every
+    // fifteen minutes, be retried, or overlap itself without a customer getting a message twice.
+    ctx.waitUntil(
+      sweepDepartureReminders(env)
+        .then((r) =>
+          console.log(
+            `[reminders] reminded=${r.reminded} reviews=${r.reviews} failed=${r.failed}`,
+          ),
+        )
+        .catch((err) => console.error('[reminders] departure-reminder sweep failed', err)),
     )
   },
 }

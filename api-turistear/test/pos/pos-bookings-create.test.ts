@@ -115,6 +115,8 @@ const clearPosDb = async () => {
   await env.DB.exec('DELETE FROM folio_lines')
   await env.DB.exec('DELETE FROM folio_access_tokens')
   await env.DB.exec('DELETE FROM folio_payments')
+  await env.DB.exec('DELETE FROM notifications')
+  await env.DB.exec('DELETE FROM folio_events')
   await env.DB.exec('DELETE FROM folios')
   await env.DB.exec('DELETE FROM slots')
   await env.DB.exec('DELETE FROM services')
@@ -184,6 +186,49 @@ describe('US-AG07 — booking creation', () => {
     expect(json.folio.booking_expires_at).toBe(epoch(slotDate, '06:00') - 15 * 60)
     // The whole point: it is NOT born expired.
     expect(json.folio.booking_expires_at).toBeGreaterThan(now)
+  })
+
+  // BUG-029 — the hole no SETTINGS rule can close. Whether an apartado is born expired depends on
+  // WHEN the sale happens, not only on how the org is configured: with the default
+  // `booking_creation_cutoff_hours = 0` ("no restriction") the cutoff guard did not run at all, so a
+  // sale inside the grace window produced an expiry already in the past. The sweep then cancelled it
+  // on its next run — a hold that was over before it was written.
+  it('BUG-029 — an apartado that would be born expired is refused at sale time', async () => {
+    const { organizationId } = await seedUser({ email: AGENT_EMAIL, role: 'agent' })
+    // grace 15 min, creation cutoff 0 (the shipped default — no restriction).
+    await setOrgPolicy(organizationId, { minPct: 0, holdDays: 7, bufferMin: 15 })
+    const { serviceId } = await seedService({ organizationId, basePrice: 150000 })
+    // Frozen now is 2026-06-14T12:00Z. A slot ten minutes out: the grace instant (slot − 15 min) is
+    // five minutes in the PAST.
+    const { slotId } = await seedSlot({
+      organizationId, serviceId, date: todayStr(), startTime: '12:10',
+    })
+
+    const { status, json } = await post(AGENT_EMAIL, {
+      customer_phone: PHONE,
+      down_payment: 45000,
+      lines: [{ slot_id: slotId, quantity: 1, unit_price: 150000 }],
+    })
+
+    expect(status).toBe(422)
+    expect(json.error.code).toBe('BOOKING_TOO_LATE')
+  })
+
+  it('BUG-029 — a FULL payment on the same slot is still fine', async () => {
+    const { organizationId } = await seedUser({ email: AGENT_EMAIL, role: 'agent' })
+    await setOrgPolicy(organizationId, { minPct: 0, holdDays: 7, bufferMin: 15 })
+    const { serviceId } = await seedService({ organizationId, basePrice: 150000 })
+    const { slotId } = await seedSlot({
+      organizationId, serviceId, date: todayStr(), startTime: '12:10',
+    })
+
+    // A completed sale near departure is fine; only a PROMISE to come back and pay is not. The
+    // guard must not have leaked onto the walk-in cash path.
+    const { status } = await post(AGENT_EMAIL, {
+      customer_phone: PHONE,
+      lines: [{ slot_id: slotId, quantity: 1, unit_price: 150000 }],
+    })
+    expect(status).toBe(201)
   })
 
   // D2 (whatsapp-qr-delivery) — a dialable phone is now required for EVERY sale (WhatsApp is the

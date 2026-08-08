@@ -80,7 +80,8 @@ const arriveAtGrace = async (folioId: string) => {
 }
 const getFolio = (id: string) =>
   env.DB.prepare(
-    `SELECT status, amount_paid, cancellation_reason, refund_status, cancellation_source, reminder_status
+    `SELECT status, amount_paid, cancellation_reason, refund_status, refund_pin,
+            cancellation_source, reminder_status, credit_amount, credit_expires_at
        FROM folios WHERE id = ?`,
   )
     .bind(id)
@@ -93,6 +94,8 @@ const clearPosDb = async () => {
   await env.DB.exec('DELETE FROM folio_lines')
   await env.DB.exec('DELETE FROM folio_access_tokens')
   await env.DB.exec('DELETE FROM folio_payments')
+  await env.DB.exec('DELETE FROM notifications')
+  await env.DB.exec('DELETE FROM folio_events')
   await env.DB.exec('DELETE FROM folios')
   await env.DB.exec('DELETE FROM slots')
   await env.DB.exec('DELETE FROM services')
@@ -159,6 +162,203 @@ describe('US-A77 — the settle deadline notifies instead of cancelling', () => 
     // away, so the ladder is in its terminal tier and nothing is owed back.
     expect(row.refund_status).toBe('none')
     expect(row.cancellation_source).toBe('system_expiry')
+  })
+
+  // US-T09 — until now the sweep emitted on ENTERING the grace window and emitted nothing when the
+  // hold actually ended, so the customer's last message said their spots were *about to* be
+  // released. They never learned that they were, or that their deposit had become revenue.
+  it('US-T09 — the close is announced, not just the warning', async () => {
+    const { organizationId } = await seedUser({ email: 'agent@empresa.com', role: 'agent' })
+    const serviceId = await seedService(organizationId)
+    const slotId = await seedSlot(organizationId, serviceId)
+    const folioId = await createBooking('agent@empresa.com', slotId)
+    await arriveAtGrace(folioId)
+
+    await sweepExpiredBookings(env)
+
+    const rows = (
+      await env.DB.prepare(
+        `SELECT channel, status FROM notifications
+          WHERE folio_id = ? AND event = 'booking_expired' ORDER BY channel`,
+      ).bind(folioId).all()
+    ).results as Array<{ channel: string; status: string }>
+
+    // D20 — WhatsApp always, email additionally. This fixture carries `c@example.com`, so both are
+    // pending; the no-address case is the next test.
+    expect(rows.map((r) => r.channel)).toEqual(['email', 'whatsapp'])
+    expect(rows.every((r) => r.status === 'pending')).toBe(true)
+  })
+
+  it('US-T09 — with no address on file the WhatsApp row still goes out', async () => {
+    const { organizationId } = await seedUser({ email: 'agent@empresa.com', role: 'agent' })
+    const serviceId = await seedService(organizationId)
+    const slotId = await seedSlot(organizationId, serviceId)
+    const folioId = await createBooking('agent@empresa.com', slotId)
+    await env.DB.prepare(`UPDATE folios SET customer_email = NULL WHERE id = ?`).bind(folioId).run()
+    await arriveAtGrace(folioId)
+
+    await sweepExpiredBookings(env)
+
+    const rows = (
+      await env.DB.prepare(
+        `SELECT channel, status FROM notifications
+          WHERE folio_id = ? AND event = 'booking_expired' ORDER BY channel`,
+      ).bind(folioId).all()
+    ).results as Array<{ channel: string; status: string }>
+
+    // `skipped` is "this channel does not apply", which is a different fact from "the provider
+    // refused" and must not be counted alongside it. The customer is still reached.
+    expect(rows.find((r) => r.channel === 'whatsapp')!.status).toBe('pending')
+    expect(rows.find((r) => r.channel === 'email')!.status).toBe('skipped')
+  })
+
+  // US-A87 (D6/D8) — the credit exists so that raising the terminal tier becomes USABLE. Before it,
+  // a generous tier produced a cash refund somebody had to physically hand to a person who was not
+  // there; now it produces something deliverable to an absent customer.
+  it('US-A87 — a generous terminal tier leaves a CREDIT, not a cash debt', async () => {
+    const { organizationId } = await seedUser({ email: 'agent@empresa.com', role: 'agent' })
+    // A terminal tier of 95%. It has to be that generous, and the reason is worth stating because
+    // it is not obvious and it decides how often credits appear at all:
+    //
+    // the ladder retains a share of what was SOLD, not of what was COLLECTED (engine D3), and the
+    // refund is `max(0, amountPaid − retention)`. This cart is 2 × 150,000 = 300,000 with a 45,000
+    // deposit, so a 40% tier retains 180,000 — more than was ever paid — and leaves NOTHING. That
+    // is US-A76 by name: "a 30% deposit against a 50% retention refunds nothing."
+    //
+    // At 95% the retention is 15,000 and the deposit leaves 30,000 behind.
+    await env.DB.prepare(
+      `UPDATE organizations SET cancellation_policy = ?, booking_credit_valid_days = 30 WHERE id = ?`,
+    )
+      .bind(
+        JSON.stringify({
+          version: 1,
+          tiers: [{ min_hours: null, refund_pct: 95, agent_commission_pct: 100 }],
+        }),
+        organizationId,
+      )
+      .run()
+    const serviceId = await seedService(organizationId)
+    const slotId = await seedSlot(organizationId, serviceId)
+    const folioId = await createBooking('agent@empresa.com', slotId)
+    await arriveAtGrace(folioId)
+
+    await sweepExpiredBookings(env)
+
+    const row = await getFolio(folioId)
+    // 45,000 paid − 15,000 retained.
+    expect(row.credit_amount).toBe(30000)
+    expect(row.credit_expires_at).toBeGreaterThan(Math.floor(Date.now() / 1000))
+    // And NOT a cash obligation: nobody is standing there to receive it, and a refund PIN would be
+    // a debt the customer never asked for.
+    expect(row.refund_status).toBe('none')
+    expect(row.refund_pin).toBeNull()
+  })
+
+  it('US-A87 — the inherited default leaves no credit, and no date on nothing', async () => {
+    const { organizationId } = await seedUser({ email: 'agent@empresa.com', role: 'agent' })
+    const serviceId = await seedService(organizationId)
+    const slotId = await seedSlot(organizationId, serviceId)
+    const folioId = await createBooking('agent@empresa.com', slotId)
+    await arriveAtGrace(folioId)
+
+    await sweepExpiredBookings(env)
+
+    const row = await getFolio(folioId)
+    // US-A76 chose this default deliberately; the credit feature does not make anyone more generous.
+    expect(row.credit_amount).toBe(0)
+    expect(row.credit_expires_at).toBeNull()
+  })
+
+  // S-12 — SNAPSHOTTED, not re-derived. The ladder is time-based and the clock has moved: deriving
+  // the credit on read would give a different answer every day, and a different one again after the
+  // org edits its tiers. The customer was told a figure; the figure must not drift under them.
+  it('S-12 — editing the ladder after the close does not change the credit', async () => {
+    const { organizationId } = await seedUser({ email: 'agent@empresa.com', role: 'agent' })
+    await env.DB.prepare(
+      `UPDATE organizations SET cancellation_policy = ?, booking_credit_valid_days = 30 WHERE id = ?`,
+    )
+      .bind(
+        JSON.stringify({
+          version: 1,
+          tiers: [{ min_hours: null, refund_pct: 95, agent_commission_pct: 100 }],
+        }),
+        organizationId,
+      )
+      .run()
+    const serviceId = await seedService(organizationId)
+    const slotId = await seedSlot(organizationId, serviceId)
+    const folioId = await createBooking('agent@empresa.com', slotId)
+    await arriveAtGrace(folioId)
+    await sweepExpiredBookings(env)
+
+    const before = await getFolio(folioId)
+    expect(before.credit_amount).toBe(30000)
+
+    // The org turns stingy: terminal tier back to retain-everything.
+    await env.DB.prepare(`UPDATE organizations SET cancellation_policy = NULL WHERE id = ?`)
+      .bind(organizationId)
+      .run()
+    await sweepExpiredBookings(env)
+
+    const after = await getFolio(folioId)
+    expect(after.credit_amount).toBe(30000)
+    expect(after.credit_expires_at).toBe(before.credit_expires_at)
+  })
+
+  // S-14 — the credit horizon is its OWN number: an accounting decision, read at each close, never
+  // a clock that moves already-closed folios. Two closes under two settings prove both halves.
+  it('S-14 — changing the horizon reaches the next close, never a folio already closed', async () => {
+    const { organizationId } = await seedUser({ email: 'agent@empresa.com', role: 'agent' })
+    await env.DB.prepare(
+      `UPDATE organizations SET cancellation_policy = ?, booking_credit_valid_days = 30 WHERE id = ?`,
+    )
+      .bind(
+        JSON.stringify({
+          version: 1,
+          tiers: [{ min_hours: null, refund_pct: 95, agent_commission_pct: 100 }],
+        }),
+        organizationId,
+      )
+      .run()
+    const serviceId = await seedService(organizationId)
+    const firstSlot = await seedSlot(organizationId, serviceId, '06:00')
+    const firstFolio = await createBooking('agent@empresa.com', firstSlot)
+    await arriveAtGrace(firstFolio)
+    await sweepExpiredBookings(env)
+    const first = await getFolio(firstFolio)
+
+    // The org lengthens the horizon AFTER the first close…
+    await env.DB.prepare(`UPDATE organizations SET booking_credit_valid_days = 300 WHERE id = ?`)
+      .bind(organizationId)
+      .run()
+    const secondSlot = await seedSlot(organizationId, serviceId, '08:00')
+    const secondFolio = await createBooking('agent@empresa.com', secondSlot)
+    await arriveAtGrace(secondFolio)
+    await sweepExpiredBookings(env)
+    const second = await getFolio(secondFolio)
+
+    // …and only the SECOND close carries it. ~300 days vs ~30: the gap is months, so a day of
+    // clock skew cannot blur the assertion.
+    expect(second.credit_expires_at - first.credit_expires_at).toBeGreaterThan(200 * 86_400)
+    // The folio already closed keeps the date its customer was told.
+    expect((await getFolio(firstFolio)).credit_expires_at).toBe(first.credit_expires_at)
+  })
+
+  it('US-T09 — a second run cannot announce the same close twice', async () => {
+    const { organizationId } = await seedUser({ email: 'agent@empresa.com', role: 'agent' })
+    const serviceId = await seedService(organizationId)
+    const slotId = await seedSlot(organizationId, serviceId)
+    const folioId = await createBooking('agent@empresa.com', slotId)
+    await arriveAtGrace(folioId)
+
+    await sweepExpiredBookings(env)
+    await sweepExpiredBookings(env)
+
+    const n = await env.DB.prepare(
+      `SELECT COUNT(*) AS n FROM notifications WHERE folio_id = ? AND event = 'booking_expired'`,
+    ).bind(folioId).first<{ n: number }>()
+    // Two rows — one per channel — never four. The unique index is the guard.
+    expect(n!.n).toBe(2)
   })
 
   it('one broken folio does not abort the run', async () => {

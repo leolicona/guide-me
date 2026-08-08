@@ -77,7 +77,7 @@ const seedRequest = async (
 ): Promise<string> => {
   const id = crypto.randomUUID()
   await env.DB.prepare(
-    `INSERT INTO cancellation_requests
+    `INSERT INTO folio_requests
        (id, organization_id, folio_id, status, reason, created_at, updated_at)
      VALUES (?, ?, ?, ?, ?, ?, ?)`,
   )
@@ -94,8 +94,10 @@ const seedInertFolio = (organizationId: string, agentId: string, createdAt: numb
   })
 
 beforeEach(async () => {
-  await env.DB.exec('DELETE FROM cancellation_requests')
+  await env.DB.exec('DELETE FROM folio_requests')
   await env.DB.exec('DELETE FROM folio_payments')
+  await env.DB.exec('DELETE FROM notifications')
+  await env.DB.exec('DELETE FROM folio_events')
   await env.DB.exec('DELETE FROM folios')
   await clearTenancyDb()
 })
@@ -218,7 +220,7 @@ describe('US-A84 — the counts are counts', () => {
   it('S-4b — a folio with history plus a live request counts once', async () => {
     const { userId, organizationId } = await seedUser({ email: ADMIN_EMAIL })
     const folio = await seedInertFolio(organizationId, userId, daysAgo(1))
-    // `uq_cancellation_requests_open` (migration 0028) is a PARTIAL unique index — one *pending*
+    // `uq_folio_requests_open` (migration 0028) is a PARTIAL unique index — one *pending*
     // request per folio, but resolved ones accumulate. So the count can only over-report by
     // counting request rows instead of folios, and this is the shape where it would: three rows,
     // one folio, one job.
@@ -226,11 +228,11 @@ describe('US-A84 — the counts are counts', () => {
     await seedRequest(organizationId, folio, 'rejected', daysAgo(10))
     await seedRequest(organizationId, folio, 'pending', daysAgo(1))
 
-    const { cancellation_requests } = await counts()
+    const { folio_requests } = await counts()
     const listed = (await list()).folios.filter((f) => f.cancellation_request === 'pending')
 
     // The pill reads "1 Solicitud" beside a list that shows one row.
-    expect(cancellation_requests).toBe(1)
+    expect(folio_requests).toBe(1)
     expect(listed).toHaveLength(1)
   })
 
@@ -313,12 +315,12 @@ describe('US-A84 — Solicitudes, absorbed', () => {
     const res = await SELF.fetch(`${FOLIOS}/${folio}`, { headers: auth(ADMIN_EMAIL) })
     expect(res.status).toBe(200)
     const body = await res.json<{
-      folio: { cancellation_requests: Array<Record<string, unknown>> }
+      folio: { folio_requests: Array<Record<string, unknown>> }
     }>()
 
     // The detail is where the absorbed tab lands: without this, rejecting a request erases it.
-    expect(body.folio.cancellation_requests.map((r) => r.status)).toEqual(['approved', 'rejected'])
-    expect(body.folio.cancellation_requests[1].reason).toBe('motivo rejected')
+    expect(body.folio.folio_requests.map((r) => r.status)).toEqual(['approved', 'rejected'])
+    expect(body.folio.folio_requests[1].reason).toBe('motivo rejected')
   })
 })
 

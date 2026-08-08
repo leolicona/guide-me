@@ -67,13 +67,14 @@ const getRedeemedCount = async (lineId: string) => {
 
 // folio_line_extras → folio_lines → folios → slots → schedules → service_extras → services
 const clearPosDb = async () => {
-  await env.DB.exec('DELETE FROM cancellation_requests')
   await env.DB.exec('DELETE FROM folio_access_tokens')
   await env.DB.exec('DELETE FROM folio_line_extras')
+  await env.DB.exec('DELETE FROM folio_requests')
   await env.DB.exec('DELETE FROM folio_lines')
-  await env.DB.exec('DELETE FROM cancellation_requests')
   await env.DB.exec('DELETE FROM folio_access_tokens')
   await env.DB.exec('DELETE FROM folio_payments')
+  await env.DB.exec('DELETE FROM notifications')
+  await env.DB.exec('DELETE FROM folio_events')
   await env.DB.exec('DELETE FROM folios')
   await env.DB.exec('DELETE FROM slot_zones')
   await env.DB.exec('DELETE FROM slots')
@@ -388,5 +389,106 @@ describe('US-A64 — zone on the scan result', () => {
     const { json } = await scan(AGENT_EMAIL, token)
     expect(json.result).toBe('valid')
     expect(json.ticket.zone_name).toBeNull()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// US-AG52 (D16) — a rescheduled ticket's PREDECESSOR must stop admitting
+// ---------------------------------------------------------------------------
+//
+// Found while writing the e2e for the paid reschedule, and it was live: the reschedule re-signs
+// the line's ticket, but nothing compared the SCANNED token against the line's current one. The
+// old ticket's signature is genuine, its line still resolves, its folio is still paid, and its
+// `expires_at` came from the OLD departure — so on a move to a later date it was still in the
+// future and the scan returned `valid`, consuming a pass.
+//
+// The damage is not theoretical: the customer we told "tu boleto anterior deja de funcionar" could
+// arrive on the ORIGINAL date, be admitted to a departure whose seat we had already returned to
+// the pool, and burn a pass belonging to the new one — leaving the correct date reading
+// ALREADY_CONSUMED at the dock.
+
+describe('US-AG52 — the ticket a reschedule replaced', () => {
+  const rescheduleTo = async (email: string, folioId: string, lineId: string, slotId: string) => {
+    const res = await SELF.fetch(`${POS}/folios/${folioId}/reschedule`, {
+      method: 'POST',
+      headers: jsonAuth(email),
+      body: JSON.stringify({ moves: [{ folio_line_id: lineId, to_slot_id: slotId }] }),
+    })
+    const body = (await res.json()) as any
+    expect(res.status, JSON.stringify(body)).toBe(200)
+    return body.folio.lines[0].qr_token as string
+  }
+
+  it('the OLD token is refused as SUPERSEDED, and burns no pass', async () => {
+    const { organizationId } = await seedUser({ email: AGENT_EMAIL, role: 'agent' })
+    const serviceId = await seedService(organizationId)
+    const from = await seedSlot(organizationId, serviceId, '2026-06-15')
+    // A LATER departure: the old token's own expiry is still ahead, so only this check can catch it.
+    const to = await seedSlot(organizationId, serviceId, '2026-06-25')
+
+    const res = await SELF.fetch(`${POS}/folios`, {
+      method: 'POST',
+      headers: jsonAuth(AGENT_EMAIL),
+      body: JSON.stringify({
+        customer_name: 'Cliente Test',
+        customer_phone: '5512345678',
+        lines: [{ slot_id: from, quantity: 2, unit_price: 150000 }],
+      }),
+    })
+    const folio = ((await res.json()) as any).folio
+    const oldToken = folio.lines[0].qr_token as string
+
+    const newToken = await rescheduleTo(AGENT_EMAIL, folio.id, folio.lines[0].id, to)
+    expect(newToken).not.toBe(oldToken)
+
+    const { status, json } = await scan(AGENT_EMAIL, oldToken)
+    expect(status).toBe(200)
+    expect(json.result).toBe('invalid')
+    expect(json.reason).toBe('SUPERSEDED')
+    // The staffer can still see WHOSE ticket it is and for what — that is what makes the result
+    // actionable ("pídele el más reciente") instead of merely a refusal.
+    expect(json.ticket).toMatchObject({ service_name: 'Canyon Tour', passes_total: 2 })
+
+    // No pass consumed: the folio must be exactly as scannable as before the bad scan.
+    const line = await env.DB.prepare(`SELECT redeemed_count FROM folio_lines WHERE id = ?`)
+      .bind(folio.lines[0].id)
+      .first<{ redeemed_count: number }>()
+    expect(line!.redeemed_count).toBe(0)
+  })
+
+  it('the NEW token admits normally — the replacement is what works', async () => {
+    const { organizationId } = await seedUser({ email: AGENT_EMAIL, role: 'agent' })
+    const serviceId = await seedService(organizationId)
+    const from = await seedSlot(organizationId, serviceId, '2026-06-15')
+    const to = await seedSlot(organizationId, serviceId, '2026-06-25')
+
+    const res = await SELF.fetch(`${POS}/folios`, {
+      method: 'POST',
+      headers: jsonAuth(AGENT_EMAIL),
+      body: JSON.stringify({
+        customer_name: 'Cliente Test',
+        customer_phone: '5512345678',
+        lines: [{ slot_id: from, quantity: 2, unit_price: 150000 }],
+      }),
+    })
+    const folio = ((await res.json()) as any).folio
+    const newToken = await rescheduleTo(AGENT_EMAIL, folio.id, folio.lines[0].id, to)
+
+    const { json } = await scan(AGENT_EMAIL, newToken)
+    expect(json.result).toBe('valid')
+    // And it reads the NEW departure, because the scanner takes the schedule from the line's live
+    // row rather than the signed payload.
+    expect(json.ticket).toMatchObject({ slot_date: '2026-06-25', pass_number: 1 })
+  })
+
+  it('a line with no ticket at all is left alone — pre-feature rows keep their validity', async () => {
+    const { organizationId } = await seedUser({ email: AGENT_EMAIL, role: 'agent' })
+    const { token, lineId } = await mintTicket(AGENT_EMAIL, organizationId)
+    // The column is what a pre-feature row lacks; the signed ticket in the customer's hand is not.
+    await env.DB.prepare(`UPDATE folio_lines SET qr_token = NULL WHERE id = ?`).bind(lineId).run()
+
+    const { json } = await scan(AGENT_EMAIL, token)
+    // The guard must key on "this line has a DIFFERENT current ticket", never on "no match found".
+    expect(json.result).toBe('valid')
   })
 })

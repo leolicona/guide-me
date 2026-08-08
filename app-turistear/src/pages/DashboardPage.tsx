@@ -74,7 +74,7 @@ export default function DashboardPage() {
   // filtered list fetched to call `.length` — three unbounded reads of `folios` to render `Hoy`,
   // one of which pulled every paid folio WITH its lines and portal link.
   const { data: counts } = useFolioCounts(true)
-  const pendingCancellationCount = counts?.cancellation_requests ?? 0
+  const pendingCancellationCount = counts?.folio_requests ?? 0
   const pendingRefundCount = counts?.refunds ?? 0
   const overdueBookingCount = counts?.overdue ?? 0
   const pendingDeliveryCount = counts?.undelivered ?? 0

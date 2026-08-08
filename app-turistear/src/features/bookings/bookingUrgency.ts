@@ -14,12 +14,6 @@ export const hoursUntilExpiry = (
 export const isUrgentBooking = (expiresAt: number | null | undefined): boolean =>
   (hoursUntilExpiry(expiresAt) ?? Infinity) < 24
 
-// Short countdown label: "Vence en 3 h", "Vence en 2 d", or "Vencido" once past.
-export const venceLabel = (expiresAt: number | null | undefined): string => {
-  const h = hoursUntilExpiry(expiresAt)
-  if (h == null) return ''
-  if (h <= 0) return 'Vencido'
-  if (h < 1) return `Vence en ${Math.round(h * 60)} min`
-  if (h < 24) return `Vence en ${Math.round(h)} h`
-  return `Vence en ${Math.round(h / 24)} d`
-}
+// The countdown LABEL used to live here too (`venceLabel`), reading `Date.now()` in render —
+// D19 (folio-lifecycle-unification) retired it: every surface now derives its time chip from
+// `folioTimeChip` + `useNowSeconds` in `features/folios`.

@@ -28,6 +28,17 @@ export const organizations = sqliteTable('organizations', {
   // `bookingPreDepartureBufferHours`, so an apartado is never born inside the window it is supposed
   // to be settled in.
   bookingCreationCutoffHours: integer('booking_creation_cutoff_hours').notNull().default(0),
+  // US-A85 (docs/folios/folio-state-machine.spec.md, D23) — when a departed line with nothing
+  // redeemed starts reading as a no-show. SIGNED like its two neighbours: + = before departure,
+  // − = after. 0 (default) = the departure instant. Its OWN column, never one of those two: they
+  // drive the sales gate and the apartado's release, and one number cannot serve two intents.
+  // Enforced coherent with `salesCutoffOffsetMinutes` — a customer may not be marked absent while
+  // their seat is still sellable. Fulfilment ITSELF is derived and stored nowhere (D4).
+  noShowMarginMinutes: integer('no_show_margin_minutes').notNull().default(0),
+  // US-A87 (D10) — how long the operator carries a closed apartado's credit on its books. Its OWN
+  // column: an accounting horizon, not one of the four departure clocks, and nothing about a
+  // departure should move it. A perpetual credit is an unbounded liability.
+  bookingCreditValidDays: integer('booking_credit_valid_days').notNull().default(90),
   // Accommodation/lodging settings (docs/lodging/accommodation-stays.spec.md §2.5). weekendDays:
   // CSV of ISO weekday ints (0=Sun … 6=Sat) — which nights use a unit's weekend_rate (default
   // Fri+Sat). A PAID stay cancels free until lodgingFreeCancelDays before check-in; inside that
@@ -63,6 +74,13 @@ export const organizations = sqliteTable('organizations', {
   qrRedemptionMode: text('qr_redemption_mode', { enum: ['per_pass', 'all_passes'] })
     .notNull()
     .default('per_pass'),
+  // US-A88 (docs/payment-verification/payment-verification.spec.md, D10 — amends D2) — must a
+  // transfer carry its bank reference at checkout/settle? ON by default (today's rule). Turning it
+  // OFF relaxes the input only: an unreferenced transfer still lands `payment_verification =
+  // 'pending'` with its QR deferred — the US-A67 verification axis is untouched.
+  paymentReferenceRequired: integer('payment_reference_required', { mode: 'boolean' })
+    .notNull()
+    .default(true),
   createdAt: integer('created_at', { mode: 'timestamp' })
     .notNull()
     .default(sql`(unixepoch())`),
@@ -416,6 +434,12 @@ export const folios = sqliteTable('folios', {
   // once they act — idempotent last-write-wins, D13). ticketsViewedAt: the tourist opened the
   // portal (the bot-proof "Visto" beacon, first-view). A folio is "pendiente de enviar" once a
   // portal link exists and ticketsSentAt is null.
+  // US-A87 (D6/D10) — what the ladder did NOT retain when an apartado's hold ended, held as a
+  // credit rather than paid out: the close is produced by a clock, so nobody is there to hand cash
+  // to. SNAPSHOTTED — re-deriving it later gives a different answer, because the ladder is
+  // time-based and the clock has moved. Zero for every org on the inherited default (US-A76).
+  creditAmount: integer('credit_amount').notNull().default(0),
+  creditExpiresAt: integer('credit_expires_at', { mode: 'timestamp' }),
   ticketsSentAt: integer('tickets_sent_at', { mode: 'timestamp' }),
   ticketsSentBy: text('tickets_sent_by').references(() => users.id),
   ticketsViewedAt: integer('tickets_viewed_at', { mode: 'timestamp' }),
@@ -617,7 +641,7 @@ export const folioAccessTokens = sqliteTable('folio_access_tokens', {
 // Tourist-initiated cancellation requests (US-T04). A REQUEST, never a cancel: it touches no
 // inventory or folio status — only an admin approval funnels into the existing cancelFolio
 // path (US-A21). At most one open `pending` row per folio (partial unique index).
-export const cancellationRequests = sqliteTable('cancellation_requests', {
+export const folioRequests = sqliteTable('folio_requests', {
   id: text('id').primaryKey(),
   organizationId: text('organization_id')
     .notNull()
@@ -625,6 +649,18 @@ export const cancellationRequests = sqliteTable('cancellation_requests', {
   folioId: text('folio_id')
     .notNull()
     .references(() => folios.id),
+  // US-AG52 (D13) — what KIND of petition. The table was `cancellation_requests`; it was renamed
+  // rather than duplicated because `uq_folio_requests_open` (one open petition per folio) is an
+  // invariant two tables could not express — a folio must never carry a pending cancellation AND a
+  // pending reschedule at once.
+  kind: text('kind', { enum: ['cancellation', 'reschedule'] })
+    .notNull()
+    .default('cancellation'),
+  // Reschedule-only; null on a cancellation. `from_slot_id` is snapshotted at approval so the
+  // history reads as a move rather than as a destination with no origin.
+  folioLineId: text('folio_line_id').references(() => folioLines.id),
+  fromSlotId: text('from_slot_id').references(() => slots.id),
+  toSlotId: text('to_slot_id').references(() => slots.id),
   status: text('status', { enum: ['pending', 'approved', 'rejected'] })
     .notNull()
     .default('pending'),
@@ -933,6 +969,84 @@ export const folioPayments = sqliteTable('folio_payments', {
     .default(sql`(unixepoch())`),
 })
 
+// US-A24 / US-AG53 (docs/folios/folio-timeline.spec.md) — the folio's append-only narrative. One
+// row per USER ACTION (D9), written in the SAME batch as its mutation (D3, the BUG-013 lesson).
+// A narrative, never an authority: no money or state computation reads it — every fact stays
+// authoritative where it already lives (folios, folio_payments). actor NULL renders "Sistema"
+// (the expiry sweep) or "Cliente" (the Visto beacon). Backfilled rows (migration 0061) carry the
+// SOURCE column's timestamp as created_at, never the migration's clock.
+export const folioEvents = sqliteTable('folio_events', {
+  id: text('id').primaryKey(),
+  organizationId: text('organization_id')
+    .notNull()
+    .references(() => organizations.id),
+  folioId: text('folio_id')
+    .notNull()
+    .references(() => folios.id),
+  eventType: text('event_type', {
+    enum: [
+      'created',
+      'payment',
+      'payment_verified',
+      'transfer_rejected',
+      'tickets_sent',
+      'tickets_viewed',
+      'reminder_sent',
+      'rescheduled',
+      'cancelled',
+      'refund_confirmed',
+    ],
+  }).notNull(),
+  actorId: text('actor_id').references(() => users.id),
+  // The PIN shift that acted (US-A68); null for an in-house (agent/admin) action.
+  operatorId: text('operator_id').references((): any => affiliateOperators.id),
+  payload: text('payload'), // JSON, shape per event_type (spec § Data Model)
+  backfilled: integer('backfilled', { mode: 'boolean' }).notNull().default(false),
+  // The event's OWN moment — the mutation's clock, never the insert's (business rule 3).
+  createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+})
+
+// US-A86 / US-AG51 (docs/folios/folio-state-machine.spec.md) — the notification outbox. One row per
+// (folio, event, channel) the system decided to emit, unique on that triple so a re-run of a cron or
+// a double-tapped button cannot duplicate a message.
+//
+// TWO DRAINS, because one is forced: email sends itself; WhatsApp is a human tap, since a Worker
+// cannot send `wa.me` (apartado-stages.spec.md S4). Every event goes out by WhatsApp (D20) — written
+// notice is what prevents a dispute — with email emitted ADDITIONALLY as a durable second copy.
+//
+// There is deliberately NO `viewed_at` (D21/D26): reading is measured only where a beacon exists,
+// which today is `folios.tickets_viewed_at` and the tickets alone. A column here would be a second
+// home for that fact, null for seven of eight events by unmeasurability rather than non-reading.
+export const notifications = sqliteTable('notifications', {
+  id: text('id').primaryKey(),
+  organizationId: text('organization_id')
+    .notNull()
+    .references(() => organizations.id),
+  folioId: text('folio_id')
+    .notNull()
+    .references(() => folios.id),
+  // The whitelist in `utils/notifications.ts`; never free text.
+  event: text('event').notNull(),
+  channel: text('channel', { enum: ['email', 'whatsapp'] }).notNull(),
+  // The DRAIN's state, not the folio's. `skipped` = this channel does not apply (no email on file),
+  // which is deliberately distinct from `failed` = the provider refused.
+  status: text('status', { enum: ['pending', 'sent', 'failed', 'skipped'] })
+    .notNull()
+    .default('pending'),
+  attempts: integer('attempts').notNull().default(0),
+  lastError: text('last_error'),
+  sentAt: integer('sent_at', { mode: 'timestamp' }),
+  // Null for an automatic (email) send; the human who tapped, for WhatsApp. D21 — it asserts that
+  // someone sent it, NOT that the customer received it.
+  sentBy: text('sent_by').references(() => users.id),
+  createdAt: integer('created_at', { mode: 'timestamp' })
+    .notNull()
+    .default(sql`(unixepoch())`),
+})
+
+export type Notification = typeof notifications.$inferSelect
+export type NewNotification = typeof notifications.$inferInsert
+
 export type FolioPayment = typeof folioPayments.$inferSelect
 export type NewFolioPayment = typeof folioPayments.$inferInsert
 
@@ -973,8 +1087,10 @@ export type Payout = typeof payouts.$inferSelect
 export type NewPayout = typeof payouts.$inferInsert
 export type FolioAccessToken = typeof folioAccessTokens.$inferSelect
 export type NewFolioAccessToken = typeof folioAccessTokens.$inferInsert
-export type CancellationRequest = typeof cancellationRequests.$inferSelect
-export type NewCancellationRequest = typeof cancellationRequests.$inferInsert
+export type CancellationRequest = typeof folioRequests.$inferSelect
+export type NewCancellationRequest = typeof folioRequests.$inferInsert
+export type FolioEvent = typeof folioEvents.$inferSelect
+export type NewFolioEvent = typeof folioEvents.$inferInsert
 export type AccommodationUnitType = typeof accommodationUnitTypes.$inferSelect
 export type NewAccommodationUnitType = typeof accommodationUnitTypes.$inferInsert
 export type AccommodationSeason = typeof accommodationSeasons.$inferSelect

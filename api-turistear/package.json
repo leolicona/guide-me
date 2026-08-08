@@ -11,7 +11,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "db:generate": "drizzle-kit generate",
-    "db:migrate:local": "wrangler d1 migrations apply guideme-db --local",
+    "seed:local": "node scripts/seed-local.mjs",
+    "db:migrate:local": "node scripts/local-db.mjs",
     "db:migrate:dev": "wrangler d1 migrations apply guideme-db --remote --env dev",
     "db:migrate:prod": "wrangler d1 migrations apply guideme-db-prod --remote --env production"
   },

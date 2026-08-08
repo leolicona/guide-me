@@ -38,7 +38,7 @@ This specification unifies two workflows:
 |---|---|
 | Org-level policy (min %, hold days, same-day buffer) + a **cascade-ready resolver** | **Per-service policy overrides** (US-AG07.1 cascade) — columns + catalog UI |
 | Booking creation, one-shot settle, adaptive checkout, recovery dashboard, manual cancel, auto-expiry sweep | **B2B `scan_allowed_unpaid`** — scanner exemption + expiry carve-out + governance |
-| **US-AG07.5 reactivation only** (*Reactivar y Liquidar* when capacity exists) | **US-AG07.5 reschedule** (transfer deposit to another slot) + **coupon/credit-note** |
+| ~~**US-AG07.5 reactivation only** (*Reactivar y Liquidar* when capacity exists)~~ **RETIRED** — see below | ~~**US-AG07.5 reschedule**~~ **PROMOTED** — it is the mechanism, not an addition |
 
 The resolver `resolveBookingPolicy(service, org)` is **shaped for cascade** (`Service-override ?? Org-global`) but, this phase, reads **org globals only** — adding the overrides later is a one-line change. The `services.*Override` and `folios.scan_allowed_unpaid` columns are **NOT added** this phase (YAGNI — no live reader yet).
 
@@ -364,7 +364,15 @@ takes `service` so wiring it in is additive.)*
 - **Cancel** (manual, booking-only) → release spots (`slots.booked −= qty` per line), `status='cancelled'`,
   `cancelled_at/by`, `cancellation_reason`. **Deposit retained** (`refund_status='none'`); the
   agent keeps the percent commission on the deposit (D7/D8).
-- **Reactivate** → only when `status='cancelled'` **and** it was a booking (`booking_expires_at`
+> **SUPERSEDED by `docs/bookings/booking-reschedule.spec.md` (D3).** The phasing recorded here was
+> inverted: this document shipped the *undo* and deferred the *reschedule*, and under the newer
+> model that is backwards. Reactivation cleared `cancelled_at`, leaving the history asserting an
+> expiry never happened after the customer had been told it did; it never reset `reminder_status`,
+> so a reactivated apartado was released a second time in silence. Rescheduling moves to **① and
+> ②**, where the seats are still held. The rule below is kept verbatim as the record of what was
+> built.
+
+- **Reactivate** *(retired)* → only when `status='cancelled'` **and** it was a booking (`booking_expires_at`
   set) **and** effective capacity ≥ the booking's spots: re-decrement the slots, set
   `status='booking'`, fresh `booking_expires_at`, then the client proceeds to settle. Else
   `409 NO_CAPACITY_AVAILABLE` (UI offers the deferred Reagendar/Cupón).

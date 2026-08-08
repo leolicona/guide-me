@@ -4,13 +4,14 @@ import { renderSVG } from 'uqr'
 import { TicketCard } from '../ticket/card'
 import { getDb, type Db } from '../../db/client'
 import {
-  cancellationRequests,
+  folioRequests,
   folioAccessTokens,
   folioLines,
   folios,
   organizations,
   services,
 } from '../../db/schema'
+import { folioEventRow } from '../../utils/folioEvents'
 
 // Tourist self-service portal (US-T01–T05) — PUBLIC Worker-rendered pages (spec D1).
 // No session, no role: the folio-scoped access token in the URL IS the credential (D2).
@@ -306,17 +307,17 @@ const loadPortalData = async (
 
   const [request] = await db
     .select({
-      status: cancellationRequests.status,
-      resolutionNote: cancellationRequests.resolutionNote,
+      status: folioRequests.status,
+      resolutionNote: folioRequests.resolutionNote,
     })
-    .from(cancellationRequests)
+    .from(folioRequests)
     .where(
       and(
-        eq(cancellationRequests.folioId, folioId),
-        eq(cancellationRequests.organizationId, org),
+        eq(folioRequests.folioId, folioId),
+        eq(folioRequests.organizationId, org),
       ),
     )
-    .orderBy(desc(cancellationRequests.createdAt))
+    .orderBy(desc(folioRequests.createdAt))
     .limit(1)
 
   return {
@@ -378,10 +379,11 @@ export const markPortalSeen = async (c: PortalContext) => {
   const resolution = await resolveToken(db, c.req.param('token'))
   if (resolution.kind !== 'ok') return c.body(null, 204)
 
+  const now = new Date()
   c.executionCtx.waitUntil(
     db
       .update(folios)
-      .set({ ticketsViewedAt: new Date() })
+      .set({ ticketsViewedAt: now })
       .where(
         and(
           eq(folios.id, resolution.folioId),
@@ -389,7 +391,19 @@ export const markPortalSeen = async (c: PortalContext) => {
           isNull(folios.ticketsViewedAt), // first view wins the timestamp
         ),
       )
-      .then(() => undefined)
+      .returning({ id: folios.id })
+      // US-A24 — the narrative row, first view ONLY: a repeat open matches 0 rows and narrates
+      // nothing. The actor is the tourist, so actor_id stays NULL (renders "Cliente").
+      .then((won) =>
+        won.length > 0
+          ? folioEventRow(db, {
+              organizationId: resolution.organizationId,
+              folioId: resolution.folioId,
+              type: 'tickets_viewed',
+              at: now,
+            }).then(() => undefined)
+          : undefined,
+      )
       .catch(() => undefined),
   )
   return c.body(null, 204)
@@ -439,18 +453,18 @@ export const submitCancellationRequest = async (c: PortalContext) => {
   }
 
   const [open] = await db
-    .select({ id: cancellationRequests.id })
-    .from(cancellationRequests)
+    .select({ id: folioRequests.id })
+    .from(folioRequests)
     .where(
       and(
-        eq(cancellationRequests.folioId, resolution.folioId),
-        eq(cancellationRequests.organizationId, resolution.organizationId),
-        eq(cancellationRequests.status, 'pending'),
+        eq(folioRequests.folioId, resolution.folioId),
+        eq(folioRequests.organizationId, resolution.organizationId),
+        eq(folioRequests.status, 'pending'),
       ),
     )
     .limit(1)
   if (open) {
-    return conflict('Ya hay una solicitud de cancelación en revisión para esta reserva.')
+    return conflict('Ya hay una solicitud en revisión para esta reserva.')
   }
 
   const body = await c.req.parseBody()
@@ -458,7 +472,7 @@ export const submitCancellationRequest = async (c: PortalContext) => {
   const reason = rawReason ? rawReason.slice(0, REASON_MAX_LENGTH) : null
 
   try {
-    await db.insert(cancellationRequests).values({
+    await db.insert(folioRequests).values({
       id: crypto.randomUUID(),
       organizationId: resolution.organizationId,
       folioId: resolution.folioId,
@@ -467,7 +481,113 @@ export const submitCancellationRequest = async (c: PortalContext) => {
     })
   } catch {
     // Unique-index race: another open request landed between the check and the insert.
-    return conflict('Ya hay una solicitud de cancelación en revisión para esta reserva.')
+    return conflict('Ya hay una solicitud en revisión para esta reserva.')
+  }
+
+  return c.redirect(`/portal/${token}`, 303)
+}
+
+
+// US-AG52 (D2) — the TOURIST origin. The other one is the counter, where the seller acts with the
+// customer in front of them; this is the same agreement reached from the customer's side.
+//
+// Almost nothing here is new, and that is the point: `resolveToken` is the same authorization the
+// ticket link already uses, `folio_requests` is the same table, and the one-open-petition guard
+// below is the SAME query the cancellation request runs — since the index was widened to cover both
+// kinds, it now stops a folio carrying a pending cancellation AND a pending reschedule without a
+// line of new code.
+//
+// It reserves NOTHING. Seats cannot be held for a petition nobody has approved, so the capacity
+// check happens at approval — which is why a request can be refused later, and why the refusal
+// carries alternatives.
+export const submitRescheduleRequest = async (c: PortalContext) => {
+  const db = getDb(c.env)
+  const token = c.req.param('token')
+  const resolution = await resolveToken(db, token)
+  if (resolution.kind === 'not_found') return renderNotFound(c)
+  if (resolution.kind === 'expired') return renderExpired(c)
+
+  const conflict = (body: string) => {
+    c.status(409)
+    c.header('X-Robots-Tag', 'noindex')
+    return c.render(
+      <main class="portal">
+        <div class="portal-card portal-error">
+          <h1>No se pudo enviar la solicitud</h1>
+          <p>{body}</p>
+          <p>
+            <a href={`/portal/${token}`}>Volver a mi reserva</a>
+          </p>
+        </div>
+      </main>,
+    )
+  }
+
+  const [folio] = await db
+    .select({ status: folios.status })
+    .from(folios)
+    .where(
+      and(
+        eq(folios.id, resolution.folioId),
+        eq(folios.organizationId, resolution.organizationId),
+      ),
+    )
+    .limit(1)
+  if (!folio) return renderNotFound(c)
+  if (folio.status === 'cancelled') {
+    return conflict('Esta reserva ya fue cancelada.')
+  }
+
+  const [open] = await db
+    .select({ id: folioRequests.id })
+    .from(folioRequests)
+    .where(
+      and(
+        eq(folioRequests.folioId, resolution.folioId),
+        eq(folioRequests.organizationId, resolution.organizationId),
+        eq(folioRequests.status, 'pending'),
+      ),
+    )
+    .limit(1)
+  if (open) {
+    return conflict('Ya hay una solicitud en revisión para esta reserva.')
+  }
+
+  const body = await c.req.parseBody()
+  const lineId = typeof body.folio_line_id === 'string' ? body.folio_line_id : ''
+  const toSlotId = typeof body.to_slot_id === 'string' ? body.to_slot_id : ''
+  if (!lineId || !toSlotId) {
+    return conflict('Elige el servicio y el nuevo horario.')
+  }
+
+  // The line must belong to THIS folio. A token grants access to one folio, and a body is not
+  // allowed to widen that.
+  const [line] = await db
+    .select({ id: folioLines.id, slotId: folioLines.slotId })
+    .from(folioLines)
+    .where(
+      and(
+        eq(folioLines.id, lineId),
+        eq(folioLines.folioId, resolution.folioId),
+        eq(folioLines.organizationId, resolution.organizationId),
+      ),
+    )
+    .limit(1)
+  if (!line) return conflict('Ese servicio no pertenece a tu reserva.')
+
+  try {
+    await db.insert(folioRequests).values({
+      id: crypto.randomUUID(),
+      organizationId: resolution.organizationId,
+      folioId: resolution.folioId,
+      kind: 'reschedule',
+      status: 'pending',
+      folioLineId: line.id,
+      fromSlotId: line.slotId,
+      toSlotId,
+    })
+  } catch {
+    return conflict('Ya hay una solicitud en revisión para esta reserva.')
   }
 
   return c.redirect(`/portal/${token}`, 303)

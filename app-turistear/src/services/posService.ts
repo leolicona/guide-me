@@ -6,6 +6,7 @@ import type {
   PosCatalogItem,
   PosServiceDetail,
 } from '../features/pos/types'
+import type { FolioEvent } from '../features/folios/types'
 
 // US-AG03 / AG04 / AG05 / AG06 / AG08 — agent-facing POS. All endpoints require
 // the `agent` role (enforced server-side). Money fields are integer minor units.
@@ -161,12 +162,15 @@ export interface PosCancellationQuote {
 // being true when apartados started following the ladder — engine D20).
 export const getFolio = async (
   id: string,
-): Promise<{ folio: Folio; quote: PosCancellationQuote | null }> => {
+): Promise<{ folio: Folio; quote: PosCancellationQuote | null; events: FolioEvent[] }> => {
   const res = await request<{
     folio: Folio
     cancellation_quote?: PosCancellationQuote | null
+    // US-AG53 — the seller reads the SAME narrative the admin reads (timeline D6); absent
+    // pre-timeline ⇒ none.
+    events?: FolioEvent[]
   }>(`/api/pos/folios/${id}`)
-  return { folio: res.folio, quote: res.cancellation_quote ?? null }
+  return { folio: res.folio, quote: res.cancellation_quote ?? null, events: res.events ?? [] }
 }
 
 

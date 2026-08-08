@@ -237,11 +237,13 @@ const getFolio = async (email: string, id: string) => {
 
 const clearDb = async () => {
   for (const t of [
-    'cancellation_requests',
     'folio_access_tokens',
     'folio_line_extras',
+    'folio_events',
+    'folio_requests',
     'folio_lines',
     'folio_payments',
+    'notifications',
     'folios',
     'slot_zones',
     'service_zones',
@@ -540,7 +542,7 @@ describe('Scenario 11/12 — the snapshot (D6)', () => {
 
 describe('the tourist-request path prices identically (the defect this fixes)', () => {
   const approve = async (email: string, requestId: string) => {
-    const res = await SELF.fetch(`${FOLIOS}/cancellation-requests/${requestId}/approve`, {
+    const res = await SELF.fetch(`${FOLIOS}/requests/${requestId}/approve`, {
       method: 'POST',
       headers: jsonAuth(email),
       body: JSON.stringify({}),
@@ -552,7 +554,7 @@ describe('the tourist-request path prices identically (the defect this fixes)', 
     const { organizationId, folioId } = await scenario({ hours: 3 })
     const requestId = crypto.randomUUID()
     await env.DB.prepare(
-      `INSERT INTO cancellation_requests (id, organization_id, folio_id, status, reason, created_at, updated_at)
+      `INSERT INTO folio_requests (id, organization_id, folio_id, status, reason, created_at, updated_at)
        VALUES (?, ?, ?, 'pending', 'Ya no puedo ir', ?, ?)`,
     )
       .bind(requestId, organizationId, folioId, ts(), ts())

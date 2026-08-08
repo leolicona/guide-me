@@ -6,6 +6,409 @@ Tracks confirmed bugs, root causes, and fixes. Each entry is immutable once clos
 
 ---
 
+## BUG-030 — Cancelling an Unverified-Transfer Folio Mints a Refund PIN for Money Never Confirmed — ✅ FIXED
+
+**Found:** 2026-08-07, designing the folio detail's blocking-first action ladder (the question "should
+unverified money block the cancel?" turned out to have a money answer, not a UX answer).
+
+**What happens:** `cancelFolio` (US-A21, `api-turistear/src/routes/folios/handler.ts`) guards only
+against `status = 'cancelled'`. On a folio whose `payment_verification` is `pending`, the ladder
+prices the cancellation over `amount_paid` — which **includes the unconfirmed transfer** — and
+`refundFieldsFor` opens `refund_status = 'pending'` with a `refund_amount` and a **refund PIN**: a
+physical-cash hand-back obligation for money the company never confirmed receiving. The same hole
+exists via the agent's `cancelBooking` on an apartado with an unverified transfer deposit.
+
+**The correct path already exists:** `rejectPayment` (US-A67 D6) cancels the same folio with
+`refund_status: 'none'` — "nothing was collected, so nothing to refund" — plus the commission
+clawback. The two entrances disagree about whether the money exists.
+
+**Mitigation shipped (frontend):** the detail hides `Cancelar folio` / `Cancelar apartado` while
+verification is pending; the work card offers `Verificar` / `Rechazar pago` instead.
+
+**Fix (#80, merged 2026-08-07):** `cancelFolio` and `cancelBooking` refuse (`409`,
+`PAYMENT_UNVERIFIED`) while `payment_verification = 'pending'`, pointing at verify/reject.
+Deliberately narrow: `rejectPayment` remains the cancel path for unconfirmed money, and the
+expiry sweep is untouched (it enters via `cancelFolioPriced`) — an expired hold releases its
+seats regardless of what the money is waiting on, pinned by
+`test/folios/cancel-unverified-guard.test.ts` (5 scenarios). The UI mirror shipped in #77.
+
+---
+
+## BUG-027 — A Cancellation That Refunded Nothing Renders As "(reembolsado)" — ✅ FIXED
+
+**Discovered:** 2026-08-01, while enumerating every reachable folio case for a lifecycle table
+**Affected component:** `app-turistear/src/features/folios/folioCardState.ts` (`folioMoneyAxis`)
+and its renderer `components/FolioCard.tsx`
+**Severity:** Medium — a factual misstatement about money, on the reconciliation screen
+
+### Symptom
+
+A cancelled folio with `refund_status = 'none'` rendered **"$1,500.00 (reembolsado)"**. Nothing was
+refunded. The organization kept every peso.
+
+### Root cause
+
+The money axis asked **one** question where there are **three** answers:
+
+```ts
+folio.refund_status === 'pending'
+  ? { kind: 'refundOwed',    cents: folio.refund_amount ?? 0 }
+  : { kind: 'refundSettled', cents: folio.total }   // ← 'none' lands here too
+```
+
+`refund_status` has three values and only two were distinguished, so *never owed* was rendered with
+the label belonging to *paid back*. `'none'` on a cancelled folio is set by `cancelFolioPriced`
+(`routes/folios/handler.ts:809-815`) when the ladder's retention consumed everything collected —
+the case **US-A76 documents by name**: *a 30% deposit against a 50% retention refunds nothing*. Any
+org on the inherited default ladder produces it at the terminal tier, so it was not an edge case.
+
+The figure was wrong too: it printed `folio.total`, not what the customer actually paid. An
+apartado cancelled after a 90,000 deposit on a 300,000 sale claimed 300,000 had gone back.
+
+### Fix
+
+Three readings for the three states, and each figure is the sum it is about:
+
+| `refund_status` | Reading | Figure |
+|---|---|---|
+| `pending` | `refundOwed` — *Reembolsar* | `refund_amount` — the debt |
+| `refunded` | `refundSettled` — *(reembolsado)* | `refund_amount` — what went back |
+| `none` | **`refundNone`** — *(sin reembolso)* | `amount_paid` — what the retention came out of |
+
+The screen-reader label moves with it (`Pagado, sin reembolso`), because the caption alone is not
+state when the figure reads as an ordinary amount.
+
+### Tests
+
+`folioCardState.test.ts` (S-2, S-2b, S-2c) and `components/FolioCard.test.tsx` (rendered S-2/S-3).
+**Mutation-verified:** collapsing the branch back to two readings turns exactly these red.
+
+### Related changes
+
+Shipped with **BUG-026** — the other label that lied — as Phase 1 of
+`docs/folios/folio-state-machine.spec.md`.
+
+---
+
+## BUG-026 — The Same Status Is Called Two Different Things — ✅ FIXED
+
+**Discovered:** 2026-08-04, by the settings/vocabulary audit behind
+`docs/folios/folio-state-machine.spec.md`
+**Affected component:** `FolioStatusChip.tsx:9` vs `folioCardState.ts:217`, plus
+`folioFacets.ts:46` and `FolioHistoryPage.tsx:58`
+**Severity:** Low technically, **Medium in the product** — the vocabulary is the model the user
+builds in their head
+
+### Symptom
+
+`status = 'booking'` rendered as two different words on screens a seller sees in the same session:
+
+| Surface | Said |
+|---|---|
+| `FolioStatusChip` (folio detail, history detail) | **"Reserva"** |
+| `folioTimeChip` (the list card) | **"Apartado"** |
+| The facet strip | **"Reserva"** |
+| The history toggle | **"Reservas"** |
+
+### Root cause
+
+No decision was ever made about the word. Each surface picked one, and both were defensible in
+isolation — which is exactly how a vocabulary rots without anyone doing anything wrong.
+
+The deeper problem is that **"Reserva" does not distinguish anything**: an apartado and a paid
+folio *both* hold inventory. The word names the property they share, so it can only ever be
+ambiguous.
+
+### Fix
+
+The word is **retired**, not disambiguated (`folio-state-machine.spec.md` D8). Three terms:
+
+- **Apartado** — partial payment, balance owed
+- **Pagado** — paid in full
+- **Por verificar** — money received, not confirmed against the bank
+
+All four surfaces now say *Apartado* / *Apartados*. `SPEC.md`'s glossary carries the retirement.
+
+### Tests
+
+`FolioCard.test.tsx` (S-1, the chip and the card together — they must agree, since disagreeing was
+the defect) and `folioFacets.test.ts` (S-1, incl. `FACETS.some(f => f.label === 'Reserva') === false`).
+**Mutation-verified.**
+
+---
+
+## BUG-029 — The Apartado Creation Cutoff Forbids the Only Useful Values, and Accepts a Born-Dead One — ✅ FIXED
+
+**Discovered:** 2026-08-05, in review of the reschedule spec
+**Reporter:** a reviewer reading the validation against `bookingExpiryDate`
+**Affected component:** `api-turistear/src/routes/organizations/handler.ts` (the US-A77 coherence
+rule) and `routes/pos/handler.ts` (`confirmSale`, which had no equivalent guard)
+**Severity:** Medium — no wrong number is computed, but a documented capability is unreachable and
+an apartado can be written already expired.
+
+### Symptom
+
+The rule was `cutoff >= buffer`. It is wrong at **both** ends.
+
+**Below the buffer, the useful configurations are rejected.** *"No apartados inside 2 hours"* —
+`booking_creation_cutoff_hours: 2` against the default 24 h deadline — returns `400`. The admin's
+only legal choices are `0` (no restriction at all) or something ≥ 24 h, so **same-day apartados
+cannot be governed**.
+
+**At the boundary, an apartado is born dead.** With `cutoff == buffer == 24`, a sale at exactly 24 h
+out passes the creation guard (`hoursOut < cutoff` is `24 < 24`, false) and then:
+
+```ts
+nearDeparture = (earliestSlotEpoch - nowSec < bufferSeconds)   //  86400 < 86400  →  false
+tourBuffer    = bufferSeconds                                   //  the FAR branch
+expiry        = earliestSlotEpoch - 86400                       //  = the instant of sale
+```
+
+`booking_expires_at = now`. The sweep cancels it within fifteen minutes.
+
+**And with the default `cutoff = 0` there is no guard at all** — `if (policy.creationCutoffHours > 0)`
+skips it — so a sale five minutes before departure computes `salida − 15 min`, an expiry already in
+the past.
+
+### Root cause
+
+The rule's stated reasoning was *"an apartado created inside its own settle window is born owing
+money it has no time to pay"*. That **ignores the grace stage**, which the same feature documents as
+a legitimate birthplace — `apartado-stages.spec.md` S2: *"Sales made close to departure are BORN
+here \[in ②], which is why entry is not a separate event."*
+
+A sale 2 h out takes the near branch and gets `salida − 15 min`: one hour forty-five of life. It is
+healthy. The validation forbade it while accepting the one case that genuinely is not.
+
+The deeper cause is that the validation **re-derived** the arithmetic it was validating instead of
+asking the function that owns it, so the two could disagree — and did.
+
+### Fix
+
+Three parts, because no single one is sufficient:
+
+1. **`cutoff >= buffer` is removed.**
+2. **The rule now asks the real function.** `bookingExpiryEpoch` is extracted from
+   `bookingExpiryDate` and exported; the validation computes what an apartado created at the
+   *tightest legal moment* (`departure − cutoff`) would receive, and requires it to be alive. Same
+   arithmetic as production, so it cannot drift. It also now re-checks when
+   `booking_grace_offset_minutes` alone changes, which the old rule ignored.
+3. **A sale-time guard in `confirmSale`** — the part a settings rule **cannot** provide, because
+   whether an apartado is born expired depends on *when the sale happens*, not only on the config.
+   With `cutoff = 0` no settings rule can promise anything. `confirmSale` now refuses a booking
+   whose computed expiry is already past → `422 BOOKING_TOO_LATE`.
+
+A **full-payment** sale on the same slot is untouched: a completed sale near departure is fine, a
+promise to come back and pay is not.
+
+### Tests
+
+`test/organizations/organization-policy.test.ts` — six assertions replacing the one that asserted
+the removed rule (kept, not deleted: it also covered the merged-stored-value logic, which survives).
+`test/pos/pos-bookings-create.test.ts` — the sale-time guard, plus the walk-in path staying open.
+
+**Mutation-verified:** restoring `cutoff < buffer` and neutering the `confirmSale` guard turns
+exactly these six red and nothing else.
+
+### Related changes
+
+Found while reviewing `docs/bookings/booking-reschedule.spec.md` (PR #67), whose Phase 2 reuses
+`booking_creation_cutoff_hours` as the destination guard for a reschedule (rule 5) — it would have
+inherited the defect.
+
+---
+
+## BUG-028 — Two Org Settings the API Accepts and Nothing Obeys — ✅ FIXED
+
+**Discovered:** 2026-08-04
+**Reporter:** an audit of every column on `organizations` for a real consumer, prompted by a
+question about how the apartado time limit works
+**Affected component:** `api-turistear/src/routes/organizations/schema.ts` (the `PATCH` contract),
+`handler.ts` (the read shape), `pos/handler.ts:660-690` (`BookingPolicy`), and — the part that
+matters — `docs/SPEC.md` US-A46
+**Severity:** Low in code, **Medium in the index.** Nothing computes wrongly; an admin is told
+something untrue.
+
+### Symptom
+
+`PATCH /api/organizations` accepted two fields that changed nothing:
+
+| Field | What the caller is told | What happens |
+|---|---|---|
+| `booking_hold_days` | US-A46: *"the **hold window** (≥ 1) after which an unsettled apartado auto-cancels and releases its spots"* | **nothing.** `200`, the value is stored, and no code reads it |
+| `agent_cancellation_enabled` | US-A73's switch, round-tripping through the API | **nothing.** Every cancel route is still `requireRole('admin')` |
+
+`booking_hold_days` was the worse of the two, for three reasons:
+
+1. It **validated** — `z.number().int().min(1)`. It rejected a `0` with a 400 and then ignored the
+   `5`. Validation is the strongest signal an API can send that a field is load-bearing.
+2. It was carried into `BookingPolicy.holdDays` (`pos/handler.ts:681`), so reading the code it
+   looked like a live policy.
+3. **`SPEC.md` US-A46 described its behaviour as real.** An admin who read the index and set
+   `booking_hold_days: 3` believing their apartados would last three days got `200` and no effect.
+
+### Root cause
+
+The `created_at + holdDays` model was correct when it shipped. It produced the born-expired
+apartado (`#29`/`#30`), whose fix moved the calculation to **time-distance to departure**, and
+`apartado-stages.spec.md` then made the deadline a transition rather than an event. Neither change
+removed the setting that configured the old model — the code comment records the moment:
+
+> *The former `createdAt + holdDays` cap was removed — the hold now lasts until the pre-departure
+> buffer regardless of how far out the tour is; **`holdDays` is retained inert**.*
+
+"Retained inert" is a fair description of a column. It is not a fair description of a validated
+field in a public contract that the product index documents as working.
+
+`agent_cancellation_enabled` is a different shape and was never a lie: `SPEC.md` US-A73 says
+plainly *"**Not yet built** — the switch is not surfaced until the endpoint exists"*, and it is
+deliberately absent from `/settings`. The only defect is that the `PATCH` still **accepted** it,
+so a caller using the API directly could set `true` and believe they had enabled something.
+
+### Fix
+
+- Both fields removed from `updateOrganizationSchema`. Zod strips unknown keys on a non-strict
+  object, so a client still sending them gets `200` and no write — no breaking error.
+- `booking_hold_days` removed from the read shape and from `MyOrganization`; `holdDays` removed
+  from `BookingPolicy` and from the three call sites that selected it.
+- `agent_cancellation_enabled` **stays readable**: it is genuinely reserved, and US-AG44 will need
+  it. The `PATCH` line is restored by the PR that builds the endpoint.
+- **`SPEC.md` US-A46 amended** — the sentence that described the retired model is struck through
+  and replaced with what actually governs the deadline.
+- Neither column is dropped. There is no migration: the stored values are harmless history, and
+  rewriting a table in D1 to remove two columns buys nothing.
+
+### Tests
+
+`test/organizations/organization-policy.test.ts` — both new assertions were **mutation-verified**:
+re-adding the schema lines and the update branches turns exactly those two tests red, and nothing
+else.
+
+### Related changes
+
+The audit that found this is recorded in `docs/folios/folio-state-machine.spec.md` (§ Settings
+audit), which also notes two findings deliberately left alone: `ack_window_hours` works but has no
+UI (tracked as unbuilt at `SPEC.md` *Configuración home*), and the lodging pair
+(`lodging_free_cancel_days` / `lodging_cancel_penalty_pct`) is the model this fix copies — a
+retired setting that stops being editable and **tells the orgs that set it where the behaviour
+went** (`SettingsPage.tsx:488`).
+
+---
+
+## BUG-025 — A Zoned Service Becomes Unsellable Once It Has 100 Sellable Slots — ⚠️ OPEN
+
+**Discovered:** 2026-08-03
+**Reporter:** the first real E2E run — GitHub Actions run `30838104788`, dispatched from `main`
+minutes after the release put `e2e.yml` there
+**Affected component:** `api-turistear/src/routes/pos/handler.ts:555-583` (`getPosService`, the
+US-A64 per-zone availability query)
+**Severity:** Medium — **latent, not currently breaking sales.** `to` is optional in the contract,
+and omitting it on a zoned service with ≥100 sellable slots is a hard `500`. Today the only caller
+that omits it is the E2E seed; both POS callers bound the window to 1–3 days and work fine (see
+*Who is actually affected*). The exposure is that the endpoint is unsafe for any consumer that
+takes the documented default — a report, a script, an integration, or a new screen — and it fails
+as a `500 INTERNAL_ERROR` that names nothing.
+
+*(Originally filed as High on the assumption that the POS opened the service unbounded. It does
+not. Corrected before this entry was merged — the evidence is in* Who is actually affected *below.)*
+
+### Symptom
+
+`GET /api/pos/services/:id` returns `500 {"error":{"code":"INTERNAL_ERROR"}}` for
+`La ruta de la montaña` (`836cedc3-ca26-4be1-824f-f5b2a295abd9`) in dev. 17 other services on the
+same org return `200`.
+
+The endpoint accepts a `to` window, which makes the boundary directly measurable:
+
+| `?to=` | slots returned | status |
+|---|---|---|
+| +98 d | 99 | `200` |
+| +99 d | — | **`500`** |
+
+99 slots pass, 100 fail.
+
+### Who is actually affected
+
+**Not the POS.** Both frontend callers always bound the window, so neither can reach the limit:
+
+| Caller | Window | Result |
+|---|---|---|
+| `ServiceSheet.tsx:54-59` — no date picked | 3 days `[start, start+2]` | `200`, 3 slots |
+| `ServiceSheet.tsx:54-59` — explicit date | 1 day | `200`, 1 slot |
+| `ServiceSheet.tsx:54-59` — Express (US-AG45 D5) | 1 day (today) | `200`, 1 slot |
+| `PosServicePage.tsx:28-31` | 1 or 3 days, same rule | `200` |
+| `e2e/setup/seed.setup.ts:37` | **none** | **`500`** |
+
+Verified against the failing service in dev by replaying each call shape. An agent can open
+`La ruta de la montaña` and sell it normally.
+
+So the defect is **latent**: `to` is documented as optional, and the one caller that takes that
+default is the E2E seed. The risk is the next consumer that does the same — a report, an export, a
+script, a new screen — and gets a `500` that names nothing. `getPosService(id, range?)` makes the
+range optional at the client layer too, so nothing stops it.
+
+### Root Cause
+
+The per-zone availability query binds **one D1 parameter per slot**:
+
+```ts
+.where(
+  and(
+    eq(slotZones.organizationId, agent.organizationId),   // 1 bound parameter
+    inArray(slotZones.slotId, slotRows.map((s) => s.id)), // + 1 per slot
+  ),
+)
+```
+
+**D1 caps a query at 100 bound parameters.** With `organizationId` taking one, 99 slots fits exactly
+and the 100th overflows — which is the boundary measured above, to the row.
+
+A controlled comparison across the org's tours isolates it to this query, not to slot volume and
+not to zones:
+
+| Service | `zones_enabled` | Slots | Result |
+|---|---|---|---|
+| Tour nocturno centro | `false` | **197** | `200` |
+| La ruta del Barro | `true` | 42 | `200` |
+| La ruta del pulque | `false` | 84 | `200` |
+| **La ruta de la montaña** | **`true`** | **≥ 100** | **`500`** |
+
+197 slots without zones is fine; 42 slots with zones is fine. Only *zoned* **and** *≥100 slots*
+fails — the `inArray` is the sole path that scales its parameter count with the slot list.
+
+The other list-shaped reads in this handler are bounded by `serviceId` rather than by an id array,
+so this is the only query in `getPosService` with the exposure. **`confirmSale` and the other
+zone-aware paths should be audited for the same pattern before this closes.**
+
+### Fix
+
+Not yet applied. Two candidates, and they are not mutually exclusive:
+
+1. **Give `to` a bounded default server-side.** This is the real fix now that the blast radius is
+   known: the failure is entirely about what happens when the caller *omits* the window, so a
+   default horizon makes the documented default safe. It also shrinks a response that is already
+   too large — 197 departures serve no screen.
+2. **Chunk the `inArray`** into batches of ≤ 90 ids and merge the results. Mechanical, and correct
+   regardless of what the window ends up being — but it only fixes this one query.
+
+(1) is the better primary fix; (2) is the safety net for whatever window is chosen. Either needs an
+API test that seeds ≥ 100 sellable slots on a zoned service — the exact case no existing test
+covers, which is why this shipped.
+
+### Why it was not caught sooner
+
+Nothing in Tiers 1–3 can see it: it needs a real D1, a zoned service, and a hundred rows of
+accumulated calendar. The E2E seed found it by accident of drift — its previous pick
+(`La ruta del pulque`) had lost availability, so "cheapest bookable tour" moved on to the next
+service, which happened to be this one.
+
+The seed found it precisely **because** it calls the endpoint the way no screen does — without a
+window. That is worth keeping: a test that only replays the UI's own call shape can only ever find
+the bugs the UI already exercises. The seed should still pass a window (it needs one departure, not
+a year of them), but the discovery came from a caller that took the contract at its word.
+
+---
+
 ## BUG-024 — An Apartado Can Be Opened on a Departure That Has Already Left — ⚠️ OPEN
 
 **Discovered:** 2026-08-02

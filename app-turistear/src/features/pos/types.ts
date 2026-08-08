@@ -260,7 +260,13 @@ export type ReminderStatus = 'none' | 'sent'
 
 /** US-A82/US-AG49 — the lean line a LIST row carries: enough to title the card and to render the
  *  WhatsApp `{itinerary}` without a second request. Structurally an `ItineraryLine`. */
+/** US-A85 — the folio's sixth axis. Server-DERIVED from `redeemed_count` against the line's own
+ *  departure; never stored, never sent. `partial` is unreachable under `qr_redemption_mode =
+ *  'all_passes'`, where one scan consumes the whole party (D24). */
+export type Fulfillment = 'pending' | 'partial' | 'fulfilled' | 'no_show'
+
 export interface FolioListLine {
+  id?: string
   service_name: string
   line_type: 'slot' | 'stay'
   slot_date: string | null
@@ -269,6 +275,8 @@ export interface FolioListLine {
   check_out: string | null
   guests: number | null
   quantity: number
+  redeemed_count?: number
+  fulfillment?: Fulfillment
 }
 
 // US-AG20 / US-AG07.3 — lean row for the agent's own folio history & the Apartados dashboard.

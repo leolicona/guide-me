@@ -196,7 +196,9 @@ export interface CancellationOutcome {
 // configurable check-in hour, and midnight is the conservative reading: the whole check-in day
 // counts as "same day"). Both resolve through the org's zone, never UTC — measuring in calendar
 // days against a UTC clock is what made a 3-hours-away slot look like "tomorrow" (see 0052).
-const departureEpoch = (line: PolicyLine, tz: string): number | null => {
+// Exported for `folioFulfillment.ts` (US-A85): the fulfilment axis reads the SAME departure the
+// ladder prices against, so the two can never disagree about when a line left.
+export const departureEpoch = (line: PolicyLine, tz: string): number | null => {
   if (line.lineType === 'stay') {
     return line.checkIn ? naiveEpoch(line.checkIn, '00:00', tz) : null
   }

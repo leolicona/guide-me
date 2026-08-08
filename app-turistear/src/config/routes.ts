@@ -23,6 +23,8 @@ export const ROUTES = {
   HISTORY: '/history', // agent — own folio history list (US-AG20)
   HISTORY_DETAIL: '/history/:id', // agent — one folio, read-only (US-AG21)
   FOLIOS: '/folios',
+  // US-A86 — the admin's outbox: the clock-produced half of the notifications, plus failures.
+  OUTBOX: '/mensajes',
   FOLIO_DETAIL: '/folios/:id',
   BALANCE: '/balance', // agent — running balance, expenses, hand-ins
   CASH: '/cash', // admin — outstanding balances + drops review queue

@@ -58,6 +58,10 @@ export type MoneyReading =
   | { kind: 'owing'; paid: number; total: number }
   | { kind: 'refundOwed'; cents: number }
   | { kind: 'refundSettled'; cents: number }
+  /** Cancelled and never owed anything back — the ladder retained everything (BUG-027). */
+  | { kind: 'refundNone'; cents: number }
+  /** US-A87 — a closed apartado that left the customer a credit. */
+  | { kind: 'credit'; cents: number }
 
 export interface MoneyAxis {
   rail: RailTone
@@ -79,11 +83,29 @@ export function folioMoneyAxis(folio: {
   payment_verification?: 'not_required' | 'pending' | 'verified'
   refund_status?: 'none' | 'pending' | 'refunded'
   refund_amount?: number | null
+  credit_amount?: number | null
 }): MoneyAxis {
+  // A cancelled folio has THREE money readings, not two (BUG-027). `refund_status = 'none'` means
+  // the ladder retained everything and the customer received nothing — the US-A76 case, where a
+  // 30% deposit against a 50% retention refunds nothing (`folios/handler.ts` cancelFolioPriced).
+  // Folding it into `refundSettled` made the card claim money went back that the company kept.
   if (folio.status === 'cancelled') {
-    return folio.refund_status === 'pending'
-      ? { rail: 'error', reading: { kind: 'refundOwed', cents: folio.refund_amount ?? 0 } }
-      : { rail: 'error', reading: { kind: 'refundSettled', cents: folio.total } }
+    if (folio.refund_status === 'pending') {
+      return { rail: 'error', reading: { kind: 'refundOwed', cents: folio.refund_amount ?? 0 } }
+    }
+    // US-A87 (D6) — a credit outranks the "(sin reembolso)" reading, because it is the one thing on
+    // this folio a seller can still act on: the customer standing in front of them owns it, and it
+    // cannot be applied if it is one tap away instead of on the card.
+    if ((folio.credit_amount ?? 0) > 0) {
+      return { rail: 'error', reading: { kind: 'credit', cents: folio.credit_amount! } }
+    }
+    if (folio.refund_status === 'refunded') {
+      return {
+        rail: 'error',
+        reading: { kind: 'refundSettled', cents: folio.refund_amount ?? folio.total },
+      }
+    }
+    return { rail: 'error', reading: { kind: 'refundNone', cents: folio.amount_paid } }
   }
   if (folio.status === 'booking') {
     return {
@@ -203,6 +225,7 @@ export function folioTimeChip(
     booking_expires_at?: number | null
     cancelled_at?: number | null
     refund_status?: 'none' | 'pending' | 'refunded'
+    fulfillment?: 'pending' | 'partial' | 'fulfilled' | 'no_show'
   },
   nowSeconds: number | null,
 ): TimeChip | null {
@@ -210,6 +233,15 @@ export function folioTimeChip(
     const since = nowSeconds !== null && folio.cancelled_at != null ? nowSeconds - folio.cancelled_at : null
     return { label: since === null ? 'Reembolso pendiente' : `Debe hace ${ago(since)}`, tone: 'error' }
   }
+
+  // US-A85 — a departed folio's time reading IS its fulfilment: the chip already carries the clock,
+  // and once the departure has passed there is no countdown left to report. `no_show` is red and
+  // `partial` amber, both icon-paired by StatusChip's own presets — never teal, which carries no
+  // state meaning. `fulfilled` and `pending` say nothing here: a consumed sale needs no chip, and a
+  // tour that has not left yet is already described by the apartado countdown below.
+
+  if (folio.fulfillment === 'no_show') return { label: 'Sin usar', tone: 'error' }
+  if (folio.fulfillment === 'partial') return { label: 'Parcialmente usado', tone: 'warning' }
 
   if (folio.status !== 'booking' || folio.booking_expires_at == null) return null
 

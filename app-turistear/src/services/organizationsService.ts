@@ -7,7 +7,6 @@ export interface MyOrganization {
   id: string
   name: string
   booking_min_down_payment_pct: number
-  booking_hold_days: number
   // US-A47 — signed departure offsets (minutes): + = before departure, − = after (grace).
   // salesCutoff closes new walk-in sales; bookingGrace times the unsettled same-day auto-cancel.
   sales_cutoff_offset_minutes: number
@@ -17,6 +16,11 @@ export interface MyOrganization {
   booking_pre_departure_buffer_hours: number
   /** US-A77 — hours before departure past which an apartado may no longer be opened. 0 = off. */
   booking_creation_cutoff_hours: number
+  /** US-A85 (D23) — signed minutes (+ before / − after departure) at which an unscanned paid seat
+   *  starts reading as wasted. 0 = the departure instant. Its own number, never one of the two above. */
+  no_show_margin_minutes?: number
+  /** US-A87 (D10) — how long a closed apartado's credit stays spendable. */
+  booking_credit_valid_days?: number
   // US-A60/A63 — lodging org settings. weekend days as ISO weekday ints (0=Sun…6=Sat; default
   // [5,6] = Fri+Sat); free-cancel window (days) + penalty (%) for paid-stay cancellations.
   lodging_weekend_days: number[]
@@ -38,6 +42,9 @@ export interface MyOrganization {
   // US-A81 (group-redemption) — how a scan consumes a ticket's passes: one per scan (default) or
   // the whole party at once. Read live at scan time from the SCANNING org.
   qr_redemption_mode: 'per_pass' | 'all_passes'
+  // US-A88 (payment-verification D10) — must a transfer carry its bank reference at checkout and
+  // settle? When false the field turns optional; the admin still verifies the money (US-A67).
+  payment_reference_required: boolean
 }
 
 export const getMyOrganization = async (): Promise<MyOrganization> => {
@@ -47,14 +54,16 @@ export const getMyOrganization = async (): Promise<MyOrganization> => {
 
 export interface UpdateOrganizationInput {
   booking_min_down_payment_pct?: number
-  booking_hold_days?: number
   sales_cutoff_offset_minutes?: number
   booking_grace_offset_minutes?: number
   booking_pre_departure_buffer_hours?: number
   booking_creation_cutoff_hours?: number
+  no_show_margin_minutes?: number
   lodging_weekend_days?: number[]
   lodging_free_cancel_days?: number
   lodging_cancel_penalty_pct?: number
+  /** US-A87 (D10) — how long a closed apartado's credit stays spendable (1–730). */
+  booking_credit_valid_days?: number
   // null resets to the shipped default; a string must contain {portal_link} (server-validated).
   wa_ticket_template?: string | null
   wa_reminder_template?: string | null
@@ -63,10 +72,13 @@ export interface UpdateOrganizationInput {
   // US-A69 — the whole ladder, validated server-side as a unit (a malformed one is rejected, never
   // partially stored). `null` clears it and returns cancellations to their pre-feature behaviour.
   cancellation_policy?: CancellationPolicy | null
-  agent_cancellation_enabled?: boolean
+  // `agent_cancellation_enabled` is deliberately NOT writable — US-A73 is specified, not built,
+  // and no endpoint reads it (BUG-028). It stays on `MyOrganization` for when US-AG44 lands.
   // US-A81 — admin-only, org-wide, deliberately not an agent-facing toggle (D7: nothing can
   // un-redeem a pass).
   qr_redemption_mode?: 'per_pass' | 'all_passes'
+  // US-A88 — the transfer-reference requirement toggle in Settings.
+  payment_reference_required?: boolean
 }
 
 // US-A46 — admin updates the org booking policy.

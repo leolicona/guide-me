@@ -15,7 +15,6 @@ import {
 import CheckCircleRounded from '@mui/icons-material/CheckCircleRounded'
 import EventAvailableRounded from '@mui/icons-material/EventAvailableRounded'
 import EventBusyRounded from '@mui/icons-material/EventBusyRounded'
-import WarningAmberRounded from '@mui/icons-material/WarningAmberRounded'
 import HourglassTopRounded from '@mui/icons-material/HourglassTopRounded'
 import { useFolio, useFolioCancellationQuote } from '../features/pos/hooks'
 import { PaymentBreakdown } from '../features/pos/components/PaymentBreakdown'
@@ -26,7 +25,6 @@ import {
   TicketWhatsAppButton,
   DeliveryBadge,
 } from '../features/bookings'
-import { deliveryState } from '../features/pos/delivery'
 import { formatMoney } from '../features/catalog/types'
 import { folioLineMeta } from '../features/folios/folioLineLabel'
 import { SectionCard } from '../components'
@@ -128,16 +126,8 @@ export default function FolioReceiptPage() {
                     <DeliveryBadge folio={folio} />
                   </Stack>
                   <TicketWhatsAppButton folio={folio} surface="seller" variant="primary" />
-                  {deliveryState(folio) === 'pending' && (
-                    <Stack
-                      direction="row"
-                      spacing={0.5}
-                      sx={{ alignItems: 'center', color: 'warning.main' }}
-                    >
-                      <WarningAmberRounded fontSize="small" />
-                      <Typography variant="caption">Aún no enviado al cliente</Typography>
-                    </Stack>
-                  )}
+                  {/* The "Pendiente de enviar" chip above already states this fact — a second
+                      amber line saying it again is noise (design review, Should Fix 1). */}
                 </Stack>
               </SectionCard>
             )}

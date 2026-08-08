@@ -183,6 +183,7 @@ used."
 | `CANCELLED` | the folio was cancelled | yes |
 | `NOT_PAID` | the folio is not `paid` (forward-safe: bookings) | yes |
 | `NOT_FOUND` | signature valid but the folio line no longer exists in the org | minimal (client identity only) |
+| `SUPERSEDED` | the line has a DIFFERENT current `qr_token` — a reschedule replaced this ticket (US-AG52 D16, BUG-030) | yes |
 
 > **No new `ErrorCode`.** `result`/`reason` live in the 200 body. Request-level failures
 > reuse existing codes (below).
@@ -195,6 +196,12 @@ used."
                                          → none      → invalid NOT_FOUND
 3. folio.status === 'cancelled'          → invalid CANCELLED
    folio.status !== 'paid'               → invalid NOT_PAID
+3b. line.qr_token && line.qr_token != token
+                                         → invalid SUPERSEDED
+    (BUG-030. AFTER the folio-level gates, because "cancelado" outranks "te reemplazaron el
+     boleto"; BEFORE expiry, because a superseded token's expiry came from the OLD departure and
+     "pide el más reciente" is the useful answer, not "ya pasó". A line with NO token is left
+     alone — pre-feature rows keep whatever validity they had.)
 4. now > payload.expires_at              → invalid EXPIRED
 5. UPDATE folio_lines
      SET redeemed_count = redeemed_count + 1

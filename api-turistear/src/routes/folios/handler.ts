@@ -1,11 +1,11 @@
 import type { Context } from 'hono'
 import type { BatchItem } from 'drizzle-orm/batch'
-import { and, asc, desc, eq, isNotNull, lt, ne, sql, type SQL } from 'drizzle-orm'
+import { and, asc, desc, eq, inArray, isNotNull, lt, ne, sql, type SQL } from 'drizzle-orm'
 import { getDb, type Db } from '../../db/client'
 import {
   accommodationReservations,
   affiliateOperators,
-  cancellationRequests,
+  folioRequests,
   folioAccessTokens,
   folioLineExtras,
   folioLines,
@@ -28,7 +28,15 @@ import {
   type CancellationEmailInput,
 } from '../../services/resend'
 import { generateRefundPin } from '../../utils/portal'
+import { folioFulfillment, lineFulfillment } from '../../utils/folioFulfillment'
+import {
+  rescheduleFolio,
+  reissueTicketsAfterReschedule,
+  viableAlternatives,
+} from '../pos/reschedule'
+import { emitNotification, recordEmailOutcome } from '../../utils/notifications'
 import { buildCancellationReversal, displayMethodSql, readFolioPayments } from '../../utils/folioPayments'
+import { folioEventRow, readFolioEvents } from '../../utils/folioEvents'
 import {
   readListCancellationRequests,
   readListLines,
@@ -43,6 +51,14 @@ import {
   undeliveredFilter,
   verificationPendingFilter,
 } from '../../utils/folioPendingWork'
+import {
+  asDay,
+  dateRangeFilter,
+  MIN_QUERY_LENGTH,
+  normalizeQuery,
+  searchFilter,
+  SEARCH_LIMIT,
+} from '../../utils/folioSearch'
 import {
   computeCancellationRefund,
   resolvePolicy,
@@ -97,6 +113,8 @@ const readFolio = async (db: Db, org: string, folioId: string, apiBaseUrl?: stri
       // portal-only (spec D6) — the admin learns it from the tourist in person, which is
       // exactly what proves the cash changed hands.
       refundStatus: folios.refundStatus,
+      creditAmount: folios.creditAmount,
+      creditExpiresAt: folios.creditExpiresAt,
       refundAmount: folios.refundAmount,
       refundNote: folios.refundNote,
       refundedAt: folios.refundedAt,
@@ -132,22 +150,46 @@ const readFolio = async (db: Db, org: string, folioId: string, apiBaseUrl?: stri
   // the folio it was about is the only surface that can carry it. One folio, one cheap read.
   const requestRows = await db
     .select({
-      id: cancellationRequests.id,
-      status: cancellationRequests.status,
-      reason: cancellationRequests.reason,
-      resolutionNote: cancellationRequests.resolutionNote,
-      resolvedBy: cancellationRequests.resolvedBy,
-      resolvedAt: cancellationRequests.resolvedAt,
-      createdAt: cancellationRequests.createdAt,
+      id: folioRequests.id,
+      // US-AG52 — the review surface must know WHAT it is approving. A reschedule petition
+      // presented as a cancellation is a button that lies about the destructive half.
+      kind: folioRequests.kind,
+      status: folioRequests.status,
+      reason: folioRequests.reason,
+      resolutionNote: folioRequests.resolutionNote,
+      resolvedBy: folioRequests.resolvedBy,
+      resolvedAt: folioRequests.resolvedAt,
+      createdAt: folioRequests.createdAt,
+      folioLineId: folioRequests.folioLineId,
+      // The requested destination, resolved to a human date — the seller decides on "quiere
+      // moverse al 21 · 09:00", not on a slot UUID.
+      toSlotId: folioRequests.toSlotId,
+      toSlotDate: slots.date,
+      toSlotStartTime: slots.startTime,
     })
-    .from(cancellationRequests)
+    .from(folioRequests)
+    .leftJoin(
+      slots,
+      and(eq(slots.id, folioRequests.toSlotId), eq(slots.organizationId, org)),
+    )
     .where(
       and(
-        eq(cancellationRequests.folioId, folioId),
-        eq(cancellationRequests.organizationId, org),
+        eq(folioRequests.folioId, folioId),
+        eq(folioRequests.organizationId, org),
       ),
     )
-    .orderBy(desc(cancellationRequests.createdAt))
+    .orderBy(desc(folioRequests.createdAt))
+
+  // US-A85 — fulfilment is derived on read, so the detail resolves the org's clock and margin the
+  // same way the list does. One derivation, two callers: they cannot disagree.
+  const [fulfillmentOrg] = await db
+    .select({ tz: organizations.timezone, noShowMargin: organizations.noShowMarginMinutes })
+    .from(organizations)
+    .where(eq(organizations.id, org))
+    .limit(1)
+  const fulfillmentTz = fulfillmentOrg?.tz ?? 'America/Mexico_City'
+  const fulfillmentMargin = fulfillmentOrg?.noShowMargin ?? 0
+  const nowEpoch = Math.floor(Date.now() / 1000)
 
   const lineRows = await db
     .select({
@@ -168,6 +210,7 @@ const readFolio = async (db: Db, org: string, folioId: string, apiBaseUrl?: stri
       checkOut: folioLines.checkOut,
       guests: folioLines.guests,
       nights: folioLines.nights,
+      redeemedCount: folioLines.redeemedCount,
     })
     .from(folioLines)
     .where(and(eq(folioLines.folioId, folioId), eq(folioLines.organizationId, org)))
@@ -229,6 +272,9 @@ const readFolio = async (db: Db, org: string, folioId: string, apiBaseUrl?: stri
     cancellation_reason: folio.cancellationReason,
     cancellation_clawback: folio.cancellationClawback,
     refund_status: folio.refundStatus,
+    // US-A87 — the credit and its expiry, so the detail can state both.
+    credit_amount: folio.creditAmount,
+    credit_expires_at: tsOrNull(folio.creditExpiresAt),
     refund_amount: folio.refundAmount,
     refund_note: folio.refundNote,
     refunded_at: tsOrNull(folio.refundedAt),
@@ -242,15 +288,41 @@ const readFolio = async (db: Db, org: string, folioId: string, apiBaseUrl?: stri
     payments,
     // US-A84 rule 7 — the absorbed request history (newest first). Empty for the vast majority of
     // folios, which is why it costs nothing to always send it.
-    cancellation_requests: requestRows.map((r) => ({
+    folio_requests: requestRows.map((r) => ({
       id: r.id,
+      kind: r.kind,
       status: r.status,
       reason: r.reason,
       resolution_note: r.resolutionNote,
       resolved_by: r.resolvedBy,
       resolved_at: tsOrNull(r.resolvedAt),
       created_at: Math.floor(r.createdAt.getTime() / 1000),
+      folio_line_id: r.folioLineId,
+      to_slot_id: r.toSlotId,
+      to_slot_date: r.toSlotDate,
+      to_slot_start_time: r.toSlotStartTime,
     })),
+    // US-A85 (D7) — the worst of the lines. Computed from the same readings the array carries, so
+    // the summary and the breakdown are one number and its parts, never two opinions.
+    fulfillment: folioFulfillment(
+      lineRows.map((line) =>
+        lineFulfillment(
+          {
+            lineId: line.id,
+            lineType: line.lineType,
+            slotDate: line.slotDate,
+            slotStartTime: line.slotStartTime,
+            checkIn: line.checkIn,
+            lineTotal: line.lineTotal,
+            quantity: line.quantity,
+            redeemedCount: line.redeemedCount,
+          },
+          fulfillmentTz,
+          fulfillmentMargin,
+          nowEpoch,
+        ),
+      ),
+    ),
     lines: lineRows.map((line) => ({
       id: line.id,
       line_type: line.lineType,
@@ -265,6 +337,24 @@ const readFolio = async (db: Db, org: string, folioId: string, apiBaseUrl?: stri
       guests: line.guests,
       nights: line.nights,
       quantity: line.quantity,
+      // US-A85 — the per-line fulfilment the folio's roll-up is made of (D2). The detail is where
+      // "two of four boarded, and the Thursday tour nobody came to" can actually be read.
+      redeemed_count: line.redeemedCount,
+      fulfillment: lineFulfillment(
+        {
+          lineId: line.id,
+          lineType: line.lineType,
+          slotDate: line.slotDate,
+          slotStartTime: line.slotStartTime,
+          checkIn: line.checkIn,
+          lineTotal: line.lineTotal,
+          quantity: line.quantity,
+          redeemedCount: line.redeemedCount,
+        },
+        fulfillmentTz,
+        fulfillmentMargin,
+        nowEpoch,
+      ),
       base_price: line.basePrice,
       minimum_price: line.minimumPrice,
       unit_price: line.unitPrice,
@@ -305,6 +395,16 @@ export const listFolios = async (c: FoliosContext) => {
   // writer and a cron that writes state drifts from the clock that defines it (apartado-stages S7).
   const refundStatusQ = c.req.query('refund_status')
   const overdueQ = c.req.query('overdue')
+  // US-A83 — the two ways to reach PAST the load window: a date range, and a free-text query.
+  // `date` is now an alias for a one-day range (D10), so there is exactly one implementation of
+  // "which day is this" — the previous `strftime(… 'unixepoch')` compared a UTC day, which for an
+  // org at UTC−5 answered for tomorrow from 19:00 local, the busiest hours of a beach counter.
+  const dayQ = asDay(dateQ)
+  const fromQ = asDay(c.req.query('from')) ?? dayQ
+  const toQ = asDay(c.req.query('to')) ?? dayQ
+  const normalizedQ = normalizeQuery(c.req.query('q') ?? '')
+  const hasQuery = normalizedQ.length >= MIN_QUERY_LENGTH
+  const hasDateFilter = !!(fromQ || toQ)
 
   const filters = [eq(folios.organizationId, org)]
   if (statusQ === 'paid' || statusQ === 'booking' || statusQ === 'cancelled') {
@@ -320,11 +420,6 @@ export const listFolios = async (c: FoliosContext) => {
     // cancels the folio (its stale 'pending' flag stays), so exclude cancelled to drop it out.
     if (verificationQ === 'pending') filters.push(ne(folios.status, 'cancelled'))
   }
-  if (dateQ) {
-    filters.push(
-      sql`strftime('%Y-%m-%d', ${folios.createdAt}, 'unixepoch') = ${dateQ}`,
-    )
-  }
   if (agentQ) filters.push(eq(folios.agentId, agentQ))
 
   // US-A78 — refunds still owed. Unknown values fall through to "no filter", matching `status`.
@@ -335,17 +430,36 @@ export const listFolios = async (c: FoliosContext) => {
   const now = new Date()
   if (overdueQ === 'true') filters.push(overdueFilter(now))
 
-  // US-A84 rule 1/2 — the union. An explicit `date` filter REPLACES the window: the caller has
-  // named the days they want, and applying both would let a range reach into the past and silently
-  // return nothing. Every other filter composes with the union rather than replacing it.
+  // The org's zone decides every calendar boundary on this route — the window (US-A84 rule 2) and,
+  // since US-A83, the range too.
+  const [orgRow] = await db
+    .select({ tz: organizations.timezone, noShowMargin: organizations.noShowMarginMinutes })
+    .from(organizations)
+    .where(eq(organizations.id, org))
+    .limit(1)
+  const tz = orgRow?.tz ?? 'UTC'
+  // US-A85 — the fulfilment axis is DERIVED on read, so the clock and the margin travel with the
+  // query rather than being baked into a column. `now` is the one already taken above.
+  const fulfillmentCtx = {
+    tz,
+    marginMinutes: orgRow?.noShowMargin ?? 0,
+    nowEpoch: Math.floor(now.getTime() / 1000),
+  }
+
+  // US-A83 rule 1 — an inclusive org-local range over `created_at`.
+  const range = dateRangeFilter(tz, fromQ, toQ)
+  if (range) filters.push(range)
+  // US-A83 rule 4 — the five fields a folio gets described by.
+  if (hasQuery) filters.push(searchFilter(db, org, normalizedQ))
+
+  // US-A84 rule 1/2 — the union, UNLESS the caller narrowed deliberately. A date range or a query
+  // REPLACES the window (US-A83 D11/D12): the caller has named what they want, and applying both
+  // would let a search reach into the past and silently return nothing — which is a search with a
+  // hidden date filter, exactly what the fallback exists to remove.
   const windowDays = DEFAULT_WINDOW_DAYS
-  if (!dateQ) {
-    const [orgRow] = await db
-      .select({ tz: organizations.timezone })
-      .from(organizations)
-      .where(eq(organizations.id, org))
-      .limit(1)
-    filters.push(listWindowFilter(db, org, orgRow?.tz ?? 'UTC', windowDays, now))
+  const windowed = !hasDateFilter && !hasQuery
+  if (windowed) {
+    filters.push(listWindowFilter(db, org, tz, windowDays, now))
   }
 
   // US-A84 rule 9 — ONE order, always. The queues used to sort by their own clock (refund debt by
@@ -380,6 +494,8 @@ export const listFolios = async (c: FoliosContext) => {
       // US-A78 — the debt itself. The lean row never carried these, so the pending-refunds queue
       // could not show what is owed without a second read per folio.
       refundStatus: folios.refundStatus,
+      creditAmount: folios.creditAmount,
+      creditExpiresAt: folios.creditExpiresAt,
       refundAmount: folios.refundAmount,
       // US-A82 — no surface may infer Express from a null name (business rule 4).
       saleMode: folios.saleMode,
@@ -389,20 +505,39 @@ export const listFolios = async (c: FoliosContext) => {
     .leftJoin(affiliateOperators, eq(folios.operatorId, affiliateOperators.id))
     .where(and(...filters))
     .orderBy(order)
+    // US-A83 D6 — a query is an unindexed scan over the whole history, so it gets a ceiling. One
+    // extra row is fetched purely to learn whether there were more, without a second COUNT.
+    .limit(hasQuery ? SEARCH_LIMIT + 1 : -1)
+
+  const truncated = hasQuery && rows.length > SEARCH_LIMIT
+  const page = truncated ? rows.slice(0, SEARCH_LIMIT) : rows
 
   // US-A82/US-A84 — the card names what was sold, sends the ticket from the list, and marks the
-  // folios a customer is waiting on. All three decorations re-apply `filters` through a join rather
-  // than an id list (see folioListRows).
+  // folios a customer is waiting on.
+  //
+  // The decorations normally re-apply `filters` through a join rather than an id list, because D1
+  // caps bound parameters and this list is otherwise unbounded (see folioListRows). A SEARCH is the
+  // one case where that reverses: the result is capped at 50, so an id list is exactly 50
+  // parameters — while re-applying the filters would fetch lines for every folio the query matched
+  // and then discard all but the page.
+  const decorationFilters = hasQuery
+    ? [eq(folios.organizationId, org), inArray(folios.id, page.map((r) => r.id))]
+    : filters
   const [linesByFolio, portalLinkByFolio, requestByFolio] = await Promise.all([
-    readListLines(db, org, filters),
-    readListPortalLinks(db, org, filters, c.env.API_BASE_URL),
-    readListCancellationRequests(db, org, filters),
+    readListLines(db, org, decorationFilters, fulfillmentCtx),
+    readListPortalLinks(db, org, decorationFilters, c.env.API_BASE_URL),
+    readListCancellationRequests(db, org, decorationFilters),
   ])
 
   return c.json({
     // US-A84 — what the list covers, so the UI can SAY so rather than imply completeness.
-    window_days: dateQ ? null : windowDays,
-    folios: rows.map((r) => ({
+    // US-A83 — null once a range or a query replaced the window: the list is no longer "the last
+    // N days", and saying it is would be the same false claim of completeness in reverse.
+    window_days: windowed ? windowDays : null,
+    // US-A83 D6 — a cap that does not announce itself reports "these are the matches" when it
+    // means "these are the first 50".
+    truncated,
+    folios: page.map((r) => ({
       id: r.id,
       agent: { id: r.agentId, name: r.agentName },
       customer_name: r.customerName,
@@ -432,11 +567,19 @@ export const listFolios = async (c: FoliosContext) => {
       // US-A78 — 'pending' = cancelled, money owed, nobody confirmed the hand-back.
       refund_status: r.refundStatus,
       refund_amount: r.refundAmount,
+      // US-A87 — what a closed apartado left the customer, and until when.
+      credit_amount: r.creditAmount,
+      credit_expires_at: tsOrNull(r.creditExpiresAt),
       // US-A82 — what was sold (card title + the WhatsApp {itinerary}), the link the ticket send
       // needs, and the sale mode a null customer_name must never be used to infer.
       sale_mode: r.saleMode,
       portal_link: portalLinkByFolio.get(r.id) ?? null,
       lines: linesByFolio.get(r.id) ?? [],
+      // US-A85 (D7) — the worst of the lines, so a folio with one wasted seat never reads as
+      // consumed. Derived; refused from any request body.
+      fulfillment: folioFulfillment(
+        (linesByFolio.get(r.id) ?? []).map((l) => l.fulfillment),
+      ),
       // US-A84 rule 6 — 'pending' ⇒ a customer is waiting on an answer (the card's first verb);
       // 'resolved' ⇒ requests exist but none live (the `Con solicitud` facet); null ⇒ none.
       cancellation_request: requestByFolio.get(r.id) ?? null,
@@ -485,7 +628,7 @@ export const listFolioCounts = async (c: FoliosContext) => {
 
   return c.json({
     verification,
-    cancellation_requests: requests,
+    folio_requests: requests,
     refunds,
     overdue,
     undelivered,
@@ -512,7 +655,10 @@ export const getFolioDetail = async (c: FoliosContext) => {
       ? null
       : await quoteCancellation(db, admin.organizationId, id, new Date())
 
-  return c.json({ folio, cancellation_quote: quote ? serializeQuote(quote) : null })
+  // US-A24 — the narrative rides the detail ("the folio is one object" applies to the API too).
+  const events = await readFolioEvents(db, admin.organizationId, id)
+
+  return c.json({ folio, cancellation_quote: quote ? serializeQuote(quote) : null, events })
 }
 
 const serializeQuote = (o: CancellationOutcome) => ({
@@ -546,6 +692,14 @@ export const markTicketsSentAdmin = async (c: FoliosContext) => {
 
   const row = updated[0]
   if (!row) throw new ApiError('NOT_FOUND', 404, 'Folio not found')
+  // US-A24 — EACH send appends a row (the column is last-write-wins; the narrative is not).
+  await folioEventRow(db, {
+    organizationId: admin.organizationId,
+    folioId: id,
+    type: 'tickets_sent',
+    actorId: admin.userId,
+    at: now,
+  })
   return c.json({
     tickets_sent_at: tsOrNull(row.sentAt),
     tickets_viewed_at: tsOrNull(row.viewedAt),
@@ -666,6 +820,27 @@ const applyCancellation = async (
           eq(accommodationReservations.status, 'active'),
         ),
       ),
+  )
+  // US-A24 — the narrative row, derived from the same folioUpdate the flip wrote, so the event and
+  // the audit columns can never disagree. It rides the WINNER's batch: only the guarded flip's
+  // winner reaches this point, so a racing cancellation can never write a second `cancelled` row.
+  // This one edit covers every cancelFolioPriced entrance: admin (US-A21), agent apartado,
+  // tourist-request approval, and the expiry sweep (cancelled_by NULL renders "Sistema").
+  statements.push(
+    folioEventRow(db, {
+      organizationId: org,
+      folioId,
+      type: 'cancelled',
+      actorId: folioUpdate.cancelledBy ?? null,
+      payload: {
+        source: folioUpdate.cancellationSource,
+        reason: folioUpdate.cancellationReason,
+        clawback: folioUpdate.cancellationClawback === true,
+        refund_amount: folioUpdate.refundAmount,
+        credit_amount: folioUpdate.creditAmount,
+      },
+      at: now,
+    }),
   )
   await db.batch(statements as [BatchItem<'sqlite'>, ...BatchItem<'sqlite'>[]])
   return true
@@ -872,10 +1047,19 @@ export const queueCancellationEmail = async (
     })),
   }
 
+  // The send stays here; what changed is that its OUTCOME is recorded (US-A86). A Resend outage
+  // used to vanish into a console line — the outbox now carries `failed` with the error, so the
+  // one notification a customer gets is never silently consumed.
   c.executionCtx.waitUntil(
-    sendCancellationEmail(c.env, emailData).catch((err) =>
-      console.error('[email] cancellation send failed', folioId, err),
-    ),
+    sendCancellationEmail(c.env, emailData)
+      .then(() => recordEmailOutcome(db, org, folioId, 'cancellation_approved', { ok: true }))
+      .catch((err) => {
+        console.error('[email] cancellation send failed', folioId, err)
+        return recordEmailOutcome(db, org, folioId, 'cancellation_approved', {
+          ok: false,
+          error: String(err),
+        })
+      }),
   )
 }
 
@@ -892,7 +1076,11 @@ export const cancelFolio = async (c: FoliosContext) => {
   const db = getDb(c.env)
 
   const folioRows = await db
-    .select({ id: folios.id, status: folios.status })
+    .select({
+      id: folios.id,
+      status: folios.status,
+      paymentVerification: folios.paymentVerification,
+    })
     .from(folios)
     .where(and(eq(folios.id, id), eq(folios.organizationId, org)))
     .limit(1)
@@ -903,6 +1091,17 @@ export const cancelFolio = async (c: FoliosContext) => {
   }
   if (folio.status === 'cancelled') {
     throw new ApiError('CONFLICT', 409, 'This folio is already cancelled')
+  }
+  // BUG-030 — the ladder would price `amount_paid`, which counts the unconfirmed transfer, and
+  // `refundFieldsFor` would mint a cash-refund PIN for money that may never have arrived. The
+  // cancel path for unconfirmed money is `rejectPayment` (no refund, clawback); this entrance
+  // refuses until the money is decided. The sweep is untouched: it enters via `cancelFolioPriced`.
+  if (folio.paymentVerification === 'pending') {
+    throw new ApiError(
+      'PAYMENT_UNVERIFIED',
+      409,
+      'El pago está por verificar — verifica o rechaza el pago antes de cancelar',
+    )
   }
 
   const lines = await db
@@ -970,32 +1169,32 @@ export const listCancellationRequests = async (c: FoliosContext) => {
   const db = getDb(c.env)
 
   const statusQ = c.req.query('status')
-  const filters = [eq(cancellationRequests.organizationId, org)]
+  const filters = [eq(folioRequests.organizationId, org)]
   if (statusQ === 'approved' || statusQ === 'rejected' || statusQ === 'pending') {
-    filters.push(eq(cancellationRequests.status, statusQ))
+    filters.push(eq(folioRequests.status, statusQ))
   } else if (statusQ !== 'all') {
-    filters.push(eq(cancellationRequests.status, 'pending'))
+    filters.push(eq(folioRequests.status, 'pending'))
   }
 
   const rows = await db
     .select({
-      id: cancellationRequests.id,
-      folioId: cancellationRequests.folioId,
-      status: cancellationRequests.status,
-      reason: cancellationRequests.reason,
-      resolutionNote: cancellationRequests.resolutionNote,
-      resolvedBy: cancellationRequests.resolvedBy,
-      resolvedAt: cancellationRequests.resolvedAt,
-      createdAt: cancellationRequests.createdAt,
+      id: folioRequests.id,
+      folioId: folioRequests.folioId,
+      status: folioRequests.status,
+      reason: folioRequests.reason,
+      resolutionNote: folioRequests.resolutionNote,
+      resolvedBy: folioRequests.resolvedBy,
+      resolvedAt: folioRequests.resolvedAt,
+      createdAt: folioRequests.createdAt,
       customerName: folios.customerName,
       folioStatus: folios.status,
       total: folios.total,
       amountPaid: folios.amountPaid,
     })
-    .from(cancellationRequests)
-    .innerJoin(folios, eq(cancellationRequests.folioId, folios.id))
+    .from(folioRequests)
+    .innerJoin(folios, eq(folioRequests.folioId, folios.id))
     .where(and(...filters))
-    .orderBy(desc(cancellationRequests.createdAt))
+    .orderBy(desc(folioRequests.createdAt))
 
   return c.json({
     requests: rows.map((r) => ({
@@ -1015,16 +1214,20 @@ export const listCancellationRequests = async (c: FoliosContext) => {
 const loadRequest = async (db: Db, org: string, requestId: string) => {
   const [request] = await db
     .select({
-      id: cancellationRequests.id,
-      folioId: cancellationRequests.folioId,
-      status: cancellationRequests.status,
-      reason: cancellationRequests.reason,
+      id: folioRequests.id,
+      folioId: folioRequests.folioId,
+      status: folioRequests.status,
+      reason: folioRequests.reason,
+      // US-AG52 — a reschedule petition carries where it wants to go.
+      kind: folioRequests.kind,
+      folioLineId: folioRequests.folioLineId,
+      toSlotId: folioRequests.toSlotId,
     })
-    .from(cancellationRequests)
+    .from(folioRequests)
     .where(
       and(
-        eq(cancellationRequests.id, requestId),
-        eq(cancellationRequests.organizationId, org),
+        eq(folioRequests.id, requestId),
+        eq(folioRequests.organizationId, org),
       ),
     )
     .limit(1)
@@ -1032,6 +1235,113 @@ const loadRequest = async (db: Db, org: string, requestId: string) => {
     throw new ApiError('NOT_FOUND', 404, 'Cancellation request not found')
   }
   return request
+}
+
+// US-AG52 — approving a tourist's reschedule. Separated from the cancellation approval rather than
+// branched inside it: they share a table and a queue, not a body.
+const approveRescheduleRequest = async (
+  c: FoliosContext,
+  db: Db,
+  org: string,
+  actorId: string,
+  request: { id: string; folioId: string; folioLineId: string | null; toSlotId: string | null },
+) => {
+  const now = new Date()
+  const nowSec = Math.floor(now.getTime() / 1000)
+
+  const rejectWith = async (note: string, alternatives: unknown[]) => {
+    await db
+      .update(folioRequests)
+      .set({ status: 'rejected', resolutionNote: note, resolvedBy: actorId, resolvedAt: now, updatedAt: now })
+      .where(and(eq(folioRequests.id, request.id), eq(folioRequests.organizationId, org)))
+    return c.json({ request: { id: request.id, status: 'rejected', resolution_note: note }, alternatives })
+  }
+
+  if (!request.folioLineId || !request.toSlotId) {
+    return rejectWith('La solicitud no indicaba un horario válido.', [])
+  }
+
+  // Everything the counter path checks, in the same order and with the same compensation.
+  let moved: Awaited<ReturnType<typeof rescheduleFolio>> | null = null
+  try {
+    moved = await rescheduleFolio({
+      db,
+      org,
+      actorId,
+      folioId: request.folioId,
+      moves: [{ folio_line_id: request.folioLineId, to_slot_id: request.toSlotId }],
+      nowSec,
+      origin: 'tourist_request',
+    })
+  } catch (err) {
+    // The one refusal a customer can do something about. Everything else (a departed slot, a folio
+    // that is no longer live) is refused with its own reason and no alternatives, because offering
+    // dates for a sale that ended would be noise.
+    const code = err instanceof ApiError ? err.code : 'UNKNOWN'
+    let alternatives: Awaited<ReturnType<typeof viableAlternatives>> = []
+    if (code === 'NO_CAPACITY_AVAILABLE') {
+      const [line] = await db
+        .select({ serviceId: folioLines.serviceId, quantity: folioLines.quantity })
+        .from(folioLines)
+        .where(
+          and(eq(folioLines.id, request.folioLineId), eq(folioLines.organizationId, org)),
+        )
+        .limit(1)
+      const [orgRow] = await db
+        .select({
+          tz: organizations.timezone,
+          cutoff: organizations.salesCutoffOffsetMinutes,
+          creationCutoff: organizations.bookingCreationCutoffHours,
+          buffer: organizations.bookingPreDepartureBufferHours,
+          grace: organizations.bookingGraceOffsetMinutes,
+        })
+        .from(organizations)
+        .where(eq(organizations.id, org))
+        .limit(1)
+      const [folioRow] = await db
+        .select({ status: folios.status })
+        .from(folios)
+        .where(and(eq(folios.id, request.folioId), eq(folios.organizationId, org)))
+        .limit(1)
+      if (line) {
+        alternatives = await viableAlternatives(
+          db, org, line.serviceId, line.quantity, nowSec,
+          orgRow?.tz ?? 'America/Mexico_City', orgRow?.cutoff ?? 0,
+          // Rules 5/5b bind an apartado's destinations, so they bind its suggestions too — a slot
+          // the move would refuse with BOOKING_TOO_LATE must not be offered as viable.
+          folioRow?.status === 'booking'
+            ? {
+                creationCutoffHours: orgRow?.creationCutoff ?? 0,
+                bufferHours: orgRow?.buffer ?? 24,
+                graceMinutes: orgRow?.grace ?? 15,
+              }
+            : undefined,
+        )
+      }
+    }
+    const note =
+      err instanceof ApiError ? err.message : 'No se pudo mover a ese horario.'
+    return rejectWith(note, alternatives)
+  }
+
+  // D16 / rule 11 — the origin does not change what a paid folio needs: its QR names the old slot
+  // and carries an `expires_at` derived from the OLD departure, so a ticket moved further out would
+  // die before its tour. The counter path re-signs; approving a portal request must too, or the
+  // customer whose request was GRANTED is the one left holding a dead ticket.
+  if (moved && moved.folio.status === 'paid' && moved.folio.paymentVerification !== 'pending') {
+    await reissueTicketsAfterReschedule(
+      db, c.env, org, request.folioId,
+      moved.folio.agentId, !!moved.folio.customerEmail, moved.tz,
+    )
+  }
+
+  await db
+    .update(folioRequests)
+    .set({ status: 'approved', resolvedBy: actorId, resolvedAt: now, updatedAt: now })
+    .where(and(eq(folioRequests.id, request.id), eq(folioRequests.organizationId, org)))
+
+  const folioOut = await readFolio(db, org, request.folioId)
+  return c.json({ request: { id: request.id, status: 'approved' }, folio: folioOut })
 }
 
 // US-T04 → US-A21 — APPROVE a tourist's cancellation request: runs the same race-safe
@@ -1054,6 +1364,18 @@ export const approveCancellationRequest = async (c: FoliosContext) => {
   const request = await loadRequest(db, org, requestId)
   if (request.status !== 'pending') {
     throw new ApiError('CONFLICT', 409, 'This request has already been resolved')
+  }
+
+  // US-AG52 — a RESCHEDULE approval is not a cancellation approval. It runs the same seven guards
+  // the counter path runs, because a petition holds no seats: the capacity was never reserved and
+  // may be gone by now.
+  //
+  // When it IS gone the request is REJECTED automatically, with the reason and with viable
+  // alternatives. Leaving it `pending` would be worse than useless: `uq_folio_requests_open` allows
+  // one open petition per folio, so an unfulfillable request would block the customer from asking
+  // for anything else — including cancelling.
+  if (request.kind === 'reschedule') {
+    return approveRescheduleRequest(c, db, org, admin.userId, request)
   }
 
   const [folio] = await db
@@ -1099,7 +1421,7 @@ export const approveCancellationRequest = async (c: FoliosContext) => {
   }
 
   await db
-    .update(cancellationRequests)
+    .update(folioRequests)
     .set({
       status: 'approved',
       resolvedBy: admin.userId,
@@ -1108,19 +1430,27 @@ export const approveCancellationRequest = async (c: FoliosContext) => {
     })
     .where(
       and(
-        eq(cancellationRequests.id, requestId),
-        eq(cancellationRequests.organizationId, org),
-        eq(cancellationRequests.status, 'pending'),
+        eq(folioRequests.id, requestId),
+        eq(folioRequests.organizationId, org),
+        eq(folioRequests.status, 'pending'),
       ),
     )
 
   const folioOut = await readFolio(db, org, folio.id)
+  // US-A86 — the customer asked and is waiting on the answer; the row is written whether or not an
+  // address exists, because WhatsApp is the channel that always reaches them (D20).
+  await emitNotification(db, {
+    organizationId: org,
+    folioId: folio.id,
+    event: 'cancellation_approved',
+    hasEmail: !!folioOut?.customer_email,
+  })
   if (folioOut) await queueCancellationEmail(c, db, org, folio.id, folioOut)
 
   const [updated] = await db
     .select()
-    .from(cancellationRequests)
-    .where(eq(cancellationRequests.id, requestId))
+    .from(folioRequests)
+    .where(eq(folioRequests.id, requestId))
     .limit(1)
 
   return c.json({
@@ -1146,7 +1476,7 @@ export const rejectCancellationRequest = async (c: FoliosContext) => {
 
   const now = new Date()
   await db
-    .update(cancellationRequests)
+    .update(folioRequests)
     .set({
       status: 'rejected',
       resolutionNote: input.note,
@@ -1156,16 +1486,16 @@ export const rejectCancellationRequest = async (c: FoliosContext) => {
     })
     .where(
       and(
-        eq(cancellationRequests.id, requestId),
-        eq(cancellationRequests.organizationId, org),
-        eq(cancellationRequests.status, 'pending'),
+        eq(folioRequests.id, requestId),
+        eq(folioRequests.organizationId, org),
+        eq(folioRequests.status, 'pending'),
       ),
     )
 
   const [updated] = await db
     .select()
-    .from(cancellationRequests)
-    .where(eq(cancellationRequests.id, requestId))
+    .from(folioRequests)
+    .where(eq(folioRequests.id, requestId))
     .limit(1)
 
   return c.json({ request: updated ? serializeRequest(updated) : null })
@@ -1191,6 +1521,9 @@ export const confirmRefund = async (c: FoliosContext) => {
     .select({
       id: folios.id,
       refundStatus: folios.refundStatus,
+      refundAmount: folios.refundAmount,
+      creditAmount: folios.creditAmount,
+      creditExpiresAt: folios.creditExpiresAt,
       refundPin: folios.refundPin,
       refundPinAttempts: folios.refundPinAttempts,
     })
@@ -1235,23 +1568,48 @@ export const confirmRefund = async (c: FoliosContext) => {
   }
 
   const now = new Date()
-  await db
-    .update(folios)
-    .set({
-      refundStatus: 'refunded',
-      refundNote: overrideNote,
-      refundedAt: now,
-      refundedBy: admin.userId,
-      updatedAt: now,
-    })
-    .where(
-      and(
-        eq(folios.id, id),
-        eq(folios.organizationId, org),
-        eq(folios.refundStatus, 'pending'),
+  await db.batch([
+    db
+      .update(folios)
+      .set({
+        refundStatus: 'refunded',
+        refundNote: overrideNote,
+        refundedAt: now,
+        refundedBy: admin.userId,
+        updatedAt: now,
+      })
+      .where(
+        and(
+          eq(folios.id, id),
+          eq(folios.organizationId, org),
+          eq(folios.refundStatus, 'pending'),
+        ),
       ),
-    )
+    // US-A24 — the hand-back's narrative row, same batch, same clock as refunded_at. The `pending`
+    // pre-check above already 409s a resolved refund, so a raced double-confirm is the same
+    // pre-check-then-batch residual rejectPayment accepts.
+    folioEventRow(db, {
+      organizationId: org,
+      folioId: id,
+      type: 'refund_confirmed',
+      actorId: admin.userId,
+      payload: { amount: folio.refundAmount, via: pin ? 'pin' : 'override' },
+      at: now,
+    }),
+  ])
 
   const folioOut = await readFolio(db, org, id)
+
+  // US-AG51 (D20) — the receipt. The cash and the PIN are the confirmation in the moment; this is
+  // the record the customer keeps afterwards, and the only place the ladder's arithmetic is ever
+  // shown to them (business rule 13). An earlier draft (D18, withdrawn) left it off WhatsApp to
+  // save a tap — it is an action-tail, so it rides the tap the agent has just made.
+  await emitNotification(db, {
+    organizationId: org,
+    folioId: id,
+    event: 'refund_completed',
+    hasEmail: !!folioOut?.customer_email,
+  })
+
   return c.json({ folio: folioOut })
 }

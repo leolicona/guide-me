@@ -27,7 +27,7 @@ export const aCancellationRequest = (over: Record<string, unknown> = {}) => ({
 /** US-A84 — the pending-work counts, all zero by default so a test opts INTO having work. */
 export const aFolioCounts = (over: Partial<Record<string, number>> = {}) => ({
   verification: 0,
-  cancellation_requests: 0,
+  folio_requests: 0,
   refunds: 0,
   overdue: 0,
   undelivered: 0,
@@ -39,7 +39,7 @@ export const folioHandlers = [
   http.get('/api/folios', () => HttpResponse.json({ folios: [aFolio()], window_days: 30 })),
   // Registered BEFORE `/api/folios/:id` so the literal route is not swallowed by the param one.
   http.get('/api/folios/counts', () => HttpResponse.json(aFolioCounts())),
-  http.get('/api/folios/cancellation-requests', () =>
+  http.get('/api/folios/requests', () =>
     HttpResponse.json({ requests: [aCancellationRequest()] }),
   ),
   http.get('/api/folios/:id', () =>
@@ -58,10 +58,10 @@ export const folioHandlers = [
       },
     }),
   ),
-  http.post('/api/folios/cancellation-requests/:id/approve', () =>
+  http.post('/api/folios/requests/:id/approve', () =>
     HttpResponse.json({ request: aCancellationRequest({ status: 'approved' }) }),
   ),
-  http.post('/api/folios/cancellation-requests/:id/reject', () =>
+  http.post('/api/folios/requests/:id/reject', () =>
     HttpResponse.json({ request: aCancellationRequest({ status: 'rejected' }) }),
   ),
   http.post('/api/folios/:id/refund/confirm', () =>

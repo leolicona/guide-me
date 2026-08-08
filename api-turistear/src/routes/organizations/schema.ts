@@ -19,8 +19,10 @@ export type OrgTimezone = (typeof ORG_TIMEZONES)[number]
 export const updateOrganizationSchema = z.object({
   // Minimum deposit as a percent of the folio total (0–100; 0 = no minimum).
   booking_min_down_payment_pct: z.number().int().min(0).max(100).optional(),
-  // Hold window in whole days before an unsettled booking auto-cancels (≥ 1).
-  booking_hold_days: z.number().int().min(1).optional(),
+  // `booking_hold_days` is NOT accepted (BUG-028). The created_at + N days model it configured was
+  // replaced by time-distance-to-departure; the value has been inert since. Accepting it — with a
+  // `min(1)` that rejected a 0 and then ignored the 5 — was the API promising a policy it does not
+  // have. The column stays for the historical value; nothing writes it.
   // US-A47 — SIGNED departure offsets in minutes (+ before / − after departure), ±4h bound.
   // salesCutoff closes new walk-in sales; bookingGrace times the unsettled same-day auto-cancel.
   sales_cutoff_offset_minutes: z.number().int().min(-240).max(240).optional(),
@@ -32,6 +34,14 @@ export const updateOrganizationSchema = z.object({
   // The coherence rule (`>= booking_pre_departure_buffer_hours` when set) is enforced below, where
   // both values are in scope.
   booking_creation_cutoff_hours: z.number().int().min(0).max(720).optional(),
+  // US-A85 (docs/folios/folio-state-machine.spec.md, D23) — when a departed line with nothing
+  // redeemed starts reading as a no-show. SIGNED like `sales_cutoff_offset_minutes` and
+  // `booking_grace_offset_minutes`, same ±4h bound: + = before departure, − = after.
+  // The coherence rule against the sales cutoff is enforced in the handler, where both are in scope.
+  no_show_margin_minutes: z.number().int().min(-240).max(240).optional(),
+  // US-A87 (D10) — how long a closed apartado's credit stays spendable. 1–730 days: a credit that
+  // outlives two years is a liability nobody reconciles.
+  booking_credit_valid_days: z.number().int().min(1).max(730).optional(),
   // Lodging settings (docs/lodging/accommodation-stays.spec.md §2.5). Weekend days as ISO
   // weekday ints (0=Sun … 6=Sat), distinct; free-cancel window in days; penalty percent.
   lodging_weekend_days: z
@@ -57,13 +67,17 @@ export const updateOrganizationSchema = z.object({
   // stored policy is always evaluable. `null` CLEARS it, which returns the org to the pre-feature
   // cancellation behaviour (D1) — that is the rollback, and the only way back.
   cancellation_policy: cancellationPolicySchema.nullable().optional(),
-  // US-A73 (D14) — may an agent cancel their own current-shift sale? A single org-level switch;
-  // per-agent grants are a permissions system, not this.
-  agent_cancellation_enabled: z.boolean().optional(),
+  // US-A73 (D14) — may an agent cancel their own current-shift sale? NOT accepted yet (BUG-028):
+  // the column landed with the cancellation engine but no endpoint reads it, and a flag that
+  // accepts `true` while every cancel route stays admin-only tells the caller something untrue.
+  // Re-add this line in the PR that builds US-AG44 — the column and the read field are already here.
   // US-A81 (docs/scanner/group-redemption.spec.md, D1/D7) — how a scan consumes a ticket's
   // passes. Admin-only, org-wide, deliberately NOT an agent-facing toggle: a mis-tap would burn a
   // whole party's passes and nothing in the system can un-redeem one.
   qr_redemption_mode: z.enum(['per_pass', 'all_passes']).optional(),
+  // US-A88 (payment-verification D10, amends D2) — must a transfer carry its bank reference?
+  // Relaxes the input only; verification (US-A67) stays armed either way.
+  payment_reference_required: z.boolean().optional(),
 })
 
 export type UpdateOrganizationInput = z.infer<typeof updateOrganizationSchema>

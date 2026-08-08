@@ -3,6 +3,8 @@ import { http, HttpResponse } from 'msw'
 import { renderWithProviders, screen } from '../../../test/renderWithProviders'
 import { server } from '../../../test/server'
 import { FolioCard, type FolioCardFolio } from './FolioCard'
+import { FolioStatusChip } from './FolioStatusChip'
+import type { Fulfillment } from '../types'
 
 // US-A82 / US-AG49 — the card as RENDERED.
 // Spec: docs/oversight/folio-list-scanability.spec.md — S-10, plus the render-level facts the pure
@@ -139,5 +141,107 @@ describe('D10/D11 — structure and the accessible name of the marks', () => {
       />,
     )
     expect(screen.getByLabelText('Boletos vistos por el cliente')).toBeInTheDocument()
+  })
+})
+
+// --- BUG-026 / BUG-027 — the two labels that lied (folio-state-machine.spec.md, Phase 1) ---------
+
+describe('S-1 — one word for one state', () => {
+  it('the status chip calls a booking an Apartado, never a Reserva', () => {
+    renderWithProviders(<FolioStatusChip status="booking" />)
+    expect(screen.getByText('Apartado')).toBeInTheDocument()
+    expect(screen.queryByText('Reserva')).not.toBeInTheDocument()
+  })
+
+  // The card carries no status chip by design (US-A82: one channel per axis), so the word reaches
+  // it through the time chip. Both surfaces must agree — disagreeing is the whole defect.
+  it('an apartado with no clock resolved yet still reads Apartado on the card', async () => {
+    renderWithProviders(
+      <FolioCard
+        folio={aFolio({ status: 'booking', amount_paid: 90000, booking_expires_at: 99999 })}
+        to="/folios/f1"
+        soldAt="hoy 14:32"
+        nowSeconds={null}
+      />,
+    )
+    expect(await screen.findByText('Apartado')).toBeInTheDocument()
+    expect(screen.queryByText('Reserva')).not.toBeInTheDocument()
+  })
+})
+
+describe('S-2 — a cancellation that refunded nothing does not claim it refunded', () => {
+  it('renders "(sin reembolso)" and never "(reembolsado)"', async () => {
+    renderWithProviders(
+      <FolioCard
+        folio={aFolio({
+          status: 'cancelled',
+          total: 150000,
+          amount_paid: 150000,
+          refund_status: 'none',
+          refund_amount: 0,
+          deliverable: false,
+          tickets_sent_at: null,
+        })}
+        to="/folios/f1"
+        soldAt="hoy 14:32"
+      />,
+    )
+    expect(await screen.findByText('(sin reembolso)')).toBeInTheDocument()
+    expect(screen.queryByText('(reembolsado)')).not.toBeInTheDocument()
+    // The screen reader is told the same thing the sighted user is — a glyph-free caption is not
+    // enough when the figure alone reads as an ordinary amount.
+    expect(screen.getByLabelText(/Pagado, sin reembolso/)).toBeInTheDocument()
+  })
+
+  it('S-3 — a confirmed refund still says so', async () => {
+    renderWithProviders(
+      <FolioCard
+        folio={aFolio({
+          status: 'cancelled',
+          total: 150000,
+          amount_paid: 150000,
+          refund_status: 'refunded',
+          refund_amount: 150000,
+          deliverable: false,
+          tickets_sent_at: null,
+        })}
+        to="/folios/f1"
+        soldAt="hoy 14:32"
+      />,
+    )
+    expect(await screen.findByText('(reembolsado)')).toBeInTheDocument()
+    expect(screen.queryByText('(sin reembolso)')).not.toBeInTheDocument()
+  })
+})
+
+// --- US-A85 — the wasted seat, as RENDERED ------------------------------------------------------
+
+describe('US-A85 — a departed folio says its seats were wasted', () => {
+  const departed = (fulfillment: Fulfillment) =>
+    aFolio({ status: 'paid', fulfillment, booking_expires_at: null, tickets_sent_at: 1000 })
+
+  it('renders "Sin usar" on the chip channel, not a fourth channel', async () => {
+    renderWithProviders(
+      <FolioCard folio={departed('no_show')} to="/folios/f1" soldAt="hoy 14:32" nowSeconds={2000} />,
+    )
+    expect(await screen.findByText('Sin usar')).toBeInTheDocument()
+  })
+
+  it('a partial boarding says how it is partial', async () => {
+    renderWithProviders(
+      <FolioCard folio={departed('partial')} to="/folios/f1" soldAt="hoy 14:32" nowSeconds={2000} />,
+    )
+    expect(await screen.findByText('Parcialmente usado')).toBeInTheDocument()
+  })
+
+  it('a consumed sale is quiet — nothing to report is nothing to render', async () => {
+    renderWithProviders(
+      <FolioCard folio={departed('fulfilled')} to="/folios/f1" soldAt="hoy 14:32" nowSeconds={2000} />,
+    )
+    // Wait for the card to settle before asserting an ABSENCE — otherwise the assertion could
+    // pass simply because nothing had rendered yet.
+    await screen.findByText(/María González/)
+    expect(screen.queryByText('Sin usar')).not.toBeInTheDocument()
+    expect(screen.queryByText('Parcialmente usado')).not.toBeInTheDocument()
   })
 })

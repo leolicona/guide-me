@@ -129,6 +129,45 @@ describe('S-5 — a cancelled folio reads as a debt, or as settled', () => {
       }).reading,
     ).toEqual({ kind: 'refundSettled', cents: 240000 })
   })
+
+  // BUG-027 / S-2 — a cancelled folio has THREE money readings. `refund_status = 'none'` means the
+  // ladder retained everything and the customer got nothing back; it used to fall into
+  // `refundSettled`, so the card read "$1,500 (reembolsado)" about money the company kept.
+  it('S-2 — a cancellation that refunded nothing does not claim it refunded', () => {
+    expect(
+      folioMoneyAxis({
+        status: 'cancelled',
+        total: 150000,
+        amount_paid: 150000,
+        refund_status: 'none',
+        refund_amount: 0,
+      }).reading,
+    ).toEqual({ kind: 'refundNone', cents: 150000 })
+  })
+
+  // The reachable shape of the US-A76 case: a 30% deposit against a terminal tier. The figure is
+  // what was COLLECTED (90,000), not the folio total — nobody is owed the other 210,000 and the
+  // customer never paid it.
+  it('S-2b — an apartado cancelled with nothing left over reads the deposit, not the total', () => {
+    expect(
+      folioMoneyAxis({
+        status: 'cancelled',
+        total: 300000,
+        amount_paid: 90000,
+        refund_status: 'none',
+        refund_amount: 0,
+      }).reading,
+    ).toEqual({ kind: 'refundNone', cents: 90000 })
+  })
+
+  it('S-2c — all three cancelled readings are distinct', () => {
+    const base = { status: 'cancelled' as const, total: 150000, amount_paid: 150000 }
+    const kinds = (['pending', 'refunded', 'none'] as const).map(
+      (refund_status) =>
+        folioMoneyAxis({ ...base, refund_status, refund_amount: 150000 }).reading.kind,
+    )
+    expect(new Set(kinds).size).toBe(3)
+  })
 })
 
 describe('S-4 — the message axis: two marks, never three', () => {
@@ -442,5 +481,88 @@ describe('S-10 — the time chip states which clock is running', () => {
 
   it('a settled sale has no time chip at all', () => {
     expect(folioTimeChip({ status: 'paid' }, now)).toBeNull()
+  })
+})
+
+// --- US-A85 — the fulfilment axis reaches the card through the time channel --------------------
+//
+// The chip already carries the clock, and once a departure has passed there is no countdown left
+// to report — so a departed folio's time reading IS its fulfilment. No new channel is added to the
+// card: US-A82's one-channel-per-axis rule holds.
+
+describe('US-A85 — a departed folio says whether its seats were used', () => {
+  const departed = {
+    status: 'paid' as const,
+    booking_expires_at: null,
+    cancelled_at: null,
+    refund_status: 'none' as const,
+  }
+
+  it('nobody boarded → "Sin usar", in error tone', () => {
+    expect(folioTimeChip({ ...departed, fulfillment: 'no_show' }, 1000)).toEqual({
+      label: 'Sin usar',
+      tone: 'error',
+    })
+  })
+
+  it('some boarded → "Parcialmente usado", in warning tone', () => {
+    expect(folioTimeChip({ ...departed, fulfillment: 'partial' }, 1000)).toEqual({
+      label: 'Parcialmente usado',
+      tone: 'warning',
+    })
+  })
+
+  it('a consumed sale needs no chip, and neither does one that has not departed', () => {
+    expect(folioTimeChip({ ...departed, fulfillment: 'fulfilled' }, 1000)).toBeNull()
+    expect(folioTimeChip({ ...departed, fulfillment: 'pending' }, 1000)).toBeNull()
+  })
+
+  it('an unconfirmed refund still outranks it — a debt is louder than a wasted seat', () => {
+    expect(
+      folioTimeChip(
+        { status: 'cancelled', refund_status: 'pending', cancelled_at: 500, fulfillment: 'no_show' },
+        1000,
+      )?.label,
+    ).toMatch(/Debe hace/)
+  })
+
+  it('a live apartado keeps its countdown — fulfilment only speaks once the tour has left', () => {
+    expect(
+      folioTimeChip(
+        { status: 'booking', booking_expires_at: 100000, refund_status: 'none', fulfillment: 'pending' },
+        1000,
+      )?.label,
+    ).toMatch(/Vence en/)
+  })
+})
+
+// --- US-A87 — the credit a closed apartado leaves --------------------------------------------
+
+describe('US-A87 — the credit reads first on a closed apartado', () => {
+  const closed = { status: 'cancelled' as const, total: 300000, amount_paid: 90000 }
+
+  it('a credit outranks the "(sin reembolso)" reading', () => {
+    // It is the one thing on this folio a seller can still act on: the customer in front of them
+    // owns it, and an agent who cannot see it cannot decide to honour it.
+    expect(folioMoneyAxis({ ...closed, refund_status: 'none', credit_amount: 30000 }).reading)
+      .toEqual({ kind: 'credit', cents: 30000 })
+  })
+
+  it('no credit keeps the honest "(sin reembolso)" reading', () => {
+    // The inherited default retains 100%, so this is what most closed apartados look like.
+    expect(folioMoneyAxis({ ...closed, refund_status: 'none', credit_amount: 0 }).reading)
+      .toEqual({ kind: 'refundNone', cents: 90000 })
+  })
+
+  it('an unconfirmed refund still outranks a credit — a debt is louder than a balance', () => {
+    expect(
+      folioMoneyAxis({
+        ...closed, refund_status: 'pending', refund_amount: 45000, credit_amount: 30000,
+      }).reading.kind,
+    ).toBe('refundOwed')
+  })
+
+  it('a folio from before the feature is unaffected', () => {
+    expect(folioMoneyAxis({ ...closed, refund_status: 'none' }).reading.kind).toBe('refundNone')
   })
 })

@@ -37,7 +37,7 @@ export function PendingWorkBar({ counts, active, onToggle }: PendingWorkBarProps
     { facet: 'por_verificar', count: counts.verification, label: () => 'Por verificar' },
     {
       facet: 'solicitud',
-      count: counts.cancellation_requests,
+      count: counts.folio_requests,
       label: (n: number) => (n === 1 ? 'Solicitud' : 'Solicitudes'),
     },
     {

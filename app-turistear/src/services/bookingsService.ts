@@ -85,3 +85,14 @@ export const rejectPayment = async (id: string, reason?: string): Promise<Folio>
   })
   return res.folio
 }
+
+// US-AG52 — reagendar a live apartado or a paid sale to another departure of the SAME service.
+// Supersedes the retired `reactivateBooking`.
+export const rescheduleFolio = (
+  folioId: string,
+  moves: { folio_line_id: string; to_slot_id: string }[],
+) =>
+  request<{ folio: unknown }>(`/api/pos/folios/${folioId}/reschedule`, {
+    method: 'POST',
+    body: JSON.stringify({ moves }),
+  })

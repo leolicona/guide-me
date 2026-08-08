@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
+  FACETS,
   facetLabels,
   facetPillLabel,
   matchesFacets,
@@ -7,7 +8,7 @@ import {
   serializeFacets,
   type FacetKey,
 } from './folioFacets'
-import type { FolioListItem } from './types'
+import type { FolioListItem, Fulfillment } from './types'
 
 // US-A84 — the facet model (D3/D4). Spec: docs/oversight/folio-lifecycle-unification.spec.md.
 //
@@ -121,5 +122,40 @@ describe('the pill states the filter without opening the sheet', () => {
   it('lists the names for the empty state', () => {
     // An empty list must name what it filtered by, or it reads as "there are no sales".
     expect(facetLabels(['reembolso', 'pagado'])).toEqual(['Pagado', 'Reembolso'])
+  })
+
+  // S-1 / BUG-026 — the facet strip said "Reserva" for the same status the card called "Apartado".
+  it('S-1 — the booking facet is labelled Apartado', () => {
+    expect(facetLabels(['reserva'])).toEqual(['Apartado'])
+    expect(facetPillLabel(['reserva'])).toBe('Apartado')
+    expect(FACETS.some((f) => f.label === 'Reserva')).toBe(false)
+  })
+})
+
+// --- US-A85 — the wasted seat is findable -----------------------------------------------------
+
+describe('US-A85 — the `Sin usar` facet', () => {
+  const row = (fulfillment: Fulfillment): FolioListItem =>
+    ({ id: 'f1', status: 'paid', fulfillment }) as FolioListItem
+
+  it('matches a no-show and a partial, and nothing else', () => {
+    expect(matchesFacets(row('no_show'), ['sin_usar'])).toBe(true)
+    expect(matchesFacets(row('partial'), ['sin_usar'])).toBe(true)
+    expect(matchesFacets(row('fulfilled'), ['sin_usar'])).toBe(false)
+    expect(matchesFacets(row('pending'), ['sin_usar'])).toBe(false)
+  })
+
+  it('a folio from before the axis existed is not swept in', () => {
+    expect(matchesFacets({ id: 'f1', status: 'paid' } as FolioListItem, ['sin_usar'])).toBe(false)
+  })
+
+  it('is named in the empty state, like every other facet', () => {
+    expect(facetLabels(['sin_usar'])).toEqual(['Sin usar'])
+  })
+
+  it('ANDs across sections — a wasted seat on a cancelled folio is not a wasted seat', () => {
+    // `pendiente` and `pago` are different sections, so both must hold (US-A84 D3).
+    expect(matchesFacets(row('no_show'), ['sin_usar', 'pagado'])).toBe(true)
+    expect(matchesFacets(row('no_show'), ['sin_usar', 'cancelado'])).toBe(false)
   })
 })

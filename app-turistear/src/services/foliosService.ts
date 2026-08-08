@@ -5,6 +5,7 @@ import type {
   CancellationRequestStatus,
   ConfirmRefundInput,
   FolioDetail,
+  FolioEvent,
   FolioFilters,
   FolioListItem,
   RejectCancellationRequestInput,
@@ -23,6 +24,9 @@ import type { CancellationQuote } from '../features/organization/types'
 export interface FolioListPage {
   folios: FolioListItem[]
   window_days: number | null
+  /** US-A83 D6 — the server capped a query at 50 and there were more. A cap that does not
+   *  announce itself reports "these are the matches" when it means "these are the first 50". */
+  truncated: boolean
 }
 
 export const listFolios = async (filters: FolioFilters = {}): Promise<FolioListPage> => {
@@ -33,11 +37,21 @@ export const listFolios = async (filters: FolioFilters = {}): Promise<FolioListP
   if (filters.verification) params.set('verification', filters.verification)
   if (filters.refundStatus) params.set('refund_status', filters.refundStatus)
   if (filters.overdue) params.set('overdue', 'true')
+  // US-A83 — the three filters that reach PAST the load window (D11/D12).
+  if (filters.from) params.set('from', filters.from)
+  if (filters.to) params.set('to', filters.to)
+  if (filters.q) params.set('q', filters.q)
   const qs = params.toString()
-  const res = await request<{ folios: FolioListItem[]; window_days?: number | null }>(
-    `/api/folios${qs ? `?${qs}` : ''}`,
-  )
-  return { folios: res.folios, window_days: res.window_days ?? null }
+  const res = await request<{
+    folios: FolioListItem[]
+    window_days?: number | null
+    truncated?: boolean
+  }>(`/api/folios${qs ? `?${qs}` : ''}`)
+  return {
+    folios: res.folios,
+    window_days: res.window_days ?? null,
+    truncated: res.truncated ?? false,
+  }
 }
 
 // US-A84 (D7) — the pending-work counts, as ONE aggregate over the WHOLE organization.
@@ -47,7 +61,7 @@ export const listFolios = async (filters: FolioFilters = {}): Promise<FolioListP
 // a number the filtered list will actually deliver (S-4).
 export interface FolioCounts {
   verification: number
-  cancellation_requests: number
+  folio_requests: number
   refunds: number
   overdue: number
   undelivered: number
@@ -60,12 +74,14 @@ export const getFolioCounts = (): Promise<FolioCounts> =>
 // would cost when the org has a cancellation policy (`cancellation_quote`, null otherwise).
 export const getFolio = async (
   id: string,
-): Promise<{ folio: FolioDetail; quote: CancellationQuote | null }> => {
+): Promise<{ folio: FolioDetail; quote: CancellationQuote | null; events: FolioEvent[] }> => {
   const res = await request<{
     folio: FolioDetail
     cancellation_quote?: CancellationQuote | null
+    // US-A24 — the narrative rides the detail (timeline D5); absent pre-timeline ⇒ none.
+    events?: FolioEvent[]
   }>(`/api/folios/${id}`)
-  return { folio: res.folio, quote: res.cancellation_quote ?? null }
+  return { folio: res.folio, quote: res.cancellation_quote ?? null, events: res.events ?? [] }
 }
 
 // D10 — `reason` is the ONLY thing a caller may send. The `clawback` (US-A26) and
@@ -110,7 +126,7 @@ export const listCancellationRequests = async (
   status: CancellationRequestStatus | 'all' = 'pending',
 ): Promise<CancellationRequest[]> => {
   const res = await request<{ requests: CancellationRequest[] }>(
-    `/api/folios/cancellation-requests?status=${status}`,
+    `/api/folios/requests?status=${status}`,
   )
   return res.requests
 }
@@ -122,7 +138,7 @@ export const approveCancellationRequest = async (
   input: ApproveCancellationRequestInput = {},
 ): Promise<{ request: CancellationRequest; folio: FolioDetail }> =>
   request<{ request: CancellationRequest; folio: FolioDetail }>(
-    `/api/folios/cancellation-requests/${requestId}/approve`,
+    `/api/folios/requests/${requestId}/approve`,
     { method: 'POST', body: JSON.stringify(input) },
   )
 
@@ -132,7 +148,7 @@ export const rejectCancellationRequest = async (
   input: RejectCancellationRequestInput,
 ): Promise<CancellationRequest> => {
   const res = await request<{ request: CancellationRequest }>(
-    `/api/folios/cancellation-requests/${requestId}/reject`,
+    `/api/folios/requests/${requestId}/reject`,
     { method: 'POST', body: JSON.stringify(input) },
   )
   return res.request

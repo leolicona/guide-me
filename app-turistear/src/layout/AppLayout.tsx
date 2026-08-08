@@ -86,7 +86,7 @@ export function AppLayout() {
   // Ventas badge. US-A84 (D7): one aggregate, shared with `Hoy` and the list's pending-work bar,
   // where these were two more full-list fetches whose only use was `.length`.
   const { data: folioCounts } = useFolioCounts(user.role === 'admin')
-  const pendingCancellationCount = folioCounts?.cancellation_requests ?? 0
+  const pendingCancellationCount = folioCounts?.folio_requests ?? 0
   const pendingVerificationCount = folioCounts?.verification ?? 0
   // US-UX06 — agent cash drops awaiting confirmation, surfaced on the admin's Caja destination.
   // Admins only; the admin's own (self-authorized) drops never count.
@@ -155,8 +155,9 @@ export function AppLayout() {
             to={landingRoute}
             aria-label="Inicio"
             sx={{
-              width: 44,
-              height: 44,
+              // ≥48px touch target (design brief) — 44 was under the floor the system sets.
+              width: 48,
+              height: 48,
               borderRadius: 'var(--radius-md, 12px)', // crisp app-icon brand mark
               mb: 2,
               fontWeight: 700,
