@@ -92,7 +92,8 @@ test.describe('The refund-PIN cycle: portal petition → approve → the portal 
     await page.getByRole('button', { name: 'Confirmar reembolso' }).last().click()
 
     await expect(page.getByText('Reembolsado', { exact: true })).toBeVisible({ timeout: 20_000 })
-    await expect(page.getByText(/Reembolso confirmado/)).toBeVisible()
+    // The confirmation banner retired with #83 — the hand-back's only surface is its Historial
+    // row, asserted below; the chip above already flipped to Reembolsado.
     // The narrative agrees with the columns: the hand-back is on the record, PIN-proofed. The
     // timeline kept the expansion from step 1 (component state survives the mutations), so only
     // expand if it collapsed — e.g. after an unexpected remount.
