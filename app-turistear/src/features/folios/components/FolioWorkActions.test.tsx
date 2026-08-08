@@ -1,5 +1,6 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { renderWithProviders, screen } from '../../../test/renderWithProviders'
+import userEvent from '@testing-library/user-event'
 import { FolioWorkActions } from './FolioWorkActions'
 import type { FolioCancellationRequest, FolioDetail } from '../types'
 
@@ -23,11 +24,14 @@ const req = (over: Partial<FolioCancellationRequest>): FolioCancellationRequest 
 const folio = (over: Partial<FolioDetail> = {}): FolioDetail =>
   ({ id: 'f1', status: 'paid', payment_verification: 'not_required', ...over }) as FolioDetail
 
+// The refund sheet lives with the page (its success path opens the receipt composer); the card
+// only signals. Tests that don't press the button share this no-op.
+const renderWork = (f: FolioDetail, onConfirmRefund: () => void = () => {}) =>
+  renderWithProviders(<FolioWorkActions folio={f} onConfirmRefund={onConfirmRefund} />)
+
 describe('US-A84 — the folio detail carries its own work', () => {
   it('shows a live request ONCE — as work, not also as history', () => {
-    renderWithProviders(
-      <FolioWorkActions folio={folio({ folio_requests: [req({})] })} />,
-    )
+    renderWork(folio({ folio_requests: [req({})] }))
 
     expect(screen.getByText('El cliente pidió cancelar')).toBeInTheDocument()
     // The history card must not repeat the request the card above is already asking about.
@@ -36,14 +40,12 @@ describe('US-A84 — the folio detail carries its own work', () => {
   })
 
   it('renders NOTHING for a folio whose only requests are resolved — the timeline owns history', () => {
-    const { container } = renderWithProviders(
-      <FolioWorkActions
-        folio={folio({
-          folio_requests: [
-            req({ id: 'r2', status: 'rejected', resolution_note: 'Fuera de ventana' }),
-          ],
-        })}
-      />,
+    const { container } = renderWork(
+      folio({
+        folio_requests: [
+          req({ id: 'r2', status: 'rejected', resolution_note: 'Fuera de ventana' }),
+        ],
+      }),
     )
 
     // The rejected petition's ONLY surface is now its derived row in FolioTimeline — this
@@ -52,9 +54,7 @@ describe('US-A84 — the folio detail carries its own work', () => {
   })
 
   it('offers verification only while the folio is alive', () => {
-    const { unmount } = renderWithProviders(
-      <FolioWorkActions folio={folio({ payment_verification: 'pending' })} />,
-    )
+    const { unmount } = renderWork(folio({ payment_verification: 'pending' }))
     expect(screen.getByRole('button', { name: 'Verificar' })).toBeInTheDocument()
     // `Rechazar pago` cancels the sale and claws back commission, so it lives HERE and never on the
     // list card (D14).
@@ -62,14 +62,12 @@ describe('US-A84 — the folio detail carries its own work', () => {
     unmount()
 
     // A rejected payment cancels the folio and leaves its stale 'pending' flag behind (US-A67).
-    renderWithProviders(
-      <FolioWorkActions folio={folio({ status: 'cancelled', payment_verification: 'pending' })} />,
-    )
+    renderWork(folio({ status: 'cancelled', payment_verification: 'pending' }))
     expect(screen.queryByRole('button', { name: 'Verificar' })).toBeNull()
   })
 
   it('renders nothing at all when the folio owes no work', () => {
-    const { container } = renderWithProviders(<FolioWorkActions folio={folio()} />)
+    const { container } = renderWork(folio())
     expect(container).toBeEmptyDOMElement()
   })
 })
@@ -96,11 +94,7 @@ describe('US-AG52 — a reschedule petition is reviewed as a reschedule', () => 
   ]
 
   it('says reagendar, shows from → to, and never offers to cancel', () => {
-    renderWithProviders(
-      <FolioWorkActions
-        folio={folio({ folio_requests: [rescheduleReq], lines } as Partial<FolioDetail>)}
-      />,
-    )
+    renderWork(folio({ folio_requests: [rescheduleReq], lines } as Partial<FolioDetail>))
 
     expect(screen.getByText('El cliente pidió reagendar')).toBeInTheDocument()
     // The seller decides on "from → to", not on a slot UUID.
@@ -113,36 +107,75 @@ describe('US-AG52 — a reschedule petition is reviewed as a reschedule', () => 
   })
 
   it('an approved reschedule renders nothing here — its `rescheduled` event tells the story', () => {
-    const { container } = renderWithProviders(
-      <FolioWorkActions
-        folio={folio({
-          folio_requests: [
-            req({
-              id: 'r3', kind: 'reschedule', status: 'approved', reason: null,
-              to_slot_date: '2026-06-21', to_slot_start_time: '09:00',
-            }),
-          ],
-        })}
-      />,
+    const { container } = renderWork(
+      folio({
+        folio_requests: [
+          req({
+            id: 'r3', kind: 'reschedule', status: 'approved', reason: null,
+            to_slot_date: '2026-06-21', to_slot_start_time: '09:00',
+          }),
+        ],
+      }),
     )
 
     expect(container).toBeEmptyDOMElement()
   })
 
   it('a request without kind is a cancellation — the pre-rename rows keep their meaning', () => {
-    renderWithProviders(<FolioWorkActions folio={folio({ folio_requests: [req({})] })} />)
+    renderWork(folio({ folio_requests: [req({})] }))
     expect(screen.getByText('El cliente pidió cancelar')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Aprobar cancelación' })).toBeInTheDocument()
   })
 
   it('the ladder: an open petition parks the verification — one pending action at a time', () => {
-    renderWithProviders(
-      <FolioWorkActions
-        folio={folio({ payment_verification: 'pending', folio_requests: [req({})] })}
-      />,
-    )
+    renderWork(folio({ payment_verification: 'pending', folio_requests: [req({})] }))
     expect(screen.getByText('El cliente pidió cancelar')).toBeInTheDocument()
     // The unverified transfer waits its turn; the header chip still says it exists.
     expect(screen.queryByText('Pago por verificar')).toBeNull()
+  })
+})
+
+// D21 — the whole D12 ladder lives in this ONE component: solicitud → verificación → reembolso →
+// entrega, exactly one rung rendered. The exclusion used to be three booleans threaded through
+// three blocks of the page — these tests are the regression net for "two rungs at once".
+describe('D21 — the unified pending-action card renders exactly one rung', () => {
+  const refundable = (): Partial<FolioDetail> => ({
+    status: 'cancelled',
+    refund_status: 'pending',
+    refund_amount: 180000,
+    amount_paid: 300000,
+  })
+
+  it('rung 3: an open refund renders as a WARNING with the confirm button, and reports the amount', async () => {
+    const onConfirmRefund = vi.fn()
+    renderWork(folio(refundable()), onConfirmRefund)
+
+    expect(screen.getByText(/Reembolso pendiente de \$1,800\.00/)).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Confirmar reembolso' }))
+    expect(onConfirmRefund).toHaveBeenCalledOnce()
+  })
+
+  it('rung 3 parks: an open petition outranks the refund — cash stays in the drawer', () => {
+    renderWork(folio({ ...refundable(), folio_requests: [req({})] }))
+
+    expect(screen.getByText('El cliente pidió cancelar')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Confirmar reembolso' })).toBeNull()
+  })
+
+  it('rung 4: a paid folio with a portal offers delivery — the card\'s resting face', () => {
+    renderWork(folio({ portal_link: 'https://portal/x', agent: { name: 'Leo' } } as Partial<FolioDetail>))
+    expect(screen.getByText('Entregar boletos')).toBeInTheDocument()
+  })
+
+  it('rung 4 parks behind every blocking rung — unverified money never delivers tickets', () => {
+    renderWork(
+      folio({
+        payment_verification: 'pending',
+        portal_link: 'https://portal/x',
+        agent: { name: 'Leo' },
+      } as Partial<FolioDetail>),
+    )
+    expect(screen.getByText('Pago por verificar')).toBeInTheDocument()
+    expect(screen.queryByText('Entregar boletos')).toBeNull()
   })
 })

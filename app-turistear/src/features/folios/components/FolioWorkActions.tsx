@@ -11,20 +11,31 @@ import {
 } from '@mui/material'
 import CheckCircleRounded from '@mui/icons-material/CheckCircleRounded'
 import { ConfirmSheet, FormSheet, SectionCard } from '../../../components'
-import { useVerifyPayment, useRejectPayment } from '../../bookings'
+import {
+  useVerifyPayment,
+  useRejectPayment,
+  TicketWhatsAppButton,
+  DeliveryBadge,
+} from '../../bookings'
 import {
   useApproveCancellationRequest,
   useRejectCancellationRequest,
 } from '../hooks'
 import { useOrgDateFormatter } from '../../organization'
+import { formatMoney } from '../../catalog/types'
 import type { FolioDetail } from '../types'
 
-// US-A84 (D14) — the work a folio needs, on the folio itself.
+// US-A84 (D14/D21) — the work a folio needs, on the folio itself: THE pending-action card.
 //
-// These four actions used to live in `PaymentVerificationTab` and `CancellationRequestsTab`, which
-// this feature deletes. Two of them stay one tap from the list (`Verificar y enviar` is the card's
-// verb); the two DESTRUCTIVE ones land here, because rejecting a payment cancels a sale and claws
-// back the seller's commission, and rejecting a request writes a note the customer reads. Q6 of
+// This component owns the detail's whole D12 ladder — solicitud → verificación → reembolso →
+// entrega — and renders exactly ONE rung (or nothing). The exclusion used to be three booleans
+// threaded through three blocks of the page; a future slip could render two rungs at once. Here
+// the ladder is structural: one component, one branch, one card in one fixed position, so the eye
+// learns "the card under the chips is what this folio needs from me".
+//
+// The two DESTRUCTIVE actions landed here first (from the deleted `PaymentVerificationTab` /
+// `CancellationRequestsTab` tabs), because rejecting a payment cancels a sale and claws back the
+// seller's commission, and rejecting a request writes a note the customer reads. Q6 of
 // `pending-work-queues.spec.md` already ruled this for the refund confirm — a money action one tap
 // from a list is how the wrong folio gets confirmed — and the reasoning does not stop at refunds.
 //
@@ -39,7 +50,15 @@ const DATE_FMT: Intl.DateTimeFormatOptions = {
   minute: '2-digit',
 }
 
-export function FolioWorkActions({ folio }: { folio: FolioDetail }) {
+export function FolioWorkActions({
+  folio,
+  onConfirmRefund,
+}: {
+  folio: FolioDetail
+  /** Opens the page's refund FormSheet (PIN / override) — the sheet stays with the page because
+   *  its success path opens the receipt composer, which is page-level navigation. */
+  onConfirmRefund: () => void
+}) {
   const formatDate = useOrgDateFormatter(DATE_FMT)
   const verify = useVerifyPayment()
   const rejectPayment = useRejectPayment()
@@ -65,16 +84,34 @@ export function FolioWorkActions({ folio }: { folio: FolioDetail }) {
     : undefined
   const awaitingVerification =
     folio.payment_verification === 'pending' && folio.status !== 'cancelled'
+  // Rung 3 — the open refund obligation (US-A23/US-T05). A warning that carries a BUTTON is work,
+  // not a notice, so it ranks as a rung: an orphaned petition on a cancelled folio gets resolved
+  // before cash leaves the drawer.
+  const refundPending = folio.refund_status === 'pending'
+  // Rung 4 — ticket delivery (whatsapp-qr-delivery, D15). Also the card's resting face: it stays
+  // for RE-sending after delivery (the DeliveryBadge says which), because re-send is a tool that
+  // needs a home even when nothing is pending.
+  const deliverable = folio.status === 'paid' && !!folio.portal_link
 
-  // Resolved petitions no longer render here — the timeline carries them (approved ones as their
-  // events, rejected ones as derived rows) — so a folio with only history renders nothing.
-  if (!pending && !awaitingVerification) return null
+  // The ladder, structural: the first true rung is the ONLY one that renders. Resolved petitions
+  // no longer render here — the timeline carries them (approved ones as their events, rejected
+  // ones as derived rows) — so a folio with only history renders nothing.
+  const rung = pending
+    ? 'petition'
+    : awaitingVerification
+      ? 'verification'
+      : refundPending
+        ? 'refund'
+        : deliverable
+          ? 'delivery'
+          : null
+  if (!rung) return null
 
   return (
     <>
       {/* The live request outranks everything else on this folio: approving it cancels the sale,
           which makes any payment verification below moot (D12, one layer down from the card). */}
-      {pending && (
+      {rung === 'petition' && pending && (
         <SectionCard>
           <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 0.5 }}>
             {pendingIsReschedule ? 'El cliente pidió reagendar' : 'El cliente pidió cancelar'}
@@ -121,9 +158,9 @@ export function FolioWorkActions({ folio }: { folio: FolioDetail }) {
         </SectionCard>
       )}
 
-      {/* The ladder, made literal: an open petition parks the verification below — one pending
-          action at a time, the header chip still says the unverified money exists. */}
-      {!pending && awaitingVerification && (
+      {/* An open petition parks the verification — one pending action at a time, the header chip
+          still says the unverified money exists. */}
+      {rung === 'verification' && (
         <SectionCard>
           <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 0.5 }}>
             Pago por verificar
@@ -150,6 +187,55 @@ export function FolioWorkActions({ folio }: { folio: FolioDetail }) {
             >
               Rechazar pago
             </Button>
+          </Stack>
+        </SectionCard>
+      )}
+
+      {/* Rung 3 keeps its WARNING anatomy inside the unified card slot — a cash obligation must
+          not read like a neutral title. The container changed; the semantics did not. */}
+      {rung === 'refund' && (
+        <Alert severity="warning">
+          <Stack spacing={1.5} sx={{ alignItems: 'flex-start' }}>
+            <span>
+              Reembolso pendiente de {formatMoney(folio.refund_amount ?? folio.amount_paid)} —
+              pide al cliente el PIN de su portal al entregarle el efectivo.
+            </span>
+            {/* The action that hands cash across the counter reads as a BUTTON, not as floating
+                text (design review, Must Fix 5). Contained teal: the one accent always marks the
+                next action. Full-width on the phone, natural on desktop. */}
+            <Button
+              variant="contained"
+              disableElevation
+              onClick={onConfirmRefund}
+              sx={{ whiteSpace: 'nowrap', alignSelf: { xs: 'stretch', sm: 'flex-start' } }}
+            >
+              Confirmar reembolso
+            </Button>
+          </Stack>
+        </Alert>
+      )}
+
+      {/* Rung 4 — whatsapp-qr-delivery, admin oversight: (re-)send the tickets over WhatsApp on
+          the seller's behalf. Structurally last: a petition, unverified money or an open refund
+          parks it — delivering tickets for a sale the customer asked to cancel (or whose money is
+          unconfirmed) is exactly what blocking-first exists to prevent. */}
+      {rung === 'delivery' && (
+        <SectionCard>
+          <Stack spacing={1.5}>
+            <Stack direction="row" sx={{ alignItems: 'center', justifyContent: 'space-between' }}>
+              <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
+                Entregar boletos
+              </Typography>
+              <DeliveryBadge folio={folio} />
+            </Stack>
+            <TicketWhatsAppButton
+              folio={folio}
+              surface="admin"
+              variant="primary"
+              agentName={folio.agent.name}
+            />
+            {/* The "Pendiente de enviar" chip above already states this fact — a second amber
+                line saying it again is noise (design review, Should Fix 1). */}
           </Stack>
         </SectionCard>
       )}

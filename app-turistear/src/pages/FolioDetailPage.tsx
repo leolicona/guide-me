@@ -36,20 +36,16 @@ import type { CancellationQuote } from '../features/organization/types'
 import BlockRounded from '@mui/icons-material/BlockRounded'
 import RemoveDoneRounded from '@mui/icons-material/RemoveDoneRounded'
 import CheckCircleRounded from '@mui/icons-material/CheckCircleRounded'
+import ScheduleRounded from '@mui/icons-material/ScheduleRounded'
 import PhoneRounded from '@mui/icons-material/PhoneRounded'
 import MailOutlineRounded from '@mui/icons-material/MailOutlineRounded'
 import WhatsAppIcon from '@mui/icons-material/WhatsApp'
 import { isSendablePhone, normalizePhone } from '../features/pos/phone'
-import {
-  BookingActions,
-  ExpiredBookingBanner,
-  TicketWhatsAppButton,
-  DeliveryBadge,
-} from '../features/bookings'
+import { BookingActions } from '../features/bookings'
 import { ServiceError } from '../services/authService'
 import { formatMoney } from '../features/catalog/types'
 import { folioLineMeta } from '../features/folios/folioLineLabel'
-import { ConfirmSheet, FormSheet, MoneyText, SectionCard, StatusChip } from '../components'
+import { ConfirmSheet, FormSheet, MoneyText, StatusChip } from '../components'
 import { ROUTES } from '../config/routes'
 
 const DATE_FMT: Intl.DateTimeFormatOptions = {
@@ -104,14 +100,13 @@ export default function FolioDetailPage() {
   const isCancelled = folio?.status === 'cancelled'
   // US-AG07/D5 — a live apartado: it gets the booking actions instead of the US-A21 cancel.
   const isBooking = folio?.status === 'booking'
-  // The blocking-first ladder (US-A82 D12), mirrored on the detail — solicitud → verificación →
-  // reembolso → entrega, one pending action at a time. An open petition parks every other verb,
-  // the refund CTA included (the orphan case: a petition left pending on a cancelled folio) —
-  // resolving it IS the path (approving cancels priced by the ladder; rejecting unblocks), and a
-  // counter action alongside it would orphan the petition against a folio that
-  // already moved. Unverified money parks the cancel too: US-A21 would run the ladder over an
-  // amount the company never confirmed and mint a refund PIN for it (BUG-030) — `Rechazar pago`
-  // is the cancel path for unconfirmed money.
+  // The D12 ladder itself lives inside `FolioWorkActions` now (one component, one rung). These
+  // two flags remain only to park the ACTION BLOCK at the bottom: an open petition parks every
+  // verb — resolving it IS the path (approving cancels priced by the ladder; rejecting unblocks),
+  // and a counter action alongside it would orphan the petition against a folio that already
+  // moved. Unverified money parks the cancel too: US-A21 would run the ladder over an amount the
+  // company never confirmed and mint a refund PIN for it (BUG-030) — `Rechazar pago` is the
+  // cancel path for unconfirmed money.
   const hasOpenPetition = !!folio?.folio_requests?.some((r) => r.status === 'pending')
   const awaitingVerification = folio?.payment_verification === 'pending' && !isCancelled
   // Every dated line already departed → the folio is a countable fact (its fulfilment reading),
@@ -223,12 +218,48 @@ export default function FolioDetailPage() {
               >
                 {folio.customer_name ?? 'Sin nombre'}
               </Typography>
-              <Typography variant="caption" color="text.secondary">
-                Agente: {folio.agent.name}
-                {/* US-A68 — the affiliate shift operator who took the sale, when applicable. */}
-                {folio.operator_name ? ` (op. ${folio.operator_name})` : ''} •{' '}
-                {formatDate(folio.created_at)}
-              </Typography>
+              {/* The header IS the customer's card: who they are and how to reach them, one
+                  container, one subject. The sale's provenance (who sold it, when) moved to the
+                  payment card — it is a fact about the sale, not about the customer. Contact used
+                  to sit inside the payment card, where one shared border made a phone number
+                  parse as sale data. */}
+              {folio.customer_phone && (
+                <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+                  <PhoneRounded sx={{ fontSize: 16, color: 'text.secondary' }} />
+                  <Typography
+                    variant="body2"
+                    component="a"
+                    href={`tel:${folio.customer_phone}`}
+                    sx={{ color: 'text.primary', textDecoration: 'none' }}
+                  >
+                    {folio.customer_phone}
+                  </Typography>
+                  <Box sx={{ flex: 1 }} />
+                  {/* Continuous contact lives WITH the contact, not in the work card: the rain
+                      call — notify, negotiate, then decide — needs no pending action to exist.
+                      Empty compose; records nothing (US-A82 D7). */}
+                  {isSendablePhone(folio.customer_phone) && (
+                    <IconButton
+                      aria-label="Enviar mensaje por WhatsApp"
+                      onClick={() => {
+                        const phone = normalizePhone(folio.customer_phone).e164
+                        if (phone) window.open(`https://wa.me/${phone}`, '_blank')
+                      }}
+                      sx={{ width: 48, height: 48, color: 'primary.main' }}
+                    >
+                      <WhatsAppIcon />
+                    </IconButton>
+                  )}
+                </Stack>
+              )}
+              {folio.customer_email && (
+                <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+                  <MailOutlineRounded sx={{ fontSize: 16, color: 'text.secondary' }} />
+                  <Typography variant="body2" color="text.primary">
+                    {folio.customer_email}
+                  </Typography>
+                </Stack>
+              )}
               {/* One StatusChip per active axis in a FIXED order — money · clearance · debt ·
                   time — so the eye learns one position per axis (the list's one-channel-per-axis
                   logic). An axis at its default value says nothing here. The time chip derives
@@ -256,46 +287,15 @@ export default function FolioDetailPage() {
               </Stack>
             </Box>
 
-            {/* The cancellation AUDIT banner is gone: a historical fact is not an alert. The
-                Historial's `cancelled` row carries the date, the reason and the commission
-                outcome — the chip row above already says the state. Only the instructional
-                banner (what to do if the customer arrives) keeps banner rank. */}
-            <ExpiredBookingBanner folio={folio} />
+            {/* No banner zone survives here: past facts live in the Historial, state in the
+                chips, money in the payment card, and every warning that carries a button is a
+                RUNG of the pending-action card below. `ExpiredBookingBanner` retired last — its
+                credit instruction now rides the "Saldo a favor" row it was about. */}
 
-            {/* US-A84 (D14) — the work this folio needs, and the cancellation-request history that
-                the absorbed Solicitudes tab used to hold. Renders nothing when there is neither. */}
-            <FolioWorkActions folio={folio} />
-
-            {/* US-A23 / US-T05 — the open refund obligation: the client reads their PIN in
-                the portal and hands it over to receive the cash; confirming here closes the
-                loop. A warning that carries a BUTTON is work, not a notice — so it is a rung
-                of the ladder (the list's D12 order: solicitud → verificación → reembolso →
-                entrega) and an open petition parks it: an orphaned petition on a cancelled
-                folio gets resolved before cash leaves the drawer. */}
-            {folio.refund_status === 'pending' && !hasOpenPetition && (
-              <Alert severity="warning">
-                <Stack spacing={1.5} sx={{ alignItems: 'flex-start' }}>
-                  <span>
-                    Reembolso pendiente de {formatMoney(folio.refund_amount ?? folio.amount_paid)}{' '}
-                    — pide al cliente el PIN de su portal al entregarle el efectivo.
-                  </span>
-                  {/* The action that hands cash across the counter reads as a BUTTON, not as
-                      floating text (design review, Must Fix 5). Contained teal: the one accent
-                      always marks the next action. Full-width on the phone, natural on desktop. */}
-                  <Button
-                    variant="contained"
-                    disableElevation
-                    onClick={openRefundDialog}
-                    sx={{ whiteSpace: 'nowrap', alignSelf: { xs: 'stretch', sm: 'flex-start' } }}
-                  >
-                    Confirmar reembolso
-                  </Button>
-                </Stack>
-              </Alert>
-            )}
-            {/* The refund-CONFIRMED banner is gone too — same reasoning: the obligation (pending)
-                is an alert; the outcome is history. The Historial's `refund_confirmed` row says
-                when, with PIN or with the override note (passed below). */}
+            {/* US-A84 (D14/D21) — THE pending-action card: the whole D12 ladder (solicitud →
+                verificación → reembolso → entrega) resolved inside, exactly one rung rendered.
+                Renders nothing when this folio needs nothing. */}
+            <FolioWorkActions folio={folio} onConfirmRefund={openRefundDialog} />
 
             {/* US-A24 — the sale as a story, COLLAPSED between the state and the money so context
                 reads first without pushing the dominant figure down (money reads first — law #1).
@@ -311,53 +311,18 @@ export default function FolioDetailPage() {
 
             <Card>
               <CardContent>
-                {/* Contact reads as contact — icon-paired rows, and the phone dials on tap —
-                    instead of a bare number floating over the money (design review, Should
-                    Fix 3). The divider marks where contact ends and the breakdown begins. */}
-                {(folio.customer_email || folio.customer_phone) && (
-                  <>
-                    <Stack spacing={0.5} sx={{ mb: 2 }}>
-                      {folio.customer_phone && (
-                        <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
-                          <PhoneRounded sx={{ fontSize: 16, color: 'text.secondary' }} />
-                          <Typography
-                            variant="body2"
-                            component="a"
-                            href={`tel:${folio.customer_phone}`}
-                            sx={{ color: 'text.primary', textDecoration: 'none' }}
-                          >
-                            {folio.customer_phone}
-                          </Typography>
-                          <Box sx={{ flex: 1 }} />
-                          {/* Continuous contact lives WITH the contact, not in the work card: the
-                              rain call — notify, negotiate, then decide — needs no pending action
-                              to exist. Empty compose; records nothing (US-A82 D7). */}
-                          {isSendablePhone(folio.customer_phone) && (
-                            <IconButton
-                              aria-label="Enviar mensaje por WhatsApp"
-                              onClick={() => {
-                                const phone = normalizePhone(folio.customer_phone).e164
-                                if (phone) window.open(`https://wa.me/${phone}`, '_blank')
-                              }}
-                              sx={{ width: 48, height: 48, color: 'primary.main' }}
-                            >
-                              <WhatsAppIcon />
-                            </IconButton>
-                          )}
-                        </Stack>
-                      )}
-                      {folio.customer_email && (
-                        <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
-                          <MailOutlineRounded sx={{ fontSize: 16, color: 'text.secondary' }} />
-                          <Typography variant="body2" color="text.primary">
-                            {folio.customer_email}
-                          </Typography>
-                        </Stack>
-                      )}
-                    </Stack>
-                    <Divider sx={{ mb: 2 }} />
-                  </>
-                )}
+                {/* The payment card is the SALE — and this caption is its letterhead: who sold
+                    it, when. It moved here from the header (a fact about the sale, not the
+                    customer), caption-weight so the lines and the Total keep the hierarchy —
+                    money reads first. The Historial's `confirmed_sale` row carries the same fact
+                    as narrative; this is the at-a-glance read. */}
+                <Typography variant="caption" color="text.secondary">
+                  Vendido por {folio.agent.name}
+                  {/* US-A68 — the affiliate shift operator who took the sale, when applicable. */}
+                  {folio.operator_name ? ` (op. ${folio.operator_name})` : ''} ·{' '}
+                  {formatDate(folio.created_at)}
+                </Typography>
+                <Divider sx={{ my: 2 }} />
 
                 <Stack spacing={2} divider={<Divider flexItem />}>
                   {folio.lines.map((line) => {
@@ -439,6 +404,65 @@ export default function FolioDetailPage() {
                       </Typography>
                     </Stack>
                   )}
+                  {/* The cancellation's money OUTCOME, recorded where money lives — the same
+                      "Se devuelve / La empresa retiene" pair the RefundQuote previewed before
+                      the admin committed: the quote was the decision's preview, this is its
+                      record. Without it a cancelled folio read as if the sale were still whole
+                      (`Pagado $3,000` and silence). `refund_status: 'none'` with money paid is
+                      the 0%-ladder case — full retention, said out loud, because that is
+                      exactly where silence confuses most. Delivery state is icon-paired on the
+                      row (never color-alone); the WHEN and HOW stay the Historial's. */}
+                  {isCancelled && folio.amount_paid > 0 && (
+                    <>
+                      {(folio.refund_amount ?? 0) > 0 && (
+                        <Stack direction="row" sx={{ justifyContent: 'space-between' }}>
+                          <Box>
+                            <Typography color="text.secondary">Se devuelve al cliente</Typography>
+                            {folio.refund_status === 'refunded' ? (
+                              <Typography
+                                variant="caption"
+                                sx={{
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: 0.5,
+                                  color: 'success.main',
+                                  fontWeight: 600,
+                                }}
+                              >
+                                <CheckCircleRounded sx={{ fontSize: 14 }} />
+                                Entregado
+                              </Typography>
+                            ) : (
+                              <Typography
+                                variant="caption"
+                                sx={{
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: 0.5,
+                                  color: 'warning.main',
+                                  fontWeight: 600,
+                                }}
+                              >
+                                <ScheduleRounded sx={{ fontSize: 14 }} />
+                                Por entregar
+                              </Typography>
+                            )}
+                          </Box>
+                          <Typography className="numeric">
+                            {formatMoney(folio.refund_amount ?? 0)}
+                          </Typography>
+                        </Stack>
+                      )}
+                      {folio.amount_paid - (folio.refund_amount ?? 0) > 0 && (
+                        <Stack direction="row" sx={{ justifyContent: 'space-between' }}>
+                          <Typography color="text.secondary">La empresa retiene</Typography>
+                          <Typography className="numeric">
+                            {formatMoney(folio.amount_paid - (folio.refund_amount ?? 0))}
+                          </Typography>
+                        </Stack>
+                      )}
+                    </>
+                  )}
                   {/* US-A87 (D6/D10) — what the close left the customer, and until when. This is
                       the number the agent honours by MANUAL DISCOUNT while the checkout cannot
                       spend it — an agent who cannot see the credit cannot decide to apply it.
@@ -452,6 +476,12 @@ export default function FolioDetailPage() {
                             Vigente hasta el {formatDate(folio.credit_expires_at)}
                           </Typography>
                         )}
+                        {/* The retired ExpiredBookingBanner's one non-redundant sentence, anchored
+                            to the money it was about: if the customer returns, it is a NEW sale,
+                            and this credit is honoured by manual discount (US-A87 D6/D10). */}
+                        <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+                          Se aplica como descuento manual en una venta nueva
+                        </Typography>
                       </Box>
                       <MoneyText
                         cents={folio.credit_amount!}
@@ -467,34 +497,6 @@ export default function FolioDetailPage() {
 
             {cancel.isError && (
               <Alert severity="error">No se pudo cancelar este folio. Inténtalo de nuevo.</Alert>
-            )}
-
-            {/* whatsapp-qr-delivery — admin oversight: (re-)send the tickets over WhatsApp on the
-                seller's behalf (D15). A ladder rung: an open petition or unverified money parks
-                it — delivering tickets for a sale the customer asked to cancel (or whose money is
-                unconfirmed) is exactly what blocking-first exists to prevent. */}
-            {folio.status === 'paid' && folio.portal_link && !hasOpenPetition && !awaitingVerification && (
-              <SectionCard>
-                <Stack spacing={1.5}>
-                  <Stack
-                    direction="row"
-                    sx={{ alignItems: 'center', justifyContent: 'space-between' }}
-                  >
-                    <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
-                      Entregar boletos
-                    </Typography>
-                    <DeliveryBadge folio={folio} />
-                  </Stack>
-                  <TicketWhatsAppButton
-                    folio={folio}
-                    surface="admin"
-                    variant="primary"
-                    agentName={folio.agent.name}
-                  />
-                  {/* The "Pendiente de enviar" chip above already states this fact — a second
-                      amber line saying it again is noise (design review, Should Fix 1). */}
-                </Stack>
-              </SectionCard>
             )}
 
             {/* One action block, not floating verbs (design review, Should Fix 2): the booking
