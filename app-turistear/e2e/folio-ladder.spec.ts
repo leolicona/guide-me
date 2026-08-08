@@ -85,8 +85,9 @@ test.describe('The blocking-first ladder on the folio detail', () => {
     await expect(page.getByText('Entregar boletos')).not.toBeVisible()
     await expect(page.getByRole('button', { name: 'Reagendar' })).not.toBeVisible()
     await expect(page.getByRole('button', { name: 'Cancelar folio' })).not.toBeVisible()
-    // The live petition is WORK, not history: creado + pago + the Salida marker, nothing more.
-    await expect(page.getByRole('button', { name: 'Ver todo (3)' })).toBeVisible()
+    // The live petition is WORK, not history: creado + pago, nothing more — the Salida marker
+    // waits for the departure (timeline D7 as amended by #83), so a future slot adds no row.
+    await expect(page.getByRole('button', { name: 'Ver todo (2)' })).toBeVisible()
 
     // ---- 2. Rejecting the petition narrates it and unblocks the next rung ----------------------
     await page.getByRole('button', { name: 'Rechazar solicitud' }).click()
@@ -98,7 +99,7 @@ test.describe('The blocking-first ladder on the folio detail', () => {
     await expect(page.getByText('Entregar boletos')).toBeVisible()
     await expect(page.getByRole('button', { name: 'Cancelar folio' })).toBeVisible()
     // The rejection's ONLY surface is its derived Historial row (timeline D12).
-    await page.getByRole('button', { name: 'Ver todo (4)' }).click()
+    await page.getByRole('button', { name: 'Ver todo (3)' }).click()
     await expect(page.getByText('Solicitud de cancelación rechazada')).toBeVisible()
     await expect(page.getByText('Motivo del cliente: E2E — el cliente pide cancelar')).toBeVisible()
     await expect(page.getByText('Resolución: E2E — fuera de ventana')).toBeVisible()
