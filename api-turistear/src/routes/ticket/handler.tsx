@@ -12,7 +12,7 @@
 //  - D11: strictly READ-ONLY — this page never touches redeemed_count. Only POST /api/tickets/scan
 //    consumes a pass; a tourist checking their ticket on the bus must not burn their own seat.
 import type { Context } from 'hono'
-import { and, eq, isNull } from 'drizzle-orm'
+import { and, eq, isNull, sql } from 'drizzle-orm'
 import { renderSVG } from 'uqr'
 import { getDb } from '../../db/client'
 import { folios, folioLines, organizations, services } from '../../db/schema'
@@ -133,6 +133,12 @@ export const viewTicket = async (c: TicketContext) => {
       // US-A22 — the LINE's own cancellation: a cancelled line on a still-alive folio renders
       // the cancelled page, exactly like a cancelled folio.
       lineCancelledAt: folioLines.cancelledAt,
+      lineTotal: folioLines.lineTotal,
+      // US-A89 (F4, PR-7) — the line's own money + clearance: NULL allocated = legacy row (keep
+      // the folio answer); a pending allocation means THIS line's money awaits an admin. Raw
+      // outer-column correlations (the displayMethodSql trick).
+      lineAllocated: sql<number | null>`(select sum(a.amount) from folio_payment_allocations a where a.folio_line_id = folio_lines.id)`,
+      linePending: sql<number>`exists(select 1 from folio_payment_allocations a join folio_payments p on p.id = a.payment_id where a.folio_line_id = folio_lines.id and p.verification = 'pending')`,
       folioStatus: folios.status,
       paymentVerification: folios.paymentVerification,
       description: services.description,
@@ -162,9 +168,15 @@ export const viewTicket = async (c: TicketContext) => {
   // `paid`, so without the line half this page would show a valid-looking pass for a line whose
   // seat went back to the pool.
   const cancelled = row.folioStatus === 'cancelled' || row.lineCancelledAt !== null
-  // A folio that is not paid-and-cleared has no valid boarding pass to show (a booking's QR does
-  // not exist until settle; an unverified transfer's is deferred) — generic page, no oracle.
-  if (!cancelled && (row.folioStatus !== 'paid' || row.paymentVerification === 'pending')) {
+  // US-A89 (F4, PR-7) — the pass shows when THE LINE is paid and ITS money is cleared: a line
+  // settled per line renders while its siblings keep the folio a `booking`, and a sibling's
+  // pending transfer no longer hides a cash-funded line's pass. Legacy rows (no allocations)
+  // keep the folio-level answer until PR-9 retires it with the column.
+  const linePaidCleared =
+    row.lineAllocated === null
+      ? row.folioStatus === 'paid' && row.paymentVerification !== 'pending'
+      : Math.max(0, Number(row.lineAllocated)) >= row.lineTotal && !row.linePending
+  if (!cancelled && !linePaidCleared) {
     return renderNotFound(c)
   }
 

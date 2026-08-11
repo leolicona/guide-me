@@ -161,6 +161,30 @@ describe('US-AG54 — S-8: settle one line only', () => {
     expect(farOut.pending_balance).toBe(35000)
   })
 
+  it("S-13 — the settled line's QR admits at the gate while the folio is still a booking", async () => {
+    // The F3 residual this closes (PR-7): line-settle minted the QR, but the scanner still gated
+    // on folio status — so the customer who paid Tuesday in full was refused NOT_PAID until
+    // Thursday was also settled. The gate now answers from the LINE's own money.
+    const stage = await seedStage()
+    const folio = await createBooking(stage)
+    const near = lineBySlot(folio, stage.slotNear)
+    expect((await settleLine(folio.id, near.id)).status).toBe(200)
+    expect((await dbFolio(folio.id)).status).toBe('booking') // the far line still owes
+
+    const token = (await dbLine(near.id)).qr_token as string
+    const scanRes = await SELF.fetch('http://api.local/api/tickets/scan', {
+      method: 'POST',
+      headers: jsonAuth(AGENT_EMAIL),
+      body: JSON.stringify({ token }),
+    })
+    const scan = (await scanRes.json()) as any
+    expect(scan.result, JSON.stringify(scan)).toBe('valid')
+
+    // And the public /t page renders the pass instead of a 404.
+    const page = await SELF.fetch(`http://api.local/t/${token}`)
+    expect(page.status).toBe(200)
+  })
+
   it('settling the LAST live line completes the folio (paid + settled_at)', async () => {
     const stage = await seedStage()
     const folio = await createBooking(stage)
