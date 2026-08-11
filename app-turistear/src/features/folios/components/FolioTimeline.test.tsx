@@ -77,6 +77,38 @@ describe('D10 — the null actor renders Sistema, or Cliente on the Visto beacon
   })
 })
 
+describe('US-A22 (line-autonomy D13) — a line-scoped cancellation names its protagonist', () => {
+  it('renders the line name + date from the payload, never a join', () => {
+    renderWithProviders(
+      <FolioTimeline
+        events={[
+          anEvent({
+            type: 'cancelled',
+            payload: {
+              source: 'admin',
+              clawback: false,
+              refund_amount: 50000,
+              line: { service_name: 'Isla Mujeres', slot_date: '2026-08-20' },
+            },
+          }),
+        ]}
+      />,
+    )
+    expect(
+      screen.getByText('Canceló Isla Mujeres (2026-08-20) — por administración'),
+    ).toBeInTheDocument()
+  })
+
+  it('a folio-scoped cancellation (no line in the payload) keeps the original copy', () => {
+    renderWithProviders(
+      <FolioTimeline
+        events={[anEvent({ type: 'cancelled', payload: { source: 'admin', clawback: false } })]}
+      />,
+    )
+    expect(screen.getByText('Cancelado por administración')).toBeInTheDocument()
+  })
+})
+
 describe('D11 — payment copy by kind, amount through MoneyText', () => {
   it('a deposit reads Abono with its formatted amount and method', () => {
     const { container } = renderWithProviders(

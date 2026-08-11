@@ -130,6 +130,9 @@ export const viewTicket = async (c: TicketContext) => {
       slotStartTime: folioLines.slotStartTime,
       quantity: folioLines.quantity,
       zoneName: folioLines.zoneName,
+      // US-A22 — the LINE's own cancellation: a cancelled line on a still-alive folio renders
+      // the cancelled page, exactly like a cancelled folio.
+      lineCancelledAt: folioLines.cancelledAt,
       folioStatus: folios.status,
       paymentVerification: folios.paymentVerification,
       description: services.description,
@@ -155,7 +158,10 @@ export const viewTicket = async (c: TicketContext) => {
     .limit(1)
   const orgName = orgRows[0]?.name ?? 'Turistear Ya!'
 
-  const cancelled = row.folioStatus === 'cancelled'
+  // US-A22 (line-autonomy F2) — the line's own cancellation counts: a half-cancelled folio stays
+  // `paid`, so without the line half this page would show a valid-looking pass for a line whose
+  // seat went back to the pool.
+  const cancelled = row.folioStatus === 'cancelled' || row.lineCancelledAt !== null
   // A folio that is not paid-and-cleared has no valid boarding pass to show (a booking's QR does
   // not exist until settle; an unverified transfer's is deferred) — generic page, no oracle.
   if (!cancelled && (row.folioStatus !== 'paid' || row.paymentVerification === 'pending')) {

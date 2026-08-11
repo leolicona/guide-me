@@ -78,6 +78,8 @@ export const scanTicket = async (c: TicketsContext) => {
       slotDate: folioLines.slotDate,
       slotStartTime: folioLines.slotStartTime,
       zoneName: folioLines.zoneName,
+      // US-A22 — the line's own cancellation, gated below ahead of F4's full line migration.
+      lineCancelledAt: folioLines.cancelledAt,
       folioStatus: folios.status,
     })
     .from(folioLines)
@@ -108,6 +110,13 @@ export const scanTicket = async (c: TicketsContext) => {
 
   // 3. STATUS gates — only a paid, non-cancelled folio admits (forward-safe for bookings).
   if (row.folioStatus === 'cancelled') {
+    return invalid(c, 'CANCELLED', ctx)
+  }
+  // US-A22 (line-autonomy F2) — the LINE's own cancellation refuses identically: a half-cancelled
+  // folio stays `paid`, and without this the cancelled line's genuine, unexpired token would
+  // still admit a passenger whose seat already went back to the pool. F4 migrates the whole gate
+  // to line state; this is the half that cannot wait for it.
+  if (row.lineCancelledAt) {
     return invalid(c, 'CANCELLED', ctx)
   }
   if (row.folioStatus !== 'paid') {

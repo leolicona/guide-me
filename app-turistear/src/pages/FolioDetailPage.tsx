@@ -22,6 +22,7 @@ import ArrowBackRounded from '@mui/icons-material/ArrowBackRounded'
 import {
   useFolio,
   useCancelFolio,
+  useCancelFolioLine,
   useConfirmRefund,
   FolioStatusChip,
   FolioTimeline,
@@ -88,9 +89,13 @@ export default function FolioDetailPage() {
   // (D17), so this is null only for a folio that is already cancelled: nothing left to quote.
   const quote = data?.quote ?? null
   const cancel = useCancelFolio()
+  const cancelLine = useCancelFolioLine()
   const refund = useConfirmRefund()
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [reason, setReason] = useState('')
+  // US-A22 — the line being cancelled (null = sheet closed) + its optional note.
+  const [lineTarget, setLineTarget] = useState<FolioDetail['lines'][number] | null>(null)
+  const [lineReason, setLineReason] = useState('')
   // US-A23 / US-T05 — refund confirmation dialog: PIN (primary) or no-PIN override + note.
   const [refundOpen, setRefundOpen] = useState(false)
   const [pin, setPin] = useState('')
@@ -131,6 +136,36 @@ export default function FolioDetailPage() {
     // dialog collects a note and confirms a number it did not compute.
     cancel.mutate({ id, reason: reason.trim() || undefined }, { onSuccess: closeDialog })
   }
+
+  // US-A22 (line-autonomy F2) — cancel ONE activity. The gesture is offered only where it is
+  // honest: an active PAID folio (an apartado keeps its own verbs until F3's per-line settle), a
+  // line still ahead of its departure, never an already-cancelled line, and never the LAST live
+  // one — cancelling everything is `Cancelar folio`, whose sheet quotes the whole.
+  const liveLines = folio?.lines?.filter((l) => l.cancelled_at == null) ?? []
+  const canCancelLine = (line: FolioDetail['lines'][number]): boolean =>
+    !!folio &&
+    !isCancelled &&
+    !isBooking &&
+    !awaitingVerification &&
+    !hasOpenPetition &&
+    line.cancelled_at == null &&
+    liveLines.length > 1 &&
+    (line.slot_date ?? line.check_in ?? '') >= todayIso
+
+  const closeLineDialog = () => {
+    setLineTarget(null)
+    setLineReason('')
+  }
+  const handleCancelLine = () => {
+    if (!id || !lineTarget) return
+    cancelLine.mutate(
+      { id, lineId: lineTarget.id, reason: lineReason.trim() || undefined },
+      { onSuccess: closeLineDialog },
+    )
+  }
+  // The subset quote for the sheet — computed server-side (line_refund rides the folio quote),
+  // never derived here: the number shown is the number the endpoint will write.
+  const lineQuote = quote?.lines.find((l) => l.line_id === lineTarget?.id) ?? null
 
   const openRefundDialog = () => {
     setPin('')
@@ -337,7 +372,15 @@ export default function FolioDetailPage() {
                       sx={{ justifyContent: 'space-between', alignItems: 'flex-start' }}
                     >
                       <Box sx={{ minWidth: 0 }}>
-                        <Typography variant="subtitle2">{line.service_name}</Typography>
+                        <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+                          <Typography variant="subtitle2">{line.service_name}</Typography>
+                          {/* US-A22 — the line's OWN state, shown only when it differs from the
+                              folio's: a uniform folio stays quiet; a mixed one names the odd one
+                              out. Same chip, same vocabulary — no second presentation invented. */}
+                          {line.money_state && line.money_state !== folio.status && (
+                            <FolioStatusChip status={line.money_state} />
+                          )}
+                        </Stack>
                         <Typography variant="caption" color="text.secondary">
                           {folioLineMeta(line)} · {formatMoney(line.unit_price)}
                         </Typography>
@@ -356,6 +399,26 @@ export default function FolioDetailPage() {
                             {note.text}
                           </Typography>
                         )}
+                        {/* US-A22 — a cancelled line states its own money outcome, the same
+                            "Se devuelve / retiene" language the folio-level record uses. */}
+                        {line.cancelled_at != null && line.refund_status === 'pending' && (
+                          <Typography
+                            variant="caption"
+                            sx={{ display: 'flex', alignItems: 'center', gap: 0.5, color: 'warning.main', fontWeight: 600 }}
+                          >
+                            <ScheduleRounded sx={{ fontSize: 14 }} />
+                            Se devuelve {formatMoney(line.refund_amount ?? 0)} — por entregar
+                          </Typography>
+                        )}
+                        {line.cancelled_at != null && line.refund_status === 'refunded' && (
+                          <Typography
+                            variant="caption"
+                            sx={{ display: 'flex', alignItems: 'center', gap: 0.5, color: 'success.main', fontWeight: 600 }}
+                          >
+                            <CheckCircleRounded sx={{ fontSize: 14 }} />
+                            Reembolso de {formatMoney(line.refund_amount ?? 0)} entregado
+                          </Typography>
+                        )}
                         {line.extras.map((e) => (
                           <Typography
                             key={e.id}
@@ -366,6 +429,20 @@ export default function FolioDetailPage() {
                             + {e.quantity}× {e.name} ({formatMoney(e.price)})
                           </Typography>
                         ))}
+                        {/* US-A22 — cancel THIS activity alone. Only where the gesture is honest:
+                            an active paid folio, a line still ahead of its departure, and never
+                            the last live line — cancelling everything is `Cancelar folio`, whose
+                            sheet quotes the whole. Apartados keep their own verbs (F3). */}
+                        {canCancelLine(line) && (
+                          <Button
+                            size="small"
+                            color="error"
+                            sx={{ px: 0, minWidth: 0, mt: 0.25 }}
+                            onClick={() => setLineTarget(line)}
+                          >
+                            Cancelar esta actividad
+                          </Button>
+                        )}
                       </Box>
                       <Typography variant="subtitle2">{formatMoney(line.line_total)}</Typography>
                     </Stack>
@@ -561,6 +638,56 @@ export default function FolioDetailPage() {
           onConfirm={handleCancel}
           busy={cancel.isPending}
           cancelLabel="Conservar folio"
+        />
+
+        {/* US-A22 — the LINE cancel confirmation, same canonical overlay. The money it states is
+            the SUBSET quote (line_refund), computed server-side by the same arithmetic the
+            endpoint writes — the sheet confirms a number it did not compute. */}
+        <ConfirmSheet
+          open={!!lineTarget}
+          onClose={closeLineDialog}
+          title={`¿Cancelar ${lineTarget?.service_name ?? 'esta actividad'}?`}
+          description="Esto libera los lugares de esta actividad y no se puede deshacer. El resto del folio sigue activo y sus boletos siguen siendo válidos."
+          detail={
+            <>
+              {lineQuote && lineQuote.line_refund != null && (
+                <Stack spacing={0.5} sx={{ mb: 1 }}>
+                  <Stack direction="row" sx={{ justifyContent: 'space-between' }}>
+                    <Typography color="text.secondary">Se devuelve al cliente</Typography>
+                    <Typography className="numeric" sx={{ fontWeight: 600 }}>
+                      {formatMoney(lineQuote.line_refund)}
+                    </Typography>
+                  </Stack>
+                  <Stack direction="row" sx={{ justifyContent: 'space-between' }}>
+                    <Typography color="text.secondary">La empresa retiene</Typography>
+                    <Typography className="numeric">
+                      {formatMoney(
+                        Math.max(0, (lineTarget?.allocated ?? 0) - lineQuote.line_refund),
+                      )}
+                    </Typography>
+                  </Stack>
+                  {lineQuote.redeemed && (
+                    <Typography variant="caption" color="text.secondary">
+                      Esta actividad ya fue usada — retiene su total sin importar la política.
+                    </Typography>
+                  )}
+                </Stack>
+              )}
+              <TextField
+                label="Motivo (opcional)"
+                size="small"
+                fullWidth
+                multiline
+                minRows={2}
+                value={lineReason}
+                onChange={(e) => setLineReason(e.target.value)}
+              />
+            </>
+          }
+          confirmLabel="Cancelar actividad"
+          onConfirm={handleCancelLine}
+          busy={cancelLine.isPending}
+          cancelLabel="Conservar actividad"
         />
 
         {/* US-A23 / US-T05 — confirm the physical cash refund, on the canonical form host
