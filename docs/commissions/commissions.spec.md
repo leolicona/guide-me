@@ -43,7 +43,8 @@ This feature is **mostly shipped** by the cash-balance pivot. What already exist
 - **The calculation** — `confirmSale` (`src/routes/pos/handler.ts`) snapshots
   `commission_amount` per the formula above; the running-balance derivation
   (`src/routes/cash/handler.ts`) deducts it (kept on a cancelled folio only when the company
-  absorbs the loss — clawback `false`, US-A26).
+  absorbs the loss — clawback `false`, derived from the org's ladder since the *Cancellation
+  Policy Engine* superseded US-A26).
 
 ### The gap this feature closes
 

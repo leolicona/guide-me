@@ -10,7 +10,6 @@ import {
   rejectCancellationRequest,
 } from '../../../services/foliosService'
 import type {
-  ApproveCancellationRequestInput,
   CancellationRequestStatus,
   ConfirmRefundInput,
   FolioFilters,
@@ -84,13 +83,7 @@ export const useCancellationRequests = (
 export const useApproveCancellationRequest = () => {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: ({
-      id,
-      input,
-    }: {
-      id: string
-      input?: ApproveCancellationRequestInput
-    }) => approveCancellationRequest(id, input),
+    mutationFn: (id: string) => approveCancellationRequest(id),
     onSuccess: () => qc.invalidateQueries({ queryKey: FOLIOS_KEY }),
   })
 }

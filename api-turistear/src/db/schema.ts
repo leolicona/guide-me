@@ -399,8 +399,10 @@ export const folios = sqliteTable('folios', {
   cancelledAt: integer('cancelled_at', { mode: 'timestamp' }), // set on total cancellation (US-A21)
   cancelledBy: text('cancelled_by').references(() => users.id), // admin who cancelled
   cancellationReason: text('cancellation_reason'), // optional admin note
-  // On cancellation (US-A26): true → agent loses the commission (clawback); false → the
-  // company absorbs it and the agent keeps the commission. Only meaningful when cancelled.
+  // On cancellation: true → the agent lost commission (clawback); false → the company absorbed
+  // it and the agent keeps the commission. DERIVED by the Cancellation Policy Engine
+  // (`reversedCommission > 0`) — never chosen by anyone (US-A26 is superseded, D10). Read by the
+  // commission report and the cash engine. Only meaningful when cancelled.
   cancellationClawback: integer('cancellation_clawback', { mode: 'boolean' })
     .notNull()
     .default(false),

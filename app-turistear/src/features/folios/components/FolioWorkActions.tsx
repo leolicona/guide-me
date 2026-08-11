@@ -1,14 +1,5 @@
 import { useState } from 'react'
-import {
-  Alert,
-  Box,
-  Button,
-  FormControlLabel,
-  Stack,
-  Switch,
-  TextField,
-  Typography,
-} from '@mui/material'
+import { Alert, Button, Stack, TextField, Typography } from '@mui/material'
 import CheckCircleRounded from '@mui/icons-material/CheckCircleRounded'
 import { ConfirmSheet, FormSheet, SectionCard } from '../../../components'
 import {
@@ -70,7 +61,6 @@ export function FolioWorkActions({
   const [rejectingRequest, setRejectingRequest] = useState(false)
   const [paymentReason, setPaymentReason] = useState('')
   const [requestNote, setRequestNote] = useState('')
-  const [clawback, setClawback] = useState(false)
 
   const requests = folio.folio_requests ?? []
   const pending = requests.find((r) => r.status === 'pending')
@@ -138,10 +128,7 @@ export function FolioWorkActions({
               variant="contained"
               disableElevation
               color={pendingIsReschedule ? 'primary' : 'error'}
-              onClick={() => {
-                setClawback(false)
-                setConfirming('approve')
-              }}
+              onClick={() => setConfirming('approve')}
             >
               {pendingIsReschedule ? 'Aprobar reagenda' : 'Aprobar cancelación'}
             </Button>
@@ -262,7 +249,7 @@ export function FolioWorkActions({
         description={
           pendingIsReschedule
             ? 'Se mueve el servicio al horario que pidió el cliente y se libera el anterior. Si el folio está pagado, el boleto anterior deja de funcionar y se envía uno nuevo. Si ya no hay lugar, la solicitud se rechaza sola con el motivo y fechas alternativas.'
-            : 'Esto cancela el folio completo: libera todos los lugares, notifica al cliente por correo y — si el folio tiene pago registrado — genera un PIN de reembolso que el cliente verá en su portal.'
+            : 'Esto cancela el folio completo: libera todos los lugares, notifica al cliente por correo y — si el folio tiene pago registrado — genera un PIN de reembolso que el cliente verá en su portal. El reembolso y la comisión del vendedor los decide la política de cancelación de la empresa.'
         }
         confirmLabel={
           approveRequest.isPending
@@ -273,45 +260,17 @@ export function FolioWorkActions({
         }
         confirmColor={pendingIsReschedule ? 'primary' : undefined}
         busy={approveRequest.isPending}
-        detail={
-          pendingIsReschedule ? null : (
-          <FormControlLabel
-            sx={{ alignItems: 'flex-start' }}
-            control={
-              <Switch
-                checked={clawback}
-                onChange={(e) => setClawback(e.target.checked)}
-                color="error"
-              />
-            }
-            label={
-              <Box sx={{ pt: 0.75 }}>
-                <Typography variant="body2">Recuperar comisión del agente</Typography>
-                <Typography variant="caption" color="text.secondary">
-                  {clawback
-                    ? 'El agente pierde la comisión generada en esta venta.'
-                    : 'Desactivado: la empresa absorbe la pérdida y el agente conserva la comisión.'}
-                </Typography>
-              </Box>
-            }
-          />
-          )
-        }
         error={
           approveRequest.isError ? (
             <Alert severity="error">No se pudo aprobar la solicitud. Inténtalo de nuevo.</Alert>
           ) : null
         }
         onConfirm={() =>
+          // Approving is an authorisation with nothing to configure — a reschedule's guards and
+          // destination live on the petition, and a cancellation's money (refund + commission
+          // clawback) is priced by the org's ladder (D10), never chosen here.
           pending &&
-          approveRequest.mutate(
-            // A reschedule approval is an authorisation with nothing to configure — the guards and
-            // the destination live on the petition itself.
-            pendingIsReschedule
-              ? { id: pending.id }
-              : { id: pending.id, input: { clawback } },
-            { onSuccess: () => setConfirming(null) },
-          )
+          approveRequest.mutate(pending.id, { onSuccess: () => setConfirming(null) })
         }
       />
 

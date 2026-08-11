@@ -400,7 +400,8 @@ describe('Total Folio Cancellation', () => {
     // ladder refunds in full, so nothing is retained, so by the D8 cap the seller keeps nothing.
     const ok = await cancelFolio(ADMIN_EMAIL, folioId, { reason: 'goodwill' })
     expect(ok.status).toBe(200)
-    expect(ok.json.folio.cancellation_clawback).toBe(true)
+    // The derived flag is bookkeeping (commission report / cash engine), not API surface — it
+    // stopped being serialized when the manual control was retired, so it is asserted on the row.
     expect((await getFolioRow(folioId))?.cancellation_clawback).toBe(1)
   })
 
