@@ -7,6 +7,10 @@ import { BookingActions, type BookingFolio } from './BookingActions'
 // could reach it, because this component returned null for anything but a live apartado. A
 // capability with no button is not a capability.
 
+// The component gates Reagendar on `slot_date >= today` against the REAL clock (UTC), so a
+// hardcoded date is a time bomb — it silently expired and the paid branch rendered null.
+const FUTURE_DATE = new Date(Date.now() + 7 * 86_400_000).toISOString().slice(0, 10)
+
 const folio = (over: Partial<BookingFolio> = {}): BookingFolio => ({
   id: 'f1',
   status: 'paid',
@@ -17,7 +21,7 @@ const folio = (over: Partial<BookingFolio> = {}): BookingFolio => ({
       service_id: 'svc-1',
       slot_id: 's1',
       service_name: 'Tour Isla',
-      slot_date: '2026-08-10',
+      slot_date: FUTURE_DATE,
       slot_start_time: '09:00',
       quantity: 2,
       line_type: 'slot' as const,
