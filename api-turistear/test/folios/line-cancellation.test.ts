@@ -236,6 +236,59 @@ describe('US-A22 — S-5: the sibling survives byte-identical', () => {
   })
 })
 
+describe('US-A22 — the gates honour the LINE (the F2 hole, closed)', () => {
+  it("the cancelled line's QR refuses CANCELLED while the sibling's still admits", async () => {
+    const stage = await seedStage()
+    const folio = await confirmPaid(stage)
+    const nearLine = lineBySlot(folio, stage.slotNear)
+    const farLine = lineBySlot(folio, stage.slotFar)
+    expect((await cancelLine(folio.id, farLine.id)).status).toBe(200)
+
+    const tokenOf = async (lineId: string) =>
+      ((await env.DB.prepare(`SELECT qr_token FROM folio_lines WHERE id = ?`).bind(lineId).all())
+        .results[0] as { qr_token: string }).qr_token
+
+    const scan = async (token: string) => {
+      const res = await SELF.fetch('http://api.local/api/tickets/scan', {
+        method: 'POST',
+        headers: jsonAuth(AGENT_EMAIL),
+        body: JSON.stringify({ token }),
+      })
+      return (await res.json()) as any
+    }
+
+    // The half-cancelled folio is still `paid` — without the line gate this token would admit a
+    // passenger whose seat already went back to the pool.
+    const refused = await scan(await tokenOf(farLine.id))
+    expect(refused.result).toBe('invalid')
+    expect(refused.reason).toBe('CANCELLED')
+    const admitted = await scan(await tokenOf(nearLine.id))
+    expect(admitted.result, JSON.stringify(admitted)).toBe('valid')
+  })
+
+  it('a booking folio refuses the line cancel until F3 (LINE_CANCEL_UNSUPPORTED)', async () => {
+    const stage = await seedStage()
+    const res = await SELF.fetch(`${POS}/folios`, {
+      method: 'POST',
+      headers: jsonAuth(AGENT_EMAIL),
+      body: JSON.stringify({
+        customer_name: 'Cliente Test',
+        customer_phone: PHONE,
+        down_payment: 45000,
+        lines: [
+          { slot_id: stage.slotNear, quantity: 1, unit_price: 100000 },
+          { slot_id: stage.slotFar, quantity: 1, unit_price: 50000 },
+        ],
+      }),
+    })
+    const booking = ((await res.json()) as any).folio
+    expect(res.status).toBe(201)
+    const attempt = await cancelLine(booking.id, booking.lines[0].id)
+    expect(attempt.status).toBe(409)
+    expect(JSON.stringify(attempt.json)).toMatch(/LINE_CANCEL_UNSUPPORTED/)
+  })
+})
+
 describe('US-A22 — S-6: two debts, two records, and the folio flips only at the end', () => {
   it('cancelling both lines on separate days leaves two line-debts and four line-scoped outbox rows', async () => {
     const stage = await seedStage()

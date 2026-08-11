@@ -98,6 +98,15 @@ export interface FolioDetailLine {
   minimum_price: number
   unit_price: number
   line_total: number
+  /** US-A22 (line-autonomy F2) — the line's OWN life, server-derived from its allocations
+   * (money) and its written cancellation stamp. The client renders these; it never derives. */
+  money_state?: FolioStatus
+  allocated?: number
+  pending_balance?: number
+  cancelled_at?: number | null
+  cancellation_source?: string | null
+  refund_status?: RefundStatus
+  refund_amount?: number | null
   extras: FolioLineExtra[]
 }
 

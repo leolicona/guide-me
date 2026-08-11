@@ -42,6 +42,10 @@ export interface CancellationQuoteLine {
   retention: number
   /** Already scanned — it retains its whole total regardless of the ladder (D7). */
   redeemed: boolean
+  /** US-A22 — what cancelling THIS line alone would return, computed server-side with the same
+   * subset arithmetic the line-cancel endpoint uses. `null` on quotes without allocations. */
+  line_refund?: number | null
+  line_reversed_commission?: number | null
 }
 
 export interface CancellationQuote {

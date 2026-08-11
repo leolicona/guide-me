@@ -119,17 +119,23 @@ function eventPrimary(ev: FolioEvent): ReactNode {
       return `Reagendado: ${from} → ${to}`
     }
     case 'cancelled': {
+      // US-A22 (line-autonomy D13) — a LINE-scoped cancellation names its protagonist. The
+      // identity rides the payload (never a join), so the story survives the line's own columns.
+      const line = p?.line as Record<string, unknown> | undefined
+      const lineName = typeof line?.service_name === 'string' ? (line.service_name as string) : null
+      const lineDate = typeof line?.slot_date === 'string' ? (line.slot_date as string) : null
+      const scope = lineName ? `Canceló ${lineName}${lineDate ? ` (${lineDate})` : ''}` : null
       switch (str(p, 'source')) {
         case 'system_expiry':
           return 'Apartado vencido — cancelado por el sistema'
         case 'tourist_request':
-          return 'Cancelado a solicitud del cliente'
+          return scope ? `${scope} — a solicitud del cliente` : 'Cancelado a solicitud del cliente'
         case 'admin':
-          return 'Cancelado por administración'
+          return scope ? `${scope} — por administración` : 'Cancelado por administración'
         case 'agent':
           return str(p, 'kind') === 'express_void' ? 'Venta Express anulada' : 'Cancelado en mostrador'
         default:
-          return 'Cancelado'
+          return scope ?? 'Cancelado'
       }
     }
     case 'refund_confirmed': {

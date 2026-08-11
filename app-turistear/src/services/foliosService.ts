@@ -117,6 +117,25 @@ export const cancelFolio = async (
   return { folio: res.folio, cancellation: res.cancellation ?? null }
 }
 
+// US-A22 (line-autonomy F2) — cancel ONE line; its siblings come out untouched. Same contract as
+// the total cancel: reason only, money always derived by the org's ladder.
+export const cancelFolioLine = async (
+  id: string,
+  lineId: string,
+  options: CancelFolioOptions = {},
+): Promise<{ folio: FolioDetail; cancellation: CancellationOutcome | null }> => {
+  const body: Record<string, unknown> = {}
+  if (options.reason) body.reason = options.reason
+  const res = await request<{
+    folio: FolioDetail
+    cancellation?: CancellationOutcome | null
+  }>(`/api/folios/${id}/lines/${lineId}/cancel`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  })
+  return { folio: res.folio, cancellation: res.cancellation ?? null }
+}
+
 // --- Tourist cancellation requests + refund tracking (US-T04/T05, US-A23) ---
 // Spec: docs/tourist-portal/tourist-self-service-portal.spec.md
 

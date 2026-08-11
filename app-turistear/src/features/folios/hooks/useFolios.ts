@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   approveCancellationRequest,
   cancelFolio,
+  cancelFolioLine,
   confirmRefund,
   getFolio,
   getFolioCounts,
@@ -58,6 +59,16 @@ export const useCancelFolio = () => {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: ({ id, reason }: { id: string; reason?: string }) => cancelFolio(id, { reason }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: FOLIOS_KEY }),
+  })
+}
+
+// US-A22 (line-autonomy F2) — cancel ONE line; same refresh, same ladder-decides contract.
+export const useCancelFolioLine = () => {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, lineId, reason }: { id: string; lineId: string; reason?: string }) =>
+      cancelFolioLine(id, lineId, { reason }),
     onSuccess: () => qc.invalidateQueries({ queryKey: FOLIOS_KEY }),
   })
 }

@@ -684,23 +684,52 @@ export const getFolioDetail = async (c: FoliosContext) => {
   // US-A24 — the narrative rides the detail ("the folio is one object" applies to the API too).
   const events = await readFolioEvents(db, admin.organizationId, id)
 
-  return c.json({ folio, cancellation_quote: quote ? serializeQuote(quote) : null, events })
+  return c.json({
+    folio,
+    cancellation_quote: quote ? serializeQuote(quote, folio.lines) : null,
+    events,
+  })
 }
 
-const serializeQuote = (o: CancellationOutcome) => ({
-  refund: o.refund,
-  retention: o.retention,
-  kept_commission: o.keptCommission,
-  reversed_commission: o.reversedCommission,
-  lines: o.lines.map((l) => ({
-    line_id: l.lineId,
-    // Rounded for display; the decision itself used the exact value.
-    hours_out: Number.isFinite(l.hoursOut) ? Math.round(l.hoursOut) : null,
-    refund_pct: l.refundPct,
-    retention: l.retention,
-    redeemed: l.redeemed,
-  })),
-})
+const serializeQuote = (
+  o: CancellationOutcome,
+  // US-A22 — the per-line ALLOCATED sums (readFolio already computed them), so each line can
+  // carry what cancelling IT ALONE would return. Omitted by callers that only need folio totals.
+  linesOut?: Array<{ id: string; allocated?: number }>,
+) => {
+  const allocatedByLine = new Map(
+    (linesOut ?? []).map((l) => [l.id, Math.max(0, l.allocated ?? 0)]),
+  )
+  return {
+    refund: o.refund,
+    retention: o.retention,
+    kept_commission: o.keptCommission,
+    reversed_commission: o.reversedCommission,
+    lines: o.lines.map((l) => {
+      // The single-line SUBSET quote's arithmetic, computed server-side so the ConfirmSheet
+      // never derives money (the folioCardState rule): refund = what the line holds minus what
+      // the ladder retains of it — pooling of one. Identical to quoteCancellation([lineId]) by
+      // construction; null when the caller sent no allocations.
+      const allocated = allocatedByLine.get(l.lineId)
+      const lineRefund = allocated === undefined ? null : Math.max(0, allocated - l.retention)
+      const realRetention = allocated === undefined ? null : allocated - (lineRefund ?? 0)
+      const lineReversed =
+        realRetention === null
+          ? null
+          : l.commission - Math.min(l.keptCommission, realRetention)
+      return {
+        line_id: l.lineId,
+        // Rounded for display; the decision itself used the exact value.
+        hours_out: Number.isFinite(l.hoursOut) ? Math.round(l.hoursOut) : null,
+        refund_pct: l.refundPct,
+        retention: l.retention,
+        redeemed: l.redeemed,
+        line_refund: lineRefund,
+        line_reversed_commission: lineReversed,
+      }
+    }),
+  }
+}
 
 // POST /folios/:id/ticket-delivery — the admin records the tickets were sent over WhatsApp
 // (whatsapp-qr-delivery D4/D13). Org-scoped (any folio in the org, no agent filter). Last-write-wins.
@@ -1301,6 +1330,16 @@ export const cancelFolioLine = async (c: FoliosContext) => {
       'PAYMENT_UNVERIFIED',
       409,
       'El pago está por verificar — verifica o rechaza el pago antes de cancelar',
+    )
+  }
+  // F3 owns the apartado's per-line gesture: settleBooking still collects `total − amount_paid`
+  // as ONE balance, so cancelling a booking's line here would leave the settle charging for a
+  // line that no longer exists. Until settle goes per line (F3), an apartado cancels whole.
+  if (folio.status === 'booking') {
+    throw new ApiError(
+      'LINE_CANCEL_UNSUPPORTED',
+      409,
+      'Cancelar una línea de un apartado llega con la liquidación por línea — por ahora cancela o liquida el apartado completo',
     )
   }
 

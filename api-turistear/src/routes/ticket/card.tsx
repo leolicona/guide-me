@@ -27,6 +27,10 @@ export interface TicketCardData {
   zoneName: string | null
   // The service's CURRENT description (meeting point / instructions) — live, not a snapshot.
   description: string | null
+  // US-A22 (line-autonomy F2) — THIS line was cancelled while its siblings live on. The owner
+  // already passes qrMarkup null; the flag makes the card SAY so instead of merely omitting the
+  // QR, which would read as a rendering failure rather than a fact.
+  cancelled?: boolean
 }
 
 export const TicketCard = ({
@@ -36,7 +40,8 @@ export const TicketCard = ({
   line: TicketCardData
   qrMarkup: string | null
 }) => (
-  <article class="portal-card portal-line">
+  <article class={`portal-card portal-line${line.cancelled ? ' portal-line-cancelled' : ''}`}>
+    {line.cancelled && <p class="portal-banner">Actividad cancelada</p>}
     <h3>{line.serviceName}</h3>
     <p>
       📅 {formatSlotDate(line.slotDate)} — {line.slotStartTime} h
