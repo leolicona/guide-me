@@ -287,6 +287,9 @@ export interface FolioListLine {
   quantity: number
   redeemed_count?: number
   fulfillment?: Fulfillment
+  /** US-A89 (D14) — the line's own money state for the card's per-line marks; absent on a
+   * legacy line with no allocations (the card simply shows no mark). */
+  money_state?: 'paid' | 'booking' | 'cancelled'
 }
 
 // US-AG20 / US-AG07.3 — lean row for the agent's own folio history & the Apartados dashboard.

@@ -159,3 +159,41 @@ describe('US-A85 — the `Sin usar` facet', () => {
     expect(matchesFacets(row('no_show'), ['sin_usar', 'cancelado'])).toBe(false)
   })
 })
+
+// --- US-A89 (line-autonomy D15) — Pago facets are ANY-LINE ----------------------------------------
+
+describe('D15 — a mixed folio appears under every facet one of its lines earns', () => {
+  const mixed = {
+    id: 'fx',
+    agent: { id: 'a', name: 'Ana' },
+    customer_name: 'C',
+    status: 'booking',
+    total: 150000,
+    amount_paid: 115000,
+    created_at: 1_700_000_000,
+    cancelled_at: null,
+    lines: [
+      { service_name: 'Isla', line_type: 'slot', slot_date: '2026-08-20', slot_start_time: '09:00', check_in: null, check_out: null, guests: null, quantity: 1, money_state: 'paid' },
+      { service_name: 'Chichén', line_type: 'slot', slot_date: '2026-08-22', slot_start_time: '07:30', check_in: null, check_out: null, guests: null, quantity: 1, money_state: 'booking' },
+    ],
+  } as unknown as FolioListItem
+
+  it('paid AND booking at once — the truth of the data (S-12)', () => {
+    expect(matchesFacets(mixed, ['pagado'])).toBe(true)
+    expect(matchesFacets(mixed, ['reserva'])).toBe(true)
+    expect(matchesFacets(mixed, ['cancelado'])).toBe(false)
+  })
+
+  it('a folio whose lines carry no marks answers by its roll-up status (the legacy valve)', () => {
+    const legacy = {
+      ...mixed,
+      id: 'legacy',
+      status: 'paid',
+      lines: [
+        { service_name: 'Tour', line_type: 'slot', slot_date: '2026-08-20', slot_start_time: '09:00', check_in: null, check_out: null, guests: null, quantity: 1 },
+      ],
+    } as unknown as FolioListItem
+    expect(matchesFacets(legacy, ['pagado'])).toBe(true)
+    expect(matchesFacets(legacy, ['reserva'])).toBe(false)
+  })
+})

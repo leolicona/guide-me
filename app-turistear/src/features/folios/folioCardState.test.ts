@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
+  folioAttention,
   folioAction,
   folioTimeChip,
   folioCustomerLabel,
@@ -564,5 +565,56 @@ describe('US-A87 — the credit reads first on a closed apartado', () => {
 
   it('a folio from before the feature is unaffected', () => {
     expect(folioMoneyAxis({ ...closed, refund_status: 'none' }).reading.kind).toBe('refundNone')
+  })
+})
+
+// --- US-A89 (line-autonomy D14) — the rail is the attention semaphore -----------------------------
+
+describe('D14 — folioAttention: one derivation feeds the rail and the button', () => {
+  const resting = {
+    status: 'paid' as const,
+    payment_verification: 'not_required' as const,
+    refund_status: 'none' as const,
+    tickets_sent_at: 1_700_000_000,
+    tickets_viewed_at: 1_700_000_100,
+    portal_link: 'https://x/p/t',
+    deliverable: true,
+  }
+
+  it('a paid, delivered, debt-free folio rests GREEN', () => {
+    expect(folioAttention(resting, { urgent: false }).rail).toBe('success')
+    expect(folioAttention(resting, { urgent: false }).level).toBe('ok')
+  })
+
+  it('any pending job the ladder surfaces turns the rail AMBER — colour and verb agree', () => {
+    // undelivered tickets → the button says Enviar boletos, the rail says work.
+    expect(
+      folioAttention(
+        { ...resting, tickets_sent_at: null, tickets_viewed_at: null },
+        { urgent: false },
+      ).rail,
+    ).toBe('warning')
+    // unverified money → Verificar.
+    expect(
+      folioAttention({ ...resting, payment_verification: 'pending' }, { urgent: false }).rail,
+    ).toBe('warning')
+    // a live petition → Revisar solicitud.
+    expect(
+      folioAttention({ ...resting, cancellation_request: 'pending' as const }, { urgent: false })
+        .rail,
+    ).toBe('warning')
+  })
+
+  it('money owed back or a dying hold turns it RED', () => {
+    expect(
+      folioAttention(
+        { ...resting, status: 'cancelled' as const, refund_status: 'pending' as const },
+        { urgent: false },
+      ).rail,
+    ).toBe('error')
+    expect(folioAttention({ ...resting, overdue: true }, { urgent: false }).rail).toBe('error')
+    expect(
+      folioAttention({ ...resting, status: 'booking' as const }, { urgent: true }).rail,
+    ).toBe('error')
   })
 })

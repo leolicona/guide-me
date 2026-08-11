@@ -4,6 +4,9 @@ import DoneRounded from '@mui/icons-material/Done'
 import DoneAllRounded from '@mui/icons-material/DoneAll'
 import EventBusyRounded from '@mui/icons-material/EventBusyRounded'
 import PaymentsRounded from '@mui/icons-material/PaymentsRounded'
+import CheckCircleRounded from '@mui/icons-material/CheckCircleRounded'
+import ScheduleRounded from '@mui/icons-material/ScheduleRounded'
+import BlockRounded from '@mui/icons-material/BlockRounded'
 import { MoneyText } from '../../../components'
 import { BookingWhatsAppButton, TicketWhatsAppButton, isUrgentBooking } from '../../bookings'
 import { MessageWhatsAppButton } from './MessageWhatsAppButton'
@@ -13,6 +16,7 @@ import {
   folioCustomerIdentity,
   folioCustomerLabel,
   folioDeliveryMark,
+  folioAttention,
   folioMoneyAxis,
   folioSoldSummary,
   folioTimeChip,
@@ -41,6 +45,17 @@ const RAIL_COLOR: Record<RailTone, string> = {
   success: 'success.main',
   warning: 'warning.main',
   error: 'error.main',
+}
+
+// D14 (line-autonomy) — the per-line mark on a MIXED folio: icon + word + functional colour,
+// never colour alone (DESIGN_TOKENS §3). Same vocabulary as FolioStatusChip.
+const LINE_MARK: Record<
+  'paid' | 'booking' | 'cancelled',
+  { label: string; color: string; icon: React.ReactNode }
+> = {
+  paid: { label: 'Pagado', color: 'success.main', icon: <CheckCircleRounded sx={{ fontSize: 14 }} /> },
+  booking: { label: 'Apartado', color: 'warning.main', icon: <ScheduleRounded sx={{ fontSize: 14 }} /> },
+  cancelled: { label: 'Cancelado', color: 'error.main', icon: <BlockRounded sx={{ fontSize: 14 }} /> },
 }
 
 /** The money figure and the words beside it (D6). One figure — a paid folio printed the same
@@ -203,13 +218,21 @@ export function FolioCard({
   nowSeconds = null,
   surface = 'admin',
 }: FolioCardProps) {
-  const { rail, reading } = folioMoneyAxis(folio)
+  const { reading } = folioMoneyAxis(folio)
   const sold = folioSoldSummary(folio.lines)
   const mark = folioDeliveryMark(folio)
   const isBooking = folio.status === 'booking'
   const urgent = isBooking && isUrgentBooking(folio.booking_expires_at)
   const action = folioAction(folio, { urgent, surface })
+  // D14 (line-autonomy) — the rail is the ATTENTION semaphore now, derived from the same
+  // pending-work ladder the button reads, so colour and verb can never disagree. The money
+  // reading below keeps its own semantics untouched.
+  const { rail } = folioAttention(folio, { urgent, surface })
   const timeChip = folioTimeChip(folio, nowSeconds)
+  // D14 — a MIXED folio names its lines: one mark per line, icon-paired, only when the states
+  // actually differ (a uniform folio stays quiet).
+  const lineMarks = (folio.lines ?? []).filter((l) => l.money_state)
+  const mixed = new Set(lineMarks.map((l) => l.money_state)).size > 1
 
   const title = sold.name
     ? [sold.name, sold.when, sold.more > 0 ? `+${sold.more}` : ''].filter(Boolean).join(' · ')
@@ -276,6 +299,29 @@ export function FolioCard({
               label={timeChip.label}
               sx={{ mt: 0.5, display: 'flex', width: 'fit-content' }}
             />
+          )}
+          {/* D14 (line-autonomy) — a MIXED folio names its lines, one icon-paired mark each: the
+              detail's truth, at a glance, only where the states differ. */}
+          {mixed && (
+            <Stack spacing={0.25} sx={{ mt: 0.5 }}>
+              {lineMarks.map((l, i) => (
+                <Typography
+                  key={l.id ?? i}
+                  variant="caption"
+                  noWrap
+                  sx={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 0.5,
+                    color: LINE_MARK[l.money_state!].color,
+                    fontWeight: 600,
+                  }}
+                >
+                  {LINE_MARK[l.money_state!].icon}
+                  {l.service_name} — {LINE_MARK[l.money_state!].label}
+                </Typography>
+              ))}
+            </Stack>
           )}
           <Divider sx={{ my: 1.5 }} />
           <Stack

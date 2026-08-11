@@ -30,7 +30,7 @@ import {
 } from '../../services/resend'
 import { generateRefundPin } from '../../utils/portal'
 import { folioFulfillment, lineFulfillment } from '../../utils/folioFulfillment'
-import { deriveStatusSql } from '../../utils/folioStatus'
+import { anyLineStatusSql, deriveStatusSql } from '../../utils/folioStatus'
 import {
   rescheduleFolio,
   reissueTicketsAfterReschedule,
@@ -438,7 +438,9 @@ export const listFolios = async (c: FoliosContext) => {
 
   const filters = [eq(folios.organizationId, org)]
   if (statusQ === 'paid' || statusQ === 'booking' || statusQ === 'cancelled') {
-    filters.push(eq(folios.status, statusQ))
+    // D15 (line-autonomy) — ANY-LINE semantics: the filter answers "is there work of this kind
+    // here?", so a mixed folio appears under every facet one of its lines earns.
+    filters.push(anyLineStatusSql(statusQ))
   }
   if (
     verificationQ === 'pending' ||
