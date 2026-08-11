@@ -14,7 +14,7 @@ import { sql } from 'drizzle-orm'
 //
 // The first branch is the transition's honesty valve: a folio with no allocations AT ALL (a
 // hand-seeded legacy fixture — never a production folio, which 0062's backfill covered) falls
-// back to the column rather than reading as an apartado it never was. PR-9 deletes the fallback
+// back to the column rather than reading as an apartado it never was. TECH_DEBT #25 deletes the fallback
 // together with the column.
 //
 // Correlations name outer columns RAW (`folios.id`, the displayMethodSql trick): an interpolated
@@ -42,7 +42,7 @@ export const deriveStatusSql = sql<'paid' | 'booking' | 'cancelled'>`(
 // D15 — facet/filter semantics are ANY-LINE, deliberately different from the field's worst-case
 // above: the filter answers "is there work of this kind here?", and a mixed folio genuinely has
 // both kinds (S-12: it may appear under two facets at once). Same legacy valve: a folio with no
-// allocations at all answers by its column; the valve dies with the column in PR-9.
+// allocations at all answers by its column; the valve dies with the column (TECH_DEBT #25).
 export const anyLineStatusSql = (status: 'paid' | 'booking' | 'cancelled') => {
   if (status === 'cancelled') {
     // Cancellation is a written stamp — no allocations needed to read it.
