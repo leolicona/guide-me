@@ -485,6 +485,20 @@ export const folioLines = sqliteTable('folio_lines', {
   commissionValue: integer('commission_value').notNull().default(0),
   qrToken: text('qr_token'), // signed access ticket; null for folios sold pre-feature
   redeemedCount: integer('redeemed_count').notNull().default(0), // passes redeemed; <= quantity
+  // US-A22 (docs/folios/line-autonomy.spec.md, D1's written half + D6) — the line's OWN
+  // cancellation and refund debt. Cancellation is WRITTEN (an action); pagada/apartada stay
+  // derived from allocations. A pre-feature total cancellation stamped these verbatim from the
+  // folio's snapshots (migration 0063); the refund split is reconstruction, pro-rata to the
+  // line's positive allocations.
+  cancelledAt: integer('cancelled_at', { mode: 'timestamp' }),
+  cancelledBy: text('cancelled_by').references(() => users.id),
+  cancellationSource: text('cancellation_source', {
+    enum: ['admin', 'agent', 'tourist_request', 'company', 'system_expiry'],
+  }),
+  refundStatus: text('refund_status', { enum: ['none', 'pending', 'refunded'] })
+    .notNull()
+    .default('none'),
+  refundAmount: integer('refund_amount'),
   // Accommodation stay line (docs/lodging/accommodation-stays.spec.md §4.4, Option A). lineType
   // 'slot' (tour, default) vs 'stay' (lodging). A stay line carries the unit type + date range +
   // guests + nights instead of a slot; its price is snapshotted in line_total (base_price =
@@ -964,6 +978,10 @@ export const folioPayments = sqliteTable('folio_payments', {
     .references(() => users.id),
   // The PIN shift that took it (US-A68); null for an in-house (agent/admin) collection.
   operatorId: text('operator_id').references((): any => affiliateOperators.id),
+  // US-A22 (line-autonomy D9) — which line an accrual or single-line reversal belongs to. NULL =
+  // folio-scoped (every pre-feature row, and multi-line reversals whose split lives in the
+  // allocations instead). SET NULL: a ledger row outlives its line, losing only the label.
+  folioLineId: text('folio_line_id').references((): any => folioLines.id, { onDelete: 'set null' }),
   verifiedAt: integer('verified_at', { mode: 'timestamp' }),
   verifiedBy: text('verified_by').references(() => users.id),
   createdAt: integer('created_at', { mode: 'timestamp' })
@@ -1035,6 +1053,10 @@ export const folioEvents = sqliteTable('folio_events', {
   actorId: text('actor_id').references(() => users.id),
   // The PIN shift that acted (US-A68); null for an in-house (agent/admin) action.
   operatorId: text('operator_id').references((): any => affiliateOperators.id),
+  // US-A22 (line-autonomy D13) — the line this event is about. NULL = folio-scoped (created,
+  // tickets_sent…); set for line-scoped actions (a line's cancellation, payment, reschedule).
+  // SET NULL: the narrative outlives its line.
+  folioLineId: text('folio_line_id').references(() => folioLines.id, { onDelete: 'set null' }),
   payload: text('payload'), // JSON, shape per event_type (spec § Data Model)
   backfilled: integer('backfilled', { mode: 'boolean' }).notNull().default(false),
   // The event's OWN moment — the mutation's clock, never the insert's (business rule 3).
@@ -1060,6 +1082,13 @@ export const notifications = sqliteTable('notifications', {
   folioId: text('folio_id')
     .notNull()
     .references(() => folios.id),
+  // US-A22 (line-autonomy D13) — the line this message is about; NULL = folio-scoped. Part of the
+  // re-send guard: unique on (folio, COALESCE(line,''), event, channel), an EXPRESSION index
+  // (0063) because SQLite treats NULLs as distinct — and without the line in the key, a second
+  // line's cancellation would collide with the first's guard and never be told to the customer.
+  // CASCADE (not SET NULL): nulling two line-scoped rows of one (folio, event, channel) would
+  // collide inside that COALESCE guard — and a guard row without its line guards nothing.
+  folioLineId: text('folio_line_id').references(() => folioLines.id, { onDelete: 'cascade' }),
   // The whitelist in `utils/notifications.ts`; never free text.
   event: text('event').notNull(),
   channel: text('channel', { enum: ['email', 'whatsapp'] }).notNull(),

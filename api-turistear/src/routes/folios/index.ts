@@ -7,6 +7,7 @@ import type { AppVariables } from '../../types/context'
 import {
   approveCancellationRequest,
   cancelFolio,
+  cancelFolioLine,
   confirmRefund,
   getFolioDetail,
   listCancellationRequests,
@@ -56,6 +57,13 @@ foliosRouter.post(
   '/:id/cancel',
   zValidator('json', cancelFolioSchema, validationHook),
   cancelFolio,
+)
+// US-A22 (line-autonomy F2) — cancel ONE line; the siblings come out byte-identical. Same body
+// contract as the total cancel: reason only, money always derived (the ladder decides).
+foliosRouter.post(
+  '/:id/lines/:lineId/cancel',
+  zValidator('json', cancelFolioSchema, validationHook),
+  cancelFolioLine,
 )
 // US-A23 / US-T05 — confirm the physical cash refund (PIN or override).
 foliosRouter.post(

@@ -147,6 +147,9 @@ export const emitNotification = async (
     event: NotificationEvent
     /** Whether the folio has an address on file. Decides `pending` vs `skipped` for the email row. */
     hasEmail: boolean
+    /** US-A22 (line-autonomy D13) — the line this message is about; omit for folio-scoped events.
+     * Part of the re-send guard: two different lines' cancellations are two messages, never one. */
+    folioLineId?: string | null
   },
 ): Promise<void> => {
   const rows = [
@@ -161,6 +164,7 @@ export const emitNotification = async (
           id: crypto.randomUUID(),
           organizationId: input.organizationId,
           folioId: input.folioId,
+          folioLineId: input.folioLineId ?? null,
           event: input.event,
           channel: r.channel,
           status: r.status,

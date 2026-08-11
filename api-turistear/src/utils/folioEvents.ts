@@ -31,6 +31,10 @@ interface FolioEventInput {
   actorId?: string | null
   // The PIN shift that acted (US-A68); null for an in-house (agent/admin) action.
   operatorId?: string | null
+  // US-A22 (line-autonomy D13) — the line this event is about; omit for a folio-scoped event.
+  // The payload should still NAME the line (service_name, slot_date) so the timeline renders
+  // without a join and survives the line's own columns changing.
+  folioLineId?: string | null
   // Shape per event_type (spec § Data Model). Stored as JSON text; nullish values are kept out.
   payload?: Record<string, unknown>
   // ONE clock domain — the request's (JS). Never a DB default here: the Workers runtime freezes
@@ -49,6 +53,7 @@ export const folioEventRow = (db: Db, input: FolioEventInput) =>
     eventType: input.type,
     actorId: input.actorId ?? null,
     operatorId: input.operatorId ?? null,
+    folioLineId: input.folioLineId ?? null,
     payload: input.payload ? JSON.stringify(prune(input.payload)) : null,
     createdAt: input.at,
   })

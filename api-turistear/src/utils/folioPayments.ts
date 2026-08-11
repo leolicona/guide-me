@@ -104,6 +104,9 @@ interface ReversalRowInput {
   at: Date // cancelled_at — the reversal's own date, so the watermark fast path sees it
   // US-LG09 — pre-generated when the caller attaches allocation rows (see PaymentRowInput.id).
   id?: string
+  // US-A22 (line-autonomy D9) — the line a SINGLE-line reversal belongs to; null when the
+  // reversal spans lines (the split lives in the allocations instead).
+  folioLineId?: string | null
 }
 
 // A cancellation reverses the money collected on the folio (its sale leaves the sales/cash buckets).
@@ -117,6 +120,7 @@ export const refundRow = (db: Db, input: ReversalRowInput) =>
     method: input.method,
     verification: 'not_required',
     collectedBy: input.collectedBy,
+    folioLineId: input.folioLineId ?? null,
     createdAt: input.at,
   })
 
@@ -132,6 +136,7 @@ export const commissionReversalRow = (db: Db, input: ReversalRowInput) =>
     method: input.method,
     verification: 'not_required',
     collectedBy: input.collectedBy,
+    folioLineId: input.folioLineId ?? null,
     createdAt: input.at,
   })
 
@@ -221,6 +226,10 @@ export const buildCancellationReversal = async (
     refundAmount?: number
     /** Reverse only this much commission, prorated. Omit to reverse it all (when `clawback`). */
     reversedCommission?: number
+    /** US-A22 — scope the reversal's ALLOCATIONS to these lines (a line cancellation reverses
+     * only its lines' money). Omit for a whole-folio reversal. The method buckets stay
+     * folio-wide either way — money is fungible across methods; the lines are what is not. */
+    lineIds?: string[]
   },
 ) => {
   const grouped = await db
@@ -292,9 +301,13 @@ export const buildCancellationReversal = async (
         eq(folioLines.folioId, input.folioId),
       ),
     )
+  // US-A22 — a line-scoped reversal weighs ONLY the cancelled lines: the survivors' money must
+  // come out untouched, which is the whole point of cancelling one line and not its siblings.
+  const scopedLines =
+    input.lineIds === undefined ? lineRows : lineRows.filter((l) => input.lineIds!.includes(l.id))
   const refundTotal = moneyToReverse.reduce((s, m) => s + m.amount, 0)
   const lineShares = prorateByWeight(
-    orderForCascade(lineRows).map((l) => ({
+    orderForCascade(scopedLines).map((l) => ({
       folioLineId: l.id,
       weight: Math.max(0, Number(l.allocated ?? 0)),
     })),
@@ -305,6 +318,10 @@ export const buildCancellationReversal = async (
     refundTotal > 0 && shareTotal === refundTotal
       ? splitRows(lineShares, moneyToReverse.map((m) => m.amount))
       : moneyToReverse.map(() => [] as LineAllocation[])
+
+  // D9 — a single-line reversal stamps the line on its rows; a multi-line one leaves them
+  // folio-scoped (the split lives in the allocations).
+  const stampLineId = input.lineIds?.length === 1 ? input.lineIds[0] : null
 
   const rows = []
   for (const [i, { method, amount }] of moneyToReverse.entries()) {
@@ -317,6 +334,7 @@ export const buildCancellationReversal = async (
         amount,
         method,
         collectedBy: input.collectedBy,
+        folioLineId: stampLineId,
         at: input.at,
       }),
       ...allocationRows(db, {
@@ -336,6 +354,7 @@ export const buildCancellationReversal = async (
         amount,
         method,
         collectedBy: input.collectedBy,
+        folioLineId: stampLineId,
         at: input.at,
       }),
     )

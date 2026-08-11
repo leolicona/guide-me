@@ -10,6 +10,8 @@ import {
 } from '../../src/utils/folioAllocations'
 // @ts-expect-error — vite's ?raw import; the test replays the migration's backfill INSERTs (S-15).
 import migrationSql from '../../migrations/0062_folio_payment_allocations.sql?raw'
+// @ts-expect-error — same pattern for F2's line-cancellation backfill (0063).
+import lineCancellationSql from '../../migrations/0063_line_cancellation.sql?raw'
 
 // US-LG09 / D10 (docs/folios/line-autonomy.spec.md) — the deterministic total backfill, proven
 // two ways: S-15 (conservation + idempotency over hand-seeded pre-feature folios of all three
@@ -297,6 +299,74 @@ describe('S-16 — the SQL and the TypeScript engine tell the same story', () =>
     for (const s of shares) {
       expect(refByLine.get(s.folioLineId)).toBe(-s.amount)
     }
+  })
+
+  it('0063 — a pre-feature cancelled folio arrives with its lines cancelled and the debt split pro-rata', async () => {
+    const d3 = addDays(todayStr(), 3)
+    const d5 = addDays(todayStr(), 5)
+    // Fully-paid 2-line folio, cancelled with a 50000 refund still owed (refund_status pending).
+    const folio = await seedFolio({
+      status: 'cancelled',
+      lines: [{ total: 100000, date: d3 }, { total: 50000, date: d5 }],
+      payments: [150000],
+      refunds: [100000],
+    })
+    await env.DB.prepare(
+      `UPDATE folios SET cancelled_at = ?, cancellation_source = 'admin', refund_status = 'pending', refund_amount = 50000 WHERE id = ?`,
+    )
+      .bind(CREATED_AT + 200, folio.folioId)
+      .run()
+
+    await runBackfill() // 0062 first: the weights the 0063 split reads
+    const updates = (lineCancellationSql as string)
+      .split('\n')
+      .filter((l) => !l.trim().startsWith('--'))
+      .join('\n')
+      .split(';')
+      .map((s) => s.trim())
+      .filter((s) => s.includes('UPDATE folio_lines'))
+    expect(updates).toHaveLength(2) // stamps + refund split
+    for (const stmt of updates) {
+      await env.DB.prepare(stmt).run()
+    }
+
+    const { results } = await env.DB.prepare(
+      `SELECT id, cancelled_at, cancellation_source, refund_status, refund_amount
+       FROM folio_lines WHERE folio_id = ?`,
+    )
+      .bind(folio.folioId)
+      .all()
+    const byId = new Map((results as any[]).map((r) => [r.id, r]))
+    const near = byId.get(folio.lines[0].id)
+    const far = byId.get(folio.lines[1].id)
+    // Stamps verbatim — every pre-feature cancellation was total.
+    expect(near.cancelled_at).toBe(CREATED_AT + 200)
+    expect(near.cancellation_source).toBe('admin')
+    expect(far.cancelled_at).toBe(CREATED_AT + 200)
+    // The 50000 debt splits pro-rata to the money each line held (100000/50000 → 33334/16666,
+    // remainder to the heaviest) — the same prorateByWeight rule, byte for byte.
+    const shares = prorateByWeight(
+      [
+        { folioLineId: folio.lines[0].id, weight: 100000 },
+        { folioLineId: folio.lines[1].id, weight: 50000 },
+      ],
+      50000,
+    )
+    expect(near.refund_amount).toBe(shares[0].amount)
+    expect(far.refund_amount).toBe(shares[1].amount)
+    expect(near.refund_status).toBe('pending')
+    expect(far.refund_status).toBe('pending')
+
+    // Idempotent: a re-run changes nothing (the IS NULL guards).
+    for (const stmt of updates) {
+      await env.DB.prepare(stmt).run()
+    }
+    const { results: after } = await env.DB.prepare(
+      `SELECT refund_amount FROM folio_lines WHERE id = ?`,
+    )
+      .bind(folio.lines[0].id)
+      .all()
+    expect((after[0] as any).refund_amount).toBe(shares[0].amount)
   })
 
   it('bookingSegments is the exact segment sequence the SQL lays payments over', () => {

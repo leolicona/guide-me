@@ -2110,6 +2110,13 @@ const readFolio = async (
       checkOut: folioLines.checkOut,
       guests: folioLines.guests,
       nights: folioLines.nights,
+      // US-A22 — the line's own life, mirrored on the seller detail (same fields the admin GET
+      // widened by; the raw outer-column correlation is the displayMethodSql trick).
+      cancelledAt: folioLines.cancelledAt,
+      cancellationSource: folioLines.cancellationSource,
+      lineRefundStatus: folioLines.refundStatus,
+      lineRefundAmount: folioLines.refundAmount,
+      allocated: sql<number>`coalesce((select sum(a.amount) from folio_payment_allocations a where a.folio_line_id = folio_lines.id), 0)`,
     })
     .from(folioLines)
     .where(and(eq(folioLines.folioId, folioId), eq(folioLines.organizationId, org)))
@@ -2163,6 +2170,21 @@ const readFolio = async (
         check_out: line.checkOut,
         guests: line.guests,
         nights: line.nights,
+        // US-A22 — the line's own money state (derived from allocations; cancellation read from
+        // its written stamp), same shape as the admin detail.
+        money_state: line.cancelledAt
+          ? ('cancelled' as const)
+          : Math.max(0, Number(line.allocated ?? 0)) >= line.lineTotal
+            ? ('paid' as const)
+            : ('booking' as const),
+        allocated: Math.max(0, Number(line.allocated ?? 0)),
+        pending_balance: line.cancelledAt
+          ? 0
+          : Math.max(0, line.lineTotal - Math.max(0, Number(line.allocated ?? 0))),
+        cancelled_at: line.cancelledAt ? Math.floor(line.cancelledAt.getTime() / 1000) : null,
+        cancellation_source: line.cancellationSource,
+        refund_status: line.lineRefundStatus,
+        refund_amount: line.lineRefundAmount,
         quantity: line.quantity,
         base_price: line.basePrice,
         minimum_price: line.minimumPrice,
