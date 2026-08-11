@@ -14,7 +14,7 @@
 // how you get back to a clean board.
 
 import { execFileSync } from 'node:child_process'
-import { writeFileSync, mkdtempSync } from 'node:fs'
+import { writeFileSync, mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
@@ -83,6 +83,13 @@ const folio = ({
     ...extra,
   }
   const lineId = randomUUID()
+  // US-LG09 — every folio carries its ledger row (a folio always has ≥1 payment row, US-LG08):
+  // one 'pmt_' payment from the scalars, exactly the 0049 backfill's shape — which cannot be
+  // re-run itself (it read the since-dropped payment_method column). The method mirrors the
+  // folio's verification extra: a 'pending'/'verified' folio was a transfer, the rest cash.
+  // The 0062 replay appended below then derives every per-line allocation from these rows.
+  const method = extra.payment_verification ? 'transfer' : 'cash'
+  const verification = extra.payment_verification ?? q('not_required')
   return [
     `INSERT INTO folios (${Object.keys(cols).join(', ')}) VALUES (${Object.values(cols).join(', ')});`,
     `INSERT INTO folio_lines (id, organization_id, folio_id, service_id, slot_id, service_name,
@@ -94,6 +101,14 @@ const folio = ({
        ${Math.round(total / quantity)}, ${Math.round(total / quantity)},
        ${Math.round(total / quantity)}, ${total},
        NULL, ${redeemed}, ${createdAt});`,
+    ...(paid > 0
+      ? [
+          `INSERT INTO folio_payments (id, organization_id, folio_id, entry_type, amount, method,
+             reference, verification, collected_by, created_at)
+           VALUES (${q(`pmt_${id}`)}, ${q(ORG_ID)}, ${q(id)}, 'payment', ${paid}, ${q(method)},
+             ${extra.payment_reference ?? 'NULL'}, ${verification}, ${q(agentId)}, ${createdAt});`,
+        ]
+      : []),
   ].join('\n')
 }
 
@@ -135,8 +150,12 @@ DELETE FROM notifications WHERE organization_id = ${q(ORG_ID)};
 -- The portal token seeded below references folios — without this, the SECOND run dies on the FK.
 DELETE FROM folio_access_tokens WHERE organization_id = ${q(ORG_ID)};
 -- 0060 renamed cancellation_requests, and its new folio_line_id FK means it must go BEFORE the lines.
+-- 0061's backfill synthesizes events for every folio (including previously seeded ones), so the
+-- narrative must go before the folios or their delete dies on the FK.
+DELETE FROM folio_events WHERE organization_id = ${q(ORG_ID)};
 DELETE FROM folio_requests WHERE organization_id = ${q(ORG_ID)};
 DELETE FROM folio_lines WHERE organization_id = ${q(ORG_ID)};
+DELETE FROM folio_payment_allocations WHERE organization_id = ${q(ORG_ID)};
 DELETE FROM folio_payments WHERE organization_id = ${q(ORG_ID)};
 
 DELETE FROM folios WHERE organization_id = ${q(ORG_ID)};
@@ -315,8 +334,24 @@ ${folio({
 })}
 `
 
+// US-LG09 — the seeded sales get their per-line allocations from the SAME rule that backfills
+// production: migration 0062's INSERT blocks, replayed verbatim over the rows written above.
+// One rule, zero drift — if the migration's arithmetic changes, the seed follows automatically.
+const allocationBackfill = readFileSync(
+  new URL('../migrations/0062_folio_payment_allocations.sql', import.meta.url),
+  'utf8',
+)
+  .split('\n')
+  .filter((l) => !l.trim().startsWith('--'))
+  .join('\n')
+  .split(';')
+  .map((s) => s.trim())
+  .filter((s) => s.includes('INSERT INTO folio_payment_allocations'))
+  .map((s) => `${s};`)
+  .join('\n\n')
+
 const file = join(mkdtempSync(join(tmpdir(), 'seed-')), 'seed.sql')
-writeFileSync(file, sql)
+writeFileSync(file, `${sql}\n\n${allocationBackfill}\n`)
 
 console.log('→ writing to the LOCAL D1 replica')
 execFileSync(

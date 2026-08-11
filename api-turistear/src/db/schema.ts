@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm'
-import { sqliteTable, text, integer } from 'drizzle-orm/sqlite-core'
+import { index, sqliteTable, text, integer } from 'drizzle-orm/sqlite-core'
 
 export const organizations = sqliteTable('organizations', {
   id: text('id').primaryKey(),
@@ -971,6 +971,39 @@ export const folioPayments = sqliteTable('folio_payments', {
     .default(sql`(unixepoch())`),
 })
 
+// US-LG09 (docs/folios/line-autonomy.spec.md, D1) — the money's per-line owner: one SIGNED row per
+// (payment, line), signed like its parent ledger row; Σ of a payment's allocations = the payment's
+// amount, written in the SAME batch (rule 1, `assertAllocations`). A line's money state
+// (pagada/apartada) is DERIVED from these rows — never stored. Nothing reads the table in F1 (the
+// verified-shadow step); `backfilled` marks migration-0062 reconstructions and is forensic
+// metadata only — no logic may branch on it.
+export const folioPaymentAllocations = sqliteTable(
+  'folio_payment_allocations',
+  {
+    id: text('id').primaryKey(),
+    organizationId: text('organization_id')
+      .notNull()
+      .references(() => organizations.id),
+    // ON DELETE CASCADE — nothing in production deletes a ledger row or a line (append-only
+    // domain); the cascade keeps a child allocation from orphan-blocking cleanup deletes.
+    paymentId: text('payment_id')
+      .notNull()
+      .references(() => folioPayments.id, { onDelete: 'cascade' }),
+    folioLineId: text('folio_line_id')
+      .notNull()
+      .references(() => folioLines.id, { onDelete: 'cascade' }),
+    amount: integer('amount').notNull(), // signed minor units, never 0
+    backfilled: integer('backfilled', { mode: 'boolean' }).notNull().default(false),
+    createdAt: integer('created_at', { mode: 'timestamp' })
+      .notNull()
+      .default(sql`(unixepoch())`),
+  },
+  (table) => [
+    index('folio_payment_allocations_line_idx').on(table.organizationId, table.folioLineId),
+    index('folio_payment_allocations_payment_idx').on(table.paymentId),
+  ],
+)
+
 // US-A24 / US-AG53 (docs/folios/folio-timeline.spec.md) — the folio's append-only narrative. One
 // row per USER ACTION (D9), written in the SAME batch as its mutation (D3, the BUG-013 lesson).
 // A narrative, never an authority: no money or state computation reads it — every fact stays
@@ -1049,6 +1082,8 @@ export const notifications = sqliteTable('notifications', {
 export type Notification = typeof notifications.$inferSelect
 export type NewNotification = typeof notifications.$inferInsert
 
+export type FolioPaymentAllocation = typeof folioPaymentAllocations.$inferSelect
+export type NewFolioPaymentAllocation = typeof folioPaymentAllocations.$inferInsert
 export type FolioPayment = typeof folioPayments.$inferSelect
 export type NewFolioPayment = typeof folioPayments.$inferInsert
 
