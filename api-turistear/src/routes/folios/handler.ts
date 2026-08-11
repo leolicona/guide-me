@@ -1293,13 +1293,253 @@ export const cancelFolio = async (c: FoliosContext) => {
   return c.json({ folio: folioOut, cancellation: serializeOutcome(outcome) })
 }
 
+// US-A22 / US-AG54 (docs/folios/line-autonomy.spec.md) — THE subset commit: cancel some of a
+// folio's lines, the rest byte-identical. One implementation for its three entrances — the
+// admin's line cancel, the agent's apartado line cancel, and the expiry sweep — exactly as
+// cancelFolioPriced is for total cancellations: no entrance can express a different opinion
+// about the same lines.
+//
+// Race-safe order (BUG-013): guarded per-line flips FIRST — a racing cancel loses a flip and
+// that line is excluded before anything is priced against it — then the winner's batch releases
+// inventory, reverses money (allocations scoped to the winners), rolls the folio up from its
+// lines, and flips the folio itself only when no live line remains.
+//
+// `creditInsteadOfRefund` is the sweep's mode (US-A87): a clock-produced close has nobody
+// standing there to hand cash to, so what the ladder does not retain accrues as CREDIT — no
+// refund obligation, no PIN — and the folio's hold clock re-rolls to the surviving lines' MIN.
+export const cancelFolioLinesPriced = async (
+  db: Db,
+  org: string,
+  folioId: string,
+  lineIds: string[],
+  now: Date,
+  by: {
+    cancelledBy: string | null
+    reason: string | null
+    source: 'admin' | 'agent' | 'tourist_request' | 'system_expiry'
+  },
+  opts?: { creditInsteadOfRefund?: { validDays: number } },
+): Promise<{ won: boolean; outcome: CancellationOutcome; cancelledLineIds: string[] }> => {
+  const [folioMeta] = await db
+    .select({ agentId: folios.agentId })
+    .from(folios)
+    .where(and(eq(folios.id, folioId), eq(folios.organizationId, org)))
+    .limit(1)
+  if (!folioMeta) throw new ApiError('NOT_FOUND', 404, 'Folio not found')
+  const credit = opts?.creditInsteadOfRefund ?? null
+
+  const targetLines = await db
+    .select({
+      id: folioLines.id,
+      slotId: folioLines.slotId,
+      quantity: folioLines.quantity,
+      zoneId: folioLines.zoneId,
+      lineType: folioLines.lineType,
+      unitTypeId: folioLines.unitTypeId,
+      checkIn: folioLines.checkIn,
+      checkOut: folioLines.checkOut,
+      serviceName: folioLines.serviceName,
+      slotDate: folioLines.slotDate,
+      slotStartTime: folioLines.slotStartTime,
+      cancelledAt: folioLines.cancelledAt,
+      allocated: sql<number>`coalesce((select sum(a.amount) from folio_payment_allocations a where a.folio_line_id = folio_lines.id and a.amount > 0), 0)`,
+    })
+    .from(folioLines)
+    .where(
+      and(
+        eq(folioLines.folioId, folioId),
+        eq(folioLines.organizationId, org),
+        inArray(folioLines.id, lineIds),
+      ),
+    )
+  const liveTargets = targetLines.filter((l) => !l.cancelledAt)
+  if (liveTargets.length === 0) {
+    return {
+      won: false,
+      outcome: await quoteCancellation(db, org, folioId, now, lineIds),
+      cancelledLineIds: [],
+    }
+  }
+
+  const liveIds = liveTargets.map((l) => l.id)
+  const outcome = await quoteCancellation(db, org, folioId, now, liveIds)
+  const shares = new Map(
+    prorateByWeight(
+      orderForCascade(liveTargets).map((l) => ({
+        folioLineId: l.id,
+        weight: Math.max(0, Number(l.allocated ?? 0)),
+      })),
+      outcome.refund,
+    ).map((s) => [s.folioLineId, s.amount]),
+  )
+
+  // 1. Guarded per-line flips. In credit mode the remainder never becomes a cash obligation, so
+  //    the refund fields stay untouched (the credit accrues on the folio below).
+  const winners: typeof liveTargets = []
+  for (const line of liveTargets) {
+    const share = shares.get(line.id) ?? 0
+    const flip = await db
+      .update(folioLines)
+      .set({
+        cancelledAt: now,
+        cancelledBy: by.cancelledBy,
+        cancellationSource: by.source,
+        ...(share > 0 && !credit
+          ? { refundStatus: 'pending' as const, refundAmount: share }
+          : {}),
+      })
+      .where(
+        and(
+          eq(folioLines.id, line.id),
+          eq(folioLines.organizationId, org),
+          sql`${folioLines.cancelledAt} is null`,
+        ),
+      )
+      .returning({ id: folioLines.id })
+    if (flip.length > 0) winners.push(line)
+  }
+  if (winners.length === 0) return { won: false, outcome, cancelledLineIds: [] }
+  // Residual: a race that took SOME of the targets leaves the outcome priced over the full live
+  // set — the same pre-check-then-commit residual every cancellation path accepts.
+
+  // 2. The winners' batch.
+  const statements: BatchItem<'sqlite'>[] = []
+  for (const line of winners) {
+    if (line.slotId && line.zoneId) {
+      statements.push(
+        db
+          .update(slotZones)
+          .set({ booked: sql`MAX(0, ${slotZones.booked} - ${line.quantity})`, updatedAt: now })
+          .where(
+            and(
+              eq(slotZones.slotId, line.slotId),
+              eq(slotZones.zoneId, line.zoneId),
+              eq(slotZones.organizationId, org),
+            ),
+          ),
+        reconcileSlotTotals(db, line.slotId),
+      )
+    } else if (line.slotId) {
+      statements.push(
+        db
+          .update(slots)
+          .set({ booked: sql`MAX(0, ${slots.booked} - ${line.quantity})`, updatedAt: now })
+          .where(and(eq(slots.id, line.slotId), eq(slots.organizationId, org))),
+      )
+    } else if (line.lineType === 'stay' && line.unitTypeId) {
+      // A stay line's inventory is its reservation row, matched by the stay's own coordinates
+      // (the reservations table predates line autonomy and carries no folio_line_id).
+      statements.push(
+        db
+          .update(accommodationReservations)
+          .set({ status: 'cancelled', updatedAt: now })
+          .where(
+            and(
+              eq(accommodationReservations.folioId, folioId),
+              eq(accommodationReservations.organizationId, org),
+              eq(accommodationReservations.unitTypeId, line.unitTypeId),
+              eq(accommodationReservations.checkIn, line.checkIn ?? ''),
+              eq(accommodationReservations.checkOut, line.checkOut ?? ''),
+              eq(accommodationReservations.status, 'active'),
+            ),
+          ),
+      )
+    }
+  }
+
+  statements.push(
+    ...(await buildCancellationReversal(db, {
+      organizationId: org,
+      folioId,
+      collectedBy: folioMeta.agentId,
+      at: now,
+      clawback: outcome.reversedCommission > 0,
+      refundAmount: outcome.refund,
+      reversedCommission: outcome.reversedCommission,
+      lineIds: winners.map((l) => l.id),
+    })),
+  )
+
+  // The folio-level roll-up while the columns live (D11's honesty rule): the refund obligation is
+  // Σ of its pending lines (one PIN, minted once) — or, in credit mode, the remainder ACCRUES as
+  // credit with a fresh expiry. Either way the hold clock re-rolls to the surviving live lines'
+  // MIN, so the settle guard and the sweep keep reading a truthful folio.
+  statements.push(
+    db
+      .update(folios)
+      .set({
+        ...(outcome.reversedCommission > 0 ? { cancellationClawback: true } : {}),
+        ...(outcome.refund > 0 && !credit
+          ? {
+              refundStatus: 'pending' as const,
+              refundAmount: sql`(select coalesce(sum(fl.refund_amount), 0) from folio_lines fl where fl.folio_id = ${folioId} and fl.refund_status = 'pending')`,
+              refundPin: sql`coalesce(${folios.refundPin}, ${generateRefundPin()})`,
+            }
+          : {}),
+        ...(outcome.refund > 0 && credit
+          ? {
+              creditAmount: sql`${folios.creditAmount} + ${outcome.refund}`,
+              creditExpiresAt: new Date(now.getTime() + credit.validDays * 86_400_000),
+            }
+          : {}),
+        bookingExpiresAt: sql`(select min(fl.booking_expires_at) from folio_lines fl where fl.folio_id = ${folioId} and fl.cancelled_at is null and fl.booking_expires_at is not null)`,
+        updatedAt: now,
+      })
+      .where(and(eq(folios.id, folioId), eq(folios.organizationId, org))),
+    // The folio itself flips only when no live line remains — then it IS a total cancellation
+    // and every existing reader stays truthful.
+    db
+      .update(folios)
+      .set({
+        status: 'cancelled',
+        cancelledAt: now,
+        cancelledBy: by.cancelledBy,
+        cancellationSource: by.source,
+        cancellationReason: by.reason,
+      })
+      .where(
+        and(
+          eq(folios.id, folioId),
+          eq(folios.organizationId, org),
+          ne(folios.status, 'cancelled'),
+          sql`not exists (select 1 from folio_lines fl where fl.folio_id = ${folioId} and fl.cancelled_at is null)`,
+        ),
+      ),
+  )
+  // The narrative names each line (D13/D9) — payload identity, never a join.
+  for (const line of winners) {
+    statements.push(
+      folioEventRow(db, {
+        organizationId: org,
+        folioId,
+        type: 'cancelled',
+        actorId: by.cancelledBy,
+        folioLineId: line.id,
+        payload: {
+          source: by.source,
+          reason: by.reason,
+          clawback: outcome.reversedCommission > 0,
+          refund_amount: credit ? 0 : (shares.get(line.id) ?? 0),
+          credit_amount: credit ? (shares.get(line.id) ?? 0) : undefined,
+          line: {
+            service_name: line.serviceName,
+            slot_date: line.slotDate,
+            slot_start_time: line.slotStartTime,
+            check_in: line.checkIn,
+          },
+        },
+        at: now,
+      }),
+    )
+  }
+  await db.batch(statements as [BatchItem<'sqlite'>, ...BatchItem<'sqlite'>[]])
+  return { won: true, outcome, cancelledLineIds: winners.map((l) => l.id) }
+}
+
 // US-A22 (docs/folios/line-autonomy.spec.md, F2) — cancel ONE line; the siblings come out
 // byte-identical. Priced by the same quote the total cancellation uses, restricted to the line
-// (subset pooling over its allocated money); committed in the same race-safe order as
-// applyCancellation (BUG-013): the guarded LINE flip first — a racing cancel loses there and
-// releases nothing — then the winner's batch releases the line's inventory, reverses its money
-// (allocations scoped to the line), rolls the folio's refund obligation up from its lines, and
-// flips the folio itself only when no live line remains.
+// (subset pooling over its allocated money); committed through cancelFolioLinesPriced, the same
+// commit the agent's apartado line cancel and the expiry sweep use.
 export const cancelFolioLine = async (c: FoliosContext) => {
   const admin = c.get('user')
   const org = admin.organizationId
@@ -1332,32 +1572,9 @@ export const cancelFolioLine = async (c: FoliosContext) => {
       'El pago está por verificar — verifica o rechaza el pago antes de cancelar',
     )
   }
-  // F3 owns the apartado's per-line gesture: settleBooking still collects `total − amount_paid`
-  // as ONE balance, so cancelling a booking's line here would leave the settle charging for a
-  // line that no longer exists. Until settle goes per line (F3), an apartado cancels whole.
-  if (folio.status === 'booking') {
-    throw new ApiError(
-      'LINE_CANCEL_UNSUPPORTED',
-      409,
-      'Cancelar una línea de un apartado llega con la liquidación por línea — por ahora cancela o liquida el apartado completo',
-    )
-  }
 
   const lineRows = await db
-    .select({
-      id: folioLines.id,
-      slotId: folioLines.slotId,
-      quantity: folioLines.quantity,
-      zoneId: folioLines.zoneId,
-      lineType: folioLines.lineType,
-      unitTypeId: folioLines.unitTypeId,
-      checkIn: folioLines.checkIn,
-      checkOut: folioLines.checkOut,
-      serviceName: folioLines.serviceName,
-      slotDate: folioLines.slotDate,
-      slotStartTime: folioLines.slotStartTime,
-      cancelledAt: folioLines.cancelledAt,
-    })
+    .select({ id: folioLines.id, cancelledAt: folioLines.cancelledAt })
     .from(folioLines)
     .where(and(eq(folioLines.id, lineId), eq(folioLines.folioId, id), eq(folioLines.organizationId, org)))
     .limit(1)
@@ -1369,149 +1586,14 @@ export const cancelFolioLine = async (c: FoliosContext) => {
   }
 
   const now = new Date()
-  const outcome = await quoteCancellation(db, org, id, now, [lineId])
-
-  // 1. The guarded LINE flip — refund debt stamped in the same statement, so the line and its
-  //    obligation can never disagree.
-  const wonLine = await db
-    .update(folioLines)
-    .set({
-      cancelledAt: now,
-      cancelledBy: admin.userId,
-      cancellationSource: 'admin',
-      ...(outcome.refund > 0
-        ? { refundStatus: 'pending' as const, refundAmount: outcome.refund }
-        : {}),
-    })
-    .where(
-      and(
-        eq(folioLines.id, lineId),
-        eq(folioLines.organizationId, org),
-        sql`${folioLines.cancelledAt} is null`,
-      ),
-    )
-    .returning({ id: folioLines.id })
-  if (wonLine.length === 0) {
+  const { won, outcome } = await cancelFolioLinesPriced(db, org, id, [lineId], now, {
+    cancelledBy: admin.userId,
+    reason: input.reason ?? null,
+    source: 'admin',
+  })
+  if (!won) {
     throw new ApiError('LINE_ALREADY_CANCELLED', 409, 'This line is already cancelled')
   }
-
-  // 2. The winner's batch.
-  const statements: BatchItem<'sqlite'>[] = []
-  if (line.slotId && line.zoneId) {
-    statements.push(
-      db
-        .update(slotZones)
-        .set({ booked: sql`MAX(0, ${slotZones.booked} - ${line.quantity})`, updatedAt: now })
-        .where(
-          and(
-            eq(slotZones.slotId, line.slotId),
-            eq(slotZones.zoneId, line.zoneId),
-            eq(slotZones.organizationId, org),
-          ),
-        ),
-      reconcileSlotTotals(db, line.slotId),
-    )
-  } else if (line.slotId) {
-    statements.push(
-      db
-        .update(slots)
-        .set({ booked: sql`MAX(0, ${slots.booked} - ${line.quantity})`, updatedAt: now })
-        .where(and(eq(slots.id, line.slotId), eq(slots.organizationId, org))),
-    )
-  } else if (line.lineType === 'stay' && line.unitTypeId) {
-    // A stay line's inventory is its reservation row, matched by the stay's own coordinates
-    // (the reservations table predates line autonomy and carries no folio_line_id).
-    statements.push(
-      db
-        .update(accommodationReservations)
-        .set({ status: 'cancelled', updatedAt: now })
-        .where(
-          and(
-            eq(accommodationReservations.folioId, id),
-            eq(accommodationReservations.organizationId, org),
-            eq(accommodationReservations.unitTypeId, line.unitTypeId),
-            eq(accommodationReservations.checkIn, line.checkIn ?? ''),
-            eq(accommodationReservations.checkOut, line.checkOut ?? ''),
-            eq(accommodationReservations.status, 'active'),
-          ),
-        ),
-    )
-  }
-
-  statements.push(
-    ...(await buildCancellationReversal(db, {
-      organizationId: org,
-      folioId: id,
-      collectedBy: folio.agentId,
-      at: now,
-      clawback: outcome.reversedCommission > 0,
-      refundAmount: outcome.refund,
-      reversedCommission: outcome.reversedCommission,
-      lineIds: [lineId],
-    })),
-  )
-
-  // The folio-level obligation is a ROLL-UP of its lines while the columns live (D11's honesty
-  // rule): pending iff any line is pending, amount = Σ pending shares, and the PIN minted only
-  // when a debt exists and none was minted before — the tourist's portal always shows one PIN.
-  statements.push(
-    db
-      .update(folios)
-      .set({
-        ...(outcome.reversedCommission > 0 ? { cancellationClawback: true } : {}),
-        ...(outcome.refund > 0
-          ? {
-              refundStatus: 'pending' as const,
-              refundAmount: sql`(select coalesce(sum(fl.refund_amount), 0) from folio_lines fl where fl.folio_id = ${id} and fl.refund_status = 'pending')`,
-              refundPin: sql`coalesce(${folios.refundPin}, ${generateRefundPin()})`,
-            }
-          : {}),
-        updatedAt: now,
-      })
-      .where(and(eq(folios.id, id), eq(folios.organizationId, org))),
-    // The folio itself flips only when this was the last live line — then it IS a total
-    // cancellation and every existing reader stays truthful.
-    db
-      .update(folios)
-      .set({
-        status: 'cancelled',
-        cancelledAt: now,
-        cancelledBy: admin.userId,
-        cancellationSource: 'admin',
-        cancellationReason: input.reason ?? null,
-      })
-      .where(
-        and(
-          eq(folios.id, id),
-          eq(folios.organizationId, org),
-          ne(folios.status, 'cancelled'),
-          sql`not exists (select 1 from folio_lines fl where fl.folio_id = ${id} and fl.cancelled_at is null)`,
-        ),
-      ),
-    // The narrative names the line (D13) — payload carries its identity so the timeline renders
-    // without joins and survives later column changes.
-    folioEventRow(db, {
-      organizationId: org,
-      folioId: id,
-      type: 'cancelled',
-      actorId: admin.userId,
-      folioLineId: lineId,
-      payload: {
-        source: 'admin',
-        reason: input.reason ?? null,
-        clawback: outcome.reversedCommission > 0,
-        refund_amount: outcome.refund,
-        line: {
-          service_name: line.serviceName,
-          slot_date: line.slotDate,
-          slot_start_time: line.slotStartTime,
-          check_in: line.checkIn,
-        },
-      },
-      at: now,
-    }),
-  )
-  await db.batch(statements as [BatchItem<'sqlite'>, ...BatchItem<'sqlite'>[]])
 
   // Written notice (D20), line-scoped (D13): a second line's cancellation months later is a
   // second message — the guard keyed by (folio, line, event, channel) cannot swallow it.

@@ -180,6 +180,10 @@ describe('BUG-030 — no cancellation may price money the company never confirme
     await env.DB.prepare(`UPDATE folios SET booking_expires_at = ? WHERE id = ?`)
       .bind(nowSec() - 60, folioId)
       .run()
+    // Since line-autonomy F3 (D5) elapsed time lives in the LINE's clock too.
+    await env.DB.prepare(`UPDATE folio_lines SET booking_expires_at = ? WHERE folio_id = ?`)
+      .bind(nowSec() - 60, folioId)
+      .run()
 
     const result = await sweepExpiredBookings(env)
     expect(result).toMatchObject({ failed: 0 })

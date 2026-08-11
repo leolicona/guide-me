@@ -17,6 +17,8 @@ import {
   rejectPayment,
   rescheduleBooking,
   settleBooking,
+  settleFolioLine,
+  cancelBookingLine,
   verifyPayment,
   voidExpressSale,
 } from './handler'
@@ -64,6 +66,12 @@ pos.get('/folios/:id', getFolio)
 // settle carries its reference and defers the QR to admin verification. The body is optional (a cash
 // settle sends none), so it is parsed/validated inside the handler rather than via zValidator.
 pos.post('/folios/:id/settle', settleBooking)
+// US-AG54 (line-autonomy F3) — settle ONE line: its balance, its QR, its commission. The
+// whole-folio settle above stays as "Liquidar todo". Same body contract (method/reference).
+pos.post('/folios/:id/lines/:lineId/settle', settleFolioLine)
+// US-AG54 / US-AG07.4 — the agent cancels one apartada line of their own folio, priced by the
+// same subset commit as the admin's US-A22 gesture and the expiry sweep.
+pos.post('/folios/:id/lines/:lineId/cancel', cancelBookingLine)
 
 // US-AG52 — reagendar a live apartado or a paid sale to another departure of the SAME service,
 // agreed with the customer. Supersedes the retired `/reactivate`.
