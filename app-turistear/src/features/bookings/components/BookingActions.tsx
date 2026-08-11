@@ -35,7 +35,23 @@ export interface BookingFolio {
     line_type?: 'slot' | 'stay'
     /** D19 — a line with redeemed passes was consumed and cannot move. */
     redeemed_count?: number
+    /** US-AG54 — the line's OWN money state, balance and hold clock (server-derived). */
+    money_state?: 'paid' | 'booking' | 'cancelled'
+    pending_balance?: number
+    booking_expires_at?: number | null
+    cancelled_at?: number | null
   }[]
+}
+
+// US-AG54 — a line's own deadline, in the words a seller uses at the counter. Coarse on purpose:
+// the exact instant lives in the sheet's server response; this is the glance.
+const lineDeadline = (expiresAt: number | null | undefined): string | null => {
+  if (!expiresAt) return null
+  const hours = Math.floor((expiresAt * 1000 - Date.now()) / 3_600_000)
+  if (hours < 0) return 'vencido'
+  if (hours < 1) return 'vence en menos de 1 h'
+  if (hours < 48) return `vence en ${hours} h`
+  return `vence en ${Math.floor(hours / 24)} días`
 }
 
 // What the ladder decided, read BEFORE confirming. Money reads first — the refund is the figure the
@@ -150,6 +166,9 @@ export function BookingActions({
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [settleOpen, setSettleOpen] = useState(false)
   const [rescheduleOpen, setRescheduleOpen] = useState(false)
+  // US-AG54 — the line being settled / cancelled alone (null = whole-folio gestures).
+  const [settleLine, setSettleLine] = useState<{ id: string; name: string; balance: number } | null>(null)
+  const [cancelLine, setCancelLine] = useState<{ id: string; name: string } | null>(null)
 
   // D11 — same service only. A stay is nights under a per-night guard rather than a slot, and is
   // deferred with its own scenarios. The sheet fetches the SELECTED line's calendar itself — the
@@ -169,14 +188,83 @@ export function BookingActions({
   const busy = cancel.isPending
 
   if (isLiveBooking(folio)) {
-    // The amount this settle collects, and the deposit's method to pre-select the picker. A live
-    // booking has a single collection, so its display method is a real method (never 'Mixto').
-    const balance = folio.pending_balance ?? (folio.total ?? 0) - (folio.amount_paid ?? 0)
+    // US-AG54 — the lines still holding a balance, each with its own clock. When more than one
+    // lives, the per-line gesture appears and the main button becomes "Liquidar todo"; a folio
+    // read by an older shape (no money_state) simply keeps the single button.
+    const apartadaLines = (folio.lines ?? []).filter(
+      (l) => l.id && l.money_state === 'booking' && (l.pending_balance ?? 0) > 0,
+    )
+    // The amount the whole-folio settle collects: Σ of the live lines' own balances when the
+    // server sent them (a cancelled line's remainder must never be charged — F3), else the
+    // scalar arithmetic it always was.
+    const balance =
+      apartadaLines.length > 0
+        ? apartadaLines.reduce((s, l) => s + (l.pending_balance ?? 0), 0)
+        : (folio.pending_balance ?? (folio.total ?? 0) - (folio.amount_paid ?? 0))
     const defaultMethod: PaymentMethod =
       folio.payment_method && folio.payment_method !== 'Mixto' ? folio.payment_method : 'cash'
+    const multiLine = apartadaLines.length > 1
     return (
       <>
         <Stack spacing={1.5}>
+          {/* US-AG54 — one row per line still owing: its balance, its deadline, its verbs. The
+              whole-folio buttons keep the common case at one tap below. */}
+          {multiLine &&
+            apartadaLines.map((line) => (
+              <Box
+                key={line.id}
+                sx={{ border: 1, borderColor: 'grey.200', borderRadius: 2, p: 1.5 }}
+              >
+                <Stack
+                  direction="row"
+                  sx={{ justifyContent: 'space-between', alignItems: 'baseline', gap: 1 }}
+                >
+                  <Box sx={{ minWidth: 0 }}>
+                    <Typography variant="subtitle2" noWrap>
+                      {line.service_name}
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      {line.slot_date ?? ''}
+                      {lineDeadline(line.booking_expires_at)
+                        ? ` · ${lineDeadline(line.booking_expires_at)}`
+                        : ''}
+                    </Typography>
+                  </Box>
+                  <MoneyText
+                    cents={line.pending_balance ?? 0}
+                    variant="subtitle1"
+                    semantic="neutral"
+                    srLabel={`Saldo de ${line.service_name}`}
+                  />
+                </Stack>
+                <Stack direction="row" spacing={1} sx={{ mt: 1 }}>
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    disabled={busy}
+                    onClick={() =>
+                      setSettleLine({
+                        id: line.id!,
+                        name: line.service_name,
+                        balance: line.pending_balance ?? 0,
+                      })
+                    }
+                  >
+                    Liquidar
+                  </Button>
+                  {folio.payment_verification !== 'pending' && (
+                    <Button
+                      size="small"
+                      color="error"
+                      disabled={busy}
+                      onClick={() => setCancelLine({ id: line.id!, name: line.service_name })}
+                    >
+                      Cancelar
+                    </Button>
+                  )}
+                </Stack>
+              </Box>
+            ))}
           <Button
             variant="contained"
             size="large"
@@ -185,7 +273,7 @@ export function BookingActions({
             disabled={busy}
             onClick={() => setSettleOpen(true)}
           >
-            Liquidar saldo
+            {multiLine ? 'Liquidar todo' : 'Liquidar saldo'}
           </Button>
           {/* US-AG52 — the cheap operation, and the one the product never had. Here the seats are
               still the customer's: moving a hold you own takes nothing from anybody, and no money
@@ -231,6 +319,78 @@ export function BookingActions({
           folioId={folio.id}
           balance={balance}
           defaultMethod={defaultMethod}
+        />
+
+        {/* US-AG54 — settle ONE line: its balance, its QR, its commission. */}
+        <SettleSheet
+          open={!!settleLine}
+          onClose={() => setSettleLine(null)}
+          folioId={folio.id}
+          balance={settleLine?.balance ?? 0}
+          defaultMethod={defaultMethod}
+          lineId={settleLine?.id}
+          lineName={settleLine?.name}
+        />
+
+        {/* US-AG54 — cancel ONE apartada line. The figure shown is the SUBSET quote the server
+            computed (line_refund); the sibling lines are untouched by construction. */}
+        <ConfirmSheet
+          open={!!cancelLine}
+          onClose={() => setCancelLine(null)}
+          title={`¿Cancelar ${cancelLine?.name ?? 'esta actividad'}?`}
+          description="Se liberan solo los lugares de esta actividad; el resto del apartado sigue vivo, con su propio plazo."
+          detail={(() => {
+            const lineQuote = quote?.lines?.find((l) => l.line_id === cancelLine?.id)
+            if (!lineQuote || lineQuote.line_refund == null) {
+              return <CancellationOutcome quote={null} loading={quoteLoading} />
+            }
+            return (
+              <Box sx={{ border: 1, borderColor: 'grey.200', borderRadius: 2, p: 2 }}>
+                <Stack
+                  direction="row"
+                  sx={{ justifyContent: 'space-between', alignItems: 'baseline', gap: 1 }}
+                >
+                  <Typography variant="body2" color="text.secondary">
+                    Se devuelve al cliente
+                  </Typography>
+                  <MoneyText
+                    cents={lineQuote.line_refund}
+                    variant="h6"
+                    semantic="neutral"
+                    srLabel="Se devuelve al cliente"
+                  />
+                </Stack>
+                {(lineQuote.line_reversed_commission ?? 0) > 0 && (
+                  <Stack
+                    direction="row"
+                    sx={{ justifyContent: 'space-between', alignItems: 'baseline', gap: 1, mt: 1 }}
+                  >
+                    <Typography variant="body2" color="text.secondary">
+                      Comisión que pierdes
+                    </Typography>
+                    <MoneyText
+                      cents={lineQuote.line_reversed_commission ?? 0}
+                      variant="subtitle1"
+                      semantic="negative"
+                      srLabel="Comisión que pierdes"
+                    />
+                  </Stack>
+                )}
+              </Box>
+            )
+          })()}
+          confirmLabel="Cancelar actividad"
+          cancelLabel="Conservar"
+          busy={cancel.isPending}
+          onConfirm={() =>
+            cancelLine &&
+            cancel.mutate({ id: folio.id, lineId: cancelLine.id }, { onSuccess: () => setCancelLine(null) })
+          }
+          error={
+            cancel.isError ? (
+              <Alert severity="error">No se pudo cancelar la actividad. Inténtalo de nuevo.</Alert>
+            ) : null
+          }
         />
 
         {/* US-AG07.4 / US-A76 — the confirm no longer ASSERTS what happens to the money, it states

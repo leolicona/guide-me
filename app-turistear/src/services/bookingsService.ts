@@ -29,6 +29,34 @@ export const settleBooking = async (id: string, payload?: SettlePayload): Promis
   return res.folio
 }
 
+// US-AG54 (line-autonomy F3) — settle ONE line: its balance, its QR, its commission; the folio
+// completes only with its last live line. Same body contract as the whole-folio settle.
+export const settleFolioLine = async (
+  id: string,
+  lineId: string,
+  payload?: SettlePayload,
+): Promise<Folio> => {
+  const res = await request<{ folio: Folio }>(`/api/pos/folios/${id}/lines/${lineId}/settle`, {
+    method: 'POST',
+    body: payload ? JSON.stringify(payload) : undefined,
+  })
+  return res.folio
+}
+
+// US-AG54 / US-AG07.4 — the agent cancels one apartada line of their own folio; the ladder
+// decides the money, same as every other cancellation entrance.
+export const cancelBookingLine = async (
+  id: string,
+  lineId: string,
+  reason?: string,
+): Promise<Folio> => {
+  const res = await request<{ folio: Folio }>(`/api/pos/folios/${id}/lines/${lineId}/cancel`, {
+    method: 'POST',
+    body: JSON.stringify(reason ? { reason } : {}),
+  })
+  return res.folio
+}
+
 // US-AG07.4 — manual cancellation of a booking (release spots; deposit retained).
 export const cancelBooking = async (id: string, reason?: string): Promise<Folio> => {
   const res = await request<{ folio: Folio }>(`/api/pos/folios/${id}/cancel`, {

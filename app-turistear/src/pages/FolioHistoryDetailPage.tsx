@@ -133,7 +133,14 @@ export default function FolioHistoryDetailPage() {
                         sx={{ justifyContent: 'space-between', alignItems: 'flex-start' }}
                       >
                         <Box sx={{ minWidth: 0 }}>
-                          <Typography variant="subtitle2">{line.service_name}</Typography>
+                          <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+                            <Typography variant="subtitle2">{line.service_name}</Typography>
+                            {/* US-AG54 — the line's own state, only when it differs from the
+                                folio's: a mixed apartado names the odd one out. */}
+                            {line.money_state && line.money_state !== folio.status && (
+                              <FolioStatusChip status={line.money_state} />
+                            )}
+                          </Stack>
                           <Typography variant="caption" color="text.secondary">
                             {folioLineMeta(line)} · {formatMoney(line.unit_price)}
                           </Typography>

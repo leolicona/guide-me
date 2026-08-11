@@ -221,6 +221,8 @@ const readFolio = async (db: Db, org: string, folioId: string, apiBaseUrl?: stri
       cancellationSource: folioLines.cancellationSource,
       lineRefundStatus: folioLines.refundStatus,
       lineRefundAmount: folioLines.refundAmount,
+      // US-AG54 (D5) — the line's own hold clock, for the per-line countdown.
+      lineBookingExpiresAt: folioLines.bookingExpiresAt,
       allocated: sql<number>`coalesce((select sum(a.amount) from folio_payment_allocations a where a.folio_line_id = folio_lines.id), 0)`,
     })
     .from(folioLines)
@@ -363,6 +365,7 @@ const readFolio = async (db: Db, org: string, folioId: string, apiBaseUrl?: stri
       cancellation_source: line.cancellationSource,
       refund_status: line.lineRefundStatus,
       refund_amount: line.lineRefundAmount,
+      booking_expires_at: tsOrNull(line.lineBookingExpiresAt),
       // US-A85 — the per-line fulfilment the folio's roll-up is made of (D2). The detail is where
       // "two of four boarded, and the Thursday tour nobody came to" can actually be read.
       redeemed_count: line.redeemedCount,
@@ -691,7 +694,7 @@ export const getFolioDetail = async (c: FoliosContext) => {
   })
 }
 
-const serializeQuote = (
+export const serializeQuote = (
   o: CancellationOutcome,
   // US-A22 — the per-line ALLOCATED sums (readFolio already computed them), so each line can
   // carry what cancelling IT ALONE would return. Omitted by callers that only need folio totals.

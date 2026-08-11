@@ -80,7 +80,7 @@ import {
 // D20 — the agent apartado cancel shares the admin path's commit, so the two cannot price the same
 // folio differently. Reaching across routes is deliberate: the alternative is a second copy of the
 // release + reversal logic, which is exactly what this replaced.
-import { cancelFolioLinesPriced, cancelFolioPriced, queueCancellationEmail, quoteCancellation } from '../folios/handler'
+import { cancelFolioLinesPriced, cancelFolioPriced, queueCancellationEmail, quoteCancellation, serializeQuote } from '../folios/handler'
 
 export type PosContext = Context<{
   Bindings: CloudflareBindings
@@ -2105,6 +2105,8 @@ const readFolio = async (
       cancellationSource: folioLines.cancellationSource,
       lineRefundStatus: folioLines.refundStatus,
       lineRefundAmount: folioLines.refundAmount,
+      // US-AG54 (D5) — the line's own hold clock, for the per-line countdown + Liquidar rows.
+      lineBookingExpiresAt: folioLines.bookingExpiresAt,
       allocated: sql<number>`coalesce((select sum(a.amount) from folio_payment_allocations a where a.folio_line_id = folio_lines.id), 0)`,
     })
     .from(folioLines)
@@ -2174,6 +2176,9 @@ const readFolio = async (
         cancellation_source: line.cancellationSource,
         refund_status: line.lineRefundStatus,
         refund_amount: line.lineRefundAmount,
+        booking_expires_at: line.lineBookingExpiresAt
+          ? Math.floor(line.lineBookingExpiresAt.getTime() / 1000)
+          : null,
         quantity: line.quantity,
         base_price: line.basePrice,
         minimum_price: line.minimumPrice,
@@ -2266,14 +2271,9 @@ export const getFolio = async (c: PosContext) => {
 
   return c.json({
     folio,
-    cancellation_quote: quote
-      ? {
-          refund: quote.refund,
-          retention: quote.retention,
-          kept_commission: quote.keptCommission,
-          reversed_commission: quote.reversedCommission,
-        }
-      : null,
+    // The SAME serializer the admin detail uses, per-line subset figures included (US-AG54):
+    // the seller's per-line cancel sheet states the number the endpoint will write.
+    cancellation_quote: quote ? serializeQuote(quote, folio.lines) : null,
     events,
   })
 }

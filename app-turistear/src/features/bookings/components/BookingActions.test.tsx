@@ -40,6 +40,96 @@ describe('US-AG52 — where Reagendar lives', () => {
     expect(screen.getByRole('button', { name: 'Cancelar apartado' })).toBeInTheDocument()
   })
 
+  // US-AG54 (line-autonomy F3) — with more than one line still owing, each gets its own row
+  // (balance + deadline + verbs) and the main button becomes "Liquidar todo". A single-line
+  // apartado keeps the quiet single button — no rows, no noise.
+  it('a multi-line apartado offers per-line Liquidar/Cancelar and relabels the main button', () => {
+    renderWithProviders(
+      <BookingActions
+        folio={folio({
+          status: 'booking',
+          total: 150_000,
+          amount_paid: 60_000,
+          lines: [
+            {
+              id: 'l1',
+              service_id: 'svc-1',
+              slot_id: 's1',
+              service_name: 'Isla Mujeres',
+              slot_date: FUTURE_DATE,
+              slot_start_time: '09:00',
+              quantity: 1,
+              line_type: 'slot' as const,
+              money_state: 'booking',
+              pending_balance: 55_000,
+              booking_expires_at: Math.floor(Date.now() / 1000) + 86_400,
+            },
+            {
+              id: 'l2',
+              service_id: 'svc-1',
+              slot_id: 's2',
+              service_name: 'Chichén Itzá',
+              slot_date: FUTURE_DATE,
+              slot_start_time: '07:30',
+              quantity: 1,
+              line_type: 'slot' as const,
+              money_state: 'booking',
+              pending_balance: 35_000,
+              booking_expires_at: Math.floor(Date.now() / 1000) + 5 * 86_400,
+            },
+          ],
+        })}
+      />,
+    )
+    expect(screen.getByRole('button', { name: 'Liquidar todo' })).toBeInTheDocument()
+    expect(screen.getAllByRole('button', { name: 'Liquidar' })).toHaveLength(2)
+    expect(screen.getAllByRole('button', { name: 'Cancelar' })).toHaveLength(2)
+    expect(screen.getByText('Isla Mujeres')).toBeInTheDocument()
+    expect(screen.getAllByText(/vence en/)).toHaveLength(2) // each line runs its OWN clock (D5)
+  })
+
+  it('a mixed apartado (one line already paid) rows only the one still owing', () => {
+    renderWithProviders(
+      <BookingActions
+        folio={folio({
+          status: 'booking',
+          total: 150_000,
+          amount_paid: 115_000,
+          lines: [
+            {
+              id: 'l1',
+              service_id: 'svc-1',
+              slot_id: 's1',
+              service_name: 'Isla Mujeres',
+              slot_date: FUTURE_DATE,
+              slot_start_time: '09:00',
+              quantity: 1,
+              line_type: 'slot' as const,
+              money_state: 'paid',
+              pending_balance: 0,
+            },
+            {
+              id: 'l2',
+              service_id: 'svc-1',
+              slot_id: 's2',
+              service_name: 'Chichén Itzá',
+              slot_date: FUTURE_DATE,
+              slot_start_time: '07:30',
+              quantity: 1,
+              line_type: 'slot' as const,
+              money_state: 'booking',
+              pending_balance: 35_000,
+            },
+          ],
+        })}
+      />,
+    )
+    // One line owing → the single quiet button, scoped by the server to the live remainder.
+    expect(screen.getByRole('button', { name: 'Liquidar saldo' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Liquidar todo' })).toBeNull()
+    expect(screen.queryAllByRole('button', { name: 'Liquidar' })).toHaveLength(0)
+  })
+
   it('a PAID folio offers Reagendar too (D16)', () => {
     renderWithProviders(<BookingActions folio={folio()} />)
     expect(screen.getByRole('button', { name: 'Reagendar' })).toBeInTheDocument()
