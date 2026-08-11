@@ -202,6 +202,16 @@ export interface FolioLine {
   /** Signed access ticket; null for folios sold before the QR feature. */
   qr_token: string | null
   qr: FolioTicket | null
+  /** US-A22/US-AG54 (line-autonomy) — the line's OWN life, server-derived: money state from its
+   * allocations, cancellation from its written stamp, and its own hold clock. Render, never derive. */
+  money_state?: FolioStatus
+  allocated?: number
+  pending_balance?: number
+  cancelled_at?: number | null
+  cancellation_source?: string | null
+  refund_status?: 'none' | 'pending' | 'refunded'
+  refund_amount?: number | null
+  booking_expires_at?: number | null
   extras: FolioLineExtra[]
 }
 
