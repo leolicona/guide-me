@@ -56,9 +56,9 @@ What this feature must NOT change, checkable by machine:
    `test/cash-drops/agent-balance-cash-drops.test.ts` passes unedited through every phase.
 3. **Money conservation is an invariant, not a hope.** After every write:
    Σ(allocations of a payment) = `payment.amount`, Σ(allocations of a line) ≤ `line_total`,
-   Σ(line allocations of a folio) = Σ(payment rows). Asserted in the write-path tests of each
-   phase (D10 — with no production data there is no migration to verify, so the invariants
-   guard the only path that exists: the live one).
+   Σ(line allocations of a folio) = Σ(payment rows). Asserted **twice** (D10): over the whole
+   database as each backfill migration's verification, and in the write-path tests of each
+   phase — which keep guarding after the migration's one run.
 4. **Multitenancy isolation model unchanged** — every new table carries `organization_id`;
    every new route ships `seedTwoOrgs` scenarios.
 5. **The timeline stays narrative, never authority** (`folio-timeline` rule 7): no money or
@@ -77,7 +77,7 @@ What this feature must NOT change, checkable by machine:
 | **D7** | **The PIN rotates: each successful `confirmRefund` consumes it and mints a new one** (`refund_pin_attempts` reset; the portal always shows the current PIN). | The PIN proves presence at *this* handshake. If debt #2 reuses the PIN the agent learned confirming debt #1, the agent can confirm #2 with the tourist absent — the exact scenario the PIN exists to block. Today the flaw is unreachable only because a second debt cannot exist. |
 | **D8** | **Clearance is derived per line, no new column**: a line's QR signs when the line is *pagada* AND every payment its allocations touch is `verified`/`not_required`. | `folio_payments.verification` is already per movement (paid-ledger). The line-level answer is a join away; a stored per-line clearance would be a second home for a fact the ledger owns. |
 | **D9** | **Commission books per line, at that line's milestones**: percent accrues on money allocated to the line; fixed books when the line reaches *pagada*. `commission`/`commission_reversal` rows in `folio_payments` gain `folio_line_id`; a partial cancellation reverses **only that line's** commission (the split `LineOutcome` already computes). `folios.commission_amount` stays a reconciled roll-up, now Σ of per-line accruals. | The inputs are already snapshotted per line; the reversal math is already per line inside the engine. Folio-level booking would recompute from lines and then discard the per-line result — doing the work without keeping the data. |
-| **D10** | **No backfill, no `backfilled` flag, no legacy code path.** The app is in testing with **no real production data** (decided 2026-08-10). `pnpm seed:local` learns the new model instead — including mixed fixtures (pagada + apartada in one folio, two line-debts) that F2/F3 tests need anyway. The conservation invariants become **write-path test assertions** rather than migration checks. | Backfill exists to honor real history; there is none to honor. The 0049/0061 reconstruction machinery (deterministic ids, retroactive cascade, pro-rata old debts, copied clocks) would be synthetic data for zero readers. Write-path invariants are strictly better placed: they guard forever, not once. |
+| **D10** | **Deterministic total backfill, `backfilled = true` — one code path after** (precedent: migration 0061). Each phase's migration backfills what its columns need, purely from columns that already exist: **paid** folios → every line's allocations sum exactly to `line_total` (a fully-paid folio is unambiguous; only the payment→line detail is reconstructed, oldest payment first through the same cascade); **booking** folios → the D2/D3 seed-and-cascade applied **retroactively** over the historical `amount_paid`; **cancelled** folios → lines arrive cancelled from the folio's own snapshotted columns, the refund debt distributed pro-rata to each line's allocated money; hold clocks **copied** from the folio's snapshot, never recalculated (0064). Mechanics per 0061: deterministic ids + `NOT EXISTS` guards (idempotent re-run), timestamps from the **source** column, `backfilled = 1` on every synthetic row. The conservation invariants run **twice**: over the whole database as each migration's verification, and forever in the write-path tests. | *(Reverses the no-backfill decision taken during the interview: an organization is **live in production**, realized 2026-08-11.)* Orphan rows would force every reader — gates, cards, reports, cancellation — to carry `if (has allocations) … else legacy` indefinitely; the backfill makes "every folio has allocations" true for the whole universe once, so the branch dies before it is born. `backfilled` separates memory from reconstruction — forensic metadata, **never a logic branch** — and makes a wrong seeding rule reparable (`DELETE WHERE backfilled = 1`, re-run corrected). The retroactive cascade is written **once**, in TypeScript (the live path); the migration SQL is verified against it as an **oracle** on a copied fixture, so the rule never exists twice unchecked. |
 | **D11** | **`folios.status`: the column dies; the API field survives as a derived roll-up until the epic's last PR.** Worst-case derivation: any line apartada → `booking` · all lines cancelled → `cancelled` · else → `paid`. Readers (lists, facets, search, reports, portal, the five QR gates) migrate to line states PR by PR inside F4; the derived field is deleted in the last one. | One truth (the lines) with no big-bang: rewriting six surfaces + the portal in one release makes any single bug block the whole deploy. With no external API consumers the compat field is a *sequencing convenience within the epic*, not a contract to maintain — so "desaparece del modelo" completes, in order. |
 | **D12** | **What stays on the folio**: identity & contact, the portal token and PIN, the delivery axis (`tickets_sent_at`/`tickets_viewed_at`), the reminder claim, and the credit aggregate (`credit_amount` accrues per line-expiry, spends folio-level). | The gesture is one: one WhatsApp send, one portal link, one reminder listing every pending line *inside* the message. Splitting them multiplies agent taps without new information — and converting agent work into taps is the named failure mode of the outbox spec (`folio-state-machine` § Context 3), not its goal. |
 | **D13** | **`folio_line_id`, nullable, on `folio_events` AND `notifications`.** Null = folio-scoped (`created`, `tickets_sent`…); set = line-scoped (`payment`, `cancelled`, `rescheduled`…). The outbox re-send guard becomes a **unique expression index** on `(folio_id, COALESCE(folio_line_id,''), event, channel)`. | One story per folio, now naming its protagonists (*"Canceló Chichén Itzá (jue 16) — reembolso $350"*); a separate line-events table would mean braiding two timelines at every render, forever. The `COALESCE` is load-bearing: SQLite treats NULLs as distinct in unique indexes, so a plain composite index would let folio-scoped rows duplicate — and without the line in the key, cancelling line B months after line A **collides with A's guard and the customer is silently never told** (same defect class the guard exists to prevent, pointed the other way). |
@@ -99,6 +99,8 @@ CREATE TABLE folio_payment_allocations (
   payment_id       TEXT NOT NULL REFERENCES folio_payments(id),
   folio_line_id    TEXT NOT NULL REFERENCES folio_lines(id),
   amount           INTEGER NOT NULL,             -- signed minor units, never 0
+  backfilled       INTEGER NOT NULL DEFAULT 0,   -- D10: 1 = reconstructed by migration. Forensic
+                                                 -- metadata only — no logic may branch on it.
   created_at       INTEGER NOT NULL DEFAULT (unixepoch())
 );
 
@@ -106,12 +108,24 @@ CREATE INDEX folio_payment_allocations_line_idx
   ON folio_payment_allocations (organization_id, folio_line_id);
 CREATE INDEX folio_payment_allocations_payment_idx
   ON folio_payment_allocations (payment_id);
+
+-- D10 backfill — every existing folio arrives with its allocations. 0061-style INSERT…SELECT
+-- blocks, one per folio class (idempotent: deterministic ids 'alc_' || payment_id || line_id +
+-- NOT EXISTS guards; created_at = the SOURCE payment row's timestamp, never the migration's):
+--   paid:      Σ per line = line_total EXACTLY — a fully-paid folio is unambiguous; only the
+--              payment→line detail is reconstruction (oldest payment first, same cascade).
+--   booking:   the D2/D3 seed-and-cascade applied retroactively over amount_paid.
+--   cancelled: allocations for their payment AND refund rows (signed), so the per-line ledger
+--              story balances to the folio's snapshotted outcome.
+-- Every synthetic row: backfilled = 1. The exact SQL is the migration body, verified against
+-- the live TypeScript cascade as an oracle (D10; S-16).
 ```
 
 `confirmSale` and `settleBooking` write allocations in the same `db.batch` as the payment row
 (seed + cascade per D2/D3 for a deposit; `line_total` each for a full payment). **Nothing reads
 the table in F1** — it is the verified shadow step, exactly `paid-ledger` Step 1's shape.
-`seed:local` gains mixed fixtures (D10).
+`seed:local` gains mixed fixtures for the F2/F3 tests; the invariants run over the whole
+database as this migration's verification (S-15).
 
 ### Phase 2 — migration `0063_line_cancellation.sql`
 
@@ -132,6 +146,14 @@ ALTER TABLE notifications ADD COLUMN folio_line_id TEXT REFERENCES folio_lines(i
 DROP INDEX uq_notifications_folio_event_channel;
 CREATE UNIQUE INDEX uq_notifications_folio_line_event_channel
   ON notifications (folio_id, COALESCE(folio_line_id, ''), event, channel);
+
+-- D10 backfill — lines of already-cancelled folios arrive cancelled, copied from the folio's
+-- own snapshotted columns. EXACT, not reconstruction: every pre-feature cancellation was total,
+-- so cancelled_at/by/source apply to all of the folio's lines verbatim. Only the refund debt's
+-- split is reconstruction: refund_amount distributed pro-rata to each line's allocated money
+-- (largest-remainder on rounding — the cancellationPolicy.ts weights pattern).
+UPDATE folio_lines SET cancelled_at = …, cancelled_by = …, cancellation_source = …,
+  refund_status = …, refund_amount = …   -- exact SQL in the migration body
 ```
 
 ### Phase 3 — migration `0064_line_booking_clock.sql`
@@ -140,6 +162,14 @@ CREATE UNIQUE INDEX uq_notifications_folio_line_event_channel
 -- D5. Each apartada line runs against ITS departure. Same resolver (bookingExpiryEpoch),
 -- same policy inputs — evaluated per line instead of against the folio's earliest slot.
 ALTER TABLE folio_lines ADD COLUMN booking_expires_at INTEGER;
+
+-- D10 backfill — existing apartada lines COPY the folio's snapshotted expiry, never
+-- recalculated: a per-line recalculation could EXTEND a hold already communicated to the
+-- customer, silently rewriting a promise. New bookings mint per-line clocks; old ones keep
+-- the one they were told (S-17).
+UPDATE folio_lines SET booking_expires_at =
+  (SELECT f.booking_expires_at FROM folios f WHERE f.id = folio_lines.folio_id)
+  WHERE booking_expires_at IS NULL AND …  -- apartada lines only; exact predicate in the body
 ```
 
 ### Phase 4 — migration `0065_retire_folio_status.sql`
@@ -293,23 +323,43 @@ line: a *pagada* line of a half-cancelled folio validates; the cancelled line's 
 **S-14 — Another org's line is invisible.** Given `seedTwoOrgs` · When org A cancels or settles
 org B's line (real ids) · Then `404` — never 403, which would confirm existence.
 
+### Backfill (D10)
+
+**S-15 — The backfill conserves every peso, and re-running writes nothing.** Given a database
+seeded with pre-feature folios of all three classes · When `0062` runs (then runs again) · Then
+the conservation invariants hold over the entire database, every paid folio's lines each sum to
+`line_total`, every synthetic row carries `backfilled = 1` — and the second run inserts zero rows.
+
+**S-16 — SQL and TypeScript tell the same story.** Given a fixture of booking folios with
+assorted deposits · Then the migration's retroactive cascade produces allocations identical to
+the live TypeScript seed-and-cascade function run over the same rows (the oracle, D10).
+
+**S-17 — An old apartado keeps its promised clock.** Given a pre-F3 booking folio with a
+snapshotted `booking_expires_at` · When `0064` runs · Then every apartada line carries exactly
+that timestamp — none extended, none shortened.
+
 ## Definition of Done
 
 **F1 — the fact** *(migration 0062; no behaviour change)*
 - [ ] `folio_payment_allocations` + Drizzle schema; `confirmSale`/`settleBooking` write
       allocations in-batch (S-1…S-4)
-- [ ] Conservation invariants asserted in write-path tests (scope boundary 3)
+- [ ] Backfill: every existing folio allocated, idempotent, `backfilled = 1` (S-15); the SQL
+      cascade verified against the TypeScript oracle (S-16)
+- [ ] Conservation invariants asserted over the whole DB post-migration AND in write-path
+      tests (scope boundary 3)
 - [ ] `seed:local` produces mixed fixtures
 - [ ] Scope-boundary tests pass unedited
 
 **F2 — US-A22** *(migration 0063)*
 - [ ] Line cancel endpoint through the single pricing commit (S-5, S-6)
+- [ ] Backfill: cancelled folios' lines arrive cancelled; refund debt distributed pro-rata
 - [ ] Per-line refund debt + rotating PIN (S-7); portal shows line-level outcomes
 - [ ] `folio_events`/`notifications` line-scoped (D13); timeline renders line names
 - [ ] Cross-org (S-14)
 
 **F3 — the gesture** *(migration 0064)*
 - [ ] Per-line settle + "Liquidar todo" (S-8, S-10); per-line clock + sweep (S-9)
+- [ ] Backfill: existing apartada lines copy the folio's snapshotted clock (S-17)
 - [ ] Reminder message itemizes pending lines (folio-level send, D12)
 
 **F4 — cleanup** *(migration 0065)*
@@ -334,6 +384,12 @@ org B's line (real ids) · Then `404` — never 403, which would confirm existen
 - The list card's rail changes meaning: money → attention (D14). Announced in the F4 PR.
 - The API `status` field becomes derived (identical values for every state reachable today) and
   is later removed with the F4 reader migration.
+- **The backfill's honest limit** (D10): for a pre-feature apartado, a *future* line
+  cancellation prices against a per-line split the seeding rule reconstructed retroactively —
+  the rule did not exist when that deposit was taken. The folio-level money is exact (scope
+  boundary 3); only the split of old deposits is reconstruction, and it is marked
+  (`backfilled = 1`). Declared here rather than discovered in production — the same posture as
+  0061's *"what left no trace is honestly absent"*.
 
 ## Open
 
