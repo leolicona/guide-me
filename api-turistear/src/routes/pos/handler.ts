@@ -3070,7 +3070,7 @@ export const verifyPayment = async (c: PosContext) => {
   }
 
   // A paid folio → run the deferred paid-path side effects (mirrors settle's cleared branch).
-  const lineRows = await db
+  const allLineRows = await db
     .select({
       id: folioLines.id,
       serviceId: folioLines.serviceId,
@@ -3083,9 +3083,13 @@ export const verifyPayment = async (c: PosContext) => {
       quantity: folioLines.quantity,
       unitPrice: folioLines.unitPrice,
       lineTotal: folioLines.lineTotal,
+      cancelledAt: folioLines.cancelledAt,
     })
     .from(folioLines)
     .where(and(eq(folioLines.folioId, id), eq(folioLines.organizationId, org)))
+  // US-A89 (F4, PR-7) — verification releases tickets for the lines that LIVE: re-signing a
+  // cancelled line's QR would hand back a pass for a seat already returned to the pool.
+  const lineRows = allLineRows.filter((l) => !l.cancelledAt)
 
   const slotLineRows = lineRows.filter((l) => l.slotId && l.slotDate)
   const identity = folio.customerName?.trim() || folio.customerEmail?.trim() || `folio:${id}`
