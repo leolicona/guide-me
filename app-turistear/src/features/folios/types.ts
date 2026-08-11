@@ -130,8 +130,6 @@ export interface FolioDetail {
   cancelled_at: number | null
   cancelled_by: string | null
   cancellation_reason: string | null
-  // US-A26 — true when the agent's commission was clawed back on cancellation.
-  cancellation_clawback: boolean
   // US-A23 / US-T05 — cash refund tracking. `pending` once a tourist's cancellation request
   // is approved on a paid folio; `refunded` after the admin confirms the hand-back. The
   // refund PIN itself is NEVER serialized here — it lives only in the tourist's portal, and
@@ -245,12 +243,6 @@ export interface CancellationRequest {
     total: number
     amount_paid: number
   }
-}
-
-// US-A26 still applies on a tourist-initiated cancellation: the admin chooses whether the
-// agent's commission is clawed back when approving.
-export interface ApproveCancellationRequestInput {
-  clawback?: boolean
 }
 
 export interface RejectCancellationRequestInput {

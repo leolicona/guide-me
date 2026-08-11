@@ -102,7 +102,6 @@ const readFolio = async (db: Db, org: string, folioId: string, apiBaseUrl?: stri
       cancelledAt: folios.cancelledAt,
       cancelledBy: folios.cancelledBy,
       cancellationReason: folios.cancellationReason,
-      cancellationClawback: folios.cancellationClawback,
       // US-AG07/D5 — apartado state, so the admin detail can show the expiry banner +
       // Liquidar/Reactivar and the reminder status.
       bookingExpiresAt: folios.bookingExpiresAt,
@@ -270,7 +269,6 @@ const readFolio = async (db: Db, org: string, folioId: string, apiBaseUrl?: stri
     cancelled_at: tsOrNull(folio.cancelledAt),
     cancelled_by: folio.cancelledBy,
     cancellation_reason: folio.cancellationReason,
-    cancellation_clawback: folio.cancellationClawback,
     refund_status: folio.refundStatus,
     // US-A87 — the credit and its expiry, so the detail can state both.
     credit_amount: folio.creditAmount,
