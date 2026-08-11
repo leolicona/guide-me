@@ -11,6 +11,7 @@ import {
   folioAccessTokens,
   folioLineExtras,
   folioLines,
+  folioPaymentAllocations,
   folioPayments,
   folios,
   organizations,
@@ -57,11 +58,20 @@ import {
   commissionRow,
   commissionReversalRow,
   refundRow,
+  allocationRows,
   buildCancellationReversal,
   displayMethodSql,
   depositMethodSql,
   readFolioPayments,
 } from '../../utils/folioPayments'
+// US-LG09 — the pure allocation engine (docs/folios/line-autonomy.spec.md D1–D3): which lines a
+// payment funds. Allocations ride the payment row's own batch; nothing reads them yet (F1).
+import {
+  allocateFull,
+  assertAllocations,
+  orderForCascade,
+  seedAndCascade,
+} from '../../utils/folioAllocations'
 import {
   readListCancellationRequests,
   readListLines,
@@ -1794,8 +1804,18 @@ export const confirmSale = async (c: PosContext) => {
   // with the lines. The scalars above stay authoritative; this is a verified shadow (Σ payment rows
   // == amount_paid; Σ commission rows == commission_amount). A booking writes the deposit; a paid
   // sale the full amount. Verification/method/reference mirror the folio; a transfer row is `pending`.
+  //
+  // US-LG09 — the payment's per-line allocations ride the same batch (rule 1): a full payment funds
+  // every line at line_total; a deposit is seeded at the org minimum % per line, surplus cascading
+  // to the soonest departure (D2/D3). assertAllocations makes a gap a 500, never a silent partial.
+  const salePaymentId = crypto.randomUUID()
+  const saleAllocations = isBooking
+    ? seedAndCascade(prepared, policy.minDownPaymentPct, amountPaid)
+    : allocateFull(prepared)
+  assertAllocations(amountPaid, saleAllocations)
   statements.push(
     paymentRow(db, {
+      id: salePaymentId,
       organizationId: org,
       folioId,
       amount: amountPaid,
@@ -1804,6 +1824,12 @@ export const confirmSale = async (c: PosContext) => {
       verification: paymentVerification,
       collectedBy: agent.userId,
       operatorId: c.get('operator')?.operatorId ?? null,
+    }),
+    ...allocationRows(db, {
+      organizationId: org,
+      paymentId: salePaymentId,
+      allocations: saleAllocations,
+      sign: 1,
     }),
   )
   if (commissionAmount > 0) {
@@ -2397,11 +2423,37 @@ export const settleBooking = async (c: PosContext) => {
   // arrives in Step 3. A transfer settle's balance row is `pending` (mirrors the re-armed folio).
   const balanceAmount = folio.total - folio.amountPaid
   const commissionTopUp = commissionAmount - folio.commissionAmount
+
+  // US-LG09 — the settle payment's allocations: each line receives exactly what it is still owed
+  // (line_total − its net allocated sum), in cascade order. When the sums do not close — a folio
+  // hand-seeded by an older test, never a post-0062 production folio — the shadow is SKIPPED
+  // rather than blocking the settle: F1's allocations are a verified shadow, not yet an authority.
+  const allocatedRows = await db
+    .select({
+      folioLineId: folioPaymentAllocations.folioLineId,
+      allocated: sql<number>`coalesce(sum(${folioPaymentAllocations.amount}), 0)`,
+    })
+    .from(folioPaymentAllocations)
+    .innerJoin(folioLines, eq(folioPaymentAllocations.folioLineId, folioLines.id))
+    .where(and(eq(folioLines.folioId, id), eq(folioLines.organizationId, org)))
+    .groupBy(folioPaymentAllocations.folioLineId)
+  const allocatedByLine = new Map(allocatedRows.map((r) => [r.folioLineId, Number(r.allocated)]))
+  const remainingByLine = orderForCascade(lineRows)
+    .map((l) => ({
+      folioLineId: l.id,
+      amount: Math.max(0, l.lineTotal - (allocatedByLine.get(l.id) ?? 0)),
+    }))
+    .filter((x) => x.amount > 0)
+  const remainingTotal = remainingByLine.reduce((s, x) => s + x.amount, 0)
+  const balanceAllocations = remainingTotal === balanceAmount ? remainingByLine : []
+
   const settleLedgerRows = (): BatchItem<'sqlite'>[] => {
     const rows: BatchItem<'sqlite'>[] = []
     if (balanceAmount > 0) {
+      const balancePaymentId = crypto.randomUUID()
       rows.push(
         paymentRow(db, {
+          id: balancePaymentId,
           organizationId: org,
           folioId: id,
           amount: balanceAmount,
@@ -2410,6 +2462,12 @@ export const settleBooking = async (c: PosContext) => {
           verification: balanceNeedsVerification ? 'pending' : 'not_required',
           collectedBy: agent.userId,
           operatorId: c.get('operator')?.operatorId ?? null,
+        }),
+        ...allocationRows(db, {
+          organizationId: org,
+          paymentId: balancePaymentId,
+          allocations: balanceAllocations,
+          sign: 1,
         }),
       )
     }
@@ -3073,6 +3131,7 @@ export const voidExpressSale = async (c: PosContext) => {
 
   const lineRows = await db
     .select({
+      id: folioLines.id,
       slotId: folioLines.slotId,
       quantity: folioLines.quantity,
       redeemedCount: folioLines.redeemedCount,
@@ -3129,14 +3188,28 @@ export const voidExpressSale = async (c: PosContext) => {
     )
   }
   if (folio.amountPaid > 0) {
+    // US-LG09 — an Express sale is exactly ONE slot line (rules 1/3), so the void's refund
+    // allocates its full amount back against that line, signed negative like its parent row.
+    const voidRefundId = crypto.randomUUID()
     statements.push(
       refundRow(db, {
+        id: voidRefundId,
         organizationId: org,
         folioId: id,
         amount: folio.amountPaid,
         method: 'cash', // rule 1 — an Express sale is always cash
         collectedBy: agent.userId,
         at: now,
+      }),
+      ...allocationRows(db, {
+        organizationId: org,
+        paymentId: voidRefundId,
+        allocations:
+          lineRows.length === 1
+            ? [{ folioLineId: lineRows[0].id, amount: folio.amountPaid }]
+            : [],
+        sign: -1,
+        createdAt: now,
       }),
     )
   }
