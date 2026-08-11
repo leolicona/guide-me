@@ -30,6 +30,7 @@ import {
 } from '../../services/resend'
 import { generateRefundPin } from '../../utils/portal'
 import { folioFulfillment, lineFulfillment } from '../../utils/folioFulfillment'
+import { deriveStatusSql } from '../../utils/folioStatus'
 import {
   rescheduleFolio,
   reissueTicketsAfterReschedule,
@@ -89,7 +90,7 @@ const readFolio = async (db: Db, org: string, folioId: string, apiBaseUrl?: stri
       agentId: folios.agentId,
       agentName: users.name,
       operatorName: affiliateOperators.name,
-      status: folios.status,
+      status: deriveStatusSql, // D11 — derived from the lines; equals the column by construction
       ticketsSentAt: folios.ticketsSentAt,
       ticketsViewedAt: folios.ticketsViewedAt,
       paymentMethod: displayMethodSql,
@@ -503,7 +504,7 @@ export const listFolios = async (c: FoliosContext) => {
       agentName: users.name,
       customerName: folios.customerName,
       customerPhone: folios.customerPhone,
-      status: folios.status,
+      status: deriveStatusSql, // D11 — derived from the lines; equals the column by construction
       total: folios.total,
       amountPaid: folios.amountPaid,
       createdAt: folios.createdAt,

@@ -72,6 +72,7 @@ import {
   orderForCascade,
   seedAndCascade,
 } from '../../utils/folioAllocations'
+import { deriveStatusSql } from '../../utils/folioStatus'
 import {
   readListCancellationRequests,
   readListLines,
@@ -2043,7 +2044,7 @@ const readFolio = async (
   const folioRows = await db
     .select({
       id: folios.id,
-      status: folios.status,
+      status: deriveStatusSql, // D11 — derived from the lines; equals the column by construction
       paymentMethod: displayMethodSql,
       paymentReference: folios.paymentReference,
       paymentVerification: folios.paymentVerification,
@@ -3239,6 +3240,19 @@ export const rejectPayment = async (c: PosContext) => {
         updatedAt: now,
       })
       .where(and(eq(folios.id, id), eq(folios.organizationId, org))),
+    // US-A22 (line-autonomy) — the lines record the same fact the folio does. This hand-rolled
+    // cancel path predates F2's per-line stamps; the derived status field (D11) is what exposed
+    // the gap — a rejected folio's lines still read as live.
+    db
+      .update(folioLines)
+      .set({ cancelledAt: now, cancelledBy: admin.userId, cancellationSource: 'admin' })
+      .where(
+        and(
+          eq(folioLines.folioId, id),
+          eq(folioLines.organizationId, org),
+          sql`${folioLines.cancelledAt} is null`,
+        ),
+      ),
     // US-A24 — one action, one row (D9): the rejection IS the cancellation, so no second
     // `cancelled` event is written for the same tap.
     folioEventRow(db, {
@@ -3505,6 +3519,27 @@ export const voidExpressSale = async (c: PosContext) => {
   // defensive floor. Both reversal rows are dated NOW — they land in the seller's current shift,
   // netting the caja to exactly its pre-sale balance (S-12).
   const statements: BatchItem<'sqlite'>[] = []
+  // US-A22 (line-autonomy) — the void's lines record the same fact the folio does: cancelled,
+  // refunded across the counter. This hand-rolled cancel predates F2's per-line stamps; the
+  // derived status field (D11) is what exposed the gap.
+  statements.push(
+    db
+      .update(folioLines)
+      .set({
+        cancelledAt: now,
+        cancelledBy: agent.userId,
+        cancellationSource: 'agent',
+        refundStatus: 'refunded',
+        refundAmount: folio.amountPaid,
+      })
+      .where(
+        and(
+          eq(folioLines.folioId, id),
+          eq(folioLines.organizationId, org),
+          sql`${folioLines.cancelledAt} is null`,
+        ),
+      ),
+  )
   let releasedSeats = 0
   for (const line of lineRows) {
     if (line.lineType !== 'slot' || !line.slotId) continue
@@ -3759,7 +3794,7 @@ export const listAgentFolios = async (c: PosContext) => {
       id: folios.id,
       customerName: folios.customerName,
       customerPhone: folios.customerPhone,
-      status: folios.status,
+      status: deriveStatusSql, // D11 — derived from the lines; equals the column by construction
       total: folios.total,
       amountPaid: folios.amountPaid,
       createdAt: folios.createdAt,
