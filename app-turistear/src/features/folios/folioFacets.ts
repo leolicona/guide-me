@@ -42,10 +42,20 @@ interface FacetDef {
 
 // The section is DEDUCED from the key, which is why the URL never has to encode it (D4). Keys are
 // globally unique; encoding the section too would be a second copy that can disagree with the first.
+// US-A89 (line-autonomy D15) — the Pago facets are ANY-LINE: the facet answers "is there work of
+// this kind here?", and a mixed folio genuinely has both kinds — it appears under every facet one
+// of its lines earns (S-12). A folio whose lines carry no marks (legacy row, no allocations)
+// answers by its roll-up status, exactly like the server's filter.
+const anyLine = (f: FolioListItem, state: 'paid' | 'booking' | 'cancelled'): boolean => {
+  const marks = (f.lines ?? []).map((l) => l.money_state).filter(Boolean)
+  if (marks.length === 0) return f.status === state
+  return marks.includes(state)
+}
+
 export const FACETS: FacetDef[] = [
-  { key: 'pagado', section: 'pago', label: 'Pagado', match: (f) => f.status === 'paid' },
-  { key: 'reserva', section: 'pago', label: 'Apartado', match: (f) => f.status === 'booking' },
-  { key: 'cancelado', section: 'pago', label: 'Cancelado', match: (f) => f.status === 'cancelled' },
+  { key: 'pagado', section: 'pago', label: 'Pagado', match: (f) => anyLine(f, 'paid') },
+  { key: 'reserva', section: 'pago', label: 'Apartado', match: (f) => anyLine(f, 'booking') },
+  { key: 'cancelado', section: 'pago', label: 'Cancelado', match: (f) => anyLine(f, 'cancelled') },
 
   {
     key: 'sin_enviar',

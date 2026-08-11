@@ -38,3 +38,31 @@ export const deriveStatusSql = sql<'paid' | 'booking' | 'cancelled'>`(
   end
   from folio_lines fl where fl.folio_id = folios.id
 )`
+
+// D15 — facet/filter semantics are ANY-LINE, deliberately different from the field's worst-case
+// above: the filter answers "is there work of this kind here?", and a mixed folio genuinely has
+// both kinds (S-12: it may appear under two facets at once). Same legacy valve: a folio with no
+// allocations at all answers by its column; the valve dies with the column in PR-9.
+export const anyLineStatusSql = (status: 'paid' | 'booking' | 'cancelled') => {
+  if (status === 'cancelled') {
+    // Cancellation is a written stamp — no allocations needed to read it.
+    return sql`(folios.status = 'cancelled' or exists (
+      select 1 from folio_lines fl where fl.folio_id = folios.id and fl.cancelled_at is not null
+    ))`
+  }
+  const lineCondition =
+    status === 'paid'
+      ? sql`coalesce((select sum(a.amount) from folio_payment_allocations a where a.folio_line_id = fl.id), 0) >= fl.line_total`
+      : sql`coalesce((select sum(a.amount) from folio_payment_allocations a where a.folio_line_id = fl.id), 0) < fl.line_total`
+  return sql`(case
+    when not exists (
+      select 1 from folio_payment_allocations a
+      join folio_lines fl2 on a.folio_line_id = fl2.id
+      where fl2.folio_id = folios.id
+    ) then folios.status = ${status}
+    else exists (
+      select 1 from folio_lines fl
+      where fl.folio_id = folios.id and fl.cancelled_at is null and ${lineCondition}
+    )
+  end)`
+}

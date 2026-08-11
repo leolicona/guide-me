@@ -72,7 +72,7 @@ import {
   orderForCascade,
   seedAndCascade,
 } from '../../utils/folioAllocations'
-import { deriveStatusSql } from '../../utils/folioStatus'
+import { anyLineStatusSql, deriveStatusSql } from '../../utils/folioStatus'
 import {
   readListCancellationRequests,
   readListLines,
@@ -3782,7 +3782,8 @@ export const listAgentFolios = async (c: PosContext) => {
     eq(folios.agentId, agent.userId), // caller-scoped — never from the request
   ]
   if (statusQ === 'paid' || statusQ === 'booking' || statusQ === 'cancelled') {
-    filters.push(eq(folios.status, statusQ))
+    // D15 (line-autonomy) — any-line facet semantics, mirroring the admin list.
+    filters.push(anyLineStatusSql(statusQ))
   }
   if (dateQ) {
     filters.push(

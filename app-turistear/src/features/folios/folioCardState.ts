@@ -186,6 +186,36 @@ export function folioAction(
   return 'message'
 }
 
+// --- The rail: the attention semaphore (line-autonomy D14 — supersedes D4's rail = money) --------
+
+export type AttentionLevel = 'ok' | 'work' | 'urgent'
+
+/**
+ * The rail's meaning changes with line autonomy (D14): a mixed folio has no single honest money
+ * colour, but it has a single honest answer to "does this need me?" — which is the question the
+ * seller is actually asking at the list. Derived FROM `folioAction`'s pending-work ladder, so the
+ * rail's colour and the button's verb can never disagree (the US-A84 property, one level up).
+ *
+ *   urgent (red)   — money owed back, an overdue hold, or a hold expiring now
+ *   work   (amber) — any pending job the ladder would surface (verify, request, deliver, remind)
+ *   ok     (green) — nothing needs a human
+ *
+ * Always icon-paired at the render (DESIGN_TOKENS §3): the rail colour anchors to the marks and
+ * chips that carry the same fact in words.
+ */
+export function folioAttention(
+  folio: Parameters<typeof folioAction>[0] & { overdue?: boolean },
+  opts: { urgent: boolean; surface?: 'admin' | 'seller' },
+): { level: AttentionLevel; rail: RailTone } {
+  if (folio.refund_status === 'pending' || folio.overdue === true || opts.urgent) {
+    return { level: 'urgent', rail: 'error' }
+  }
+  if (folioAction(folio, opts) !== 'message') {
+    return { level: 'work', rail: 'warning' }
+  }
+  return { level: 'ok', rail: 'success' }
+}
+
 // --- The time axis: the chip (D1 · US-A84 D10 · D19) ---------------------------------------------
 
 export type TimeChipTone = 'default' | 'warning' | 'error'
