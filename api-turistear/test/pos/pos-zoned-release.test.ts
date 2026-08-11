@@ -117,10 +117,15 @@ const cancel = (id: string) =>
   SELF.fetch(`${base}/folios/${id}/cancel`, { method: 'POST', headers: jsonAuth(AGENT), body: '{}' })
 const reactivate = (id: string) =>
   SELF.fetch(`${base}/folios/${id}/reactivate`, { method: 'POST', headers: auth(AGENT) })
-const expire = (id: string) =>
-  env.DB.prepare('UPDATE folios SET booking_expires_at = ? WHERE id = ?')
+// Elapsed time lives in TWO clocks since line-autonomy F3 (D5): the folio's MIN and each line's own.
+const expire = async (id: string) => {
+  await env.DB.prepare('UPDATE folios SET booking_expires_at = ? WHERE id = ?')
     .bind(ts() - 60, id)
     .run()
+  await env.DB.prepare('UPDATE folio_lines SET booking_expires_at = ? WHERE folio_id = ?')
+    .bind(ts() - 60, id)
+    .run()
+}
 
 // US-A77 — the sweep only CANCELS once the grace instant passes; the settle deadline alone just
 // notifies. It reads each line's snapshotted departure, so that is what moves. Test orgs are UTC.

@@ -1,7 +1,7 @@
 import { and, eq, inArray, lte } from 'drizzle-orm'
 import { getDb, type Db } from '../../db/client'
 import { folioLines, folios, organizations } from '../../db/schema'
-import { cancelFolioPriced } from '../folios/handler'
+import { cancelFolioLinesPriced } from '../folios/handler'
 import { sendBookingReminderEmail } from '../../services/resend'
 import { naiveEpoch } from '../../utils/tz'
 import { emitNotification, recordEmailOutcome } from '../../utils/notifications'
@@ -86,6 +86,7 @@ export async function sweepExpiredBookings(env: CloudflareBindings): Promise<Swe
 
       const lineRows = await db
         .select({
+          id: folioLines.id,
           slotId: folioLines.slotId,
           quantity: folioLines.quantity,
           zoneId: folioLines.zoneId,
@@ -93,6 +94,8 @@ export async function sweepExpiredBookings(env: CloudflareBindings): Promise<Swe
           slotDate: folioLines.slotDate,
           slotStartTime: folioLines.slotStartTime,
           checkIn: folioLines.checkIn,
+          cancelledAt: folioLines.cancelledAt,
+          bookingExpiresAt: folioLines.bookingExpiresAt,
         })
         .from(folioLines)
         .where(
@@ -102,86 +105,72 @@ export async function sweepExpiredBookings(env: CloudflareBindings): Promise<Swe
           ),
         )
 
-      // The protected instant: the earliest departure across the cart, in the ORG's zone. A stay
-      // line departs at its check-in, 00:00 org-local (engine D11).
-      const departures = lineRows
-        .map((l) =>
-          l.slotDate
-            ? naiveEpoch(l.slotDate, l.slotStartTime ?? '00:00', org.timezone)
-            : l.checkIn
-              ? naiveEpoch(l.checkIn, '00:00', org.timezone)
-              : null,
-        )
-        .filter((e): e is number => e !== null)
+      // US-AG54 (line-autonomy D5) — each LIVE line runs its own two clocks: its hold expiry
+      // (booking_expires_at, per-line since 0064; a pre-feature line fell back to the folio's via
+      // the backfill copy) and its own grace instant (ITS departure − the org's grace offset). A
+      // line with no readable departure gets `nowSec` — it is already past its deadline and there
+      // is nothing to wait for.
+      const liveLines = lineRows.filter((l) => !l.cancelledAt)
+      const lineFacts = liveLines.map((l) => {
+        const departure = l.slotDate
+          ? naiveEpoch(l.slotDate, l.slotStartTime ?? '00:00', org.timezone)
+          : l.checkIn
+            ? naiveEpoch(l.checkIn, '00:00', org.timezone)
+            : null
+        const expiry = l.bookingExpiresAt
+          ? Math.floor(l.bookingExpiresAt.getTime() / 1000)
+          : Number.NEGATIVE_INFINITY // legacy null clock on a due folio: already past
+        const grace = departure !== null ? departure - org.graceOffsetMinutes * 60 : nowSec
+        return { line: l, expiry, grace }
+      })
+      const dueLines = lineFacts.filter((f) => nowSec >= f.expiry && nowSec >= f.grace)
 
-      // No readable departure means we cannot compute a grace instant. Cancel rather than hold
-      // seats forever — the folio is already past its deadline and there is nothing to wait for.
-      const graceInstant =
-        departures.length > 0
-          ? Math.min(...departures) - org.graceOffsetMinutes * 60
-          : nowSec
-
-      if (nowSec >= graceInstant) {
-        const { won, outcome } = await cancelFolioPriced(
+      if (dueLines.length > 0) {
+        // US-A87 (D6/D10) — the sweep's close is clock-produced: what the ladder does not retain
+        // accrues as CREDIT, never a cash obligation (nobody is standing there to hand cash to;
+        // a PIN nobody asked for would sit in the admin's refund queue). Zero for every org on
+        // the inherited default, whose terminal tier retains 100% (US-A76).
+        //
+        // Per-line since F3 (D5): only the lines whose OWN clocks fired are cancelled — the far
+        // line keeps its hold and its clock, which is exactly the collateral damage this phase
+        // exists to end. When every live line fired at once this converges to the total
+        // cancellation it always was.
+        const { won, cancelledLineIds } = await cancelFolioLinesPriced(
           db,
           folio.organizationId,
           folio.id,
-          lineRows,
+          dueLines.map((f) => f.line.id),
           now,
           {
             cancelledBy: null, // the system; there is no user
             reason: 'Apartado vencido',
             source: 'system_expiry',
           },
+          { creditInsteadOfRefund: { validDays: org.creditValidDays } },
         )
         if (won) {
           result.cancelled++
-
-          // US-A87 (D6/D10) — what the ladder did NOT retain becomes a CREDIT, not cash. Nobody is
-          // standing there to hand cash to: the close is produced by a clock and the customer is
-          // absent by definition, so a refund obligation would create a debt with a PIN nobody
-          // asked for.
-          //
-          // Zero for every organization on the inherited default, whose terminal tier retains 100%
-          // (US-A76). This does not make anyone more generous — it makes that knob USABLE, because
-          // raising it used to produce a cash refund somebody had to physically deliver to a person
-          // who was not there.
-          //
-          // Written only when there IS something to leave: a `credit_expires_at` on a zero credit
-          // is a date on nothing.
-          if (outcome.refund > 0) {
-            await db
-              .update(folios)
-              .set({
-                creditAmount: outcome.refund,
-                creditExpiresAt: new Date(
-                  (nowSec + org.creditValidDays * 86_400) * 1000,
-                ),
-                // The ladder produced a remainder, so the cancellation's own refund bookkeeping
-                // must NOT also open a cash obligation for it — the money is being handed over as
-                // a credit instead. `cancelFolioPriced` set these; this is the one path that
-                // converts them.
-                refundStatus: 'none',
-                refundAmount: 0,
-                refundPin: null,
-                updatedAt: now,
-              })
-              .where(
-                and(eq(folios.id, folio.id), eq(folios.organizationId, folio.organizationId)),
-              )
+          // US-T09 — the hold actually ended, per LINE (D13): a second line expiring on a later
+          // run is a second message, never swallowed by the first one's guard. Emitted AFTER the
+          // cancellation won its race; whether or not an address exists (D20).
+          for (const lineId of cancelledLineIds) {
+            await emitNotification(db, {
+              organizationId: folio.organizationId,
+              folioId: folio.id,
+              event: 'booking_expired',
+              hasEmail: !!folio.customerEmail,
+              folioLineId: lineId,
+            })
           }
-          // US-T09 — the hold actually ended. Emitted AFTER the cancellation won its race, so a
-          // folio somebody else cancelled first is not announced twice; and emitted whether or not
-          // an address exists, because WhatsApp is the channel that always reaches them (D20).
-          await emitNotification(db, {
-            organizationId: folio.organizationId,
-            folioId: folio.id,
-            event: 'booking_expired',
-            hasEmail: !!folio.customerEmail,
-          })
         }
+        // Lines still inside their own grace window (if any survive) keep the folio alive; its
+        // clock re-rolled to their MIN inside the commit. Nothing more to do this run.
         continue
       }
+
+      // For the stage-② notification below, the release instant the customer is warned about is
+      // the EARLIEST live grace instant — the first moment any of their spots can actually go.
+      const graceInstant = Math.min(...lineFacts.map((f) => f.grace), nowSec + 365 * 86_400)
 
       // Still inside the grace window: this folio has just entered stage ②. Tell the customer their
       // spots are about to go, once.

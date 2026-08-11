@@ -12,6 +12,8 @@ import {
 import migrationSql from '../../migrations/0062_folio_payment_allocations.sql?raw'
 // @ts-expect-error — same pattern for F2's line-cancellation backfill (0063).
 import lineCancellationSql from '../../migrations/0063_line_cancellation.sql?raw'
+// @ts-expect-error — and F3's per-line hold clock backfill (0064).
+import lineClockSql from '../../migrations/0064_line_booking_clock.sql?raw'
 
 // US-LG09 / D10 (docs/folios/line-autonomy.spec.md) — the deterministic total backfill, proven
 // two ways: S-15 (conservation + idempotency over hand-seeded pre-feature folios of all three
@@ -367,6 +369,51 @@ describe('S-16 — the SQL and the TypeScript engine tell the same story', () =>
       .bind(folio.lines[0].id)
       .all()
     expect((after[0] as any).refund_amount).toBe(shares[0].amount)
+  })
+
+  it('S-17 — 0064: an old apartado keeps its promised clock, copied never recalculated', async () => {
+    const d3 = addDays(todayStr(), 3)
+    const d5 = addDays(todayStr(), 5)
+    const folio = await seedFolio({
+      status: 'booking',
+      lines: [{ total: 100000, date: d3 }, { total: 50000, date: d5 }],
+      payments: [60000],
+    })
+    const promised = CREATED_AT + 7 * 86_400
+    await env.DB.prepare(`UPDATE folios SET booking_expires_at = ? WHERE id = ?`)
+      .bind(promised, folio.folioId)
+      .run()
+
+    const updates = (lineClockSql as string)
+      .split('\n')
+      .filter((l) => !l.trim().startsWith('--'))
+      .join('\n')
+      .split(';')
+      .map((s) => s.trim())
+      .filter((s) => s.includes('UPDATE folio_lines'))
+    expect(updates).toHaveLength(1)
+    for (const stmt of updates) await env.DB.prepare(stmt).run()
+
+    const { results } = await env.DB.prepare(
+      `SELECT booking_expires_at FROM folio_lines WHERE folio_id = ?`,
+    )
+      .bind(folio.folioId)
+      .all()
+    // EXACTLY the folio's snapshot on every line — none extended, none shortened, even though a
+    // per-line recalculation would have given the far departure a later clock.
+    expect((results as any[]).map((r) => r.booking_expires_at)).toEqual([promised, promised])
+
+    // Idempotent: re-running rewrites nothing (the IS NULL guard).
+    await env.DB.prepare(`UPDATE folios SET booking_expires_at = ? WHERE id = ?`)
+      .bind(promised + 999, folio.folioId)
+      .run()
+    for (const stmt of updates) await env.DB.prepare(stmt).run()
+    const { results: after } = await env.DB.prepare(
+      `SELECT booking_expires_at FROM folio_lines WHERE folio_id = ?`,
+    )
+      .bind(folio.folioId)
+      .all()
+    expect((after as any[]).map((r) => r.booking_expires_at)).toEqual([promised, promised])
   })
 
   it('bookingSegments is the exact segment sequence the SQL lays payments over', () => {

@@ -266,7 +266,9 @@ describe('US-A22 — the gates honour the LINE (the F2 hole, closed)', () => {
     expect(admitted.result, JSON.stringify(admitted)).toBe('valid')
   })
 
-  it('a booking folio refuses the line cancel until F3 (LINE_CANCEL_UNSUPPORTED)', async () => {
+  it("F3 — a booking's line cancels alone, and the settle then charges only what lives", async () => {
+    // (Supersedes F2's LINE_CANCEL_UNSUPPORTED guard test: the guard existed because settle
+    // still charged `total − amount_paid`; with the live-lines settle, the gesture unblocks.)
     const stage = await seedStage()
     const res = await SELF.fetch(`${POS}/folios`, {
       method: 'POST',
@@ -283,9 +285,27 @@ describe('US-A22 — the gates honour the LINE (the F2 hole, closed)', () => {
     })
     const booking = ((await res.json()) as any).folio
     expect(res.status).toBe(201)
-    const attempt = await cancelLine(booking.id, booking.lines[0].id)
-    expect(attempt.status).toBe(409)
-    expect(JSON.stringify(attempt.json)).toMatch(/LINE_CANCEL_UNSUPPORTED/)
+    const farLine = lineBySlot(booking, stage.slotFar)
+
+    // The far line holds no money yet (org min % defaults to 0 → the deposit cascaded to the
+    // near line), so cancelling it owes nothing — and the folio stays a live booking.
+    const cancelled = await cancelLine(booking.id, farLine.id)
+    expect(cancelled.status, JSON.stringify(cancelled.json)).toBe(200)
+    expect(cancelled.json.cancellation.refund).toBe(0)
+    const f = await dbFolio(booking.id)
+    expect(f.status).toBe('booking')
+    expect(await slotBooked(stage.slotFar)).toBe(0)
+
+    // Liquidar todo now collects ONLY the live line's remainder — never the cancelled line's.
+    const settle = await SELF.fetch(`${POS}/folios/${booking.id}/settle`, {
+      method: 'POST',
+      headers: jsonAuth(AGENT_EMAIL),
+    })
+    expect(settle.status).toBe(200)
+    const settled = await dbFolio(booking.id)
+    expect(settled.status).toBe('paid')
+    expect(settled.amount_paid).toBe(100000) // 45,000 deposit + 55,000 live remainder — not 150,000
+    await expectConserved(booking.id)
   })
 })
 

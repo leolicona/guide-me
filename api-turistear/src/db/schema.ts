@@ -499,6 +499,11 @@ export const folioLines = sqliteTable('folio_lines', {
     .notNull()
     .default('none'),
   refundAmount: integer('refund_amount'),
+  // US-AG54 (line-autonomy D5) — the line's OWN hold clock, computed against ITS departure at
+  // booking birth. The folio's booking_expires_at survives as MIN(live line clocks) while the
+  // column lives, so every existing reader stays truthful. Null for a paid line, a stay-only
+  // legacy row, or a pre-feature apartada that kept the folio's promised clock (migration 0064).
+  bookingExpiresAt: integer('booking_expires_at', { mode: 'timestamp' }),
   // Accommodation stay line (docs/lodging/accommodation-stays.spec.md §4.4, Option A). lineType
   // 'slot' (tour, default) vs 'stay' (lodging). A stay line carries the unit type + date range +
   // guests + nights instead of a slot; its price is snapshotted in line_total (base_price =
