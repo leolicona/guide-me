@@ -2,6 +2,29 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Communication
+
+Write in **B1 level English** in this project. This applies to chat answers, commit bodies,
+pull request descriptions, code comments, and documentation.
+
+- Use simple, common words.
+- Keep sentences short. One idea per sentence.
+- Do not use complex idioms or phrasal verbs. Say "start" instead of "kick off", "continue"
+  instead of "carry on", "check" instead of "look into".
+- Technical terms stay as they are (worktree, migration, binding, tenant). Explain them if the
+  meaning is not clear.
+
+**Exception — commit and PR titles.** The title line keeps the existing narrative voice of this
+repo's history: a Conventional Commit prefix, then a sentence that tells what changed in the
+product's own language, with the story/feature IDs in parentheses. Example:
+
+```
+feat(folios): the rail becomes the attention semaphore, and the facets tell the whole truth (US-A89, line-autonomy F4, PR-8)
+```
+
+Because PRs are squash-merged, the PR title *is* the commit title — so the same exception covers
+both. Everything below the title line follows the B1 rules.
+
 ## Project Overview
 
 `turistear` is a monorepo containing:
