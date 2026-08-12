@@ -1,6 +1,6 @@
 import type { Context } from 'hono'
 import type { BatchItem } from 'drizzle-orm/batch'
-import { and, asc, desc, eq, inArray, isNotNull, lt, ne, sql, type SQL } from 'drizzle-orm'
+import { and, asc, desc, eq, inArray, isNotNull, isNull, lt, ne, sql, type SQL } from 'drizzle-orm'
 import { getDb, type Db } from '../../db/client'
 import {
   accommodationReservations,
@@ -30,7 +30,13 @@ import {
 } from '../../services/resend'
 import { generateRefundPin } from '../../utils/portal'
 import { folioFulfillment, lineFulfillment } from '../../utils/folioFulfillment'
-import { anyLineStatusSql, deriveStatusSql } from '../../utils/folioStatus'
+import {
+  anyLineStatusSql,
+  deriveBookingExpiresAtSql,
+  deriveRefundAmountSql,
+  deriveRefundStatusSql,
+  deriveStatusSql,
+} from '../../utils/folioStatus'
 import {
   rescheduleFolio,
   reissueTicketsAfterReschedule,
@@ -110,17 +116,18 @@ const readFolio = async (db: Db, org: string, folioId: string, apiBaseUrl?: stri
       cancellationReason: folios.cancellationReason,
       // US-AG07/D5 — apartado state, so the admin detail can show the expiry banner +
       // Liquidar/Reactivar and the reminder status.
-      bookingExpiresAt: folios.bookingExpiresAt,
+      // TECH_DEBT #25 — the roll-ups derive from the lines; the columns are gone (0065).
+      bookingExpiresAt: deriveBookingExpiresAtSql,
       reminderStatus: folios.reminderStatus,
       reminderSentAt: folios.reminderSentAt,
       reminderSentBy: folios.reminderSentBy,
       // US-A23 — refund tracking. refund_pin is DELIBERATELY not selected: the PIN is
       // portal-only (spec D6) — the admin learns it from the tourist in person, which is
       // exactly what proves the cash changed hands.
-      refundStatus: folios.refundStatus,
+      refundStatus: deriveRefundStatusSql,
       creditAmount: folios.creditAmount,
       creditExpiresAt: folios.creditExpiresAt,
-      refundAmount: folios.refundAmount,
+      refundAmount: deriveRefundAmountSql,
       refundNote: folios.refundNote,
       refundedAt: folios.refundedAt,
       refundedBy: folios.refundedBy,
@@ -277,7 +284,7 @@ const readFolio = async (db: Db, org: string, folioId: string, apiBaseUrl?: stri
     amount_paid: folio.amountPaid,
     pending_balance: folio.total - folio.amountPaid,
     commission_amount: folio.commissionAmount,
-    booking_expires_at: tsOrNull(folio.bookingExpiresAt),
+    booking_expires_at: folio.bookingExpiresAt ?? null, // derived: epoch seconds already
     reminder_status: folio.reminderStatus,
     reminder_sent_at: tsOrNull(folio.reminderSentAt),
     reminder_sent_by: folio.reminderSentBy,
@@ -450,13 +457,14 @@ export const listFolios = async (c: FoliosContext) => {
     filters.push(eq(folios.paymentVerification, verificationQ))
     // US-A67 — the "Por verificar" queue is ACTIVE folios awaiting an admin: a rejected payment
     // cancels the folio (its stale 'pending' flag stays), so exclude cancelled to drop it out.
-    if (verificationQ === 'pending') filters.push(ne(folios.status, 'cancelled'))
+    if (verificationQ === 'pending') filters.push(isNull(folios.cancelledAt))
   }
   if (agentQ) filters.push(eq(folios.agentId, agentQ))
 
   // US-A78 — refunds still owed. Unknown values fall through to "no filter", matching `status`.
   if (refundStatusQ === 'pending' || refundStatusQ === 'none' || refundStatusQ === 'refunded') {
-    filters.push(eq(folios.refundStatus, refundStatusQ))
+    // TECH_DEBT #25 — the obligation derives from the line debts.
+    filters.push(sql`${deriveRefundStatusSql} = ${refundStatusQ}`)
   }
   // US-A79 — apartados past their settle deadline. DERIVED here, never stored.
   const now = new Date()
@@ -513,7 +521,7 @@ export const listFolios = async (c: FoliosContext) => {
       cancelledAt: folios.cancelledAt,
       // US-AG07.3/D5 — booking-recovery fields so the admin list can decorate apartado rows
       // (urgency accent, pending balance, WhatsApp reminder) exactly like the agent list.
-      bookingExpiresAt: folios.bookingExpiresAt,
+      bookingExpiresAt: deriveBookingExpiresAtSql,
       reminderStatus: folios.reminderStatus,
       reminderSentAt: folios.reminderSentAt,
       reminderSentBy: folios.reminderSentBy,
@@ -525,10 +533,10 @@ export const listFolios = async (c: FoliosContext) => {
       operatorName: affiliateOperators.name,
       // US-A78 — the debt itself. The lean row never carried these, so the pending-refunds queue
       // could not show what is owed without a second read per folio.
-      refundStatus: folios.refundStatus,
+      refundStatus: deriveRefundStatusSql,
       creditAmount: folios.creditAmount,
       creditExpiresAt: folios.creditExpiresAt,
-      refundAmount: folios.refundAmount,
+      refundAmount: deriveRefundAmountSql,
       // US-A82 — no surface may infer Express from a null name (business rule 4).
       saleMode: folios.saleMode,
     })
@@ -580,7 +588,7 @@ export const listFolios = async (c: FoliosContext) => {
       pending_balance: r.total - r.amountPaid,
       created_at: Math.floor(r.createdAt.getTime() / 1000),
       cancelled_at: tsOrNull(r.cancelledAt),
-      booking_expires_at: tsOrNull(r.bookingExpiresAt),
+      booking_expires_at: r.bookingExpiresAt ?? null, // derived: epoch seconds already
       reminder_status: r.reminderStatus,
       reminder_sent_at: tsOrNull(r.reminderSentAt),
       reminder_sent_by: r.reminderSentBy,
@@ -620,7 +628,7 @@ export const listFolios = async (c: FoliosContext) => {
       overdue:
         r.status === 'booking' &&
         r.bookingExpiresAt != null &&
-        r.bookingExpiresAt.getTime() < now.getTime(),
+        r.bookingExpiresAt * 1000 < now.getTime(),
     })),
   })
 }
@@ -810,7 +818,9 @@ const applyCancellation = async (
       and(
         eq(folios.id, folioId),
         eq(folios.organizationId, org),
-        ne(folios.status, 'cancelled'),
+        // TECH_DEBT #25 — cancelled_at is the flip guard now: the full cancellation is the only
+        // writer of the folio-level stamp, so its NULLness carries exactly ne(status,'cancelled').
+        isNull(folios.cancelledAt),
       ),
     )
     .returning({ id: folios.id })
@@ -846,7 +856,9 @@ const applyCancellation = async (
         folioLineId: l.id,
         weight: Math.max(0, Number(l.allocated ?? 0)),
       })),
-      folioUpdate.refundAmount ?? 0,
+      // TECH_DEBT #25 — the obligation no longer travels on `folioUpdate` (the folio columns are
+      // gone): `reversal.refundAmount` IS the amount owed, and the lines are where it lands.
+      reversal?.refundAmount ?? 0,
     ).map((s) => [s.folioLineId, s.amount]),
   )
   for (const line of liveLines) {
@@ -858,9 +870,7 @@ const applyCancellation = async (
           cancelledAt: now,
           cancelledBy: folioUpdate.cancelledBy ?? null,
           cancellationSource: folioUpdate.cancellationSource ?? null,
-          ...(share > 0
-            ? { refundStatus: folioUpdate.refundStatus ?? 'pending', refundAmount: share }
-            : {}),
+          ...(share > 0 ? { refundStatus: 'pending' as const, refundAmount: share } : {}),
         })
         .where(
           and(
@@ -988,7 +998,6 @@ export const quoteCancellation = async (
 ): Promise<CancellationOutcome> => {
   const [folio] = await db
     .select({
-      status: folios.status,
       amountPaid: folios.amountPaid,
       commissionAmount: folios.commissionAmount,
       snapshot: folios.cancellationPolicySnapshot,
@@ -1099,13 +1108,9 @@ const serializeOutcome = (o: CancellationOutcome) => ({
 // mints a PIN, because a tourist owed money must be able to prove they were present to receive it
 // regardless of who pressed cancel.
 const refundFieldsFor = (outcome: CancellationOutcome): Partial<typeof folios.$inferInsert> =>
-  outcome.refund > 0
-    ? {
-        refundStatus: 'pending' as const,
-        refundAmount: outcome.refund,
-        refundPin: generateRefundPin(),
-      }
-    : { refundStatus: 'none' as const, refundAmount: 0 }
+  // TECH_DEBT #25 — the obligation itself lives on the LINES (applyCancellation distributes it);
+  // the folio keeps only the PIN, which is person-scoped by design (D6).
+  outcome.refund > 0 ? { refundPin: generateRefundPin() } : {}
 
 // Cancel a folio at the ladder's price: quote it, flip it, release its inventory, reverse its money.
 //
@@ -1144,7 +1149,7 @@ export const cancelFolioPriced = async (
     lines,
     now,
     {
-      status: 'cancelled',
+      // TECH_DEBT #25 — status is derived; cancelled_at is both the fact and the flip guard.
       cancelledAt: now,
       cancelledBy: by.cancelledBy,
       cancellationReason: by.reason,
@@ -1240,7 +1245,7 @@ export const cancelFolio = async (c: FoliosContext) => {
   const folioRows = await db
     .select({
       id: folios.id,
-      status: folios.status,
+      status: deriveStatusSql,
       paymentVerification: folios.paymentVerification,
     })
     .from(folios)
@@ -1475,12 +1480,10 @@ export const cancelFolioLinesPriced = async (
       .update(folios)
       .set({
         ...(outcome.reversedCommission > 0 ? { cancellationClawback: true } : {}),
+        // TECH_DEBT #25 — the obligation and the clock LIVE on the lines now; only the PIN
+        // (folio-scoped by design, D6) and the credit accrual still write here.
         ...(outcome.refund > 0 && !credit
-          ? {
-              refundStatus: 'pending' as const,
-              refundAmount: sql`(select coalesce(sum(fl.refund_amount), 0) from folio_lines fl where fl.folio_id = ${folioId} and fl.refund_status = 'pending')`,
-              refundPin: sql`coalesce(${folios.refundPin}, ${generateRefundPin()})`,
-            }
+          ? { refundPin: sql`coalesce(${folios.refundPin}, ${generateRefundPin()})` }
           : {}),
         ...(outcome.refund > 0 && credit
           ? {
@@ -1488,7 +1491,6 @@ export const cancelFolioLinesPriced = async (
               creditExpiresAt: new Date(now.getTime() + credit.validDays * 86_400_000),
             }
           : {}),
-        bookingExpiresAt: sql`(select min(fl.booking_expires_at) from folio_lines fl where fl.folio_id = ${folioId} and fl.cancelled_at is null and fl.booking_expires_at is not null)`,
         updatedAt: now,
       })
       .where(and(eq(folios.id, folioId), eq(folios.organizationId, org))),
@@ -1497,7 +1499,6 @@ export const cancelFolioLinesPriced = async (
     db
       .update(folios)
       .set({
-        status: 'cancelled',
         cancelledAt: now,
         cancelledBy: by.cancelledBy,
         cancellationSource: by.source,
@@ -1507,7 +1508,7 @@ export const cancelFolioLinesPriced = async (
         and(
           eq(folios.id, folioId),
           eq(folios.organizationId, org),
-          ne(folios.status, 'cancelled'),
+          isNull(folios.cancelledAt),
           sql`not exists (select 1 from folio_lines fl where fl.folio_id = ${folioId} and fl.cancelled_at is null)`,
         ),
       ),
@@ -1557,7 +1558,7 @@ export const cancelFolioLine = async (c: FoliosContext) => {
   const folioRows = await db
     .select({
       id: folios.id,
-      status: folios.status,
+      status: deriveStatusSql,
       paymentVerification: folios.paymentVerification,
       agentId: folios.agentId,
       customerEmail: folios.customerEmail,
@@ -1671,7 +1672,7 @@ export const listCancellationRequests = async (c: FoliosContext) => {
       resolvedAt: folioRequests.resolvedAt,
       createdAt: folioRequests.createdAt,
       customerName: folios.customerName,
-      folioStatus: folios.status,
+      folioStatus: deriveStatusSql,
       total: folios.total,
       amountPaid: folios.amountPaid,
     })
@@ -1783,7 +1784,7 @@ const approveRescheduleRequest = async (
         .where(eq(organizations.id, org))
         .limit(1)
       const [folioRow] = await db
-        .select({ status: folios.status })
+        .select({ status: deriveStatusSql })
         .from(folios)
         .where(and(eq(folios.id, request.folioId), eq(folios.organizationId, org)))
         .limit(1)
@@ -1863,7 +1864,7 @@ export const approveCancellationRequest = async (c: FoliosContext) => {
   }
 
   const [folio] = await db
-    .select({ id: folios.id, status: folios.status, amountPaid: folios.amountPaid })
+    .select({ id: folios.id, status: deriveStatusSql, amountPaid: folios.amountPaid })
     .from(folios)
     .where(and(eq(folios.id, request.folioId), eq(folios.organizationId, org)))
     .limit(1)
@@ -2004,8 +2005,8 @@ export const confirmRefund = async (c: FoliosContext) => {
   const [folio] = await db
     .select({
       id: folios.id,
-      refundStatus: folios.refundStatus,
-      refundAmount: folios.refundAmount,
+      refundStatus: deriveRefundStatusSql,
+      refundAmount: deriveRefundAmountSql,
       creditAmount: folios.creditAmount,
       creditExpiresAt: folios.creditExpiresAt,
       refundPin: folios.refundPin,
@@ -2053,22 +2054,11 @@ export const confirmRefund = async (c: FoliosContext) => {
 
   const now = new Date()
   await db.batch([
-    // US-A22 (D6) — the handshake settles every line-debt present at the counter: the person is
-    // one, the PIN is one, the debts are per line.
-    db
-      .update(folioLines)
-      .set({ refundStatus: 'refunded' })
-      .where(
-        and(
-          eq(folioLines.folioId, id),
-          eq(folioLines.organizationId, org),
-          eq(folioLines.refundStatus, 'pending'),
-        ),
-      ),
+    // ORDER MATTERS (TECH_DEBT #25): the folio update's guard below asks "is anything still
+    // pending?" — so it must run BEFORE the lines flip to refunded, or the rotation never fires.
     db
       .update(folios)
       .set({
-        refundStatus: 'refunded',
         refundNote: overrideNote,
         refundedAt: now,
         refundedBy: admin.userId,
@@ -2083,7 +2073,20 @@ export const confirmRefund = async (c: FoliosContext) => {
         and(
           eq(folios.id, id),
           eq(folios.organizationId, org),
-          eq(folios.refundStatus, 'pending'),
+          // TECH_DEBT #25 — the obligation lives on the lines.
+          sql`exists (select 1 from folio_lines fl where fl.folio_id = ${id} and fl.refund_status = 'pending')`,
+        ),
+      ),
+    // US-A22 (D6) — the handshake settles every line-debt present at the counter: the person is
+    // one, the PIN is one, the debts are per line.
+    db
+      .update(folioLines)
+      .set({ refundStatus: 'refunded' })
+      .where(
+        and(
+          eq(folioLines.folioId, id),
+          eq(folioLines.organizationId, org),
+          eq(folioLines.refundStatus, 'pending'),
         ),
       ),
     // US-A24 — the hand-back's narrative row, same batch, same clock as refunded_at. The `pending`

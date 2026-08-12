@@ -1,6 +1,7 @@
 import type { Context } from 'hono'
 import { and, eq, gte, inArray, lt, lte, ne, sql } from 'drizzle-orm'
 import { getDb, type Db } from '../../db/client'
+import { deriveStatusSql } from '../../utils/folioStatus'
 import {
   affiliateCompanies,
   cashDrops,
@@ -81,9 +82,9 @@ export const buildCommissionReport = async (
   const folioAgg = await db
     .select({
       agentId: folios.agentId,
-      foliosSold: sql<number>`count(case when ${folios.status} != 'cancelled' then 1 end)`,
-      salesTotal: sql<number>`coalesce(sum(case when ${folios.status} != 'cancelled' then ${folios.total} end), 0)`,
-      commission: sql<number>`coalesce(sum(case when (${folios.status} != 'cancelled' or ${folios.cancellationClawback} = 0) then ${folios.commissionAmount} end), 0)`,
+      foliosSold: sql<number>`count(case when ${folios.cancelledAt} is null then 1 end)`,
+      salesTotal: sql<number>`coalesce(sum(case when ${folios.cancelledAt} is null then ${folios.total} end), 0)`,
+      commission: sql<number>`coalesce(sum(case when (${folios.cancelledAt} is null or ${folios.cancellationClawback} = 0) then ${folios.commissionAmount} end), 0)`,
     })
     .from(folios)
     .where(and(...folioFilters))
@@ -375,7 +376,7 @@ export const getWastedSeatsReport = async (c: ReportsContext) => {
       and(
         eq(folioLines.organizationId, org),
         eq(folios.organizationId, org),
-        eq(folios.status, 'paid'),
+        sql`${deriveStatusSql} = 'paid'`, // TECH_DEBT #25
         // The DEPARTURE decides which period a wasted seat belongs to, not the sale date: a seat
         // sold in June for an August tour is wasted in August.
         gte(sql`COALESCE(${folioLines.slotDate}, ${folioLines.checkIn})`, from),

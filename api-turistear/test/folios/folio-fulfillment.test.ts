@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { env, SELF } from 'cloudflare:test'
-import { seedUser, seedTwoOrgs, clearAffiliateDb } from '../helpers/tenancy'
+import { materializeSeededFolio, seedUser, seedTwoOrgs, clearAffiliateDb } from '../helpers/tenancy'
 import { buildFakeJwt } from '../helpers/jwt'
 
 // US-A85 — the wasted seat, end to end.
@@ -81,6 +81,7 @@ const seedLine = async (opts: {
       opts.redeemedCount ?? 0, nowSec(),
     )
     .run()
+  await materializeSeededFolio(opts.folioId)
   return id
 }
 

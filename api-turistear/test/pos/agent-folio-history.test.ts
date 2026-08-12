@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { env, SELF } from 'cloudflare:test'
-import { seedUser, seedTwoOrgs, clearTenancyDb } from '../helpers/tenancy'
+import { materializeSeededFolio, seedUser, seedTwoOrgs, clearTenancyDb } from '../helpers/tenancy'
 import { buildFakeJwt } from '../helpers/jwt'
 
 // Agent Folio History (read-only list and details) — US-AG20, US-AG21.
@@ -50,7 +50,9 @@ const seedFolio = async ({
 }: SeedFolioOptions): Promise<{ folioId: string }> => {
   const folioId = crypto.randomUUID()
   const ts = createdAt ?? Math.floor(Date.now() / 1000)
-  const paid = amountPaid ?? total
+  // TECH_DEBT #25 — an apartado is a folio whose lines are not covered yet; the deposit is what
+  // makes it one, since `status` no longer exists as a stored fact.
+  const paid = amountPaid ?? (status === 'booking' ? Math.floor(total / 3) : total)
   await env.DB.prepare(
     `INSERT INTO folios
        (id, organization_id, agent_id, customer_name, customer_email, customer_phone,
@@ -61,6 +63,7 @@ const seedFolio = async ({
   )
     .bind(folioId, organizationId, agentId, customerName, status, total, total, paid, cancelledAt, ts, ts)
     .run()
+  await materializeSeededFolio(folioId)
   return { folioId }
 }
 

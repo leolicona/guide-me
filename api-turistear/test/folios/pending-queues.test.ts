@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { env, SELF } from 'cloudflare:test'
-import { seedUser, seedTwoOrgs, clearTenancyDb } from '../helpers/tenancy'
+import { materializeSeededFolio, seedUser, seedTwoOrgs, clearTenancyDb } from '../helpers/tenancy'
 import { buildFakeJwt } from '../helpers/jwt'
 
 // Pending work queues — US-A78 (refunds owed) / US-A79 (apartados past the settle deadline).
@@ -73,11 +73,13 @@ const seedFolio = async ({
       bookingExpiresAt,
     )
     .run()
+  await materializeSeededFolio(id)
   return id
 }
 
 const clearFoliosDb = async () => {
   await env.DB.exec('DELETE FROM folio_payments')
+  await env.DB.exec('DELETE FROM folio_lines')
   await env.DB.exec('DELETE FROM notifications')
   await env.DB.exec('DELETE FROM folio_events')
   await env.DB.exec('DELETE FROM folios')
@@ -134,8 +136,9 @@ describe('US-A78 — refunds pending hand-back', () => {
 
     expect(await listQueue('refund_status=pending')).toHaveLength(1)
 
-    // The confirm flow itself is US-A23's; here we only assert the queue follows the flag.
-    await env.DB.prepare(`UPDATE folios SET refund_status = 'refunded' WHERE id = ?`)
+    // The confirm flow itself is US-A23's; here we only assert the queue follows the flag —
+    // which now lives on the LINE (TECH_DEBT #25: the folio column is gone, the fact derives).
+    await env.DB.prepare(`UPDATE folio_lines SET refund_status = 'refunded' WHERE folio_id = ?`)
       .bind(id)
       .run()
 
@@ -231,8 +234,19 @@ describe('US-A79 — apartados past the settle deadline', () => {
 
     expect(await listQueue('overdue=true')).toHaveLength(1)
 
-    await env.DB.prepare(`UPDATE folios SET status = 'paid', amount_paid = total WHERE id = ?`)
-      .bind(id)
+    // Settling = the line reaches full allocation (TECH_DEBT #25: `status` derives from the
+    // ledger). Top the fixture's single payment + allocation up to the line total.
+    await env.DB.prepare(`UPDATE folios SET amount_paid = total WHERE id = ?`).bind(id).run()
+    await env.DB.prepare(
+      `UPDATE folio_payments SET amount = (SELECT total FROM folios WHERE id = ?) WHERE id = ?`,
+    )
+      .bind(id, `pmt_${id}`)
+      .run()
+    await env.DB.prepare(
+      `UPDATE folio_payment_allocations SET amount = (SELECT line_total FROM folio_lines WHERE id = folio_payment_allocations.folio_line_id)
+       WHERE payment_id = ?`,
+    )
+      .bind(`pmt_${id}`)
       .run()
 
     expect(await listQueue('overdue=true')).toHaveLength(0)

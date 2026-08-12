@@ -85,9 +85,25 @@ const getSlotBooked = async (id: string) =>
   (await env.DB.prepare(`SELECT booked FROM slots WHERE id = ?`).bind(id).first<{ booked: number }>())!.booked
 const getFolio = (id: string) =>
   env.DB.prepare(
-    `SELECT status, amount_paid, commission_amount, refund_status, refund_amount, refund_pin,
-            cancellation_source, cancellation_clawback, reminder_status, reminder_sent_by
-     FROM folios WHERE id = ?`,
+    `SELECT f.*,
+      (SELECT CASE
+        WHEN COALESCE(SUM(CASE WHEN fl.cancelled_at IS NULL THEN 1 ELSE 0 END),0) = 0 THEN 'cancelled'
+        WHEN COALESCE(SUM(CASE WHEN fl.cancelled_at IS NULL
+            AND COALESCE((SELECT SUM(a2.amount) FROM folio_payment_allocations a2 WHERE a2.folio_line_id = fl.id),0) < fl.line_total
+            THEN 1 ELSE 0 END),0) > 0 THEN 'booking'
+        ELSE 'paid' END
+       FROM folio_lines fl WHERE fl.folio_id = f.id) AS status,
+      (SELECT COALESCE(
+        (SELECT MIN(fl.booking_expires_at) FROM folio_lines fl
+          WHERE fl.folio_id = f.id AND fl.cancelled_at IS NULL AND fl.booking_expires_at IS NOT NULL),
+        (SELECT MIN(fl.booking_expires_at) FROM folio_lines fl
+          WHERE fl.folio_id = f.id AND fl.booking_expires_at IS NOT NULL))) AS booking_expires_at,
+      (SELECT CASE
+        WHEN EXISTS (SELECT 1 FROM folio_lines fl WHERE fl.folio_id = f.id AND fl.refund_status = 'pending') THEN 'pending'
+        WHEN EXISTS (SELECT 1 FROM folio_lines fl WHERE fl.folio_id = f.id AND fl.refund_status = 'refunded') THEN 'refunded'
+        ELSE 'none' END) AS refund_status,
+      (SELECT SUM(fl.refund_amount) FROM folio_lines fl WHERE fl.folio_id = f.id AND fl.refund_status <> 'none') AS refund_amount
+     FROM folios f WHERE f.id = ?`,
   )
     .bind(id)
     .first<any>()

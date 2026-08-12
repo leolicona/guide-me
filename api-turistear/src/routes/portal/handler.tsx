@@ -12,6 +12,7 @@ import {
   services,
 } from '../../db/schema'
 import { folioEventRow } from '../../utils/folioEvents'
+import { deriveRefundAmountSql, deriveRefundStatusSql, deriveStatusSql } from '../../utils/folioStatus'
 
 // Tourist self-service portal (US-T01–T05) — PUBLIC Worker-rendered pages (spec D1).
 // No session, no role: the folio-scoped access token in the URL IS the credential (D2).
@@ -323,11 +324,11 @@ const loadPortalData = async (
   const [folio] = await db
     .select({
       id: folios.id,
-      status: folios.status,
+      status: deriveStatusSql, // TECH_DEBT #25
       total: folios.total,
       amountPaid: folios.amountPaid,
-      refundStatus: folios.refundStatus,
-      refundAmount: folios.refundAmount,
+      refundStatus: deriveRefundStatusSql,
+      refundAmount: deriveRefundAmountSql,
       refundPin: folios.refundPin,
       orgName: organizations.name,
     })
@@ -472,7 +473,7 @@ export const submitCancellationRequest = async (c: PortalContext) => {
   if (resolution.kind === 'expired') return renderExpired(c)
 
   const [folio] = await db
-    .select({ status: folios.status })
+    .select({ status: deriveStatusSql })
     .from(folios)
     .where(
       and(
@@ -575,7 +576,7 @@ export const submitRescheduleRequest = async (c: PortalContext) => {
   }
 
   const [folio] = await db
-    .select({ status: folios.status })
+    .select({ status: deriveStatusSql })
     .from(folios)
     .where(
       and(
