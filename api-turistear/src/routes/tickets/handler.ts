@@ -127,7 +127,7 @@ export const scanTicket = async (c: TicketsContext) => {
   // line admits even while its siblings keep the folio a `booking`, and an unpaid line refuses
   // whatever the folio's roll-up says. A line with no allocations at all (legacy fixture; never
   // a production row) keeps the folio-status answer — the same fallback deriveStatusSql uses,
-  // and it dies with the column in PR-9.
+  // and it dies with the column (TECH_DEBT #25).
   const linePaid =
     row.lineAllocated === null
       ? row.folioStatus === 'paid'

@@ -171,7 +171,7 @@ export const viewTicket = async (c: TicketContext) => {
   // US-A89 (F4, PR-7) — the pass shows when THE LINE is paid and ITS money is cleared: a line
   // settled per line renders while its siblings keep the folio a `booking`, and a sibling's
   // pending transfer no longer hides a cash-funded line's pass. Legacy rows (no allocations)
-  // keep the folio-level answer until PR-9 retires it with the column.
+  // keep the folio-level answer until the column retires (TECH_DEBT #25).
   const linePaidCleared =
     row.lineAllocated === null
       ? row.folioStatus === 'paid' && row.paymentVerification !== 'pending'

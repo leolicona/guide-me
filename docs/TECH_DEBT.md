@@ -2,6 +2,27 @@
 
 This document tracks known technical debt, deferred tasks, and architectural improvements that are planned for future phases.
 
+## 25. `folios.status` (+ its sibling roll-ups) Survive as Reconciled Columns — the 0065 Drop Is Deferred — ⚠️ OPEN
+
+**Context:** Line Autonomy (`docs/folios/line-autonomy.spec.md`) planned migration `0065` to drop
+`folios.status`, `booking_expires_at`, `refund_status` and `refund_amount` once every reader
+derived from the lines. The reader migration IS complete (PRs #95–#97: serializers, the five QR
+gates, the `/t` page, filters and facets all answer from `folio_lines` + `folio_payment_allocations`),
+and the write paths maintain the columns as worst-case roll-ups **in the same commits** — they
+cannot drift, exactly like `amount_paid`/`commission_amount` after the paid-ledger.
+
+**Why deferred:** the physical drop collides with the spec's own mechanical scope boundary.
+27 test files hand-seed `INSERT INTO folios (…, status, …)` — including
+`test/cash/agent-balance-cash-drops.test.ts`, which the boundary requires to pass **unedited** —
+so the drop forces the exact big-bang the epic's phasing was designed to avoid.
+
+**Exit path:** one mechanical PR that (1) centralizes folio seeding into a shared test helper,
+(2) sweeps the 27 column lists, (3) amends the scope boundary's wording to cover fixture-only
+edits, then (4) ships `0065` and deletes the three legacy valves that read the column
+(`deriveStatusSql`'s no-allocations branch, the scanner/`/t` fallbacks, `anyLineStatusSql`'s
+fallback) plus the columns from `schema.ts`/Zod/app types. Until then the columns are caches with
+a single writer each — safe, but a second home for facts the lines own.
+
 ## 24. Two Date Vocabularies: `useOrgDateFormatter` Follows the BROWSER's Locale — ✅ CLOSED (2026-08-07)
 
 **Closed:** the locale is pinned to `'es-MX'` inside the hook, matching `folioSoldAtLabel` (US-A82

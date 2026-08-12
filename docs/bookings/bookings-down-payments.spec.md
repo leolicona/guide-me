@@ -1,5 +1,11 @@
 # Bookings / Down-payments (Apartados) — Spec
 
+> **Partially superseded by `docs/folios/line-autonomy.spec.md` (2026-08-11):** the one-shot
+> settle became *Liquidar todo* over the LIVE lines (each line also settles alone, minting its
+> own QR and commission), and the single folio-level hold clock became per-line clocks —
+> `folios.booking_expires_at` survives as MIN(live line clocks), and the sweep cancels line by
+> line with the US-A87 remainder accruing as credit per line. Everything else here stands.
+
 **Feature:** Register a sale as an *apartado* (booking) with a partial amount received — reserve the spots now, collect the rest later, then settle into a fully-paid folio.
 **Stories:** US-AG07.1 (cascade rules), US-AG07.2 (adaptive checkout), US-AG07.3 (CRM recovery), US-AG07.4 (manual cancel), US-AG07.5 (late arrival contingency), US-A46 (org policy).
 **Status:** Updated Specification. SHOULD HAVE.
