@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { env, SELF } from 'cloudflare:test'
-import { seedUser, seedTwoOrgs, clearAffiliateDb } from '../helpers/tenancy'
+import { materializeSeededFolio, seedUser, seedTwoOrgs, clearAffiliateDb , readDerivedFolio} from '../helpers/tenancy'
 import { buildFakeJwt } from '../helpers/jwt'
 import {
   quoteStay,
@@ -163,6 +163,7 @@ const seedReservation = async (
   )
     .bind(folioId, organizationId, admin!.id)
     .run()
+  await materializeSeededFolio(folioId)
   await env.DB.prepare(
     `INSERT INTO accommodation_reservations
        (id, organization_id, service_id, unit_type_id, quantity, folio_id, check_in, check_out, guests, status)
@@ -976,13 +977,13 @@ describe('POS lodging sale path', () => {
       body: JSON.stringify({ reason: 'cambio de planes' }),
     })
     expect(cancelFree.status).toBe(200)
-    const freeRow = await env.DB.prepare(
-      'SELECT refund_status, refund_amount FROM folios WHERE id = ?',
-    )
-      .bind(freeId)
-      .first<{ refund_status: string; refund_amount: number }>()
-    expect(freeRow!.refund_status).toBe('pending')
-    expect(freeRow!.refund_amount).toBe(300000)
+    // TECH_DEBT #25 — the refund obligation lives on the LINES; the folio's is derived.
+    const freeRow = (await readDerivedFolio(freeId)) as {
+      refund_status: string
+      refund_amount: number
+    }
+    expect(freeRow.refund_status).toBe('pending')
+    expect(freeRow.refund_amount).toBe(300000)
     // The reservation is released on cancel.
     expect((await reservationsForFolio(freeId))[0].status).toBe('cancelled')
 
@@ -999,10 +1000,8 @@ describe('POS lodging sale path', () => {
       headers: jsonAuth(ADMIN_EMAIL),
       body: JSON.stringify({ reason: 'no show' }),
     })
-    const lateRow = await env.DB.prepare('SELECT refund_amount FROM folios WHERE id = ?')
-      .bind(lateId)
-      .first<{ refund_amount: number }>()
-    expect(lateRow!.refund_amount).toBe(200000) // full — the 50% penalty field is inert
+    const lateRow = (await readDerivedFolio(lateId)) as { refund_amount: number }
+    expect(lateRow.refund_amount).toBe(200000) // full — the 50% penalty field is inert
   })
 
   it('Sc12b — a ladder DOES withhold on a near check-in (what replaces the retired fields)', async () => {
@@ -1033,10 +1032,8 @@ describe('POS lodging sale path', () => {
       headers: jsonAuth(ADMIN_EMAIL),
       body: JSON.stringify({ reason: 'no show' }),
     })
-    const row = await env.DB.prepare('SELECT refund_amount FROM folios WHERE id = ?')
-      .bind(lateId)
-      .first<{ refund_amount: number }>()
-    expect(row!.refund_amount).toBe(100000) // 200000 × 50%
+    const row = (await readDerivedFolio(lateId)) as { refund_amount: number }
+    expect(row.refund_amount).toBe(100000) // 200000 × 50%
   })
 })
 

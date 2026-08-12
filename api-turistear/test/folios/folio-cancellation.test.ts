@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { env, SELF } from 'cloudflare:test'
-import { seedUser, seedTwoOrgs, clearTenancyDb } from '../helpers/tenancy'
+import { seedUser, seedTwoOrgs, clearTenancyDb , materializeSeededFolio} from '../helpers/tenancy'
 import { buildFakeJwt } from '../helpers/jwt'
 
 // Total Folio Cancellation — US-A21 / US-A26.
@@ -103,6 +103,9 @@ const seedFolioLine = async (opts: {
   )
     .bind(id, opts.organizationId, opts.folioId, opts.serviceId, opts.slotId, opts.quantity, 150000 * opts.quantity, ts)
     .run()
+  // TECH_DEBT #25 — the product reads the LINE's coverage, so each seeded line gets the ledger
+  // facts the shim columns only declared. Per-line and idempotent: safe after every insert.
+  await materializeSeededFolio(opts.folioId)
   return id
 }
 
@@ -115,9 +118,25 @@ const getSlotBooked = async (slotId: string) => {
 
 const getFolioRow = (id: string) =>
   env.DB.prepare(
-    `SELECT status, organization_id, cancelled_at, cancelled_by, cancellation_reason,
-            cancellation_clawback
-       FROM folios WHERE id = ?`,
+    `SELECT f.*,
+      (SELECT CASE
+        WHEN COALESCE(SUM(CASE WHEN fl.cancelled_at IS NULL THEN 1 ELSE 0 END),0) = 0 THEN 'cancelled'
+        WHEN COALESCE(SUM(CASE WHEN fl.cancelled_at IS NULL
+            AND COALESCE((SELECT SUM(a2.amount) FROM folio_payment_allocations a2 WHERE a2.folio_line_id = fl.id),0) < fl.line_total
+            THEN 1 ELSE 0 END),0) > 0 THEN 'booking'
+        ELSE 'paid' END
+       FROM folio_lines fl WHERE fl.folio_id = f.id) AS status,
+      (SELECT COALESCE(
+        (SELECT MIN(fl.booking_expires_at) FROM folio_lines fl
+          WHERE fl.folio_id = f.id AND fl.cancelled_at IS NULL AND fl.booking_expires_at IS NOT NULL),
+        (SELECT MIN(fl.booking_expires_at) FROM folio_lines fl
+          WHERE fl.folio_id = f.id AND fl.booking_expires_at IS NOT NULL))) AS booking_expires_at,
+      (SELECT CASE
+        WHEN EXISTS (SELECT 1 FROM folio_lines fl WHERE fl.folio_id = f.id AND fl.refund_status = 'pending') THEN 'pending'
+        WHEN EXISTS (SELECT 1 FROM folio_lines fl WHERE fl.folio_id = f.id AND fl.refund_status = 'refunded') THEN 'refunded'
+        ELSE 'none' END) AS refund_status,
+      (SELECT SUM(fl.refund_amount) FROM folio_lines fl WHERE fl.folio_id = f.id AND fl.refund_status <> 'none') AS refund_amount
+     FROM folios f WHERE f.id = ?`,
   )
     .bind(id)
     .first<{
@@ -261,11 +280,15 @@ describe('Total Folio Cancellation', () => {
     const expiresAt = Math.floor(Date.now() / 1000) + 3600
     await env.DB.prepare(
       `UPDATE folios
-         SET booking_expires_at = ?, customer_phone = '5551234567',
+         SET customer_phone = '5551234567',
              reminder_status = 'sent', reminder_sent_at = ?, reminder_sent_by = ?
        WHERE id = ?`,
     )
-      .bind(expiresAt, expiresAt, agentId, folioId)
+      .bind(expiresAt, agentId, folioId)
+      .run()
+    // TECH_DEBT #25 — the hold's clock belongs to the LINE; the folio's is derived from it.
+    await env.DB.prepare(`UPDATE folio_lines SET booking_expires_at = ? WHERE folio_id = ?`)
+      .bind(expiresAt, folioId)
       .run()
 
     const list = await listFolios(ADMIN_EMAIL, 'status=booking')
@@ -330,16 +353,18 @@ describe('Total Folio Cancellation', () => {
   it('Scenario 6 — cancelled folio is excluded from collected-cash derivation', async () => {
     const { organizationId, agentId } = await seedOrgWithStaff()
     const folioId = await seedFolio({ organizationId, agentId, total: 300000, amountPaid: 300000 })
+    await materializeSeededFolio(folioId)
 
     // The cash derivation (shared by the agent balance / cash-drops feature) sums
     // amount_paid over NON-cancelled folios. Assert at that predicate level so the test
-    // is decoupled from any specific cash endpoint.
+    // is decoupled from any specific cash endpoint. TECH_DEBT #25 — that predicate is
+    // `cancelled_at IS NULL` now; the `status` column it used to read is gone.
     const collected = async () =>
       Number(
         (
           await env.DB.prepare(
             `SELECT coalesce(sum(amount_paid), 0) AS c FROM folios
-               WHERE organization_id = ? AND agent_id = ? AND status != 'cancelled'`,
+               WHERE organization_id = ? AND agent_id = ? AND cancelled_at IS NULL`,
           )
             .bind(organizationId, agentId)
             .first<{ c: number }>()
@@ -445,6 +470,7 @@ describe('Total Folio Cancellation', () => {
     const paidId = await seedFolio({ organizationId, agentId, total: 200000, date: DATE })
     await seedFolioLine({ organizationId, folioId: paidId, serviceId, slotId, quantity: 2 })
     const cancelledId = await seedFolio({ organizationId, agentId, status: 'cancelled', date: '2026-06-03' })
+    await materializeSeededFolio(cancelledId)
 
     const { status, json } = await listFolios(ADMIN_EMAIL)
     expect(status).toBe(200)
@@ -469,6 +495,7 @@ describe('Total Folio Cancellation', () => {
   it('Scenario 9 — non-admin → 403 on every folio route', async () => {
     const { organizationId, agentId } = await seedOrgWithStaff()
     const folioId = await seedFolio({ organizationId, agentId })
+    await materializeSeededFolio(folioId)
 
     const list = await listFolios(AGENT_EMAIL)
     const detail = await getFolio(AGENT_EMAIL, folioId)
@@ -524,7 +551,9 @@ describe('Total Folio Cancellation', () => {
       slotId: slotA,
       quantity: 1,
     })
-    await seedFolio({ organizationId: orgB.organizationId, agentId: orgB.adminUserId })
+    await materializeSeededFolio(
+      await seedFolio({ organizationId: orgB.organizationId, agentId: orgB.adminUserId }),
+    )
 
     // B4 — list returns only org_a.
     const list = await listFolios(orgA.adminEmail)

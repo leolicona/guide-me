@@ -1,4 +1,5 @@
 import { and, eq, inArray, lte } from 'drizzle-orm'
+import { sql } from 'drizzle-orm'
 import { getDb, type Db } from '../../db/client'
 import { folioLines, folios, organizations } from '../../db/schema'
 import { cancelFolioLinesPriced } from '../folios/handler'
@@ -56,7 +57,14 @@ export async function sweepExpiredBookings(env: CloudflareBindings): Promise<Swe
       reminderStatus: folios.reminderStatus,
     })
     .from(folios)
-    .where(and(eq(folios.status, 'booking'), lte(folios.bookingExpiresAt, now)))
+    // TECH_DEBT #25 — due = any LIVE line still owing whose OWN clock passed (D5); the folio
+    // roll-up columns are gone. The per-line grace decision below is unchanged.
+    .where(sql`exists (
+      select 1 from folio_lines fl
+      where fl.folio_id = folios.id and fl.cancelled_at is null
+        and fl.booking_expires_at is not null and fl.booking_expires_at <= ${Math.floor(now.getTime() / 1000)}
+        and coalesce((select sum(a.amount) from folio_payment_allocations a where a.folio_line_id = fl.id), 0) < fl.line_total
+    )`)
 
   if (due.length === 0) return result
 

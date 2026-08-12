@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { env, SELF } from 'cloudflare:test'
-import { seedUser, seedTwoOrgs, clearTenancyDb } from '../helpers/tenancy'
+import { seedUser, seedTwoOrgs, clearTenancyDb , readDerivedFolio} from '../helpers/tenancy'
 import { buildFakeJwt } from '../helpers/jwt'
 import { sweepExpiredBookings } from '../../src/routes/pos/sweep'
 // @ts-expect-error — vite's ?raw import; the test replays the migration's backfill INSERTs (S-5).
@@ -260,10 +260,9 @@ describe('US-A24 — the admin reads the sale as a story', () => {
       reason: 'La transferencia nunca llegó',
     })
 
-    const folio = await env.DB.prepare('SELECT status FROM folios WHERE id = ?')
-      .bind(folioId)
-      .first<{ status: string }>()
-    expect(folio!.status).toBe('cancelled')
+    // TECH_DEBT #25 — the rejection cancels the folio, and that fact is the stamp + the lines.
+    const folio = (await readDerivedFolio(folioId)) as { status: string }
+    expect(folio.status).toBe('cancelled')
   })
 
   it('S-4b — a verified transfer narrates who cleared the money', async () => {

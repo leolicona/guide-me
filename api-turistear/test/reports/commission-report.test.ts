@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { env, SELF } from 'cloudflare:test'
-import {
+import { materializeSeededFolio,
   seedUser,
   seedTwoOrgs,
   seedAffiliateCompany,
@@ -56,8 +56,8 @@ const seedFolio = async ({
     `INSERT INTO folios
        (id, organization_id, agent_id, affiliate_company_id, customer_name, status,
         subtotal, discount_total, total, amount_paid, commission_amount,
-        cancellation_clawback, created_at, updated_at)
-     VALUES (?, ?, ?, ?, 'John Diver', ?, ?, 0, ?, ?, ?, ?, ?, ?)`,
+        cancellation_clawback, cancelled_at, created_at, updated_at)
+     VALUES (?, ?, ?, ?, 'John Diver', ?, ?, 0, ?, ?, ?, ?, ?, ?, ?)`,
   )
     .bind(
       id,
@@ -70,6 +70,9 @@ const seedFolio = async ({
       amountPaid,
       commissionAmount,
       cancellationClawback ? 1 : 0,
+      // TECH_DEBT #25 — `cancelled_at` IS the cancellation now (the report's own predicate); the
+      // `status` word above is test-only dead storage the shim reads to build the line facts.
+      status === 'cancelled' ? ts : null,
       ts,
       ts,
     )
@@ -78,6 +81,7 @@ const seedFolio = async ({
     folioId: id, organizationId, agentId, status, paymentMethod, amountPaid,
     commissionAmount, cancellationClawback, createdAt: ts,
   })
+  await materializeSeededFolio(id)
   return id
 }
 

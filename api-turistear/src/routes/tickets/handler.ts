@@ -85,7 +85,7 @@ export const scanTicket = async (c: TicketsContext) => {
       // production was backfilled by 0062), else its net allocated sum. Raw outer-column
       // correlation — the displayMethodSql trick.
       lineAllocated: sql<number | null>`(select sum(a.amount) from folio_payment_allocations a where a.folio_line_id = folio_lines.id)`,
-      folioStatus: folios.status,
+      folioCancelledAt: folios.cancelledAt,
     })
     .from(folioLines)
     .innerJoin(folios, eq(folioLines.folioId, folios.id))
@@ -113,8 +113,8 @@ export const scanTicket = async (c: TicketsContext) => {
     redeemed_count: row.redeemedCount,
   }
 
-  // 3. STATUS gates — only a paid, non-cancelled folio admits (forward-safe for bookings).
-  if (row.folioStatus === 'cancelled') {
+  // 3. STATUS gates — the folio-level stamp (a full cancellation) and the line's own.
+  if (row.folioCancelledAt) {
     return invalid(c, 'CANCELLED', ctx)
   }
   // US-A22 (line-autonomy F2) — the LINE's own cancellation refuses identically: a half-cancelled
@@ -123,15 +123,12 @@ export const scanTicket = async (c: TicketsContext) => {
   if (row.lineCancelledAt) {
     return invalid(c, 'CANCELLED', ctx)
   }
-  // US-A89 (F4, PR-7 — S-13) — the paid gate answers from the LINE's money: a line settled per
-  // line admits even while its siblings keep the folio a `booking`, and an unpaid line refuses
-  // whatever the folio's roll-up says. A line with no allocations at all (legacy fixture; never
-  // a production row) keeps the folio-status answer — the same fallback deriveStatusSql uses,
-  // and it dies with the column (TECH_DEBT #25).
+  // US-A89 (F4 — S-13, valve deleted with TECH_DEBT #25) — the paid gate answers from the
+  // LINE's money alone. A line with no allocations FAILS CLOSED: 0062 backfilled every real
+  // folio, so the only way to reach this with NULL is un-reconciled data, and a gate must
+  // never admit on missing facts.
   const linePaid =
-    row.lineAllocated === null
-      ? row.folioStatus === 'paid'
-      : Math.max(0, Number(row.lineAllocated)) >= row.lineTotal
+    row.lineAllocated !== null && Math.max(0, Number(row.lineAllocated)) >= row.lineTotal
   if (!linePaid) {
     return invalid(c, 'NOT_PAID', ctx)
   }

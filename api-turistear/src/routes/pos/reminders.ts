@@ -1,5 +1,6 @@
 import { and, eq, gte, lte, ne, sql } from 'drizzle-orm'
 import { getDb, type Db } from '../../db/client'
+import { deriveStatusSql } from '../../utils/folioStatus'
 import { folioLines, folios, organizations } from '../../db/schema'
 import { emitNotification } from '../../utils/notifications'
 import { naiveEpoch } from '../../utils/tz'
@@ -85,7 +86,7 @@ export async function sweepDepartureReminders(
             // Only a PAID folio is reminded. An apartado has its own notice — the stage-② one —
             // and reminding somebody about a tour they have not finished paying for, without
             // mentioning the balance, would be the wrong message entirely.
-            eq(folios.status, 'paid'),
+            sql`${deriveStatusSql} = 'paid'`, // TECH_DEBT #25 — derived from the lines
             ne(folios.paymentVerification, 'pending'),
             gte(sql`COALESCE(${folioLines.slotDate}, ${folioLines.checkIn})`, from),
             lte(sql`COALESCE(${folioLines.slotDate}, ${folioLines.checkIn})`, to),

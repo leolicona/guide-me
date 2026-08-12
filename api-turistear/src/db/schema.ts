@@ -350,9 +350,7 @@ export const folios = sqliteTable('folios', {
   customerName: text('customer_name'),
   customerEmail: text('customer_email'),
   customerPhone: text('customer_phone'),
-  status: text('status', { enum: ['paid', 'booking', 'cancelled'] })
-    .notNull()
-    .default('paid'),
+  // TECH_DEBT #25 — `status` retired (0065): derived from the lines (utils/folioStatus.ts).
   // US-AG45 (docs/pos/express-sale.spec.md, D22) — how the sale was taken. 'express' is the
   // one-sheet cash walk-up (phone-only, full cash, no cart); everything else is 'standard'.
   // Reports and the 60-second void key off it.
@@ -388,7 +386,7 @@ export const folios = sqliteTable('folios', {
   // Bookings/down-payments (US-AG07). bookingExpiresAt: snapshot release timestamp for a 'booking'
   // folio (null otherwise) — see resolveBookingExpiry. settledAt/By: one-shot settlement audit.
   // reminder*: the WhatsApp recovery claim (US-AG07.3) — an atomic flag preventing double-contact.
-  bookingExpiresAt: integer('booking_expires_at', { mode: 'timestamp' }),
+  // TECH_DEBT #25 — booking_expires_at retired (0065): each line runs its own clock (D5).
   settledAt: integer('settled_at', { mode: 'timestamp' }),
   settledBy: text('settled_by').references(() => users.id),
   reminderStatus: text('reminder_status', { enum: ['none', 'sent'] })
@@ -419,10 +417,8 @@ export const folios = sqliteTable('folios', {
   // Cash refund tracking (US-A23 / US-T05). `pending` is set when a PAID folio is cancelled
   // via an approved tourist cancellation request; `refunded` once the admin confirms the
   // physical hand-back (PIN or override). `none` = no refund obligation.
-  refundStatus: text('refund_status', { enum: ['none', 'pending', 'refunded'] })
-    .notNull()
-    .default('none'),
-  refundAmount: integer('refund_amount'), // snapshot of amount_paid owed back
+  // TECH_DEBT #25 — refund_status/refund_amount retired (0065): the debt lives on the lines
+  // (D6); the PIN below stays — it is person-scoped by design.
   // 6-digit crypto-random PIN shown ONLY in the tourist portal (never emailed). The tourist
   // hands it to the agent/admin to prove they were present to receive the cash.
   refundPin: text('refund_pin'),

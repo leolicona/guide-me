@@ -37,19 +37,29 @@ export const DEFAULT_WINDOW_DAYS = 30
  * `'pending'` flag behind — the same exclusion `?verification=pending` has always applied.
  */
 export const verificationPendingFilter = (): SQL =>
-  and(eq(folios.paymentVerification, 'pending'), ne(folios.status, 'cancelled'))!
+  // TECH_DEBT #25 — "not cancelled" reads the lines (any live line), the column is gone.
+  and(
+    eq(folios.paymentVerification, 'pending'),
+    sql`exists (select 1 from folio_lines fl where fl.folio_id = folios.id and fl.cancelled_at is null)`,
+  )!
 
 /** Cash the company owes back and nobody has confirmed handing over (US-A78). */
-export const refundPendingFilter = (): SQL => eq(folios.refundStatus, 'pending')
+// TECH_DEBT #25 — the debt lives on the lines (D6); pending = any line still owed.
+export const refundPendingFilter = (): SQL =>
+  sql`exists (select 1 from folio_lines fl where fl.folio_id = folios.id and fl.refund_status = 'pending')`
 
 /** A hold past its settle deadline (US-A79). Derived from the clock at query time, NEVER stored —
  *  a stored stage needs a writer, and a cron that writes state drifts from the clock that defines
  *  it (`apartado-stages.spec.md` S7). */
 export const overdueFilter = (now: Date): SQL =>
   and(
-    eq(folios.status, 'booking'),
-    isNotNull(folios.bookingExpiresAt),
-    lt(folios.bookingExpiresAt, now),
+    // TECH_DEBT #25 — overdue = any LIVE line still owing whose OWN clock passed (D5).
+    sql`exists (
+      select 1 from folio_lines fl
+      where fl.folio_id = folios.id and fl.cancelled_at is null
+        and fl.booking_expires_at is not null and fl.booking_expires_at < ${Math.floor(now.getTime() / 1000)}
+        and coalesce((select sum(a.amount) from folio_payment_allocations a where a.folio_line_id = fl.id), 0) < fl.line_total
+    )`,
   )!
 
 /**
@@ -61,7 +71,13 @@ export const overdueFilter = (now: Date): SQL =>
  */
 export const undeliveredFilter = (): SQL =>
   and(
-    eq(folios.status, 'paid'),
+    // TECH_DEBT #25 — "paid" = the worst-case derivation: no live line under-allocated, some live line.
+    sql`exists (select 1 from folio_lines fl where fl.folio_id = folios.id and fl.cancelled_at is null)`,
+    sql`not exists (
+      select 1 from folio_lines fl
+      where fl.folio_id = folios.id and fl.cancelled_at is null
+        and coalesce((select sum(a.amount) from folio_payment_allocations a where a.folio_line_id = fl.id), 0) < fl.line_total
+    )`,
     ne(folios.paymentVerification, 'pending'),
     isNull(folios.ticketsSentAt),
     isNull(folios.ticketsViewedAt),

@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { env, SELF } from 'cloudflare:test'
-import { seedUser, seedTwoOrgs, clearTenancyDb } from '../helpers/tenancy'
+import { materializeSeededFolio, seedUser, seedTwoOrgs, clearTenancyDb } from '../helpers/tenancy'
 import { buildFakeJwt } from '../helpers/jwt'
 
 // US-A83 — finding one sale among a hundred.
@@ -78,6 +78,7 @@ const seedLine = async (organizationId: string, folioId: string, serviceName: st
   )
     .bind(crypto.randomUUID(), organizationId, folioId, serviceId, serviceName, nowSec())
     .run()
+  await materializeSeededFolio(folioId)
 }
 
 beforeEach(async () => {
@@ -257,7 +258,14 @@ describe('US-A83 — a query and a range reach past the load window', () => {
     const { userId, organizationId } = await seedUser({ email: ADMIN_EMAIL })
     const paid = await seedFolio({ organizationId, agentId: userId, customerName: 'Leo Uno' })
     const cancelled = await seedFolio({ organizationId, agentId: userId, customerName: 'Leo Dos' })
-    await env.DB.prepare(`UPDATE folios SET status = 'cancelled' WHERE id = ?`).bind(cancelled).run()
+    // TECH_DEBT #25 — `status` is derived from the lines, so both folios need lines to have one,
+    // and cancelling means stamping the line.
+    await Promise.all([materializeSeededFolio(paid), materializeSeededFolio(cancelled)])
+    await env.DB.prepare(
+      `UPDATE folio_lines SET cancelled_at = unixepoch() WHERE folio_id = ?`,
+    )
+      .bind(cancelled)
+      .run()
 
     // Rule 5 — a query is a filter, not a different endpoint.
     expect(ids(await list('q=leo&status=paid'))).toEqual([paid])

@@ -78,7 +78,25 @@ const settle = async (email: string, folioId: string) => {
 const getSlotBooked = async (id: string) =>
   (await env.DB.prepare(`SELECT booked FROM slots WHERE id = ?`).bind(id).first<{ booked: number }>())!.booked
 const getFolio = (id: string) =>
-  env.DB.prepare(`SELECT status, amount_paid, commission_amount, settled_by FROM folios WHERE id = ?`)
+  env.DB.prepare(`SELECT f.*,
+      (SELECT CASE
+        WHEN COALESCE(SUM(CASE WHEN fl.cancelled_at IS NULL THEN 1 ELSE 0 END),0) = 0 THEN 'cancelled'
+        WHEN COALESCE(SUM(CASE WHEN fl.cancelled_at IS NULL
+            AND COALESCE((SELECT SUM(a2.amount) FROM folio_payment_allocations a2 WHERE a2.folio_line_id = fl.id),0) < fl.line_total
+            THEN 1 ELSE 0 END),0) > 0 THEN 'booking'
+        ELSE 'paid' END
+       FROM folio_lines fl WHERE fl.folio_id = f.id) AS status,
+      (SELECT COALESCE(
+        (SELECT MIN(fl.booking_expires_at) FROM folio_lines fl
+          WHERE fl.folio_id = f.id AND fl.cancelled_at IS NULL AND fl.booking_expires_at IS NOT NULL),
+        (SELECT MIN(fl.booking_expires_at) FROM folio_lines fl
+          WHERE fl.folio_id = f.id AND fl.booking_expires_at IS NOT NULL))) AS booking_expires_at,
+      (SELECT CASE
+        WHEN EXISTS (SELECT 1 FROM folio_lines fl WHERE fl.folio_id = f.id AND fl.refund_status = 'pending') THEN 'pending'
+        WHEN EXISTS (SELECT 1 FROM folio_lines fl WHERE fl.folio_id = f.id AND fl.refund_status = 'refunded') THEN 'refunded'
+        ELSE 'none' END) AS refund_status,
+      (SELECT SUM(fl.refund_amount) FROM folio_lines fl WHERE fl.folio_id = f.id AND fl.refund_status <> 'none') AS refund_amount
+     FROM folios f WHERE f.id = ?`)
     .bind(id)
     .first<{ status: string; amount_paid: number; commission_amount: number; settled_by: string | null }>()
 
@@ -151,14 +169,19 @@ describe('US-AG07 — settle a booking', () => {
 
     // cancelled
     const f2 = await createBooking(AGENT_EMAIL, slotId)
-    await env.DB.prepare(`UPDATE folios SET status = 'cancelled' WHERE id = ?`).bind(f2).run()
+    // TECH_DEBT #25 — cancellation is the LINES' fact now; the folio column is a test shim.
+    await env.DB.prepare(
+      `UPDATE folio_lines SET cancelled_at = 1750000000, cancellation_source = 'admin' WHERE folio_id = ?`,
+    )
+      .bind(f2)
+      .run()
     const cancelled = await settle(AGENT_EMAIL, f2)
     expect(cancelled.status).toBe(409)
     expect(cancelled.json.error.code).toBe('FOLIO_CANCELLED')
 
     // expired
     const f3 = await createBooking(AGENT_EMAIL, slotId)
-    await env.DB.prepare(`UPDATE folios SET booking_expires_at = ? WHERE id = ?`)
+    await env.DB.prepare(`UPDATE folio_lines SET booking_expires_at = ? WHERE folio_id = ?`)
       .bind(Math.floor(Date.now() / 1000) - 60, f3)
       .run()
     const expired = await settle(AGENT_EMAIL, f3)

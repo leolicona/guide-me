@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { env, SELF } from 'cloudflare:test'
-import { seedUser, seedTwoOrgs, clearTenancyDb } from '../helpers/tenancy'
+import { materializeSeededFolio, seedUser, seedTwoOrgs, clearTenancyDb } from '../helpers/tenancy'
 import { buildFakeJwt } from '../helpers/jwt'
 
 // US-A84 — the folio is one object, not five screens.
@@ -66,6 +66,7 @@ const seedFolio = async ({
       refundAmount, bookingExpiresAt, paymentVerification, ticketsSentAt, ticketsViewedAt,
     )
     .run()
+  await materializeSeededFolio(id)
   return id
 }
 
@@ -96,6 +97,7 @@ const seedInertFolio = (organizationId: string, agentId: string, createdAt: numb
 beforeEach(async () => {
   await env.DB.exec('DELETE FROM folio_requests')
   await env.DB.exec('DELETE FROM folio_payments')
+  await env.DB.exec('DELETE FROM folio_lines')
   await env.DB.exec('DELETE FROM notifications')
   await env.DB.exec('DELETE FROM folio_events')
   await env.DB.exec('DELETE FROM folios')

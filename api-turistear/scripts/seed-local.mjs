@@ -14,7 +14,7 @@
 // how you get back to a clean board.
 
 import { execFileSync } from 'node:child_process'
-import { writeFileSync, mkdtempSync, readFileSync } from 'node:fs'
+import { writeFileSync, mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
@@ -66,6 +66,15 @@ const folio = ({
   // a folio be genuinely departed rather than merely old.
   quantity = 2, redeemed = 0, departsOn, slot,
 }) => {
+  // US-A89 / TECH_DEBT #25 — `status`, the hold clock and the refund debt are no longer folio
+  // columns (migration 0065). They are LINE facts, and the folio's reading derives from them. The
+  // `status` argument stays as the seed's vocabulary — it is what decides the line's shape below.
+  const {
+    booking_expires_at: bookingExpiresAt,
+    refund_status: refundStatus,
+    refund_amount: refundAmount,
+    ...folioExtra
+  } = extra
   const cols = {
     id: q(id),
     organization_id: q(ORG_ID),
@@ -73,40 +82,51 @@ const folio = ({
     customer_name: customer === null ? 'NULL' : q(customer),
     customer_email: 'NULL',
     customer_phone: phone ? q(phone) : 'NULL',
-    status: q(status),
     subtotal: total,
     discount_total: 0,
     total,
     amount_paid: paid,
     created_at: createdAt,
     updated_at: createdAt,
-    ...extra,
+    ...folioExtra,
   }
   const lineId = randomUUID()
   // US-LG09 — every folio carries its ledger row (a folio always has ≥1 payment row, US-LG08):
   // one 'pmt_' payment from the scalars, exactly the 0049 backfill's shape — which cannot be
   // re-run itself (it read the since-dropped payment_method column). The method mirrors the
   // folio's verification extra: a 'pending'/'verified' folio was a transfer, the rest cash.
-  // The 0062 replay appended below then derives every per-line allocation from these rows.
-  const method = extra.payment_verification ? 'transfer' : 'cash'
-  const verification = extra.payment_verification ?? q('not_required')
+  const method = folioExtra.payment_verification ? 'transfer' : 'cash'
+  const verification = folioExtra.payment_verification ?? q('not_required')
+  const cancelled = status === 'cancelled'
   return [
     `INSERT INTO folios (${Object.keys(cols).join(', ')}) VALUES (${Object.values(cols).join(', ')});`,
     `INSERT INTO folio_lines (id, organization_id, folio_id, service_id, slot_id, service_name,
        slot_date, slot_start_time, quantity, base_price, minimum_price, unit_price, line_total,
-       qr_token, redeemed_count, created_at)
+       qr_token, redeemed_count, created_at,
+       cancelled_at, cancellation_source, refund_status, refund_amount, booking_expires_at)
      VALUES (${q(lineId)}, ${q(ORG_ID)}, ${q(id)}, ${q(service.id)},
        ${slot ? q(slot.id) : 'NULL'}, ${q(service.name)},
        ${q(departsOn ?? slot?.date ?? service.date)}, ${q(slot?.startTime ?? '08:00')}, ${quantity},
        ${Math.round(total / quantity)}, ${Math.round(total / quantity)},
        ${Math.round(total / quantity)}, ${total},
-       NULL, ${redeemed}, ${createdAt});`,
+       NULL, ${redeemed}, ${createdAt},
+       ${cancelled ? (folioExtra.cancelled_at ?? createdAt) : 'NULL'},
+       ${cancelled ? q('admin') : 'NULL'},
+       ${refundStatus ?? q('none')}, ${refundAmount ?? 0},
+       ${bookingExpiresAt ?? 'NULL'});`,
     ...(paid > 0
       ? [
           `INSERT INTO folio_payments (id, organization_id, folio_id, entry_type, amount, method,
              reference, verification, collected_by, created_at)
            VALUES (${q(`pmt_${id}`)}, ${q(ORG_ID)}, ${q(id)}, 'payment', ${paid}, ${q(method)},
-             ${extra.payment_reference ?? 'NULL'}, ${verification}, ${q(agentId)}, ${createdAt});`,
+             ${folioExtra.payment_reference ?? 'NULL'}, ${verification}, ${q(agentId)}, ${createdAt});`,
+          // US-LG09 — the money lands on the LINE, which is where "pagada / apartada" is read from.
+          // Each seeded folio has exactly one line, so 0062's cascade collapses to "all of it here":
+          // Σ(allocations of the payment) = the payment, and Σ(of the line) ≤ line_total.
+          `INSERT INTO folio_payment_allocations (id, organization_id, payment_id, folio_line_id,
+             amount, backfilled, created_at)
+           VALUES (${q(randomUUID())}, ${q(ORG_ID)}, ${q(`pmt_${id}`)}, ${q(lineId)}, ${paid}, 0,
+             ${createdAt});`,
         ]
       : []),
   ].join('\n')
@@ -334,24 +354,12 @@ ${folio({
 })}
 `
 
-// US-LG09 — the seeded sales get their per-line allocations from the SAME rule that backfills
-// production: migration 0062's INSERT blocks, replayed verbatim over the rows written above.
-// One rule, zero drift — if the migration's arithmetic changes, the seed follows automatically.
-const allocationBackfill = readFileSync(
-  new URL('../migrations/0062_folio_payment_allocations.sql', import.meta.url),
-  'utf8',
-)
-  .split('\n')
-  .filter((l) => !l.trim().startsWith('--'))
-  .join('\n')
-  .split(';')
-  .map((s) => s.trim())
-  .filter((s) => s.includes('INSERT INTO folio_payment_allocations'))
-  .map((s) => `${s};`)
-  .join('\n\n')
-
+// US-LG09 — the allocations used to come from replaying migration 0062 over the seeded rows. That
+// replay read `folios.status`, which migration 0065 dropped (TECH_DEBT #25), so each folio now
+// writes its own allocation alongside its payment — one line per folio makes that the same answer
+// 0062's cascade would give, without a column that no longer exists.
 const file = join(mkdtempSync(join(tmpdir(), 'seed-')), 'seed.sql')
-writeFileSync(file, `${sql}\n\n${allocationBackfill}\n`)
+writeFileSync(file, `${sql}\n`)
 
 console.log('→ writing to the LOCAL D1 replica')
 execFileSync(

@@ -5,8 +5,13 @@ import { buildFakeJwt } from '../helpers/jwt'
 
 // US-A89 (docs/folios/line-autonomy.spec.md, D11 — F4 step one). The API's `status` field now
 // DERIVES from the lines (allocations + cancellation stamps) instead of reading the column. By
-// construction the two agree on every folio the write paths touch — this suite is that proof,
-// plus the legacy fallback: a folio with no allocations at all keeps reading its column.
+// construction the two agree on every folio the write paths touch — this suite is that proof.
+//
+// TECH_DEBT #25 closed the loop: migration 0065 DROPPED the column, so the fallback that used to
+// read it when a folio had no allocations is gone too. The derivation is now the only answer, and
+// a folio with no allocations is exactly what it looks like — an unpaid hold. Nothing in
+// production can be in that shape (0062's backfill gave every pre-feature folio its allocations),
+// which is why fail-closed is the honest reading rather than a regression.
 
 const AGENT_EMAIL = 'agent@empresa.com'
 const ADMIN_EMAIL = 'admin@empresa.com'
@@ -88,7 +93,25 @@ const confirm = async (body: Record<string, unknown>): Promise<any> => {
 }
 
 const columnStatus = async (folioId: string): Promise<string> =>
-  ((await env.DB.prepare(`SELECT status FROM folios WHERE id = ?`).bind(folioId).all())
+  ((await env.DB.prepare(`SELECT f.*,
+      (SELECT CASE
+        WHEN COALESCE(SUM(CASE WHEN fl.cancelled_at IS NULL THEN 1 ELSE 0 END),0) = 0 THEN 'cancelled'
+        WHEN COALESCE(SUM(CASE WHEN fl.cancelled_at IS NULL
+            AND COALESCE((SELECT SUM(a2.amount) FROM folio_payment_allocations a2 WHERE a2.folio_line_id = fl.id),0) < fl.line_total
+            THEN 1 ELSE 0 END),0) > 0 THEN 'booking'
+        ELSE 'paid' END
+       FROM folio_lines fl WHERE fl.folio_id = f.id) AS status,
+      (SELECT COALESCE(
+        (SELECT MIN(fl.booking_expires_at) FROM folio_lines fl
+          WHERE fl.folio_id = f.id AND fl.cancelled_at IS NULL AND fl.booking_expires_at IS NOT NULL),
+        (SELECT MIN(fl.booking_expires_at) FROM folio_lines fl
+          WHERE fl.folio_id = f.id AND fl.booking_expires_at IS NOT NULL))) AS booking_expires_at,
+      (SELECT CASE
+        WHEN EXISTS (SELECT 1 FROM folio_lines fl WHERE fl.folio_id = f.id AND fl.refund_status = 'pending') THEN 'pending'
+        WHEN EXISTS (SELECT 1 FROM folio_lines fl WHERE fl.folio_id = f.id AND fl.refund_status = 'refunded') THEN 'refunded'
+        ELSE 'none' END) AS refund_status,
+      (SELECT SUM(fl.refund_amount) FROM folio_lines fl WHERE fl.folio_id = f.id AND fl.refund_status <> 'none') AS refund_amount
+     FROM folios f WHERE f.id = ?`).bind(folioId).all())
     .results[0] as { status: string }).status
 
 // The field, read through BOTH serializers that derive it (admin detail + admin list).
@@ -147,7 +170,7 @@ describe('US-A89 — the status field derives from the lines and equals the colu
     await expectAgree(folio.id, 'cancelled')
   })
 
-  it('a hand-seeded legacy folio with NO allocations falls back to its column', async () => {
+  it('a folio with NO allocations reads as an unpaid hold — no column left to fall back to', async () => {
     const id = crypto.randomUUID()
     const ts = nowSec()
     await env.DB.prepare(
@@ -162,8 +185,8 @@ describe('US-A89 — the status field derives from the lines and equals the colu
     )
       .bind(crypto.randomUUID(), org, id, serviceId, addDays(todayStr(), 3), ts)
       .run()
-    // No allocations at all: without the fallback this would misread as 'booking'.
+    // No allocations at all — the money never reached this line, so the line is not covered.
     const { detail } = await apiStatus(id)
-    expect(detail).toBe('paid')
+    expect(detail).toBe('booking')
   })
 })

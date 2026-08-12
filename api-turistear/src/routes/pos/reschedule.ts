@@ -1,5 +1,6 @@
 import { and, eq, sql } from 'drizzle-orm'
 import type { Db } from '../../db/client'
+import { deriveStatusSql } from '../../utils/folioStatus'
 import {
   folioLines,
   folioRequests,
@@ -72,7 +73,7 @@ export const rescheduleFolio = async (ctx: Ctx) => {
   const [folio] = await db
     .select({
       id: folios.id,
-      status: folios.status,
+      status: deriveStatusSql, // TECH_DEBT #25
       agentId: folios.agentId,
       customerEmail: folios.customerEmail,
       paymentVerification: folios.paymentVerification,
@@ -391,25 +392,35 @@ export const rescheduleFolio = async (ctx: Ctx) => {
   // --- What the move implies for the rest of the folio -------------------------------------------
 
   if (folio.status === 'booking') {
-    // Rule 6 / D17 — recompute from the NEW earliest departure across the whole folio. Under this
-    // rule the sentence "pagas 24 h antes de tu primer tour" stays TRUE; freezing the old deadline
-    // or ratcheting it would make it false, and neither can be explained at a counter.
+    // Rule 6 / D17, per line since D5 (completed by TECH_DEBT #25): each LIVE, still-owing line's
+    // clock recomputes from ITS OWN departure — the moved line gets the deadline its new date
+    // implies, and a sibling's hold is never re-priced by someone else's move. Under this rule
+    // the counter sentence "pagas 24 h antes de tu tour" stays TRUE per activity. (F3 left the
+    // moved line on its OLD clock while re-rolling only the folio's — fixed here.)
     const lineRows = await db
-      .select({ slotDate: folioLines.slotDate, slotStartTime: folioLines.slotStartTime })
+      .select({
+        id: folioLines.id,
+        slotDate: folioLines.slotDate,
+        slotStartTime: folioLines.slotStartTime,
+        cancelledAt: folioLines.cancelledAt,
+      })
       .from(folioLines)
       .where(and(eq(folioLines.folioId, folioId), eq(folioLines.organizationId, org)))
 
-    const departures = lineRows
-      .map((l) => (l.slotDate ? naiveEpoch(l.slotDate, l.slotStartTime ?? '00:00', tz) : null))
-      .filter((e): e is number => e !== null)
-    const earliest = Math.min(...departures)
-    const nearDeparture = earliest - nowSec < buffer * 3_600
-    const expiresAt = earliest - (nearDeparture ? grace * 60 : buffer * 3_600)
+    for (const l of lineRows) {
+      if (l.cancelledAt || !l.slotDate) continue
+      const departure = naiveEpoch(l.slotDate, l.slotStartTime ?? '00:00', tz)
+      const nearDeparture = departure - nowSec < buffer * 3_600
+      const expiresAt = departure - (nearDeparture ? grace * 60 : buffer * 3_600)
+      await db
+        .update(folioLines)
+        .set({ bookingExpiresAt: new Date(expiresAt * 1000) })
+        .where(and(eq(folioLines.id, l.id), eq(folioLines.organizationId, org)))
+    }
 
     await db
       .update(folios)
       .set({
-        bookingExpiresAt: new Date(expiresAt * 1000),
         // D14 — the deadline moved, so the customer is owed a fresh warning for the new one. Today
         // neither would fire: the flag skips the sweep, and the unique index blocks a second
         // `booking_grace_entered`. The rows for the closed cycle go with it. Cost, accepted: the
