@@ -242,7 +242,9 @@ const lineCommission = (line: PolicyLine): number =>
 // its source, so every reader agrees.
 //
 // Omitting `bookedCommission` means "no authoritative figure": the lines are used as-is.
-const lineCommissions = (lines: PolicyLine[], bookedCommission?: number): number[] => {
+// EXPORTED for the line-cancel path (US-A22): a subset cancellation prices with the subset's
+// share of the folio's booked commission, and this reconciliation is the one rule for that split.
+export const lineCommissions = (lines: PolicyLine[], bookedCommission?: number): number[] => {
   const perLine = lines.map(lineCommission)
   const summed = perLine.reduce((a, b) => a + b, 0)
   if (bookedCommission === undefined || bookedCommission < 0 || summed === bookedCommission) {

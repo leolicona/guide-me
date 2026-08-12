@@ -65,6 +65,13 @@ against it.
 
 ## Scope boundary
 
+> **Items 1–2 SUPERSEDED by `docs/folios/line-autonomy.spec.md` (2026-08-11).** The folio became
+> the container and the lines own their money and lifecycle: `status` is now a reconciled
+> roll-up every reader derives from the lines, the five QR gates answer from the line, and
+> per-line state has real writers (`folio_payment_allocations` + the line's cancellation stamps).
+> Items 3–4 stand. The sixth axis (fulfilment, D1–D7 below) is untouched: still derived, still
+> per line, the scanner still writes only `redeemed_count`.
+
 This feature must not change what a folio *is*.
 
 **Mechanical criterion — these must pass unedited:**

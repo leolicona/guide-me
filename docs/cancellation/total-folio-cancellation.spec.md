@@ -87,7 +87,7 @@ table record the cancellation. Additive nullable columns are safe on a populated
 | `cancelled_at` | `integer` timestamp (nullable) | set when cancelled |
 | `cancelled_by` | `text` → `users(id)` (nullable) | the **admin** who cancelled (from context) |
 | `cancellation_reason` | `text` (nullable) | optional admin note |
-| `cancellation_clawback` | `integer` boolean, default `0` | **US-A26** — `1` = claw back the agent's commission (they forfeit it); `0` (default) = the company absorbs it. Written by `cancelFolio`, **read** by the Agent-cash-balance derivation. |
+| `cancellation_clawback` | `integer` boolean, default `0` | `1` = the agent's commission was clawed back; `0` = the company absorbed it. **Derived** by the Cancellation Policy Engine (`reversedCommission > 0`) — never client-supplied (US-A26 superseded, D10). **Read** by the Agent-cash-balance derivation and the commission report; not serialized in API responses. |
 
 > The `status` enum already includes `cancelled` — no enum migration. Cancellation is the
 > only writer of the three audit columns; they stay `null` for every active folio.
@@ -180,15 +180,20 @@ One folio in the caller's org with its lines, extras, totals, customer, agent, a
 cancellation audit (`cancelled_at`, `cancelled_by`, `cancellation_reason`). → `200
 { "folio": { … } }`. `404` cross-org/unknown.
 
-### `POST /api/folios/:id/cancel` — cancel the whole folio (US-A21, US-A26)
+### `POST /api/folios/:id/cancel` — cancel the whole folio (US-A21)
 
 ```json
-{ "reason": "Customer no-show", "clawback": true }
+{ "reason": "Customer no-show" }
 ```
-Both fields optional (`reason` → `null`, `clawback` → `false`). Releases every line's spots,
-sets `status = 'cancelled'`, and records the audit fields + the clawback flag. → `200
-{ "folio": { …, "status": "cancelled", "cancelled_at", "cancelled_by", "cancellation_reason",
-"cancellation_clawback" } }`.
+`reason` is optional (→ `null`) and is the **only** thing a caller may send. The money — refund,
+retention, commission clawback — is priced by the org's cancellation ladder (*Cancellation Policy
+Engine*, D10); the withdrawn `clawback` / `cancelled_by_company` flags are **rejected with a
+`400`** rather than silently dropped. Releases every line's spots, sets `status = 'cancelled'`,
+records the audit fields, and lets the engine write the derived `cancellation_clawback` on the
+row (bookkeeping for the commission report and the cash engine — no longer serialized in any
+response). → `200 { "folio": { …, "status": "cancelled", "cancelled_at", "cancelled_by",
+"cancellation_reason" }, "cancellation": { refund, retention, kept_commission,
+reversed_commission } }`.
 
 - `404` if unknown / cross-org.
 - `409 CONFLICT` if the folio is **already cancelled**.
@@ -250,13 +255,13 @@ balance (`GET /api/cash/me`)
 **Then** the agent's derived `cash_collected` **excludes** the 300000 and the running
 `balance` drops accordingly.
 
-#### Scenario 6b — Clawback choice is recorded and applied (US-A26)
+#### Scenario 6b — Clawback is derived and applied *(US-A26 superseded — Cancellation Policy Engine, D10)*
 **Given** a `paid` folio carrying a booked `commission_amount`
-**When** the admin cancels it with `{ "clawback": true }`
-**Then** `cancellation_clawback = true` on the folio and the agent's derived
-`commission_total` **no longer includes** that folio's commission (they forfeit it).
-Cancelling another folio with `{ "clawback": false }` (or no flag) records
-`cancellation_clawback = false` and the agent **keeps** that commission.
+**When** the admin cancels it ~~with `{ "clawback": true }`~~ (no flag — sending one is a `400`)
+**Then** the org's ladder prices the cancellation: if it reverses any commission,
+`cancellation_clawback = true` on the row and the agent's derived `commission_total`
+**no longer includes** that folio's commission (they forfeit it); if the ladder retains enough
+for the agent to keep their share, `cancellation_clawback = false` and they **keep** it.
 
 #### Scenario 7 — Cancelled folio's tickets are rejected by the scanner
 **Given** a folio that has been cancelled

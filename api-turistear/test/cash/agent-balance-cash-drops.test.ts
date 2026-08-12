@@ -1316,8 +1316,14 @@ describe('Agent Continuous Cash Balance with Cash Drops', () => {
       body: JSON.stringify({ reason: 'No-show' }),
     })
     expect(res.status).toBe(200)
-    const body = (await res.json()) as any
-    expect(body.folio.cancellation_clawback).toBe(true)
+    // The derived flag no longer travels in the response (the manual control is retired) —
+    // what matters here is the row the cash engine reads.
+    const cancelled = await env.DB.prepare(
+      `SELECT cancellation_clawback FROM folios WHERE id = ?`,
+    )
+      .bind(folioId)
+      .first<{ cancellation_clawback: number }>()
+    expect(cancelled?.cancellation_clawback).toBe(1)
 
     const after = await getMyBalance(AGENT_EMAIL)
     // Folio cancelled (no cash) AND commission clawed back → balance 0.
@@ -1355,7 +1361,12 @@ describe('Agent Continuous Cash Balance with Cash Drops', () => {
       body: JSON.stringify({ reason: 'No-show' }),
     })
     expect(res.status).toBe(200)
-    expect((await res.json() as any).folio.cancellation_clawback).toBe(false)
+    const kept = await env.DB.prepare(
+      `SELECT cancellation_clawback FROM folios WHERE id = ?`,
+    )
+      .bind(folioId)
+      .first<{ cancellation_clawback: number }>()
+    expect(kept?.cancellation_clawback).toBe(0)
 
     const after = await getMyBalance(AGENT_EMAIL)
     expect(after.json.balance.commission_total).toBe(20000)

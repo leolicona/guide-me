@@ -16,12 +16,7 @@ import ArrowBackRounded from '@mui/icons-material/ArrowBackRounded'
 import { useFolio, useFolioCancellationQuote, useFolioEvents } from '../features/pos/hooks'
 import { useOrgDateFormatter } from '../features/organization'
 import { TicketQr } from '../features/pos/components/TicketQr'
-import {
-  BookingActions,
-  ExpiredBookingBanner,
-  TicketWhatsAppButton,
-  DeliveryBadge,
-} from '../features/bookings'
+import { BookingActions, TicketWhatsAppButton, DeliveryBadge } from '../features/bookings'
 import { FolioStatusChip, FolioTimeline, folioTimeChip, useNowSeconds } from '../features/folios'
 import { MoneyText, SectionCard, StatusChip } from '../components'
 import { formatMoney } from '../features/catalog/types'
@@ -91,6 +86,15 @@ export default function FolioHistoryDetailPage() {
               <Typography variant="caption" color="text.secondary">
                 {folio.id} · {formatDate(folio.created_at)}
               </Typography>
+              {/* Who the sale is for, with the identity — not inside the payment card, where a
+                  shared border made the name parse as sale data (same move as the admin detail). */}
+              {(folio.customer_name || folio.customer_email) && (
+                <Typography variant="body2" sx={{ mt: 0.5 }}>
+                  {folio.customer_name}
+                  {folio.customer_name && folio.customer_email ? ' · ' : ''}
+                  {folio.customer_email}
+                </Typography>
+              )}
               {/* One StatusChip per active axis, same vocabulary as the admin detail (D8): an
                   axis at its default value says nothing here. The time chip derives from
                   useNowSeconds (D19), never Date.now() in render. */}
@@ -110,11 +114,9 @@ export default function FolioHistoryDetailPage() {
               </Stack>
             </Box>
 
-            {/* A plain (admin) cancellation keeps the neutral notice; an expired apartado gets
-                the reactivation banner instead (US-AG07.5). */}
-            {/* The cancellation notice moved into the Historial (D6: same anatomy as the admin
-                detail) — the chip says the state, the `cancelled` row says when and why. */}
-            <ExpiredBookingBanner folio={folio} />
+            {/* No banners: the cancellation notice moved into the Historial (D6: same anatomy as
+                the admin detail) and `ExpiredBookingBanner` retired — the chips say the state,
+                the `cancelled` row says when and why. */}
 
             {/* US-AG53 — the sale as a story, COLLAPSED between the state and the money (D6:
                 identical placement to the admin detail). The POS detail carries no folio-level
@@ -123,14 +125,6 @@ export default function FolioHistoryDetailPage() {
 
             <Card>
               <CardContent>
-                {(folio.customer_name || folio.customer_email) && (
-                  <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                    {folio.customer_name}
-                    {folio.customer_name && folio.customer_email ? ' · ' : ''}
-                    {folio.customer_email}
-                  </Typography>
-                )}
-
                 <Stack spacing={2} divider={<Divider flexItem />}>
                   {folio.lines.map((line) => (
                     <Box key={line.id}>
@@ -139,7 +133,14 @@ export default function FolioHistoryDetailPage() {
                         sx={{ justifyContent: 'space-between', alignItems: 'flex-start' }}
                       >
                         <Box sx={{ minWidth: 0 }}>
-                          <Typography variant="subtitle2">{line.service_name}</Typography>
+                          <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+                            <Typography variant="subtitle2">{line.service_name}</Typography>
+                            {/* US-AG54 — the line's own state, only when it differs from the
+                                folio's: a mixed apartado names the odd one out. */}
+                            {line.money_state && line.money_state !== folio.status && (
+                              <FolioStatusChip status={line.money_state} />
+                            )}
+                          </Stack>
                           <Typography variant="caption" color="text.secondary">
                             {folioLineMeta(line)} · {formatMoney(line.unit_price)}
                           </Typography>

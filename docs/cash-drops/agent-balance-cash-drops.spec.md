@@ -51,7 +51,7 @@ US-AG14 (register a cash drop / hand-in), US-AG23 (auto-deduct commissions), US-
   rises (the continuous model handles partial collection naturally — no day boundary to
   split it across).
 - **Total folio cancellation** (`docs/cancellation/total-folio-cancellation.spec.md`) — a
-  cancelled folio is excluded from `collected`; depending on the admin's choice (US-A26), it can either trigger a commission clawback or be absorbed by the company.
+  cancelled folio is excluded from `collected`; the cancellation can either trigger a commission clawback or be absorbed by the company — **derived** from the org's refund ladder since the *Cancellation Policy Engine* superseded the admin's per-cancellation choice (US-A26, D10).
 - **Commissions** (US-A12) — are now an integral part of the derivation, auto-deducted from the cash the agent owes.
 - **Auth & roles** — `authMiddleware`, `requireRole`, the multitenancy Enforcement Contract
   (`docs/multitenancy/multitenancy.spec.md`).

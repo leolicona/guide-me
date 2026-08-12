@@ -8,7 +8,7 @@
 // deliberately unpaginated (TECH_DEBT #23) — an id list would blow that cap on exactly the
 // organizations the feature exists to serve.
 
-import { and, asc, eq, type SQL } from 'drizzle-orm'
+import { and, asc, eq, sql, type SQL } from 'drizzle-orm'
 import type { Db } from '../db/client'
 import { folioRequests, folioAccessTokens, folioLines, folios } from '../db/schema'
 import { lineFulfillment, type Fulfillment } from './folioFulfillment'
@@ -29,6 +29,9 @@ export interface FolioListLine {
   // "which line was it" without a second read (D2: fulfilment lives on the line).
   redeemed_count: number
   fulfillment: Fulfillment
+  /** US-A89 (D14) — the line's own money state for the card's per-line marks. Absent when the
+   * line has no allocations (legacy fixture) — the card simply shows no mark. */
+  money_state?: 'paid' | 'booking' | 'cancelled'
 }
 
 /**
@@ -58,6 +61,10 @@ export const readListLines = async (
       guests: folioLines.guests,
       quantity: folioLines.quantity,
       redeemedCount: folioLines.redeemedCount,
+      // US-A89 — cancellation is a written stamp; money derives from allocations (NULL = none).
+      cancelledAt: folioLines.cancelledAt,
+      lineTotal: folioLines.lineTotal,
+      allocated: sql<number | null>`(select sum(a.amount) from folio_payment_allocations a where a.folio_line_id = folio_lines.id)`,
     })
     .from(folioLines)
     .innerJoin(folios, eq(folioLines.folioId, folios.id))
@@ -78,6 +85,14 @@ export const readListLines = async (
       guests: r.guests,
       quantity: r.quantity,
       redeemed_count: r.redeemedCount,
+      // US-A89 (D14) — the per-line mark: cancelled from its stamp, else money from allocations.
+      money_state: r.cancelledAt
+        ? ('cancelled' as const)
+        : r.allocated === null
+          ? undefined
+          : Math.max(0, Number(r.allocated)) >= r.lineTotal
+            ? ('paid' as const)
+            : ('booking' as const),
       fulfillment: lineFulfillment(
         {
           lineId: r.id,

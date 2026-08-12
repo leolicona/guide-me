@@ -11,6 +11,7 @@ import {
   folioAccessTokens,
   folioLineExtras,
   folioLines,
+  folioPaymentAllocations,
   folioPayments,
   folios,
   organizations,
@@ -57,11 +58,21 @@ import {
   commissionRow,
   commissionReversalRow,
   refundRow,
+  allocationRows,
   buildCancellationReversal,
   displayMethodSql,
   depositMethodSql,
   readFolioPayments,
 } from '../../utils/folioPayments'
+// US-LG09 — the pure allocation engine (docs/folios/line-autonomy.spec.md D1–D3): which lines a
+// payment funds. Allocations ride the payment row's own batch; nothing reads them yet (F1).
+import {
+  allocateFull,
+  assertAllocations,
+  orderForCascade,
+  seedAndCascade,
+} from '../../utils/folioAllocations'
+import { anyLineStatusSql, deriveStatusSql } from '../../utils/folioStatus'
 import {
   readListCancellationRequests,
   readListLines,
@@ -70,7 +81,7 @@ import {
 // D20 — the agent apartado cancel shares the admin path's commit, so the two cannot price the same
 // folio differently. Reaching across routes is deliberate: the alternative is a second copy of the
 // release + reversal logic, which is exactly what this replaced.
-import { cancelFolioPriced, queueCancellationEmail, quoteCancellation } from '../folios/handler'
+import { cancelFolioLinesPriced, cancelFolioPriced, queueCancellationEmail, quoteCancellation, serializeQuote } from '../folios/handler'
 
 export type PosContext = Context<{
   Bindings: CloudflareBindings
@@ -662,6 +673,8 @@ interface PreparedLine {
   // Signed at confirm time, once all decrements succeed (below). Stay lines have no QR.
   qrToken?: string
   qr?: ReturnType<typeof qrEcho>
+  // US-AG54 (line-autonomy D5) — the line's own hold clock, set on the booking path only.
+  bookingExpiresAt?: Date
 }
 
 // --- Bookings/down-payments shared helpers (US-AG07) ---
@@ -1434,51 +1447,37 @@ export const confirmSale = async (c: PosContext) => {
     // Percent on the amount collected; fixed accrues nothing until the folio reaches `paid` (D8).
     commissionAmount = Math.round((fullPercentCommission * downPayment) / total)
     const nowSec = Math.floor(Date.now() / 1000)
-    // Earliest "departure" across the cart: a slot's start, or a stay's check-in (midnight). Drives
-    // the release timestamp (US-AG07.1). A stay uses its check-in date as the protected instant.
-    const earliest = prepared.reduce(
-      (min, l) => {
-        const date = l.lineType === 'stay' ? l.checkIn! : l.slotDate!
-        const time = l.lineType === 'stay' ? '00:00' : l.slotStartTime!
-        const e = slotEpoch(date, time, tz)
-        return e < min.epoch ? { epoch: e, date } : min
-      },
-      { epoch: Infinity, date: '' },
-    )
-    // US-A77 (S1) — an apartado may not be opened this close to departure. Distinct from the sales
-    // cutoff, which gates every folio and stays at 0 so a cash walk-in sells until the last minute:
-    // a completed sale near departure is fine, a promise to come back and pay is not. Without this
-    // an agent could open an apartado twenty minutes out that expires fifteen minutes out — five
-    // minutes of hold, and a customer who never had a chance to settle.
-    // BUG-029 — the guard that a SETTINGS rule cannot provide. Whether an apartado is born expired
-    // depends on WHEN the sale happens, not only on how the org is configured: with the default
-    // `creationCutoffHours = 0` ("no restriction") nothing below ran at all, so a sale five minutes
-    // before departure produced `booking_expires_at = salida − 15min` — a hold that was already over
-    // when it was written, cancelled by the next sweep. Checked against the same function that
-    // computes the real value, so the two can never disagree.
-    if (bookingExpiryEpoch(policy, nowSec, earliest.epoch) <= nowSec) {
-      throw new ApiError(
-        'BOOKING_TOO_LATE',
-        422,
-        'Ya no se puede abrir un apartado para esta salida: vencería antes de que el cliente pueda liquidarlo.',
-      )
-    }
-    if (policy.creationCutoffHours > 0) {
-      const hoursOut = (earliest.epoch - nowSec) / 3600
-      if (hoursOut < policy.creationCutoffHours) {
+    // US-AG54 (line-autonomy D5) — each line's hold runs against ITS OWN departure: a slot's
+    // start, or a stay's check-in at 00:00 org-local. The guards below apply PER LINE — a line
+    // whose hold would be born expired refuses the whole apartado (US-A77/BUG-029: whether it is
+    // born expired depends on WHEN the sale happens, checked against the same function that
+    // computes the real clock so the two can never disagree). The folio-level column keeps
+    // MIN(line clocks) while it lives, so every existing reader stays truthful — and for the
+    // near line that MIN is exactly the single clock this block used to compute.
+    let earliestClock = Infinity
+    for (const l of prepared) {
+      const date = l.lineType === 'stay' ? l.checkIn! : l.slotDate!
+      const time = l.lineType === 'stay' ? '00:00' : l.slotStartTime!
+      const departure = slotEpoch(date, time, tz)
+      const clockEpoch = bookingExpiryEpoch(policy, nowSec, departure)
+      if (clockEpoch <= nowSec) {
+        throw new ApiError(
+          'BOOKING_TOO_LATE',
+          422,
+          'Ya no se puede abrir un apartado para esta salida: vencería antes de que el cliente pueda liquidarlo.',
+        )
+      }
+      if (policy.creationCutoffHours > 0 && (departure - nowSec) / 3600 < policy.creationCutoffHours) {
         throw new ApiError(
           'BOOKING_TOO_LATE',
           422,
           `Los apartados cierran ${policy.creationCutoffHours} h antes de la salida. Cobra el total para vender este servicio.`,
         )
       }
+      l.bookingExpiresAt = new Date(clockEpoch * 1000)
+      if (clockEpoch < earliestClock) earliestClock = clockEpoch
     }
-
-    bookingExpiresAt = bookingExpiryDate(
-      policy,
-      nowSec,
-      earliest.epoch,
-    )
+    bookingExpiresAt = new Date(earliestClock * 1000)
   }
 
   // A stay reservation FK-references the folio, so the folio row must exist BEFORE the reserve
@@ -1764,6 +1763,7 @@ export const confirmSale = async (c: PosContext) => {
         commissionType: line.commissionType,
         commissionValue: line.commissionValue,
         qrToken: line.qrToken,
+        bookingExpiresAt: line.bookingExpiresAt ?? null,
         lineType: line.lineType,
         unitTypeId: line.unitTypeId ?? null,
         checkIn: line.checkIn ?? null,
@@ -1794,8 +1794,18 @@ export const confirmSale = async (c: PosContext) => {
   // with the lines. The scalars above stay authoritative; this is a verified shadow (Σ payment rows
   // == amount_paid; Σ commission rows == commission_amount). A booking writes the deposit; a paid
   // sale the full amount. Verification/method/reference mirror the folio; a transfer row is `pending`.
+  //
+  // US-LG09 — the payment's per-line allocations ride the same batch (rule 1): a full payment funds
+  // every line at line_total; a deposit is seeded at the org minimum % per line, surplus cascading
+  // to the soonest departure (D2/D3). assertAllocations makes a gap a 500, never a silent partial.
+  const salePaymentId = crypto.randomUUID()
+  const saleAllocations = isBooking
+    ? seedAndCascade(prepared, policy.minDownPaymentPct, amountPaid)
+    : allocateFull(prepared)
+  assertAllocations(amountPaid, saleAllocations)
   statements.push(
     paymentRow(db, {
+      id: salePaymentId,
       organizationId: org,
       folioId,
       amount: amountPaid,
@@ -1804,6 +1814,12 @@ export const confirmSale = async (c: PosContext) => {
       verification: paymentVerification,
       collectedBy: agent.userId,
       operatorId: c.get('operator')?.operatorId ?? null,
+    }),
+    ...allocationRows(db, {
+      organizationId: org,
+      paymentId: salePaymentId,
+      allocations: saleAllocations,
+      sign: 1,
     }),
   )
   if (commissionAmount > 0) {
@@ -2028,7 +2044,7 @@ const readFolio = async (
   const folioRows = await db
     .select({
       id: folios.id,
-      status: folios.status,
+      status: deriveStatusSql, // D11 — derived from the lines; equals the column by construction
       paymentMethod: displayMethodSql,
       paymentReference: folios.paymentReference,
       paymentVerification: folios.paymentVerification,
@@ -2084,6 +2100,15 @@ const readFolio = async (
       checkOut: folioLines.checkOut,
       guests: folioLines.guests,
       nights: folioLines.nights,
+      // US-A22 — the line's own life, mirrored on the seller detail (same fields the admin GET
+      // widened by; the raw outer-column correlation is the displayMethodSql trick).
+      cancelledAt: folioLines.cancelledAt,
+      cancellationSource: folioLines.cancellationSource,
+      lineRefundStatus: folioLines.refundStatus,
+      lineRefundAmount: folioLines.refundAmount,
+      // US-AG54 (D5) — the line's own hold clock, for the per-line countdown + Liquidar rows.
+      lineBookingExpiresAt: folioLines.bookingExpiresAt,
+      allocated: sql<number>`coalesce((select sum(a.amount) from folio_payment_allocations a where a.folio_line_id = folio_lines.id), 0)`,
     })
     .from(folioLines)
     .where(and(eq(folioLines.folioId, folioId), eq(folioLines.organizationId, org)))
@@ -2137,6 +2162,24 @@ const readFolio = async (
         check_out: line.checkOut,
         guests: line.guests,
         nights: line.nights,
+        // US-A22 — the line's own money state (derived from allocations; cancellation read from
+        // its written stamp), same shape as the admin detail.
+        money_state: line.cancelledAt
+          ? ('cancelled' as const)
+          : Math.max(0, Number(line.allocated ?? 0)) >= line.lineTotal
+            ? ('paid' as const)
+            : ('booking' as const),
+        allocated: Math.max(0, Number(line.allocated ?? 0)),
+        pending_balance: line.cancelledAt
+          ? 0
+          : Math.max(0, line.lineTotal - Math.max(0, Number(line.allocated ?? 0))),
+        cancelled_at: line.cancelledAt ? Math.floor(line.cancelledAt.getTime() / 1000) : null,
+        cancellation_source: line.cancellationSource,
+        refund_status: line.lineRefundStatus,
+        refund_amount: line.lineRefundAmount,
+        booking_expires_at: line.lineBookingExpiresAt
+          ? Math.floor(line.lineBookingExpiresAt.getTime() / 1000)
+          : null,
         quantity: line.quantity,
         base_price: line.basePrice,
         minimum_price: line.minimumPrice,
@@ -2229,14 +2272,9 @@ export const getFolio = async (c: PosContext) => {
 
   return c.json({
     folio,
-    cancellation_quote: quote
-      ? {
-          refund: quote.refund,
-          retention: quote.retention,
-          kept_commission: quote.keptCommission,
-          reversed_commission: quote.reversedCommission,
-        }
-      : null,
+    // The SAME serializer the admin detail uses, per-line subset figures included (US-AG54):
+    // the seller's per-line cancel sheet states the number the endpoint will write.
+    cancellation_quote: quote ? serializeQuote(quote, folio.lines) : null,
     events,
   })
 }
@@ -2359,7 +2397,7 @@ export const settleBooking = async (c: PosContext) => {
   // The QR can mint now only if THIS balance clears AND no earlier payment is still awaiting an admin.
   const cleared = !balanceNeedsVerification && folio.paymentVerification !== 'pending'
 
-  const lineRows = await db
+  const allLineRows = await db
     .select({
       id: folioLines.id,
       serviceId: folioLines.serviceId,
@@ -2374,12 +2412,19 @@ export const settleBooking = async (c: PosContext) => {
       lineTotal: folioLines.lineTotal,
       commissionType: folioLines.commissionType,
       commissionValue: folioLines.commissionValue,
+      cancelledAt: folioLines.cancelledAt,
     })
     .from(folioLines)
     .where(and(eq(folioLines.folioId, id), eq(folioLines.organizationId, org)))
+  // US-AG54 (line-autonomy F3) — the settle collects, signs and commissions only what LIVES: a
+  // cancelled line's seats went back, its money reversed, its commission clawed — charging its
+  // remainder here would bill the customer for a line that no longer exists.
+  const lineRows = allLineRows.filter((l) => !l.cancelledAt)
+  const hasCancelledLines = lineRows.length !== allLineRows.length
 
   // Full commission from the per-line snapshot: percent on the full line total + fixed (which
   // only accrues now that the folio reaches `paid`, US-AG07 D8). No re-read of the service.
+  // Live lines only — a cancelled line's commission already met its reversal in the ledger.
   const commissionAmount = lineRows.reduce(
     (sum, l) =>
       sum +
@@ -2395,13 +2440,45 @@ export const settleBooking = async (c: PosContext) => {
   // is the commission that only accrues now the folio reaches `paid` (fixed + percent-on-balance).
   // Step 2 still re-uses the deposit's method (folio.paymentMethod) — the settle-chosen method
   // arrives in Step 3. A transfer settle's balance row is `pending` (mirrors the re-armed folio).
-  const balanceAmount = folio.total - folio.amountPaid
-  const commissionTopUp = commissionAmount - folio.commissionAmount
+  // The balance: with every line alive this is the scalar arithmetic it always was; once a line
+  // has been cancelled the honest balance is what the LIVE lines are still owed, which only the
+  // allocations can say (their money already excludes the reversal).
+  const commissionTopUp = Math.max(0, commissionAmount - folio.commissionAmount)
+
+  // US-LG09 — the settle payment's allocations: each line receives exactly what it is still owed
+  // (line_total − its net allocated sum), in cascade order. When the sums do not close — a folio
+  // hand-seeded by an older test, never a post-0062 production folio — the shadow is SKIPPED
+  // rather than blocking the settle: F1's allocations are a verified shadow, not yet an authority.
+  const allocatedRows = await db
+    .select({
+      folioLineId: folioPaymentAllocations.folioLineId,
+      allocated: sql<number>`coalesce(sum(${folioPaymentAllocations.amount}), 0)`,
+    })
+    .from(folioPaymentAllocations)
+    .innerJoin(folioLines, eq(folioPaymentAllocations.folioLineId, folioLines.id))
+    .where(and(eq(folioLines.folioId, id), eq(folioLines.organizationId, org)))
+    .groupBy(folioPaymentAllocations.folioLineId)
+  const allocatedByLine = new Map(allocatedRows.map((r) => [r.folioLineId, Number(r.allocated)]))
+  const remainingByLine = orderForCascade(lineRows)
+    .map((l) => ({
+      folioLineId: l.id,
+      amount: Math.max(0, l.lineTotal - (allocatedByLine.get(l.id) ?? 0)),
+    }))
+    .filter((x) => x.amount > 0)
+  const remainingTotal = remainingByLine.reduce((s, x) => s + x.amount, 0)
+  // Every line alive → the scalar arithmetic it always was (and hand-seeded legacy fixtures keep
+  // working via the shadow skip below). A cancelled line in the folio → the allocations are the
+  // only honest ledger of what the live lines are still owed.
+  const balanceAmount = hasCancelledLines ? remainingTotal : folio.total - folio.amountPaid
+  const balanceAllocations = remainingTotal === balanceAmount ? remainingByLine : []
+
   const settleLedgerRows = (): BatchItem<'sqlite'>[] => {
     const rows: BatchItem<'sqlite'>[] = []
     if (balanceAmount > 0) {
+      const balancePaymentId = crypto.randomUUID()
       rows.push(
         paymentRow(db, {
+          id: balancePaymentId,
           organizationId: org,
           folioId: id,
           amount: balanceAmount,
@@ -2410,6 +2487,12 @@ export const settleBooking = async (c: PosContext) => {
           verification: balanceNeedsVerification ? 'pending' : 'not_required',
           collectedBy: agent.userId,
           operatorId: c.get('operator')?.operatorId ?? null,
+        }),
+        ...allocationRows(db, {
+          organizationId: org,
+          paymentId: balancePaymentId,
+          allocations: balanceAllocations,
+          sign: 1,
         }),
       )
     }
@@ -2442,8 +2525,10 @@ export const settleBooking = async (c: PosContext) => {
         .update(folios)
         .set({
           status: 'paid',
-          amountPaid: folio.total,
-          commissionAmount,
+          // With a cancelled line this is NOT the folio's total: the customer pays what the live
+          // lines are owed, and amount_paid records what was actually collected.
+          amountPaid: folio.amountPaid + balanceAmount,
+          commissionAmount: folio.commissionAmount + commissionTopUp,
           settledAt: settledNow,
           settledBy: agent.userId,
           ...deferUpdate,
@@ -2493,8 +2578,9 @@ export const settleBooking = async (c: PosContext) => {
       .update(folios)
       .set({
         status: 'paid',
-        amountPaid: folio.total,
-        commissionAmount,
+        // With a cancelled line this is NOT the folio's total (see the deferred branch).
+        amountPaid: folio.amountPaid + balanceAmount,
+        commissionAmount: folio.commissionAmount + commissionTopUp,
         settledAt: settledNow,
         settledBy: agent.userId,
         updatedAt: settledNow,
@@ -2588,6 +2674,311 @@ export const settleBooking = async (c: PosContext) => {
   return c.json({ folio: settled })
 }
 
+// US-AG54 (docs/folios/line-autonomy.spec.md, F3 — D4) — settle ONE line: collect ITS remaining
+// balance, sign ITS QR, book ITS commission, and touch nothing of its siblings. "Liquidar todo"
+// stays `settleBooking` (one payment row, N allocations — the ledger's grain is the money event);
+// this is the gesture that makes "pago completo el martes ahora, el jueves la semana que viene"
+// exist. The folio flips to `paid` only when the LAST live line completes — the delivery tail
+// (portal + email) stays with that completing settle, exactly where settleBooking runs it.
+export const settleFolioLine = async (c: PosContext) => {
+  const agent = c.get('user')
+  const id = c.req.param('id')
+  const lineId = c.req.param('lineId')
+  const db = getDb(c.env)
+  const org = agent.organizationId
+  const { tz } = await loadOrgTiming(db, org)
+
+  const folioRows = await db
+    .select({
+      id: folios.id,
+      status: folios.status,
+      total: folios.total,
+      amountPaid: folios.amountPaid,
+      commissionAmount: folios.commissionAmount,
+      customerName: folios.customerName,
+      customerEmail: folios.customerEmail,
+      paymentMethod: depositMethodSql,
+      paymentVerification: folios.paymentVerification,
+    })
+    .from(folios)
+    .where(folioActionFilter(id, agent))
+    .limit(1)
+  const folio = folioRows[0]
+  if (!folio) throw new ApiError('NOT_FOUND', 404, 'Folio not found')
+  if (folio.status === 'paid') throw new ApiError('ALREADY_SETTLED', 409, 'Folio is already paid')
+  if (folio.status === 'cancelled') throw new ApiError('FOLIO_CANCELLED', 409, 'Folio is cancelled')
+
+  const lineRows = await db
+    .select({
+      id: folioLines.id,
+      serviceId: folioLines.serviceId,
+      slotId: folioLines.slotId,
+      serviceName: folioLines.serviceName,
+      slotDate: folioLines.slotDate,
+      slotStartTime: folioLines.slotStartTime,
+      quantity: folioLines.quantity,
+      lineTotal: folioLines.lineTotal,
+      commissionType: folioLines.commissionType,
+      commissionValue: folioLines.commissionValue,
+      cancelledAt: folioLines.cancelledAt,
+      bookingExpiresAt: folioLines.bookingExpiresAt,
+      allocated: sql<number>`coalesce((select sum(a.amount) from folio_payment_allocations a where a.folio_line_id = folio_lines.id), 0)`,
+    })
+    .from(folioLines)
+    .where(and(eq(folioLines.folioId, id), eq(folioLines.organizationId, org)))
+  const line = lineRows.find((l) => l.id === lineId)
+  // Cross-org and wrong-folio land indistinguishably on 404 (S-14).
+  if (!line) throw new ApiError('FOLIO_LINE_NOT_FOUND', 404, 'Line not found in this folio')
+  if (line.cancelledAt) {
+    throw new ApiError('LINE_ALREADY_CANCELLED', 409, 'This line is cancelled')
+  }
+  // The LINE's own clock guards its own settle (D5) — a sibling's expiry is not this line's fact.
+  if (line.bookingExpiresAt && line.bookingExpiresAt.getTime() <= Date.now()) {
+    throw new ApiError('BOOKING_EXPIRED', 409, 'This line’s hold has expired')
+  }
+  const lineRemaining = Math.max(0, line.lineTotal - Math.max(0, Number(line.allocated ?? 0)))
+  if (lineRemaining === 0) {
+    throw new ApiError('LINE_ALREADY_PAID', 409, 'This line is already fully paid')
+  }
+
+  // Same body contract as settleBooking (US-LG03/US-AG41/US-A88): the balance is collected by
+  // its own method; a transfer re-arms verification and defers the QR.
+  const parsed = settleSchema.safeParse(await c.req.json().catch(() => ({})))
+  if (!parsed.success) throw new ApiError('VALIDATION_ERROR', 400, 'Invalid settle payload')
+  const body: SettleInput = parsed.data
+  const settleMethod = body.method ?? folio.paymentMethod
+  const balanceNeedsVerification = settleMethod === 'transfer'
+  if (balanceNeedsVerification && !body.payment_reference) {
+    const [orgRef] = await db
+      .select({ required: organizations.paymentReferenceRequired })
+      .from(organizations)
+      .where(eq(organizations.id, org))
+      .limit(1)
+    if (orgRef?.required ?? true) {
+      throw new ApiError(
+        'VALIDATION_ERROR',
+        400,
+        'A payment reference is required to settle a bank transfer',
+      )
+    }
+  }
+  const cleared = !balanceNeedsVerification && folio.paymentVerification !== 'pending'
+
+  // The commission this line's completion books: its full snapshot minus what the deposit's
+  // percent-on-collected already attributed to it (the same arithmetic settleBooking runs
+  // folio-wide, applied to one line). Fixed accrues only now, when the line reaches paid (D8/D9).
+  const lineFullCommission =
+    line.commissionType === 'fixed'
+      ? line.commissionValue * line.quantity
+      : Math.round((line.lineTotal * line.commissionValue) / 10000)
+  const lineAccrued =
+    line.commissionType === 'fixed'
+      ? 0
+      : Math.round(
+          (Math.round((line.lineTotal * line.commissionValue) / 10000) *
+            Math.max(0, Number(line.allocated ?? 0))) /
+            line.lineTotal,
+        )
+  const commissionDelta = Math.max(0, lineFullCommission - lineAccrued)
+
+  // Does THIS settle complete the folio? (Every other live line already fully allocated.)
+  const liveLines = lineRows.filter((l) => !l.cancelledAt)
+  const completing = liveLines.every(
+    (l) => l.id === lineId || Math.max(0, Number(l.allocated ?? 0)) >= l.lineTotal,
+  )
+
+  // The line's QR mints with ITS money (slot lines only), deferred while anything is unverified.
+  let lineTicket: { token: string } | null = null
+  if (cleared && line.slotId && line.slotDate) {
+    const identity = folio.customerName?.trim() || folio.customerEmail?.trim() || `folio:${id}`
+    const tickets = await signLineTickets(
+      c.env,
+      org,
+      id,
+      identity,
+      [
+        {
+          id: line.id,
+          serviceId: line.serviceId,
+          slotId: line.slotId,
+          quantity: line.quantity,
+          slotDate: line.slotDate,
+        },
+      ],
+      tz,
+    )
+    lineTicket = tickets.get(line.id) ?? null
+  }
+
+  const settledNow = new Date()
+  const linePaymentId = crypto.randomUUID()
+  const statements: BatchItem<'sqlite'>[] = [
+    paymentRow(db, {
+      id: linePaymentId,
+      organizationId: org,
+      folioId: id,
+      amount: lineRemaining,
+      method: settleMethod,
+      reference: balanceNeedsVerification ? (body.payment_reference ?? null) : null,
+      verification: balanceNeedsVerification ? 'pending' : 'not_required',
+      collectedBy: agent.userId,
+      operatorId: c.get('operator')?.operatorId ?? null,
+    }),
+    ...allocationRows(db, {
+      organizationId: org,
+      paymentId: linePaymentId,
+      allocations: [{ folioLineId: lineId, amount: lineRemaining }],
+      sign: 1,
+    }),
+    db
+      .update(folios)
+      .set({
+        amountPaid: folio.amountPaid + lineRemaining,
+        commissionAmount: folio.commissionAmount + commissionDelta,
+        ...(completing
+          ? { status: 'paid' as const, settledAt: settledNow, settledBy: agent.userId }
+          : {}),
+        ...(balanceNeedsVerification
+          ? {
+              paymentReference: body.payment_reference ?? null,
+              paymentVerification: 'pending' as const,
+            }
+          : {}),
+        updatedAt: settledNow,
+      })
+      .where(and(eq(folios.id, id), eq(folios.organizationId, org))),
+    folioEventRow(db, {
+      organizationId: org,
+      folioId: id,
+      type: 'payment',
+      actorId: agent.userId,
+      operatorId: c.get('operator')?.operatorId ?? null,
+      folioLineId: lineId,
+      payload: {
+        amount: lineRemaining,
+        method: settleMethod,
+        kind: 'settlement',
+        line: {
+          service_name: line.serviceName,
+          slot_date: line.slotDate,
+          slot_start_time: line.slotStartTime,
+        },
+      },
+      at: settledNow,
+    }),
+  ]
+  if (commissionDelta > 0) {
+    statements.push(
+      commissionRow(db, {
+        organizationId: org,
+        folioId: id,
+        amount: commissionDelta,
+        method: settleMethod,
+        collectedBy: agent.userId,
+      }),
+    )
+  }
+  if (lineTicket) {
+    statements.push(
+      db
+        .update(folioLines)
+        .set({ qrToken: lineTicket.token })
+        .where(and(eq(folioLines.id, lineId), eq(folioLines.organizationId, org))),
+    )
+  }
+  await db.batch(statements as [BatchItem<'sqlite'>, ...BatchItem<'sqlite'>[]])
+
+  // Completing AND cleared → the delivery tail (portal + ticket email), exactly where the
+  // whole-folio settle runs it. A deferred (transfer) completion waits for verifyPayment, which
+  // already owns that tail.
+  if (completing && cleared) {
+    await issuePortalLink(
+      db,
+      c.env,
+      org,
+      id,
+      lineRows.map((l) => l.slotDate ?? l.checkIn).filter((d): d is string => !!d),
+    )
+  }
+
+  const updated = await readFolio(db, org, agent.userId, id, c.env.QR_SECRET, c.env.API_BASE_URL)
+  return c.json({ folio: updated })
+}
+
+// US-AG54 / US-AG07.4 (line-autonomy F3) — the AGENT cancels one apartada line of their own
+// folio, priced by the same subset commit every other entrance uses. Booking-only: a paid
+// folio's per-line cancel is the admin's US-A22 gesture, with its refund obligations.
+export const cancelBookingLine = async (c: PosContext) => {
+  const agent = c.get('user')
+  const id = c.req.param('id')
+  const lineId = c.req.param('lineId')
+  const db = getDb(c.env)
+  const org = agent.organizationId
+  const body = (await c.req.json().catch(() => ({}))) as { reason?: string }
+
+  const folioRows = await db
+    .select({
+      status: folios.status,
+      paymentVerification: folios.paymentVerification,
+      customerEmail: folios.customerEmail,
+    })
+    .from(folios)
+    .where(folioActionFilter(id, agent))
+    .limit(1)
+  const folio = folioRows[0]
+  if (!folio) throw new ApiError('NOT_FOUND', 404, 'Folio not found')
+  if (folio.status !== 'booking') {
+    throw new ApiError('NOT_A_BOOKING', 409, 'Only a live booking can be cancelled here')
+  }
+  // BUG-030 parity with cancelBooking: unverified money is decided via verify/reject.
+  if (folio.paymentVerification === 'pending') {
+    throw new ApiError(
+      'PAYMENT_UNVERIFIED',
+      409,
+      'El pago está por verificar — verifica o rechaza el pago antes de cancelar',
+    )
+  }
+  const [line] = await db
+    .select({ id: folioLines.id, cancelledAt: folioLines.cancelledAt })
+    .from(folioLines)
+    .where(and(eq(folioLines.id, lineId), eq(folioLines.folioId, id), eq(folioLines.organizationId, org)))
+    .limit(1)
+  if (!line) throw new ApiError('FOLIO_LINE_NOT_FOUND', 404, 'Line not found in this folio')
+  if (line.cancelledAt) {
+    throw new ApiError('LINE_ALREADY_CANCELLED', 409, 'This line is already cancelled')
+  }
+
+  const now = new Date()
+  const { won, outcome } = await cancelFolioLinesPriced(db, org, id, [lineId], now, {
+    cancelledBy: agent.userId,
+    reason: body.reason ?? null,
+    source: 'agent',
+  })
+  if (!won) {
+    throw new ApiError('LINE_ALREADY_CANCELLED', 409, 'This line is already cancelled')
+  }
+
+  // Written notice (D20), line-scoped (D13) — same event the admin's line cancel emits.
+  await emitNotification(db, {
+    organizationId: org,
+    folioId: id,
+    event: 'cancellation_approved',
+    hasEmail: !!folio.customerEmail,
+    folioLineId: lineId,
+  })
+
+  const updated = await readFolio(db, org, agent.userId, id, c.env.QR_SECRET, c.env.API_BASE_URL)
+  return c.json({
+    folio: updated,
+    cancellation: {
+      refund: outcome.refund,
+      retention: outcome.retention,
+      kept_commission: outcome.keptCommission,
+      reversed_commission: outcome.reversedCommission,
+    },
+  })
+}
+
 // US-A67 — ADMIN verifies an electronic (transfer) payment against the bank. Flips the folio's
 // `payment_verification` pending → verified; if the folio is already `paid` (a full transfer sale or
 // a transfer settle), this runs the DEFERRED half of the paid path — signs the per-line QR, mints
@@ -2679,7 +3070,7 @@ export const verifyPayment = async (c: PosContext) => {
   }
 
   // A paid folio → run the deferred paid-path side effects (mirrors settle's cleared branch).
-  const lineRows = await db
+  const allLineRows = await db
     .select({
       id: folioLines.id,
       serviceId: folioLines.serviceId,
@@ -2692,9 +3083,13 @@ export const verifyPayment = async (c: PosContext) => {
       quantity: folioLines.quantity,
       unitPrice: folioLines.unitPrice,
       lineTotal: folioLines.lineTotal,
+      cancelledAt: folioLines.cancelledAt,
     })
     .from(folioLines)
     .where(and(eq(folioLines.folioId, id), eq(folioLines.organizationId, org)))
+  // US-A89 (F4, PR-7) — verification releases tickets for the lines that LIVE: re-signing a
+  // cancelled line's QR would hand back a pass for a seat already returned to the pool.
+  const lineRows = allLineRows.filter((l) => !l.cancelledAt)
 
   const slotLineRows = lineRows.filter((l) => l.slotId && l.slotDate)
   const identity = folio.customerName?.trim() || folio.customerEmail?.trim() || `folio:${id}`
@@ -2849,6 +3244,19 @@ export const rejectPayment = async (c: PosContext) => {
         updatedAt: now,
       })
       .where(and(eq(folios.id, id), eq(folios.organizationId, org))),
+    // US-A22 (line-autonomy) — the lines record the same fact the folio does. This hand-rolled
+    // cancel path predates F2's per-line stamps; the derived status field (D11) is what exposed
+    // the gap — a rejected folio's lines still read as live.
+    db
+      .update(folioLines)
+      .set({ cancelledAt: now, cancelledBy: admin.userId, cancellationSource: 'admin' })
+      .where(
+        and(
+          eq(folioLines.folioId, id),
+          eq(folioLines.organizationId, org),
+          sql`${folioLines.cancelledAt} is null`,
+        ),
+      ),
     // US-A24 — one action, one row (D9): the rejection IS the cancellation, so no second
     // `cancelled` event is written for the same tap.
     folioEventRow(db, {
@@ -3073,6 +3481,7 @@ export const voidExpressSale = async (c: PosContext) => {
 
   const lineRows = await db
     .select({
+      id: folioLines.id,
       slotId: folioLines.slotId,
       quantity: folioLines.quantity,
       redeemedCount: folioLines.redeemedCount,
@@ -3114,6 +3523,27 @@ export const voidExpressSale = async (c: PosContext) => {
   // defensive floor. Both reversal rows are dated NOW — they land in the seller's current shift,
   // netting the caja to exactly its pre-sale balance (S-12).
   const statements: BatchItem<'sqlite'>[] = []
+  // US-A22 (line-autonomy) — the void's lines record the same fact the folio does: cancelled,
+  // refunded across the counter. This hand-rolled cancel predates F2's per-line stamps; the
+  // derived status field (D11) is what exposed the gap.
+  statements.push(
+    db
+      .update(folioLines)
+      .set({
+        cancelledAt: now,
+        cancelledBy: agent.userId,
+        cancellationSource: 'agent',
+        refundStatus: 'refunded',
+        refundAmount: folio.amountPaid,
+      })
+      .where(
+        and(
+          eq(folioLines.folioId, id),
+          eq(folioLines.organizationId, org),
+          sql`${folioLines.cancelledAt} is null`,
+        ),
+      ),
+  )
   let releasedSeats = 0
   for (const line of lineRows) {
     if (line.lineType !== 'slot' || !line.slotId) continue
@@ -3129,14 +3559,28 @@ export const voidExpressSale = async (c: PosContext) => {
     )
   }
   if (folio.amountPaid > 0) {
+    // US-LG09 — an Express sale is exactly ONE slot line (rules 1/3), so the void's refund
+    // allocates its full amount back against that line, signed negative like its parent row.
+    const voidRefundId = crypto.randomUUID()
     statements.push(
       refundRow(db, {
+        id: voidRefundId,
         organizationId: org,
         folioId: id,
         amount: folio.amountPaid,
         method: 'cash', // rule 1 — an Express sale is always cash
         collectedBy: agent.userId,
         at: now,
+      }),
+      ...allocationRows(db, {
+        organizationId: org,
+        paymentId: voidRefundId,
+        allocations:
+          lineRows.length === 1
+            ? [{ folioLineId: lineRows[0].id, amount: folio.amountPaid }]
+            : [],
+        sign: -1,
+        createdAt: now,
       }),
     )
   }
@@ -3338,7 +3782,8 @@ export const listAgentFolios = async (c: PosContext) => {
     eq(folios.agentId, agent.userId), // caller-scoped — never from the request
   ]
   if (statusQ === 'paid' || statusQ === 'booking' || statusQ === 'cancelled') {
-    filters.push(eq(folios.status, statusQ))
+    // D15 (line-autonomy) — any-line facet semantics, mirroring the admin list.
+    filters.push(anyLineStatusSql(statusQ))
   }
   if (dateQ) {
     filters.push(
@@ -3354,7 +3799,7 @@ export const listAgentFolios = async (c: PosContext) => {
       id: folios.id,
       customerName: folios.customerName,
       customerPhone: folios.customerPhone,
-      status: folios.status,
+      status: deriveStatusSql, // D11 — derived from the lines; equals the column by construction
       total: folios.total,
       amountPaid: folios.amountPaid,
       createdAt: folios.createdAt,

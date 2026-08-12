@@ -16,13 +16,24 @@ export interface SettleSheetProps {
   open: boolean
   onClose: () => void
   folioId: string
-  /** total − amount_paid: the amount this settle collects. */
+  /** The amount this settle collects: the folio's balance — or one line's (US-AG54). */
   balance: number
   /** The deposit's method, used to pre-select the picker (never 'Mixto' for a live booking). */
   defaultMethod: PaymentMethod
+  /** US-AG54 — set, the settle targets ONE line: its balance, its QR, its commission. */
+  lineId?: string
+  lineName?: string
 }
 
-export function SettleSheet({ open, onClose, folioId, balance, defaultMethod }: SettleSheetProps) {
+export function SettleSheet({
+  open,
+  onClose,
+  folioId,
+  balance,
+  defaultMethod,
+  lineId,
+  lineName,
+}: SettleSheetProps) {
   const settle = useSettleBooking()
   const [method, setMethod] = useState<PaymentMethod>(defaultMethod)
   const [reference, setReference] = useState('')
@@ -42,6 +53,7 @@ export function SettleSheet({ open, onClose, folioId, balance, defaultMethod }: 
     settle.mutate(
       {
         id: folioId,
+        lineId,
         payload: {
           method,
           // An empty optional reference is omitted, not sent as ''.
@@ -58,7 +70,7 @@ export function SettleSheet({ open, onClose, folioId, balance, defaultMethod }: 
     <FormSheet
       open={open}
       onClose={onClose}
-      title="Liquidar saldo"
+      title={lineName ? `Liquidar ${lineName}` : 'Liquidar saldo'}
       submitLabel="Cobrar y liquidar"
       onSubmit={onSubmit}
       busy={settle.isPending}

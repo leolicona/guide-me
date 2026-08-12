@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm'
-import { sqliteTable, text, integer } from 'drizzle-orm/sqlite-core'
+import { index, sqliteTable, text, integer } from 'drizzle-orm/sqlite-core'
 
 export const organizations = sqliteTable('organizations', {
   id: text('id').primaryKey(),
@@ -399,8 +399,10 @@ export const folios = sqliteTable('folios', {
   cancelledAt: integer('cancelled_at', { mode: 'timestamp' }), // set on total cancellation (US-A21)
   cancelledBy: text('cancelled_by').references(() => users.id), // admin who cancelled
   cancellationReason: text('cancellation_reason'), // optional admin note
-  // On cancellation (US-A26): true → agent loses the commission (clawback); false → the
-  // company absorbs it and the agent keeps the commission. Only meaningful when cancelled.
+  // On cancellation: true → the agent lost commission (clawback); false → the company absorbed
+  // it and the agent keeps the commission. DERIVED by the Cancellation Policy Engine
+  // (`reversedCommission > 0`) — never chosen by anyone (US-A26 is superseded, D10). Read by the
+  // commission report and the cash engine. Only meaningful when cancelled.
   cancellationClawback: integer('cancellation_clawback', { mode: 'boolean' })
     .notNull()
     .default(false),
@@ -483,6 +485,25 @@ export const folioLines = sqliteTable('folio_lines', {
   commissionValue: integer('commission_value').notNull().default(0),
   qrToken: text('qr_token'), // signed access ticket; null for folios sold pre-feature
   redeemedCount: integer('redeemed_count').notNull().default(0), // passes redeemed; <= quantity
+  // US-A22 (docs/folios/line-autonomy.spec.md, D1's written half + D6) — the line's OWN
+  // cancellation and refund debt. Cancellation is WRITTEN (an action); pagada/apartada stay
+  // derived from allocations. A pre-feature total cancellation stamped these verbatim from the
+  // folio's snapshots (migration 0063); the refund split is reconstruction, pro-rata to the
+  // line's positive allocations.
+  cancelledAt: integer('cancelled_at', { mode: 'timestamp' }),
+  cancelledBy: text('cancelled_by').references(() => users.id),
+  cancellationSource: text('cancellation_source', {
+    enum: ['admin', 'agent', 'tourist_request', 'company', 'system_expiry'],
+  }),
+  refundStatus: text('refund_status', { enum: ['none', 'pending', 'refunded'] })
+    .notNull()
+    .default('none'),
+  refundAmount: integer('refund_amount'),
+  // US-AG54 (line-autonomy D5) — the line's OWN hold clock, computed against ITS departure at
+  // booking birth. The folio's booking_expires_at survives as MIN(live line clocks) while the
+  // column lives, so every existing reader stays truthful. Null for a paid line, a stay-only
+  // legacy row, or a pre-feature apartada that kept the folio's promised clock (migration 0064).
+  bookingExpiresAt: integer('booking_expires_at', { mode: 'timestamp' }),
   // Accommodation stay line (docs/lodging/accommodation-stays.spec.md §4.4, Option A). lineType
   // 'slot' (tour, default) vs 'stay' (lodging). A stay line carries the unit type + date range +
   // guests + nights instead of a slot; its price is snapshotted in line_total (base_price =
@@ -962,12 +983,49 @@ export const folioPayments = sqliteTable('folio_payments', {
     .references(() => users.id),
   // The PIN shift that took it (US-A68); null for an in-house (agent/admin) collection.
   operatorId: text('operator_id').references((): any => affiliateOperators.id),
+  // US-A22 (line-autonomy D9) — which line an accrual or single-line reversal belongs to. NULL =
+  // folio-scoped (every pre-feature row, and multi-line reversals whose split lives in the
+  // allocations instead). SET NULL: a ledger row outlives its line, losing only the label.
+  folioLineId: text('folio_line_id').references((): any => folioLines.id, { onDelete: 'set null' }),
   verifiedAt: integer('verified_at', { mode: 'timestamp' }),
   verifiedBy: text('verified_by').references(() => users.id),
   createdAt: integer('created_at', { mode: 'timestamp' })
     .notNull()
     .default(sql`(unixepoch())`),
 })
+
+// US-LG09 (docs/folios/line-autonomy.spec.md, D1) — the money's per-line owner: one SIGNED row per
+// (payment, line), signed like its parent ledger row; Σ of a payment's allocations = the payment's
+// amount, written in the SAME batch (rule 1, `assertAllocations`). A line's money state
+// (pagada/apartada) is DERIVED from these rows — never stored. Nothing reads the table in F1 (the
+// verified-shadow step); `backfilled` marks migration-0062 reconstructions and is forensic
+// metadata only — no logic may branch on it.
+export const folioPaymentAllocations = sqliteTable(
+  'folio_payment_allocations',
+  {
+    id: text('id').primaryKey(),
+    organizationId: text('organization_id')
+      .notNull()
+      .references(() => organizations.id),
+    // ON DELETE CASCADE — nothing in production deletes a ledger row or a line (append-only
+    // domain); the cascade keeps a child allocation from orphan-blocking cleanup deletes.
+    paymentId: text('payment_id')
+      .notNull()
+      .references(() => folioPayments.id, { onDelete: 'cascade' }),
+    folioLineId: text('folio_line_id')
+      .notNull()
+      .references(() => folioLines.id, { onDelete: 'cascade' }),
+    amount: integer('amount').notNull(), // signed minor units, never 0
+    backfilled: integer('backfilled', { mode: 'boolean' }).notNull().default(false),
+    createdAt: integer('created_at', { mode: 'timestamp' })
+      .notNull()
+      .default(sql`(unixepoch())`),
+  },
+  (table) => [
+    index('folio_payment_allocations_line_idx').on(table.organizationId, table.folioLineId),
+    index('folio_payment_allocations_payment_idx').on(table.paymentId),
+  ],
+)
 
 // US-A24 / US-AG53 (docs/folios/folio-timeline.spec.md) — the folio's append-only narrative. One
 // row per USER ACTION (D9), written in the SAME batch as its mutation (D3, the BUG-013 lesson).
@@ -1000,6 +1058,10 @@ export const folioEvents = sqliteTable('folio_events', {
   actorId: text('actor_id').references(() => users.id),
   // The PIN shift that acted (US-A68); null for an in-house (agent/admin) action.
   operatorId: text('operator_id').references((): any => affiliateOperators.id),
+  // US-A22 (line-autonomy D13) — the line this event is about. NULL = folio-scoped (created,
+  // tickets_sent…); set for line-scoped actions (a line's cancellation, payment, reschedule).
+  // SET NULL: the narrative outlives its line.
+  folioLineId: text('folio_line_id').references(() => folioLines.id, { onDelete: 'set null' }),
   payload: text('payload'), // JSON, shape per event_type (spec § Data Model)
   backfilled: integer('backfilled', { mode: 'boolean' }).notNull().default(false),
   // The event's OWN moment — the mutation's clock, never the insert's (business rule 3).
@@ -1025,6 +1087,13 @@ export const notifications = sqliteTable('notifications', {
   folioId: text('folio_id')
     .notNull()
     .references(() => folios.id),
+  // US-A22 (line-autonomy D13) — the line this message is about; NULL = folio-scoped. Part of the
+  // re-send guard: unique on (folio, COALESCE(line,''), event, channel), an EXPRESSION index
+  // (0063) because SQLite treats NULLs as distinct — and without the line in the key, a second
+  // line's cancellation would collide with the first's guard and never be told to the customer.
+  // CASCADE (not SET NULL): nulling two line-scoped rows of one (folio, event, channel) would
+  // collide inside that COALESCE guard — and a guard row without its line guards nothing.
+  folioLineId: text('folio_line_id').references(() => folioLines.id, { onDelete: 'cascade' }),
   // The whitelist in `utils/notifications.ts`; never free text.
   event: text('event').notNull(),
   channel: text('channel', { enum: ['email', 'whatsapp'] }).notNull(),
@@ -1047,6 +1116,8 @@ export const notifications = sqliteTable('notifications', {
 export type Notification = typeof notifications.$inferSelect
 export type NewNotification = typeof notifications.$inferInsert
 
+export type FolioPaymentAllocation = typeof folioPaymentAllocations.$inferSelect
+export type NewFolioPaymentAllocation = typeof folioPaymentAllocations.$inferInsert
 export type FolioPayment = typeof folioPayments.$inferSelect
 export type NewFolioPayment = typeof folioPayments.$inferInsert
 

@@ -78,6 +78,13 @@ export const scanTicket = async (c: TicketsContext) => {
       slotDate: folioLines.slotDate,
       slotStartTime: folioLines.slotStartTime,
       zoneName: folioLines.zoneName,
+      // US-A22 — the line's own cancellation, gated below ahead of F4's full line migration.
+      lineCancelledAt: folioLines.cancelledAt,
+      lineTotal: folioLines.lineTotal,
+      // US-A89 (F4, PR-7) — the line's own money: NULL = no allocations at all (a legacy row;
+      // production was backfilled by 0062), else its net allocated sum. Raw outer-column
+      // correlation — the displayMethodSql trick.
+      lineAllocated: sql<number | null>`(select sum(a.amount) from folio_payment_allocations a where a.folio_line_id = folio_lines.id)`,
       folioStatus: folios.status,
     })
     .from(folioLines)
@@ -110,7 +117,22 @@ export const scanTicket = async (c: TicketsContext) => {
   if (row.folioStatus === 'cancelled') {
     return invalid(c, 'CANCELLED', ctx)
   }
-  if (row.folioStatus !== 'paid') {
+  // US-A22 (line-autonomy F2) — the LINE's own cancellation refuses identically: a half-cancelled
+  // folio stays `paid`, and without this the cancelled line's genuine, unexpired token would
+  // still admit a passenger whose seat already went back to the pool.
+  if (row.lineCancelledAt) {
+    return invalid(c, 'CANCELLED', ctx)
+  }
+  // US-A89 (F4, PR-7 — S-13) — the paid gate answers from the LINE's money: a line settled per
+  // line admits even while its siblings keep the folio a `booking`, and an unpaid line refuses
+  // whatever the folio's roll-up says. A line with no allocations at all (legacy fixture; never
+  // a production row) keeps the folio-status answer — the same fallback deriveStatusSql uses,
+  // and it dies with the column (TECH_DEBT #25).
+  const linePaid =
+    row.lineAllocated === null
+      ? row.folioStatus === 'paid'
+      : Math.max(0, Number(row.lineAllocated)) >= row.lineTotal
+  if (!linePaid) {
     return invalid(c, 'NOT_PAID', ctx)
   }
 

@@ -202,6 +202,16 @@ export interface FolioLine {
   /** Signed access ticket; null for folios sold before the QR feature. */
   qr_token: string | null
   qr: FolioTicket | null
+  /** US-A22/US-AG54 (line-autonomy) — the line's OWN life, server-derived: money state from its
+   * allocations, cancellation from its written stamp, and its own hold clock. Render, never derive. */
+  money_state?: FolioStatus
+  allocated?: number
+  pending_balance?: number
+  cancelled_at?: number | null
+  cancellation_source?: string | null
+  refund_status?: 'none' | 'pending' | 'refunded'
+  refund_amount?: number | null
+  booking_expires_at?: number | null
   extras: FolioLineExtra[]
 }
 
@@ -277,6 +287,9 @@ export interface FolioListLine {
   quantity: number
   redeemed_count?: number
   fulfillment?: Fulfillment
+  /** US-A89 (D14) — the line's own money state for the card's per-line marks; absent on a
+   * legacy line with no allocations (the card simply shows no mark). */
+  money_state?: 'paid' | 'booking' | 'cancelled'
 }
 
 // US-AG20 / US-AG07.3 — lean row for the agent's own folio history & the Apartados dashboard.

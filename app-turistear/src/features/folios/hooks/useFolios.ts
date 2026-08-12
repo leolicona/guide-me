@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   approveCancellationRequest,
   cancelFolio,
+  cancelFolioLine,
   confirmRefund,
   getFolio,
   getFolioCounts,
@@ -10,7 +11,6 @@ import {
   rejectCancellationRequest,
 } from '../../../services/foliosService'
 import type {
-  ApproveCancellationRequestInput,
   CancellationRequestStatus,
   ConfirmRefundInput,
   FolioFilters,
@@ -63,6 +63,16 @@ export const useCancelFolio = () => {
   })
 }
 
+// US-A22 (line-autonomy F2) — cancel ONE line; same refresh, same ladder-decides contract.
+export const useCancelFolioLine = () => {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, lineId, reason }: { id: string; lineId: string; reason?: string }) =>
+      cancelFolioLine(id, lineId, { reason }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: FOLIOS_KEY }),
+  })
+}
+
 // --- Tourist cancellation requests + refund tracking (US-T04/T05, US-A23) ---
 
 const REQUESTS_KEY = [...FOLIOS_KEY, 'requests'] as const
@@ -84,13 +94,7 @@ export const useCancellationRequests = (
 export const useApproveCancellationRequest = () => {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: ({
-      id,
-      input,
-    }: {
-      id: string
-      input?: ApproveCancellationRequestInput
-    }) => approveCancellationRequest(id, input),
+    mutationFn: (id: string) => approveCancellationRequest(id),
     onSuccess: () => qc.invalidateQueries({ queryKey: FOLIOS_KEY }),
   })
 }

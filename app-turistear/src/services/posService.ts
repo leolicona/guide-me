@@ -154,6 +154,16 @@ export interface PosCancellationQuote {
   retention: number
   kept_commission: number
   reversed_commission: number
+  /** US-AG54 — per-line ladder readings incl. the single-line SUBSET refund, server-computed. */
+  lines?: Array<{
+    line_id: string
+    hours_out: number | null
+    refund_pct: number
+    retention: number
+    redeemed: boolean
+    line_refund?: number | null
+    line_reversed_commission?: number | null
+  }>
 }
 
 // US-AG08 / AG21 — read back one of the caller agent's own folios (receipt + history detail).

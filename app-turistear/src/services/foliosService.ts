@@ -1,6 +1,5 @@
 import { request } from './authService'
 import type {
-  ApproveCancellationRequestInput,
   CancellationRequest,
   CancellationRequestStatus,
   ConfirmRefundInput,
@@ -118,6 +117,25 @@ export const cancelFolio = async (
   return { folio: res.folio, cancellation: res.cancellation ?? null }
 }
 
+// US-A22 (line-autonomy F2) — cancel ONE line; its siblings come out untouched. Same contract as
+// the total cancel: reason only, money always derived by the org's ladder.
+export const cancelFolioLine = async (
+  id: string,
+  lineId: string,
+  options: CancelFolioOptions = {},
+): Promise<{ folio: FolioDetail; cancellation: CancellationOutcome | null }> => {
+  const body: Record<string, unknown> = {}
+  if (options.reason) body.reason = options.reason
+  const res = await request<{
+    folio: FolioDetail
+    cancellation?: CancellationOutcome | null
+  }>(`/api/folios/${id}/lines/${lineId}/cancel`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  })
+  return { folio: res.folio, cancellation: res.cancellation ?? null }
+}
+
 // --- Tourist cancellation requests + refund tracking (US-T04/T05, US-A23) ---
 // Spec: docs/tourist-portal/tourist-self-service-portal.spec.md
 
@@ -132,14 +150,14 @@ export const listCancellationRequests = async (
 }
 
 // US-T04 → US-A21 — approve: cancels the folio (seats released, client emailed) and, when
-// it was paid, opens the refund obligation + issues the tourist's portal PIN.
+// it was paid, opens the refund obligation + issues the tourist's portal PIN. No body — the
+// refund and the commission clawback are priced by the org's cancellation ladder (D10).
 export const approveCancellationRequest = async (
   requestId: string,
-  input: ApproveCancellationRequestInput = {},
 ): Promise<{ request: CancellationRequest; folio: FolioDetail }> =>
   request<{ request: CancellationRequest; folio: FolioDetail }>(
     `/api/folios/requests/${requestId}/approve`,
-    { method: 'POST', body: JSON.stringify(input) },
+    { method: 'POST' },
   )
 
 // US-T04 — reject with a required note (the tourist reads it in their portal). Folio untouched.

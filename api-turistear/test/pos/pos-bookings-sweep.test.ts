@@ -60,10 +60,17 @@ const createBooking = async (email: string, slotId: string): Promise<string> => 
 }
 // Push the folio past its STAGE-① boundary: the settle deadline has passed, so the sweep should
 // notify and let it into the grace window — not cancel it.
-const expire = (folioId: string) =>
-  env.DB.prepare(`UPDATE folios SET booking_expires_at = ? WHERE id = ?`)
-    .bind(Math.floor(Date.now() / 1000) - 60, folioId)
+// Simulates elapsed time, which since line-autonomy F3 (D5) lives in TWO clocks: the folio's
+// (MIN roll-up, what makes the sweep look) and each line's own (what the sweep now cancels by).
+const expire = async (folioId: string) => {
+  const past = Math.floor(Date.now() / 1000) - 60
+  await env.DB.prepare(`UPDATE folios SET booking_expires_at = ? WHERE id = ?`)
+    .bind(past, folioId)
     .run()
+  await env.DB.prepare(`UPDATE folio_lines SET booking_expires_at = ? WHERE folio_id = ?`)
+    .bind(past, folioId)
+    .run()
+}
 
 // Push the folio past its GRACE instant, which is what actually cancels. The sweep reads each
 // LINE's snapshotted departure (a folio prices by the departure it was sold for, even if the slot

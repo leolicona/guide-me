@@ -4,6 +4,7 @@ export {
   // US-A84 (D7) — the five list-fetching count hooks collapsed into this one aggregate.
   useFolioCounts,
   useCancelFolio,
+  useCancelFolioLine,
   useCancellationRequests,
   useApproveCancellationRequest,
   useRejectCancellationRequest,

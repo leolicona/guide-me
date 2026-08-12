@@ -1,12 +1,14 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   cancelBooking,
+  cancelBookingLine,
   claimReminder,
   markTicketsSent,
   markTicketsSentAdmin,
   rejectPayment,
   rescheduleFolio,
   settleBooking,
+  settleFolioLine,
   verifyPayment,
   type SettlePayload,
 } from '../../../services/bookingsService'
@@ -28,7 +30,9 @@ function useInvalidateBookings() {
 export function useSettleBooking() {
   const invalidate = useInvalidateBookings()
   return useMutation({
-    mutationFn: (v: { id: string; payload?: SettlePayload }) => settleBooking(v.id, v.payload),
+    // US-AG54 — with a lineId the settle targets ONE line; without it, the whole folio.
+    mutationFn: (v: { id: string; lineId?: string; payload?: SettlePayload }) =>
+      v.lineId ? settleFolioLine(v.id, v.lineId, v.payload) : settleBooking(v.id, v.payload),
     onSuccess: invalidate,
   })
 }
@@ -37,7 +41,9 @@ export function useSettleBooking() {
 export function useCancelBooking() {
   const invalidate = useInvalidateBookings()
   return useMutation({
-    mutationFn: (v: { id: string; reason?: string }) => cancelBooking(v.id, v.reason),
+    // US-AG54 — with a lineId only that apartada line is cancelled; the ladder still decides.
+    mutationFn: (v: { id: string; lineId?: string; reason?: string }) =>
+      v.lineId ? cancelBookingLine(v.id, v.lineId, v.reason) : cancelBooking(v.id, v.reason),
     onSuccess: invalidate,
   })
 }

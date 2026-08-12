@@ -195,7 +195,7 @@ describe('mutations refresh the folio surface', () => {
     )
     await waitFor(() => expect(result.current.queue.data).toHaveLength(1))
 
-    result.current.approve.mutate({ id: 'req-1' })
+    result.current.approve.mutate('req-1')
 
     // The requests key is nested under ['folios'], so invalidating the parent clears both.
     await waitFor(() => expect(result.current.queue.data).toHaveLength(0))

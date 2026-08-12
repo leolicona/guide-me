@@ -1,7 +1,7 @@
 import type { Context } from 'hono'
 import { and, desc, eq, isNull } from 'drizzle-orm'
 import { renderSVG } from 'uqr'
-import { TicketCard } from '../ticket/card'
+import { TicketCard, formatSlotDate } from '../ticket/card'
 import { getDb, type Db } from '../../db/client'
 import {
   folioRequests,
@@ -117,6 +117,11 @@ interface PortalLine {
   // The service's CURRENT description (meeting point / instructions) — live, not a sale
   // snapshot, so an updated meeting point reaches the tourist (Rule 3 / open question 1).
   description: string | null
+  // US-A22 (line-autonomy F2) — the line's own life: a cancelled line on a still-active folio
+  // loses its QR here and states its refund outcome, exactly like a cancelled folio would.
+  cancelledAt: Date | null
+  refundStatus: 'none' | 'pending' | 'refunded'
+  refundAmount: number | null
 }
 
 interface PortalData {
@@ -137,8 +142,59 @@ interface PortalData {
   request: { status: 'pending' | 'approved' | 'rejected'; resolutionNote: string | null } | null
 }
 
+// US-A22 (line-autonomy F2) — the refund block, shared by both shapes of cancellation: the whole
+// folio, or some of its lines while the rest live on. The PIN is ONE per folio (D6 — it proves
+// the person, not the amount); the per-line outcomes spell out where every peso went, because
+// "pagué X y me devuelven Y" is answered nowhere else the tourist can reach.
+const RefundBlock = ({ folio, lines }: { folio: PortalData['folio']; lines: PortalLine[] }) => {
+  const owed = lines.filter((l) => l.refundStatus === 'pending' && (l.refundAmount ?? 0) > 0)
+  if (folio.refundStatus === 'pending' && folio.refundPin) {
+    return (
+      <div class="portal-pin">
+        <h3>Tu PIN de reembolso</h3>
+        <p class="portal-pin-code">{folio.refundPin}</p>
+        {owed.length > 0 && (
+          <ul class="portal-muted">
+            {owed.map((l) => (
+              <li>
+                {l.serviceName} ({formatSlotDate(l.slotDate)}):{' '}
+                {formatAmount(l.refundAmount ?? 0)}
+              </li>
+            ))}
+          </ul>
+        )}
+        <p>
+          Da este código al agente o administrador para recibir tu reembolso
+          {folio.refundAmount != null ? ` de ${formatAmount(folio.refundAmount)}` : ''} en
+          efectivo. Es tu comprobante de que recibiste el dinero — no lo compartas antes.
+        </p>
+      </div>
+    )
+  }
+  if (folio.refundStatus === 'refunded') {
+    return <p class="portal-refunded">✓ Reembolso confirmado. ¡Gracias!</p>
+  }
+  return null
+}
+
 const CancellationBlock = ({ data }: { data: PortalData }) => {
   const { folio, request, token } = data
+
+  // US-A22 — some lines cancelled, the folio still alive: state it, with the refund block when
+  // money is owed. The request form below stays reachable for the surviving activities.
+  const cancelledLines = data.lines.filter((l) => l.cancelledAt !== null)
+  const partialBlock =
+    folio.status !== 'cancelled' && cancelledLines.length > 0 ? (
+      <section class="portal-card portal-cancelled">
+        <h2>
+          {cancelledLines.length === 1
+            ? 'Una actividad fue cancelada'
+            : 'Algunas actividades fueron canceladas'}
+        </h2>
+        <p>El resto de tu reserva sigue activa; sus códigos siguen siendo válidos.</p>
+        <RefundBlock folio={folio} lines={data.lines} />
+      </section>
+    ) : null
 
   if (folio.status === 'cancelled') {
     return (
@@ -148,41 +204,30 @@ const CancellationBlock = ({ data }: { data: PortalData }) => {
           Esta reserva fue cancelada. Los códigos de acceso ya no son válidos para
           ingresar.
         </p>
-        {folio.refundStatus === 'pending' && folio.refundPin && (
-          <div class="portal-pin">
-            <h3>Tu PIN de reembolso</h3>
-            <p class="portal-pin-code">{folio.refundPin}</p>
-            <p>
-              Da este código al agente o administrador para recibir tu reembolso
-              {folio.refundAmount != null
-                ? ` de ${formatAmount(folio.refundAmount)}`
-                : ''}{' '}
-              en efectivo. Es tu comprobante de que recibiste el dinero — no lo
-              compartas antes.
-            </p>
-          </div>
-        )}
-        {folio.refundStatus === 'refunded' && (
-          <p class="portal-refunded">✓ Reembolso confirmado. ¡Gracias!</p>
-        )}
+        <RefundBlock folio={folio} lines={data.lines} />
       </section>
     )
   }
 
   if (request?.status === 'pending') {
     return (
-      <section class="portal-card">
-        <h2>Solicitud de cancelación en revisión</h2>
-        <p>
-          La agencia está revisando tu solicitud. Te notificará el resultado; tu
-          reserva sigue activa mientras tanto.
-        </p>
-      </section>
+      <>
+        {partialBlock}
+        <section class="portal-card">
+          <h2>Solicitud de cancelación en revisión</h2>
+          <p>
+            La agencia está revisando tu solicitud. Te notificará el resultado; tu
+            reserva sigue activa mientras tanto.
+          </p>
+        </section>
+      </>
     )
   }
 
   return (
-    <section class="portal-card">
+    <>
+      {partialBlock}
+      <section class="portal-card">
       {request?.status === 'rejected' && (
         <p class="portal-rejected">
           Tu solicitud anterior fue rechazada
@@ -207,7 +252,8 @@ const CancellationBlock = ({ data }: { data: PortalData }) => {
           </p>
         </form>
       </details>
-    </section>
+      </section>
+    </>
   )
 }
 
@@ -233,9 +279,10 @@ const PortalPage = ({ data }: { data: PortalData }) => {
             URL, so a plain camera resolves to the ticket page while the scanner still redeems. */}
         {data.lines.map((line) => (
           <TicketCard
-            line={line}
+            line={{ ...line, cancelled: line.cancelledAt !== null }}
             qrMarkup={
-              !cancelled && line.qrToken
+              // US-A22 — a cancelled LINE loses its QR even while its siblings' remain valid.
+              !cancelled && !line.cancelledAt && line.qrToken
                 ? qrSvg(`${data.apiBaseUrl}/t/${line.qrToken}`)
                 : null
             }
@@ -299,6 +346,10 @@ const loadPortalData = async (
       qrToken: folioLines.qrToken,
       zoneName: folioLines.zoneName,
       description: services.description,
+      // US-A22 — the line's own cancellation + refund outcome.
+      cancelledAt: folioLines.cancelledAt,
+      refundStatus: folioLines.refundStatus,
+      refundAmount: folioLines.refundAmount,
     })
     .from(folioLines)
     .innerJoin(services, eq(folioLines.serviceId, services.id))
