@@ -3426,7 +3426,9 @@ export const cancelBooking = async (c: PosContext) => {
 // commission ledger rows IN FULL, releases the seats, records the refund as already handed back
 // across the counter (no Refund PIN, D15), and NEVER consults the cancellation ladder — for a
 // same-day departure the terminal tier would keep 100% of a sale that never happened (D14).
-// Strictly the selling seller's own Express sale, inside the window, undelivered, unscanned.
+// Strictly the selling seller's own Express sale, inside the window, unopened, unscanned — since
+// the WhatsApp-first amendment (D26–D28) every successful sale is Enviado at birth, so a launched
+// send alone no longer blocks; the guard trusts tickets_viewed_at, set by the tourist's own device.
 const VOID_WINDOW_SECONDS = 60
 
 export const voidExpressSale = async (c: PosContext) => {
@@ -3444,7 +3446,6 @@ export const voidExpressSale = async (c: PosContext) => {
       saleMode: folios.saleMode,
       amountPaid: folios.amountPaid,
       commissionAmount: folios.commissionAmount,
-      ticketsSentAt: folios.ticketsSentAt,
       ticketsViewedAt: folios.ticketsViewedAt,
       settledAt: folios.settledAt,
       // ONE clock — the DB's. The Workers runtime freezes Date.now() per request (and the test
@@ -3470,8 +3471,11 @@ export const voidExpressSale = async (c: PosContext) => {
   if (Number(folio.elapsedSeconds) > VOID_WINDOW_SECONDS) {
     throw closed('La ventana de anulación (60 s) ya cerró')
   }
-  // Delivered = the ticket left the counter; the void's premise (nothing happened) is gone.
-  if (folio.ticketsSentAt || folio.ticketsViewedAt) {
+  // Delivered = the customer OPENED the ticket (beacon or scan, which stamps both — D13); only
+  // then is the void's premise (nothing happened) gone. tickets_sent_at deliberately does NOT
+  // block (D28): under WhatsApp-first it is stamped on every successful Cobrar, and the old guard
+  // would close the 60-second window the moment it opens.
+  if (folio.ticketsViewedAt) {
     throw closed('Los boletos ya fueron entregados')
   }
 

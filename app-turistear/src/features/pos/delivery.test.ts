@@ -82,8 +82,17 @@ describe('fillTemplate', () => {
     expect(filled).not.toContain('1,000')
   })
 
-  it('renders an empty customer name as blank, never as "null"', () => {
-    expect(fillTemplate('[{customer_name}]', ctx({ customer_name: null }))).toBe('[]')
+  it('degrades a null customer name to the fallback addressee, never "null" or a blank (D29)', () => {
+    // An Express folio has no name (D17); under WhatsApp-first the template renders on EVERY
+    // sale, so the empty-string substitution that produced "Hola ," is retired.
+    expect(fillTemplate('[{customer_name}]', ctx({ customer_name: null }))).toBe('[viajero]')
+    expect(
+      fillTemplate('Hola {customer_name}, te escribe {agent_name}.', ctx({ customer_name: null })),
+    ).toBe('Hola viajero, te escribe Luis.')
+  })
+
+  it('an empty-string name degrades exactly like a null one', () => {
+    expect(fillTemplate('[{customer_name}]', ctx({ customer_name: '' }))).toBe('[viajero]')
   })
 
   it('leaves an unknown {token} untouched rather than blanking it', () => {
