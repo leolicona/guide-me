@@ -3,6 +3,7 @@ import { Box, Collapse, Divider, IconButton, Stack, Typography } from '@mui/mate
 import ExpandMoreRounded from '@mui/icons-material/ExpandMoreRounded'
 import PersonOffRounded from '@mui/icons-material/PersonOffRounded'
 import CheckCircleRounded from '@mui/icons-material/CheckCircleRounded'
+import RemoveCircleOutlineRounded from '@mui/icons-material/RemoveCircleOutlineRounded'
 import { SectionCard, StatusChip } from '../../../components'
 import type { DashboardDepartedRow } from '../../../services/dashboardService'
 
@@ -33,7 +34,11 @@ export function DepartedCard({ rows }: { rows: DashboardDepartedRow[] }) {
       <Box sx={{ px: 3, pb: open ? 0 : 2 }}>
         <Typography variant="body2" color="text.secondary" className="numeric">
           {rows.length === 1 ? '1 salida' : `${rows.length} salidas`}
-          {sinUsar > 0 ? ` · ${sinUsar} asientos sin usar` : ' · todos abordaron'}
+          {sinUsar === 0
+            ? ' · todos abordaron'
+            : sinUsar === 1
+              ? ' · 1 asiento sin usar'
+              : ` · ${sinUsar} asientos sin usar`}
         </Typography>
       </Box>
       <Collapse in={open}>
@@ -61,6 +66,14 @@ export function DepartedCard({ rows }: { rows: DashboardDepartedRow[] }) {
                   tone="warning"
                   icon={<PersonOffRounded />}
                   label={`${r.sin_usar} sin usar`}
+                  size="small"
+                />
+              ) : r.vendidos === 0 ? (
+                // A departed slot with nothing sold (e.g. fully cancelled) must not read "Completo".
+                <StatusChip
+                  tone="neutral"
+                  icon={<RemoveCircleOutlineRounded />}
+                  label="Sin ventas"
                   size="small"
                 />
               ) : (
