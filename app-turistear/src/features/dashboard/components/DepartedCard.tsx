@@ -43,24 +43,31 @@ export function DepartedCard({ rows }: { rows: DashboardDepartedRow[] }) {
       </Box>
       <Collapse in={open}>
         <Stack divider={<Divider />} sx={{ px: 3, py: 1 }}>
+          {/* Same two-line shape as the occupancy rows: full-width name, then data + chip. */}
           {rows.map((r) => (
-            <Stack
-              key={r.slot_id}
-              direction="row"
-              spacing={2}
-              sx={{ alignItems: 'center', py: 1.5 }}
-            >
-              <Typography className="numeric" sx={{ fontWeight: 700, width: 52, flexShrink: 0 }}>
-                {r.start_time}
-              </Typography>
-              <Box sx={{ minWidth: 0, flex: 1 }}>
-                <Typography sx={{ fontWeight: 600 }} noWrap>
+            <Stack key={r.slot_id} spacing={0.75} sx={{ py: 1.5 }}>
+              <Stack direction="row" spacing={2} sx={{ alignItems: 'baseline' }}>
+                <Typography className="numeric" sx={{ fontWeight: 700, width: 52, flexShrink: 0 }}>
+                  {r.start_time}
+                </Typography>
+                <Typography sx={{ fontWeight: 600, minWidth: 0 }} noWrap>
                   {r.service_name}
                 </Typography>
-                <Typography variant="body2" color="text.secondary" className="numeric">
+              </Stack>
+              <Stack
+                direction="row"
+                spacing={1}
+                sx={{ alignItems: 'center', pl: '68px' /* 52px time column + 16px gap */ }}
+              >
+                <Typography
+                  variant="body2"
+                  color="text.secondary"
+                  className="numeric"
+                  noWrap
+                  sx={{ flex: 1, minWidth: 0 }}
+                >
                   {r.abordaron}/{r.vendidos} abordaron
                 </Typography>
-              </Box>
               {r.sin_usar > 0 ? (
                 <StatusChip
                   tone="warning"
@@ -84,6 +91,7 @@ export function DepartedCard({ rows }: { rows: DashboardDepartedRow[] }) {
                   size="small"
                 />
               )}
+              </Stack>
             </Stack>
           ))}
         </Stack>

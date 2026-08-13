@@ -29,10 +29,12 @@ export function DaySalesCard({ sales }: { sales: DashboardSales | undefined }) {
                   </Typography>
                 )}
               </Typography>
+              {/* Neutral ink at body size: only the headline figure wears the money green, so the
+                  eye lands there first (de-emphasize to emphasize). Red still marks a negative. */}
               <MoneyText
                 cents={s.collected_cents}
-                signed
-                variant="h6"
+                semantic={s.collected_cents < 0 ? 'negative' : 'neutral'}
+                variant="body1"
                 srLabel={`Cobrado por ${s.name}`}
               />
             </Stack>

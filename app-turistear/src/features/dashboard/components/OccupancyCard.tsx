@@ -24,11 +24,13 @@ function OccupancyChip({ row }: { row: DashboardOccupancyRow }) {
   return <StatusChip tone="success" icon={<CheckCircleRounded />} label="Disponible" size="small" />
 }
 
-const seatsLine = (r: DashboardOccupancyRow): string => {
-  const parts = [`${r.vendidos} vendidos`]
+// "quedan N" is the datum the admin scans for, so it leads the line in ink while the sold/held
+// detail stays secondary (hierarchy: emphasize the data, soften its context).
+const seatsDetail = (r: DashboardOccupancyRow): string => {
+  const parts: string[] = []
+  if (r.vendidos > 0) parts.push(`${r.vendidos} vendidos`)
   if (r.apartados > 0) parts.push(`${r.apartados} apartados`)
-  parts.push(`quedan ${r.remaining}`)
-  return parts.join(' · ')
+  return parts.map((p) => ` · ${p}`).join('')
 }
 
 export function OccupancyCard({
@@ -54,31 +56,41 @@ export function OccupancyCard({
         </Box>
       ) : (
         <Stack divider={<Divider />} sx={{ px: 3, py: 1 }}>
+          {/* Two-line row: the name owns the full width (390px screens truncated it against the
+              chip), and the chip shares the second line with the seat numbers it qualifies. */}
           {rows.map((r) => (
-            <Stack
-              key={r.slot_id}
-              direction="row"
-              spacing={2}
-              sx={{ alignItems: 'center', py: 1.5 }}
-            >
-              <Typography className="numeric" sx={{ fontWeight: 700, width: 52, flexShrink: 0 }}>
-                {r.start_time}
-              </Typography>
-              <Box sx={{ minWidth: 0, flex: 1 }}>
-                <Typography sx={{ fontWeight: 600 }} noWrap>
+            <Stack key={r.slot_id} spacing={0.75} sx={{ py: 1.5 }}>
+              <Stack direction="row" spacing={2} sx={{ alignItems: 'baseline' }}>
+                <Typography className="numeric" sx={{ fontWeight: 700, width: 52, flexShrink: 0 }}>
+                  {r.start_time}
+                </Typography>
+                <Typography sx={{ fontWeight: 600, minWidth: 0 }} noWrap>
                   {r.service_name}
                 </Typography>
-                <Typography variant="body2" color="text.secondary" className="numeric">
-                  {seatsLine(r)}
+              </Stack>
+              <Stack
+                direction="row"
+                spacing={1}
+                sx={{ alignItems: 'center', pl: '68px' /* 52px time column + 16px gap */ }}
+              >
+                <Typography
+                  variant="body2"
+                  color="text.secondary"
+                  className="numeric"
+                  noWrap
+                  sx={{ flex: 1, minWidth: 0 }}
+                >
+                  <Box component="span" sx={{ color: 'text.primary', fontWeight: 600 }}>
+                    quedan {r.remaining}
+                  </Box>
+                  {seatsDetail(r)}
                 </Typography>
-              </Box>
-              <Stack sx={{ alignItems: 'flex-end', flexShrink: 0 }} spacing={0.5}>
-                <OccupancyChip row={r} />
                 {r.booked >= r.capacity && r.flex_extra > 0 && (
-                  <Typography variant="caption" color="warning.main" className="numeric">
+                  <Typography variant="caption" color="warning.main" className="numeric" noWrap>
                     +{r.flex_extra} extra
                   </Typography>
                 )}
+                <OccupancyChip row={r} />
               </Stack>
             </Stack>
           ))}
