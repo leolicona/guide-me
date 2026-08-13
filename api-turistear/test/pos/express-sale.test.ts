@@ -381,6 +381,30 @@ describe('US-AG47 — the 60-second void', () => {
     }
   })
 
+  it('S-26 — Enviado alone no longer forfeits the void (WhatsApp-first, D28)', async () => {
+    const { organizationId } = await seedUser({ email: AGENT_EMAIL, role: 'agent' })
+    const serviceId = await seedService(organizationId, { commissionValue: 1000 })
+    const slotId = await seedSlot(organizationId, serviceId)
+
+    const sale = await expressConfirm(AGENT_EMAIL, slotId)
+    expect(sale.status).toBe(201)
+    // WhatsApp-first stamps the send at Cobrar (D26/D27) — same write the mark endpoint makes.
+    // The customer has NOT opened it: tickets_viewed_at stays null.
+    await env.DB.prepare(
+      `UPDATE folios SET tickets_sent_at = unixepoch() WHERE id = ?`,
+    )
+      .bind(sale.json.folio.id)
+      .run()
+
+    const { status, json } = await voidFolio(AGENT_EMAIL, sale.json.folio.id)
+    expect(status, JSON.stringify(json)).toBe(200)
+    expect(json.status).toBe('cancelled')
+    const row = await getFolioRow(sale.json.folio.id)
+    expect(row.status).toBe('cancelled')
+    expect(row.refund_status).toBe('refunded')
+    expect(row.refund_pin).toBeNull() // D15 still holds under the relaxed guard
+  })
+
   it('S-22 — another org\'s folio cannot be voided (404, never 403)', async () => {
     const { orgA, orgB } = await seedTwoOrgs()
     const serviceId = await seedService(orgA.organizationId)

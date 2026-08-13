@@ -17,6 +17,12 @@ shell and `qrSvg()` reused by the ticket page · *WhatsApp QR Ticket Delivery*
 boards a whole party. Independent of this feature, but the two are why a family of four becomes
 **one** QR, **one** scan.
 
+> **Amended (2026-08): WhatsApp-first delivery (D26–D29).** Field use inverted the delivery
+> primacy this spec shipped with: tourists fumbled the screen-scan and asked for the WhatsApp
+> message anyway, so *Cobrar* now launches the `wa.me` send and the QR overlay demotes to backup.
+> Amends **D14**, **D20** and **rule 7**; narrows US-A80's Express audience; the tourist scan path
+> (US-T07) and both QR encodings are unchanged.
+
 ---
 
 ## Context
@@ -69,6 +75,10 @@ will not scan is not lost: the folio stays `● Pendiente de enviar` and surface
 queue**, where the existing one-tap WhatsApp finishes the job later — and where a future WhatsApp
 Business API integration will finish it automatically.
 
+*(Amendment, 2026-08: the field partially re-inverted this. The scan remains the stronger receipt
+signal, but tourists fumbled it often enough — and asked for the message even after scanning — that
+the wa.me send, accepted per-sale app-switch and all, became the primary path. See D26.)*
+
 ---
 
 ## Scope boundary
@@ -110,18 +120,22 @@ Business API integration will finish it automatically.
 | **D11** | `/t/:token` is **line-scoped and read-only**. It never redeems. Redemption remains exclusively `POST /api/tickets/scan`. | A tourist checking their ticket on the bus must not burn their own seat. Line scope also means least privilege: one QR opens one boarding pass, not the whole folio. Division of labour: **`/t/` = one boarding pass · `/portal/` = the whole reservation**. |
 | **D12** | `/t/:token` derives the org key from the payload's **`organization_id`**, not from a caller. | There is no caller — the route is public. This is a deliberate departure from the scanner's caller-org derivation, which exists to stop org A redeeming org B's ticket. Forgery still requires `QR_SECRET`, so the signature guarantee is unchanged. Recorded because the scanner spec states the opposite rule for its own path. |
 | **D13** | A tourist scan sets **both `tickets_sent_at` and `tickets_viewed_at`**, via the same JS-beacon pattern as the portal. | Handing the QR across the counter *is* the send. Setting only *Visto* would leave the folio reading "viewed but never sent" and sitting in the pending queue prompting a redundant WhatsApp. The beacon (not a raw GET) keeps the signal honest, consistent with whatsapp-qr-delivery D6. |
-| **D14** | A mis-tapped Express sale is undone by a **void**, not a cancellation: `POST /api/pos/folios/:id/void`, **selling seller only**, `sale_mode = 'express'`, **≤ 60 s**, not delivered, `redeemed_count = 0`, not settled. | An agent **cannot** undo their own paid sale today — the agent cancel route is booking-only and `/api/folios/*` is admin-only. An admin cancel would run the ladder, which for a same-day departure is the terminal tier: 0 % refund, 100 % commission retained — the company keeping the money for a sale that never happened. 60 s because the guards, not the clock, are what make it safe; 10 s is shorter than noticing. |
+| **D14** | A mis-tapped Express sale is undone by a **void**, not a cancellation: `POST /api/pos/folios/:id/void`, **selling seller only**, `sale_mode = 'express'`, **≤ 60 s**, not delivered, `redeemed_count = 0`, not settled. *(Amended by **D28**: "not delivered" narrowed to **not viewed / not scanned** — a launched WhatsApp send alone no longer forfeits the void.)* | An agent **cannot** undo their own paid sale today — the agent cancel route is booking-only and `/api/folios/*` is admin-only. An admin cancel would run the ladder, which for a same-day departure is the terminal tier: 0 % refund, 100 % commission retained — the company keeping the money for a sale that never happened. 60 s because the guards, not the clock, are what make it safe; 10 s is shorter than noticing. |
 | **D15** | The void **bypasses the cancellation ladder entirely** and settles the refund immediately: `refund_status = 'refunded'`, `refunded_at/by` set, **`refund_pin` stays null**. | A void asserts the sale never happened; a cancellation prices an unwinding. Minting a PIN for cash already handed back across the counter would open a fake obligation in the admin refund queue that someone must then close. |
 | **D16** | Scope of the void is **Express sales only**. | Smallest surface, and it cannot become a backdoor around the ladder for ordinary sales. The general case is already specified as US-AG44/US-A73 and stays there. |
 | **D17** | **No customer name in Express.** `customer_name` is left null. | It is already **nullable in the DB** — only `confirmSaleSchema` requires it — so this is a validation change with no migration. The name exists to address a WhatsApp template; a customer receiving their ticket in person is not being addressed. Deliberate, documented exception to whatsapp-qr-delivery **D2**. |
 | **D18** | **Phone stays required** and dialable, exactly as D2 requires. | It is the fallback-delivery handle for the pending queue, the folio's contact of record, and the manifest key if manifest boarding is ever built. It is the one field worth typing. |
 | **D19** | Express is **always full payment in cash**. No method toggle, no `down_payment`, no apartado. | "Reservations are not supported" is the product decision; cash-only means the sale enters the seller's caja through the ordinary ledger row with no new money path. |
-| **D20** | After *Cobrar*: **service and departure held**, seats → 1, price → base, phone cleared. Confirmation strip with *Mostrar QR*, *WhatsApp*, *Deshacer (60 s)*, plus a header tally **"Esta sesión · N ventas · $X"**. | The next five customers usually want the same boat; re-selecting it discards the taps this feature just saved. The tally is labelled *sesión*, never *caja* — the authoritative caja figure is computed at `/balance` over the whole shift, and two different numbers under one label is how reconciliation disputes start. |
+| **D20** | After *Cobrar*: **service and departure held**, seats → 1, price → base, phone cleared. Confirmation strip with *Mostrar QR*, *WhatsApp*, *Deshacer (60 s)*, plus a header tally **"Esta sesión · N ventas · $X"**. *(Amended by **D26**: the strip is now the landing surface — Cobrar launches the wa.me send instead of opening the overlay, and the strip carries WhatsApp · Mostrar QR · Deshacer.)* | The next five customers usually want the same boat; re-selecting it discards the taps this feature just saved. The tally is labelled *sesión*, never *caja* — the authoritative caja figure is computed at `/balance` over the whole shift, and two different numbers under one label is how reconciliation disputes start. |
 | **D21** | `POST /api/pos/folios` accepts a client-generated **`idempotency_key`**; a replay returns the existing folio. | At speed, a double-tap or a 3G retry writes a second folio **and** a second `folio_payments` cash row — real duplicated cash debt against the agent, discovered at the cash drop. This is the highest-risk gap in the design and it is not visible in the UI. |
 | **D22** | `folios.sale_mode` (`standard \| express`) is persisted. | Measuring whether the mode is used is the point of shipping it, and a cash-reconciliation dispute will want to know how the sale was taken. One additive column. |
 | **D23** | Pending-delivery surfaces reuse the existing axis: admin `SectionCard` on `/dashboard`; count badge on *Ventas* plus a **"Sin entregar"** filter chip for agent/affiliate. **No new route.** | `tickets_sent_at` / `tickets_viewed_at` and `DeliveryBadge` already exist (US-AG40). `/dashboard` is admin-only and agents land on `/pos`, so the two audiences need two placements — matching how `/balance` and `/folios` already carry role-scoped badges. |
 | **D24** | **No change calculator** in this phase. | Raised and declined. Noted here because cash-only plus a `+10` shortcut means large tenders; if agents are doing that arithmetic on paper, it is a cheap follow-up (see *Deferred*). |
 | **D25** | **The scanner's re-arm tap is untouched.** | `ScannerPage` pauses after each scan so one QR produces exactly one request. With group redemption (sibling spec) cutting a family of four from four scans to one, the remaining tap is no longer the bottleneck, and a working race guard is not worth disturbing in this PR. |
+| **D26** | **WhatsApp-first delivery** *(amendment)*: on success, *Cobrar* **auto-opens `wa.me`** with the org's ticket template and the folio's `portal_link`. The full-bleed QR overlay becomes the **backup**, opened only via *Mostrar QR*. | Field evidence, not theory: tourists fumble the screen-scan (a dense 300+-char URL QR, sunlight, no camera-QR habit) and ask for the WhatsApp message even after scanning — so the per-sale `wa.me` tap was happening anyway, *on top of* a fumbled scan. The app-switch this spec's Context called the loop-breaker is accepted back **deliberately**: one switch per sale, traded against a scan that often failed and a message that was requested regardless. |
+| **D27** | `tickets_sent_at` is stamped **only when `window.open` returns a handle** — a blocked popup, or user activation expired over slow signal, leaves the folio `Pendiente`. | The auto-open is an *attempt*, not a send. Stamping unconditionally would mark sales *Enviado* for which no message left the phone, and no queue would ever surface them. With the conditional stamp the detectable failure lands in the US-A80 queue; the undetectable one (WhatsApp opened, send never pressed) is irreducible without the Business API and is accepted. |
+| **D28** | Rule 7 drops `tickets_sent_at IS NULL` from the void guard: a void is blocked by **`tickets_viewed_at`** or a **redeemed pass**, never by a launched send alone. | Under D26+D27 every successful sale is *Enviado* at birth — the old guard would close the 60-second window the moment it opens, resurrecting the trap US-AG47 was built to remove. `tickets_viewed_at` is the tourist's **own device** attesting receipt (beacon or scan — which stamps both, D13), so the guard's trust moves to the one signal that still means "the ticket reached them". A sent-then-voided link degrades safely: the ticket page already renders the cancelled state with no QR (rule 9). |
+| **D29** | The message carries **`{portal_link}`**, and `fillTemplate` **degrades on a null `customer_name`** — no dangling *"Hola ,"*. | Consistent with every other WhatsApp delivery; the tourist saves one canonical link. The degradation is the debt *Known behaviour change* #2 recorded and nobody built — with the template now rendering on **every** Express sale instead of the occasional queue drain, "Hola ," stops being cosmetic. |
 
 ---
 
@@ -175,10 +189,11 @@ self-verifying — unlike `folio_access_tokens`, it needs no row to prove itself
    idempotency_key)`, the request is a **replay**: return that folio with `200`, perform no
    inventory or ledger write (D21).
 7. The **void** (D14) requires **all** of: caller is the folio's `agent_id`; `sale_mode = 'express'`;
-   `status = 'paid'`; `now − created_at ≤ 60 s`; `tickets_sent_at IS NULL` **and**
-   `tickets_viewed_at IS NULL`; every line has `redeemed_count = 0`. Any failure →
-   `409 VOID_WINDOW_CLOSED` with the reason. The window check is server-side; the countdown in the
-   UI only mirrors it.
+   `status = 'paid'`; `now − created_at ≤ 60 s`; `tickets_viewed_at IS NULL`; every line has
+   `redeemed_count = 0`. Any failure → `409 VOID_WINDOW_CLOSED` with the reason. The window check is
+   server-side; the countdown in the UI only mirrors it. *(Amended by **D28**: `tickets_sent_at`
+   alone no longer blocks — under WhatsApp-first (D26/D27) every successful sale is* Enviado *at
+   birth, so the guard trusts `tickets_viewed_at`, the signal set by the tourist's own device.)*
 8. A void **releases the seats** (`booked = MAX(0, booked − quantity)`), writes a **full** reversal of
    the folio's `payment` and `commission` ledger rows dated **now**, and sets `status = 'cancelled'`,
    `cancellation_source = 'agent'`, `refund_status = 'refunded'`, `refund_amount = amount_paid`,
@@ -270,11 +285,15 @@ the shared `BottomSheet` markup today; not this feature's job to fix, noted in `
 **`ExpressSalePanel`** (new) — fixed header (service · session tally) · seats row (`−`/`+`, `+5`,
 `+10`, clamp message) · today's departures with counts, nearest preselected, none hidden · price
 field clamped `[minimum, base]` · phone field · pinned **Cobrar** footer showing the live total in
-`MoneyText`. On success it swaps the footer for the confirmation strip (D20) and resets.
+`MoneyText`. On success *(as amended, D26/D27)* it **auto-opens `wa.me`** with the filled ticket
+template, stamps *Enviado* only if the window actually opened, and lands on the already-reset form
+with the confirmation strip — **✓ Venta · WhatsApp · Mostrar QR · Deshacer** — as the post-sale
+surface.
 
-**`ExpressTicketOverlay`** (new) — the QR full-bleed at **≥ 280 px**, error level **L**, on pure
-white, with a max-brightness request; auto-hides after ~20 s so it is not left exposed to the queue;
-re-opened by *Mostrar QR*.
+**`ExpressTicketOverlay`** (new) — the **backup** handoff *(as amended, D26)*: the QR full-bleed at
+**≥ 280 px**, error level **L**, on pure white, with a max-brightness request; opened via
+*Mostrar QR* for the customer who prefers to scan — or when the send launch failed; auto-hides
+after ~20 s so it is not left exposed to the queue.
 
 **Ticket page** (Worker SSR) — `<TicketCard>` extracted from `PortalPage`'s line `.map` and shared by
 both pages. The ticket page renders **only** that card plus the beacon: no header total, no
@@ -417,6 +436,36 @@ Given an Express sale whose customer never scanned
 When the admin opens `/dashboard` and the seller opens `/history`
 Then both see it counted as *sin entregar*, and the existing one-tap WhatsApp sends it.
 
+*(As amended: an Express folio now enters this queue only when the send launch failed (D27) — its
+original walk-away audience is mostly served at Cobrar. The queue's definition is unchanged; its
+main clients remain standard sales and verified transfers.)*
+
+### Amendment — WhatsApp-first delivery (D26–D29)
+
+**S-24 — Cobrar launches the send**
+Given a valid express form
+When *Cobrar* succeeds and `window.open` returns a handle
+Then `wa.me` opens with the org's ticket template filled — portal link present, no dangling
+*"Hola ,"* — `tickets_sent_at` is stamped, and the app shows the already-reset form with the strip
+*✓ Venta · WhatsApp · Mostrar QR · Deshacer*. The QR overlay does **not** open.
+
+**S-25 — A blocked popup leaves the truth intact**
+Given `window.open` returns `null`
+When *Cobrar* succeeds
+Then `tickets_sent_at` stays null, the folio reads `● Pendiente de enviar` and surfaces in the
+US-A80 queue — and the strip's WhatsApp button is the retry.
+
+**S-26 — *Enviado* no longer forfeits the void**
+Given an Express sale 15 s old with `tickets_sent_at` set and `tickets_viewed_at` null, nothing
+scanned
+When its seller calls the void
+Then it succeeds with S-11's full postconditions.
+
+**S-27 — *Visto* still closes the window**
+Given `tickets_viewed_at` set (beacon or scan)
+When the void is attempted
+Then `409 VOID_WINDOW_CLOSED` and nothing is written.
+
 ### Multitenancy isolation (required)
 
 **S-22 — A foreign folio cannot be voided**
@@ -451,6 +500,17 @@ Then `INVALID_SIGNATURE` — the caller-org key derivation is unchanged by this 
 - [x] `pnpm build:app` and `pnpm lint:app` clean; API suite 689/689
 - [x] `SPEC.md`: US-AG45/AG46/AG47, US-T07, US-A80 under their roles; one Features-by-Phase line;
       glossary — *Venta Express*, *Ticket page (`/t/`)*, *Void*
+
+**Amendment (WhatsApp-first) DoD:**
+
+- [x] `voidExpressSale`: `tickets_sent_at` removed from the guard (rule 7 as amended); S-26 in
+      `test/pos/express-sale.test.ts` (S-27 was already S-14's case (c))
+- [x] `fillTemplate` degrades on a null `customer_name` (D29); covered in `delivery.test.ts`
+- [x] `ExpressSalePanel`: wa.me launch on success, conditional stamp (D27), strip landing
+      *✓ Venta · WhatsApp · Mostrar QR · Deshacer*; overlay opens via *Mostrar QR* only —
+      verified by build/lint per the fast-sale precedent (S-24/S-25)
+- [x] `SPEC.md`: US-AG46/AG47/A80 wording amended; glossary *Venta Express* / *Void (Express)*
+      updated — in this PR
 
 ---
 
@@ -497,6 +557,11 @@ Then `INVALID_SIGNATURE` — the caller-org key derivation is unchanged by this 
 4. **Delivery status can flip to *Enviado* without any agent tapping WhatsApp** (D13). Any metric
    counting agent sends must read `tickets_sent_by` (null for a counter handoff), not
    `tickets_sent_at`.
+5. *(Amendment)* **On an Express sale, *Enviado* now means "a send was launched from Cobrar"**
+   (D26/D27), not that an agent deliberately chose to send — and the sale can still be **voided
+   while *Enviado***, as long as it is not *Visto* and nothing is scanned (D28). Metrics treating
+   `tickets_sent_at` as a deliberate act must stop; the US-A80 queue's Express audience narrows to
+   failed launches.
 
 ---
 
@@ -504,7 +569,7 @@ Then `INVALID_SIGNATURE` — the caller-org key derivation is unchanged by this 
 
 | Question | Smallest change that answers it |
 |---|---|
-| **Does a URL-form QR reliably scan off a phone screen, in sunlight, at arm's length?** The token is `<payload>.<signature>` with three UUIDs — 300+ chars before the URL prefix — and Express's entire delivery rides on this. | Render one on a real device at 280 px / level L and scan it outdoors with a mid-range Android. If it fails, D9 changes shape: a short opaque redirect id resolving server-side to the token, which is a data-model change and must be decided before build. |
+| **Does a URL-form QR reliably scan off a phone screen, in sunlight, at arm's length?** The token is `<payload>.<signature>` with three UUIDs — 300+ chars before the URL prefix — and Express's entire delivery rides on this. *(Amendment: the field partly answered — scans fumble often enough that D26 made WhatsApp primary, so the QR is now the backup path and the stakes dropped. The short opaque redirect id remains the named fix; it is a data-model change deferred to its own spec.)* | Render one on a real device at 280 px / level L and scan it outdoors with a mid-range Android. If it fails, D9 changes shape: a short opaque redirect id resolving server-side to the token, which is a data-model change and must be decided before build. |
 | Spanish copy for the clamp message, the confirmation strip and the ticket page | Draft in the PR; the admin does not configure these, so no template plumbing. |
 | Does the ⚡ belong on the affiliate POS too? | D-level answer is yes (Express is a mode, not a privilege), but no affiliate has asked. Gate on the same eligibility rule; revisit if an affiliate reports the card is cluttered. |
 | Should the void window be org-configurable? | A `organizations.express_void_seconds` column, defaulted to 60. Deliberately not shipped — one more knob for a number nobody has yet argued about. |
