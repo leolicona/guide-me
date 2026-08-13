@@ -8,6 +8,7 @@ import affiliatesRouter from './routes/affiliates'
 import agentsRouter from './routes/agents'
 import authRouter from './routes/auth'
 import cashRouter from './routes/cash'
+import dashboardRouter from './routes/dashboard'
 import organizationsRouter from './routes/organizations'
 import foliosRouter from './routes/folios'
 import { managerOperatorsRouter, operatorAccessRouter } from './routes/operators'
@@ -49,6 +50,7 @@ app.route('/api/folios', foliosRouter)
 app.route('/api/tickets', ticketsRouter)
 app.route('/api/cash', cashRouter)
 app.route('/api/reports', reportsRouter)
+app.route('/api/dashboard', dashboardRouter)
 app.route('/api/notifications', notificationsRouter)
 app.route('/api/affiliate/operators', managerOperatorsRouter)
 app.route('/api/operator', operatorAccessRouter)
