@@ -35,14 +35,16 @@ export const useFolios = (filters: FolioFilters = {}, enabled = true) =>
     enabled,
   })
 
-// US-A84 (D7/D20) — the pending-work counts. Shared by the list's banner and `Hoy`'s cards, which
+// US-A84 (D7/D20) — the pending-work counts. Shared by the list's banner and `Hoy`'s pills, which
 // is what makes the two surfaces structurally incapable of showing different numbers. They read the
 // WHOLE organization, never the loaded window, so a count always matches the list its pill opens.
-export const useFolioCounts = (enabled = true) =>
+// `refetchInterval` exists for Hoy's polling convention (occupancy-dashboard.spec.md D3).
+export const useFolioCounts = (enabled = true, refetchInterval?: number) =>
   useQuery({
     queryKey: [...FOLIOS_KEY, 'counts'] as const,
     queryFn: getFolioCounts,
     enabled,
+    refetchInterval,
   })
 
 // US-A21 — one folio's detail.
