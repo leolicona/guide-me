@@ -30,7 +30,7 @@ export function DayStrip({ today, selected, onSelect }: DayStripProps) {
 
   return (
     <>
-      <FilterStrip sx={{ mb: 2 }}>
+      <FilterStrip sx={{ mb: 1.5 }}>
         <FilterPill variant="date" active={selected === null} onClick={() => onSelect(null)}>
           Hoy
         </FilterPill>
