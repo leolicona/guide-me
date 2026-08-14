@@ -31,7 +31,7 @@ export function DepartedCard({ rows }: { rows: DashboardDepartedRow[] }) {
         </IconButton>
       }
     >
-      <Box sx={{ px: 3, pb: open ? 0 : 2 }}>
+      <Box sx={{ px: 3, pb: open ? 0 : 3 }}>
         <Typography variant="body2" color="text.secondary" className="numeric">
           {rows.length === 1 ? '1 salida' : `${rows.length} salidas`}
           {sinUsar === 0
@@ -42,7 +42,7 @@ export function DepartedCard({ rows }: { rows: DashboardDepartedRow[] }) {
         </Typography>
       </Box>
       <Collapse in={open}>
-        <Stack divider={<Divider />} sx={{ px: 3, py: 1 }}>
+        <Stack divider={<Divider />} sx={{ px: 3, pt: 1, pb: 1.5 }}>
           {/* Same two-line shape as the occupancy rows: full-width name, then data + chip. */}
           {rows.map((r) => (
             <Stack key={r.slot_id} spacing={0.75} sx={{ py: 1.5 }}>
