@@ -50,21 +50,22 @@ export function DepartedCard({ rows }: { rows: DashboardDepartedRow[] }) {
                 <Typography className="numeric" sx={{ fontWeight: 700, width: 52, flexShrink: 0 }}>
                   {r.start_time}
                 </Typography>
-                <Typography sx={{ fontWeight: 600, minWidth: 0 }} noWrap>
-                  {r.service_name}
-                </Typography>
+                <Typography sx={{ fontWeight: 600 }}>{r.service_name}</Typography>
               </Stack>
-              <Stack
-                direction="row"
-                spacing={1}
-                sx={{ alignItems: 'center', pl: '68px' /* 52px time column + 16px gap */ }}
+              <Box
+                sx={{
+                  display: 'flex',
+                  flexWrap: 'wrap',
+                  alignItems: 'center',
+                  gap: 1,
+                  pl: '68px' /* 52px time column + 16px gap */,
+                }}
               >
                 <Typography
                   variant="body2"
                   color="text.secondary"
                   className="numeric"
-                  noWrap
-                  sx={{ flex: 1, minWidth: 0 }}
+                  sx={{ flex: '1 1 auto' }}
                 >
                   {r.abordaron}/{r.vendidos} abordaron
                 </Typography>
@@ -91,7 +92,7 @@ export function DepartedCard({ rows }: { rows: DashboardDepartedRow[] }) {
                   size="small"
                 />
               )}
-              </Stack>
+              </Box>
             </Stack>
           ))}
         </Stack>
