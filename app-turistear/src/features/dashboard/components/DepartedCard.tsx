@@ -31,7 +31,7 @@ export function DepartedCard({ rows }: { rows: DashboardDepartedRow[] }) {
         </IconButton>
       }
     >
-      <Box sx={{ px: 3, pb: open ? 0 : 2 }}>
+      <Box sx={{ px: 3, pb: open ? 0 : 3 }}>
         <Typography variant="body2" color="text.secondary" className="numeric">
           {rows.length === 1 ? '1 salida' : `${rows.length} salidas`}
           {sinUsar === 0
@@ -42,25 +42,33 @@ export function DepartedCard({ rows }: { rows: DashboardDepartedRow[] }) {
         </Typography>
       </Box>
       <Collapse in={open}>
-        <Stack divider={<Divider />} sx={{ px: 3, py: 1 }}>
+        <Stack divider={<Divider />} sx={{ px: 3, pt: 1, pb: 1.5 }}>
+          {/* Same two-line shape as the occupancy rows: full-width name, then data + chip. */}
           {rows.map((r) => (
-            <Stack
-              key={r.slot_id}
-              direction="row"
-              spacing={2}
-              sx={{ alignItems: 'center', py: 1.5 }}
-            >
-              <Typography className="numeric" sx={{ fontWeight: 700, width: 52, flexShrink: 0 }}>
-                {r.start_time}
-              </Typography>
-              <Box sx={{ minWidth: 0, flex: 1 }}>
-                <Typography sx={{ fontWeight: 600 }} noWrap>
-                  {r.service_name}
+            <Stack key={r.slot_id} spacing={0.75} sx={{ py: 1.5 }}>
+              <Stack direction="row" spacing={2} sx={{ alignItems: 'baseline' }}>
+                <Typography className="numeric" sx={{ fontWeight: 700, width: 52, flexShrink: 0 }}>
+                  {r.start_time}
                 </Typography>
-                <Typography variant="body2" color="text.secondary" className="numeric">
+                <Typography sx={{ fontWeight: 600 }}>{r.service_name}</Typography>
+              </Stack>
+              <Box
+                sx={{
+                  display: 'flex',
+                  flexWrap: 'wrap',
+                  alignItems: 'center',
+                  gap: 1,
+                  pl: '68px' /* 52px time column + 16px gap */,
+                }}
+              >
+                <Typography
+                  variant="body2"
+                  color="text.secondary"
+                  className="numeric"
+                  sx={{ flex: '1 1 auto' }}
+                >
                   {r.abordaron}/{r.vendidos} abordaron
                 </Typography>
-              </Box>
               {r.sin_usar > 0 ? (
                 <StatusChip
                   tone="warning"
@@ -84,6 +92,7 @@ export function DepartedCard({ rows }: { rows: DashboardDepartedRow[] }) {
                   size="small"
                 />
               )}
+              </Box>
             </Stack>
           ))}
         </Stack>

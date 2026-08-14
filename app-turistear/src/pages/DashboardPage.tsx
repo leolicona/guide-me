@@ -55,7 +55,9 @@ export default function DashboardPage() {
           onToggle={(key) => navigate(`${ROUTES.FOLIOS}?estado=${key}`)}
         />
 
-        <Stack spacing={2}>
+        {/* 24px between groups vs 12px strip-to-card inside the Salidas group — between-group
+            space must exceed within-group space or the strip reads as a stray control. */}
+        <Stack spacing={3}>
           <DaySalesCard sales={todayQuery.data?.sales} />
           <Box>
             <DayStrip today={today} selected={selectedDay} onSelect={setSelectedDay} />

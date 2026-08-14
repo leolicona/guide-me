@@ -24,11 +24,13 @@ function OccupancyChip({ row }: { row: DashboardOccupancyRow }) {
   return <StatusChip tone="success" icon={<CheckCircleRounded />} label="Disponible" size="small" />
 }
 
-const seatsLine = (r: DashboardOccupancyRow): string => {
-  const parts = [`${r.vendidos} vendidos`]
+// "quedan N" is the datum the admin scans for, so it leads the line in ink while the sold/held
+// detail stays secondary (hierarchy: emphasize the data, soften its context).
+const seatsDetail = (r: DashboardOccupancyRow): string => {
+  const parts: string[] = []
+  if (r.vendidos > 0) parts.push(`${r.vendidos} vendidos`)
   if (r.apartados > 0) parts.push(`${r.apartados} apartados`)
-  parts.push(`quedan ${r.remaining}`)
-  return parts.join(' · ')
+  return parts.map((p) => ` · ${p}`).join('')
 }
 
 export function OccupancyCard({
@@ -39,9 +41,11 @@ export function OccupancyCard({
   loading: boolean
 }) {
   return (
-    <SectionCard title="Salidas" padded={false}>
+    // «Por partir» / «Ya partieron» — the pair is deliberate: same verb, same grammatical shape,
+    // so the two cards read as two states of one thing instead of a noun beside a verb phrase.
+    <SectionCard title="Por partir" padded={false}>
       {rows.length === 0 ? (
-        <Box sx={{ p: 3 }}>
+        <Box sx={{ px: 3, pb: 3 }}>
           <Typography color="text.secondary">
             {loading ? 'Cargando…' : 'Sin salidas este día.'}
           </Typography>
@@ -53,33 +57,47 @@ export function OccupancyCard({
           )}
         </Box>
       ) : (
-        <Stack divider={<Divider />} sx={{ px: 3, py: 1 }}>
+        // pb 1.5 + the last row's 12px = a 24px card bottom, matching the padded cards.
+        <Stack divider={<Divider />} sx={{ px: 3, pt: 1, pb: 1.5 }}>
+          {/* Two-line row. NOTHING here truncates: a departure the admin cannot name, or seat
+              numbers cut to "14 vendi…", is the one thing this screen exists to show. The name
+              wraps onto as many lines as it needs; the chip shares the second line with the
+              numbers it qualifies and drops below them when the width runs out. */}
           {rows.map((r) => (
-            <Stack
-              key={r.slot_id}
-              direction="row"
-              spacing={2}
-              sx={{ alignItems: 'center', py: 1.5 }}
-            >
-              <Typography className="numeric" sx={{ fontWeight: 700, width: 52, flexShrink: 0 }}>
-                {r.start_time}
-              </Typography>
-              <Box sx={{ minWidth: 0, flex: 1 }}>
-                <Typography sx={{ fontWeight: 600 }} noWrap>
-                  {r.service_name}
+            <Stack key={r.slot_id} spacing={0.75} sx={{ py: 1.5 }}>
+              <Stack direction="row" spacing={2} sx={{ alignItems: 'baseline' }}>
+                <Typography className="numeric" sx={{ fontWeight: 700, width: 52, flexShrink: 0 }}>
+                  {r.start_time}
                 </Typography>
-                <Typography variant="body2" color="text.secondary" className="numeric">
-                  {seatsLine(r)}
+                <Typography sx={{ fontWeight: 600 }}>{r.service_name}</Typography>
+              </Stack>
+              <Box
+                sx={{
+                  display: 'flex',
+                  flexWrap: 'wrap',
+                  alignItems: 'center',
+                  gap: 1,
+                  pl: '68px' /* 52px time column + 16px gap */,
+                }}
+              >
+                <Typography
+                  variant="body2"
+                  color="text.secondary"
+                  className="numeric"
+                  sx={{ flex: '1 1 auto' }}
+                >
+                  <Box component="span" sx={{ color: 'text.primary', fontWeight: 600 }}>
+                    quedan {r.remaining}
+                  </Box>
+                  {seatsDetail(r)}
                 </Typography>
-              </Box>
-              <Stack sx={{ alignItems: 'flex-end', flexShrink: 0 }} spacing={0.5}>
-                <OccupancyChip row={r} />
                 {r.booked >= r.capacity && r.flex_extra > 0 && (
-                  <Typography variant="caption" color="warning.main" className="numeric">
+                  <Typography variant="caption" color="warning.main" className="numeric" noWrap>
                     +{r.flex_extra} extra
                   </Typography>
                 )}
-              </Stack>
+                <OccupancyChip row={r} />
+              </Box>
             </Stack>
           ))}
         </Stack>
