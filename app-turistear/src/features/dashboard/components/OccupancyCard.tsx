@@ -43,7 +43,7 @@ export function OccupancyCard({
   return (
     <SectionCard title="Salidas" padded={false}>
       {rows.length === 0 ? (
-        <Box sx={{ p: 3 }}>
+        <Box sx={{ px: 3, pb: 3 }}>
           <Typography color="text.secondary">
             {loading ? 'Cargando…' : 'Sin salidas este día.'}
           </Typography>
@@ -55,7 +55,8 @@ export function OccupancyCard({
           )}
         </Box>
       ) : (
-        <Stack divider={<Divider />} sx={{ px: 3, py: 1 }}>
+        // pb 1.5 + the last row's 12px = a 24px card bottom, matching the padded cards.
+        <Stack divider={<Divider />} sx={{ px: 3, pt: 1, pb: 1.5 }}>
           {/* Two-line row: the name owns the full width (390px screens truncated it against the
               chip), and the chip shares the second line with the seat numbers it qualifies. */}
           {rows.map((r) => (
