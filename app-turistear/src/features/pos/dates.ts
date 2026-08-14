@@ -26,6 +26,24 @@ export const todayStr = (tz?: string): string => {
   return `${d.getFullYear()}-${month}-${day}`
 }
 
+/**
+ * The org-local wall clock as a naive `HH:MM` (24h, zero-padded) — `todayStr`'s within-the-day
+ * sibling, resolved in the same org zone for the same US-A66 reason: every screen must agree on
+ * what time it is *at the location*, not on each device.
+ *
+ * Zero-padded 24h strings order lexicographically, so `slot.start_time <= nowHM(tz)` is a valid
+ * "has it left?" test against `slots.start_time` with no epoch math — the client-side echo of the
+ * server's `naiveEpoch(date, start_time, tz) <= now` (api-turistear/src/routes/dashboard/handler.ts).
+ */
+export const nowHM = (tz?: string): string =>
+  new Intl.DateTimeFormat('en-GB', {
+    ...(tz ? { timeZone: tz } : {}),
+    hour: '2-digit',
+    minute: '2-digit',
+    // h23 (not `hour12: false`, which yields "24:00" at midnight in some engines).
+    hourCycle: 'h23',
+  }).format(new Date())
+
 /** Add `n` whole days to a YYYY-MM-DD string (UTC midnight arithmetic). */
 export const addDays = (date: string, n: number): string =>
   new Date(Date.parse(`${date}T00:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10)

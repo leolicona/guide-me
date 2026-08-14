@@ -10,8 +10,7 @@ import {
   DASHBOARD_POLL_MS,
   DaySalesCard,
   DayStrip,
-  DepartedCard,
-  OccupancyCard,
+  DeparturesTimeline,
   useDashboardDay,
 } from '../features/dashboard'
 import { ROUTES } from '../config/routes'
@@ -20,7 +19,8 @@ import { ROUTES } from '../config/routes'
 // docs/dashboard/occupancy-dashboard.spec.md). Top to bottom: the pending-work pills (D7 — the
 // same PendingWorkBar and counts endpoint the folios list reads, so the two surfaces can never
 // disagree), the day's money as the ledger stamped it (D10), the occupancy list scoped by the
-// quick-day strip (D5/D12 — the strip re-scopes THIS list only), and «Ya partieron» (D9).
+// quick-day strip (D5/D12 — the strip re-scopes THAT card only), which carries departed and
+// upcoming on one axis around the «Ahora» marker (D9 amended).
 // Agents never route here (D4). The cash-drop queue that used to be the "Entregas" card stays on
 // the Caja nav badge, which always carried the same count.
 export default function DashboardPage() {
@@ -36,8 +36,10 @@ export default function DashboardPage() {
   const peekQuery = useDashboardDay(peekDay ?? undefined, peekDay !== null)
   const { data: counts } = useFolioCounts(true, DASHBOARD_POLL_MS)
 
-  // D12 — the strip scopes the occupancy list alone; money, pills and «Ya partieron» are today's.
-  const occupancySource = peekDay !== null ? peekQuery : todayQuery
+  // D12 — the strip scopes the departures card alone; money and pills stay today's. The card reads
+  // ONE query, so a peeked day can no longer show today's departures underneath tomorrow's list:
+  // the peek payload's `departed` is empty by the server's own rule (handler.ts — today only).
+  const daySource = peekDay !== null ? peekQuery : todayQuery
 
   return (
     <Fade in timeout={400}>
@@ -61,12 +63,13 @@ export default function DashboardPage() {
           <DaySalesCard sales={todayQuery.data?.sales} />
           <Box>
             <DayStrip today={today} selected={selectedDay} onSelect={setSelectedDay} />
-            <OccupancyCard
-              rows={occupancySource.data?.occupancy ?? []}
-              loading={occupancySource.isPending}
+            <DeparturesTimeline
+              day={daySource.data}
+              isToday={peekDay === null}
+              tz={org?.timezone}
+              loading={daySource.isPending}
             />
           </Box>
-          <DepartedCard rows={todayQuery.data?.departed ?? []} />
         </Stack>
       </Box>
     </Fade>
