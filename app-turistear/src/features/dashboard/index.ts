@@ -1,5 +1,6 @@
 export { useDashboardDay, DASHBOARD_POLL_MS } from './hooks/useDashboard'
+export { useOrgClock } from './hooks/useOrgClock'
 export { DaySalesCard } from './components/DaySalesCard'
 export { DayStrip } from './components/DayStrip'
-export { OccupancyCard } from './components/OccupancyCard'
-export { DepartedCard } from './components/DepartedCard'
+export { DeparturesTimeline } from './components/DeparturesTimeline'
+export { timelineItems, hasDeparted, type TimelineItem } from './timeline'
