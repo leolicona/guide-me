@@ -41,7 +41,9 @@ export function OccupancyCard({
   loading: boolean
 }) {
   return (
-    <SectionCard title="Salidas" padded={false}>
+    // «Por partir» / «Ya partieron» — the pair is deliberate: same verb, same grammatical shape,
+    // so the two cards read as two states of one thing instead of a noun beside a verb phrase.
+    <SectionCard title="Por partir" padded={false}>
       {rows.length === 0 ? (
         <Box sx={{ px: 3, pb: 3 }}>
           <Typography color="text.secondary">
@@ -57,29 +59,32 @@ export function OccupancyCard({
       ) : (
         // pb 1.5 + the last row's 12px = a 24px card bottom, matching the padded cards.
         <Stack divider={<Divider />} sx={{ px: 3, pt: 1, pb: 1.5 }}>
-          {/* Two-line row: the name owns the full width (390px screens truncated it against the
-              chip), and the chip shares the second line with the seat numbers it qualifies. */}
+          {/* Two-line row. NOTHING here truncates: a departure the admin cannot name, or seat
+              numbers cut to "14 vendi…", is the one thing this screen exists to show. The name
+              wraps onto as many lines as it needs; the chip shares the second line with the
+              numbers it qualifies and drops below them when the width runs out. */}
           {rows.map((r) => (
             <Stack key={r.slot_id} spacing={0.75} sx={{ py: 1.5 }}>
               <Stack direction="row" spacing={2} sx={{ alignItems: 'baseline' }}>
                 <Typography className="numeric" sx={{ fontWeight: 700, width: 52, flexShrink: 0 }}>
                   {r.start_time}
                 </Typography>
-                <Typography sx={{ fontWeight: 600, minWidth: 0 }} noWrap>
-                  {r.service_name}
-                </Typography>
+                <Typography sx={{ fontWeight: 600 }}>{r.service_name}</Typography>
               </Stack>
-              <Stack
-                direction="row"
-                spacing={1}
-                sx={{ alignItems: 'center', pl: '68px' /* 52px time column + 16px gap */ }}
+              <Box
+                sx={{
+                  display: 'flex',
+                  flexWrap: 'wrap',
+                  alignItems: 'center',
+                  gap: 1,
+                  pl: '68px' /* 52px time column + 16px gap */,
+                }}
               >
                 <Typography
                   variant="body2"
                   color="text.secondary"
                   className="numeric"
-                  noWrap
-                  sx={{ flex: 1, minWidth: 0 }}
+                  sx={{ flex: '1 1 auto' }}
                 >
                   <Box component="span" sx={{ color: 'text.primary', fontWeight: 600 }}>
                     quedan {r.remaining}
@@ -92,7 +97,7 @@ export function OccupancyCard({
                   </Typography>
                 )}
                 <OccupancyChip row={r} />
-              </Stack>
+              </Box>
             </Stack>
           ))}
         </Stack>

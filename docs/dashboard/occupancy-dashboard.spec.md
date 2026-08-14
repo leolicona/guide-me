@@ -173,6 +173,12 @@ Server-derived, therefore no request body at all: this surface is a pure read.
    `PosDatePickerSheet` + `GET /api/pos/availability/days`) above one `SectionCard` of
    chronological departure rows (D15). Traffic light per D11: functional colors, icon-paired,
    cited from `DESIGN_TOKENS.md` §3 — never restated as hex.
+The two occupancy sections are titled **«Por partir»** and **«Ya partieron»** — one pair, same
+verb and same grammatical shape, so they read as two states of one thing rather than a noun beside
+a verb phrase. Neither card truncates a service name or a seat count: the name wraps and the
+semáforo chip drops below the numbers when the width runs out, because a departure the admin
+cannot name is the one thing this screen exists to prevent.
+
 4. **«Ya partieron»** — collapsed-by-default section of today's departed rows (D9); hidden when a
    future day is selected (D12).
 
