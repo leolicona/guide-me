@@ -11,9 +11,10 @@ import type { DashboardDay } from '../../../services/dashboardService'
 import { useOrgClock } from '../hooks/useOrgClock'
 import { hasDeparted, timelineItems, type TimelineItem } from '../timeline'
 
-// D20 — the rail IS the time column: a hairline at the column's right edge, drawn as the content
-// block's left border so consecutive rows join into one unbroken spine. Costs zero horizontal
-// space, which is the whole point — the service names keep every pixel PR #104 won them.
+// D20 — the rail IS the time column: ONE absolutely-positioned hairline at the column's right
+// edge (see the relative wrapper in DeparturesTimeline), so the spine is a single unbroken stroke
+// that runs through the «Ahora» node instead of restarting per row. Costs zero horizontal space,
+// which is the whole point — the service names keep every pixel PR #104 won them.
 const TIME_COL = 52
 
 // D11 (unchanged) — the traffic light for what is still sellable · D19 — and its deliberate
@@ -92,22 +93,14 @@ function RowDetail({ item, past }: { item: TimelineItem; past: boolean }) {
 function TimelineRow({ item, past }: { item: TimelineItem; past: boolean }) {
   const ink = past ? 'text.secondary' : 'text.primary'
   return (
-    <Box sx={{ display: 'flex', alignItems: 'stretch' }}>
+    <Box sx={{ display: 'flex' }}>
       <Box sx={{ width: TIME_COL, flexShrink: 0, pt: 1.5 }}>
         <Typography className="numeric" sx={{ fontWeight: 700, color: ink }}>
           {item.start_time}
         </Typography>
       </Box>
-      <Box
-        sx={{
-          flex: 1,
-          minWidth: 0,
-          borderLeft: '1px solid',
-          borderColor: 'grey.200',
-          pl: 2,
-          py: 1.5,
-        }}
-      >
+      {/* No border here — the shared rail behind these rows is drawn once by the parent (D20). */}
+      <Box sx={{ flex: 1, minWidth: 0, pl: 2, py: 1.5 }}>
         <Typography sx={{ fontWeight: 600, color: ink }}>{item.service_name}</Typography>
         <Box
           sx={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 1, mt: 0.75 }}
@@ -132,18 +125,36 @@ function TimelineRow({ item, past }: { item: TimelineItem; past: boolean }) {
   )
 }
 
-// D18 — the crossbar sits ON the spine (no gap: it starts exactly at the rail's x) and carries the
-// org-local clock in the same column as every other time, so it reads as "the row that is now".
+// D18/D20-rev — «Ahora» is a NODE on the spine, not a bar across the card: a small ink dot
+// centered exactly on the rail's 1px stroke, the org-local clock bold in the same column as every
+// other time, and a hairline whisper to the right edge. The bold time + solid dot carry the
+// marker; the heavy 2px crossbar it replaces was the loudest stroke on the page.
 function NowMarker({ now }: { now: string }) {
   return (
-    <Box role="separator" aria-label={`Ahora, ${now}`} sx={{ display: 'flex', alignItems: 'center' }}>
+    <Box
+      role="separator"
+      aria-label={`Ahora, ${now}`}
+      sx={{ display: 'flex', alignItems: 'center', py: 0.5 }}
+    >
       <Typography
         className="numeric"
         sx={{ width: TIME_COL, flexShrink: 0, fontWeight: 700, color: 'text.primary' }}
       >
         {now}
       </Typography>
-      <Box sx={{ flex: 1, height: '2px', bgcolor: 'text.primary' }} />
+      {/* 9px dot at ml:-4px → its center lands on the rail's x (TIME_COL) + half the 1px stroke. */}
+      <Box
+        sx={{
+          position: 'relative',
+          width: 9,
+          height: 9,
+          borderRadius: '50%',
+          bgcolor: 'text.primary',
+          ml: '-4px',
+          flexShrink: 0,
+        }}
+      />
+      <Box sx={{ flex: 1, height: '1px', bgcolor: 'grey.200', ml: 1.5 }} />
     </Box>
   )
 }
@@ -272,22 +283,38 @@ export function DeparturesTimeline({
           )}
           {/* pb 1.5 + the last row's 12px = a 24px card bottom, matching the padded cards. */}
           <Box sx={{ px: 3, pb: 1.5 }}>
-            <Collapse in={open}>
-              <Box>
-                {departed.map((i) => (
-                  <TimelineRow key={i.slot_id} item={i} past />
-                ))}
-              </Box>
-            </Collapse>
-            {isToday && <NowMarker now={now} />}
-            {upcoming.map((i) => (
-              <TimelineRow key={i.slot_id} item={i} past={false} />
-            ))}
-            {isToday && upcoming.length === 0 && (
-              <Typography variant="body2" color="text.secondary" sx={{ pl: `${TIME_COL + 16}px`, py: 1.5 }}>
-                Ya no queda ninguna salida hoy.
-              </Typography>
-            )}
+            {/* D20 — the spine, drawn ONCE: a single hairline the rows share and the «Ahora» dot
+                sits on. Per-row borders would restart it at every row and leave a hole at the
+                marker — one continuous stroke is both fewer lines and truer to what it depicts. */}
+            <Box sx={{ position: 'relative' }}>
+              <Box
+                aria-hidden
+                sx={{
+                  position: 'absolute',
+                  left: TIME_COL,
+                  top: 8,
+                  bottom: 8,
+                  width: '1px',
+                  bgcolor: 'grey.200',
+                }}
+              />
+              <Collapse in={open}>
+                <Box>
+                  {departed.map((i) => (
+                    <TimelineRow key={i.slot_id} item={i} past />
+                  ))}
+                </Box>
+              </Collapse>
+              {isToday && <NowMarker now={now} />}
+              {upcoming.map((i) => (
+                <TimelineRow key={i.slot_id} item={i} past={false} />
+              ))}
+              {isToday && upcoming.length === 0 && (
+                <Typography variant="body2" color="text.secondary" sx={{ pl: `${TIME_COL + 16}px`, py: 1.5 }}>
+                  Ya no queda ninguna salida hoy.
+                </Typography>
+              )}
+            </Box>
           </Box>
         </>
       )}
