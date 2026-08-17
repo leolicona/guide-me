@@ -1,7 +1,9 @@
 # Feature: Daily Operations Dashboard — «Hoy» answers how today is going
 
-> **Status: BUILT** — shipped in #103, read at 390 px in #104, and **revised by the timeline pass**
-> (Rev. 2026-08-14: D9 and D12 amended, D17–D22 added — the two departure cards became one axis).
+> **Status: BUILT** — shipped in #103, read at 390 px in #104, **revised by the timeline pass**
+> (Rev. 2026-08-14: D9 and D12 amended, D17–D22 added — the two departure cards became one axis),
+> and **reduced to the occupancy reading** (Rev. 2026-08-17: D11, D19, D20 and the «Ahora» marker
+> retired, D23–D27 added — the card now answers *how full* and *who showed up*, and nothing else).
 > Delivers **US-A14**, **US-A16** and **US-A90**; delivers
 > **US-A15 partially** (the count ships, the unrealized-revenue reading is deferred — D8, and the
 > story carries the amendment in `SPEC.md`). Replaces the interim queue-card *Hoy*
@@ -64,7 +66,7 @@ Mechanically checkable:
 | **D9** ~~*(superseded — see D9-rev)*~~ | Today's **departed** slots move out of the occupancy list into a separate **«Ya partieron»** section, showing *abordaron / vendidos / sin usar* from `folio_lines.redeemed_count` (the US-A85 fulfilment math — derived, never stored). | A no-show discovered at 2 PM is actionable — the seller can call, the admin can resell tomorrow's hold; one discovered in next week's wasted-seats report is trivia. Separating the sections keeps what is still sellable on top. |
 | **D9-rev** | The two sections become **one chronological timeline** in a single card titled **«Salidas»**: departed rows sit above an **«Ahora» marker**, upcoming below. The boarding data and the collapse behaviour of D9 are unchanged — only the container is. | "Already departed" is not a category a slot belongs to, it is a **relation between the slot and now**; modelling it as an axis rather than a second card is what makes the relation visible. It also removed a whole bug class rather than patching one: the shipped page fed the departed card from the *today* query unconditionally, so peeking at tomorrow rendered today's departures under tomorrow's list with nothing saying so. On an axis, a future day has nothing above the marker **by construction** — there is no state left to get wrong. |
 | **D10** | Sales summary = **money received today**: the net SUM of signed `folio_payments` rows with `entry_type IN ('payment','refund')` whose `created_at` falls in the org-tz day. The count of **folios created today** is shown separately, labeled as such. | `folio_payments.created_at` is the money's *own* date by design (deposit=confirm, balance=settle, refund=hand-back), so this figure can never disagree with Caja — a settle today of last week's apartado is today's money, and a refund handed back today subtracts. Summing folio totals instead would count money not yet collected and miss today's settles. |
-| **D11** | Traffic light on capacity: **green < 80 % booked · amber ≥ 80 % · red at booked ≥ capacity**, with a small **«+N extra»** hint when a flexible service still has sellable margin. Thresholds computed client-side from the returned numbers. | One org-agnostic rule, stated once. Red-on-base-capacity is deliberate: a slot in its flex margin is the thing an ops admin most wants to notice, and the hint mirrors the POS's existing «Usando X cupos extra» vocabulary. Icon-paired per `DESIGN_TOKENS.md` §3 — state is never color-alone. |
+| **D11** ~~*(retired — see D23)*~~ | Traffic light on capacity: **green < 80 % booked · amber ≥ 80 % · red at booked ≥ capacity**, with a small **«+N extra»** hint when a flexible service still has sellable margin. Thresholds computed client-side from the returned numbers. | One org-agnostic rule, stated once. Red-on-base-capacity is deliberate: a slot in its flex margin is the thing an ops admin most wants to notice, and the hint mirrors the POS's existing «Usando X cupos extra» vocabulary. Icon-paired per `DESIGN_TOKENS.md` §3 — state is never color-alone. **Retired 2026-08-17**: the chip and the number beside it said the same thing — «0 disponibles» *is* «Lleno» — and the number says it without colour, without an icon, and without a legend to learn. The «+N extra» hint survives as plain text (D25). |
 | **D12** *(amended by D9-rev)* | The day strip re-scopes the **«Salidas» card only** — the whole card, since departed and upcoming are now one list reading one query. The pills and the sales summary stay pinned to today. | "Payments received tomorrow" is always $0 and pending work has no date — re-scoping them would blank or lie. The screen stays *Hoy* with a forward-looking departures peek. The card reading a *single* query is the structural half of the fix: there is no second data source that could still be showing today. |
 | **D13** | One new admin-only endpoint, **`GET /api/dashboard/day?date=`**, returns occupancy + departed + sales summary in one payload. The pills keep `GET /api/folios/counts`. | One poll, one org-tz "today" resolution, one place for the query to be right. Splitting per block would re-create the N-reads pattern US-A84 just cleaned up; folding into `/counts` would couple a lean `COUNT(*)` every list hits to a heavy aggregate only *Hoy* needs. |
 | **D14** | The per-seller list attributes money by **`folio_payments.collected_by`** (with the operator label via `operator_id` where present), sorted by amount descending. | It is the ledger's own attribution — a settle may differ from the original seller, and D10 chose the ledger's truth. Sale-attribution by `folios.agent_id` remains the commission report's view (US-A17/A18); the two answer different questions. |
@@ -76,11 +78,24 @@ Mechanically checkable:
 | # | Decision | Why |
 |---|---|---|
 | **D17** | The merge is **component-side**; `GET /api/dashboard/day` is untouched — same two arrays, same shape, same tests. The client concatenates `departed` then `occupancy`. | The server builds both arrays in ONE `ORDER BY start_time` pass, pushing each row into one or the other, so concatenating in that order restores the original chronology exactly — no re-sort, no endpoint change, no test edit. A display change must not re-open a merged API. |
-| **D18** | The **client owns both the marker's clock and the past/upcoming split**, from one org-local `nowHM(tz)` ticking each wall-clock minute (`useOrgClock`). The server's classification is kept only for *what a row shows*, not *which side it is on*. | The marker displays minutes; the poll refreshes every 60 s. Anything shown at a finer resolution than its refresh interval must be derived on the display side, or the two visibly disagree — a 14:30 departure sitting below a marker reading 14:31. One fact, one owner. The clock is *computed during render*, never mirrored into state, so a late-arriving org `tz` is correct on the first render that has it. |
-| **D19** | A departed row is de-emphasised in **text only** (name and time to secondary ink); its **chips keep full strength**. A row that crosses the marker between polls keeps its seat line but **loses its chip entirely** until boarding data arrives. | Dimming the whole row would dim the amber *sin usar* chip — the one actionable thing on a finished departure. And an availability chip is a forward-looking claim: a slot that has left may never read "Disponible", not even greyed, so the honest render is no chip at all for the ≤60 s gap. |
-| **D20** | The rail **is the time column**: ONE absolutely-positioned 1px `grey.200` hairline behind the rows — a single unbroken stroke, not per-row borders. The «Ahora» marker is a **node on that spine**: a 9px ink dot centered on the rail's x, the bold org-local clock in the time column, and a 1px `grey.200` hairline to the right edge. *(Rev. 2026-08-16, pre-merge: the first cut drew the rail as per-row `borderLeft` — which left a hole at the marker row — and «Ahora» as a 2px full-width ink crossbar, the heaviest stroke on the page. Too many lines; the bold time + solid dot carry the marker on their own.)* | Zero horizontal cost — the spine lives at the time column's right edge, so the service names keep every pixel #104 un-truncated. Structure-first (`DESIGN_TOKENS.md` §Elevation): one stroke depicting one axis is both fewer lines and truer to what it draws, and the marker still reads in sunlight because its weight is in the ink dot and 700-weight clock, not in a bar. |
-| **D21** | The past segment is **collapsed by default** behind a ≥48 px button row carrying `N ya partieron` **and** the no-show count, icon-paired amber. It **auto-expands only when nothing is upcoming**; an explicit tap always wins. Rows not yet re-polled contribute no boarding claim — with none known the summary says nothing rather than "todos abordaron". | D9's argument survives the merge: what is still sellable keeps the top. But collapsing must not hide the miss, so the summary carries it — and once the day is over there is no top left to protect, which is exactly when an admin reconciles. |
-| **D22** | The card title is the day-agnostic **«Salidas»**, and the «Ahora» marker does not render for a non-today date. The picker's **past-day floor stays** (`PosDatePickerSheet` disables `date < today`). | The strip already names the day; a title changing under the user's thumb is noise. With one card the D9 noun-vs-verb pairing problem simply dissolves — there is no pair left to mismatch. Past days stay out of *Hoy* because the server only computes boarding for today, so a past day would show exactly the numbers you opened it for as blanks; real history is the wasted-seats report's job. |
+| **D18** *(the marker retired by D26; the clock survives)* | The **client owns the past/upcoming split**, from one org-local `nowHM(tz)` ticking each wall-clock minute (`useOrgClock`). The server's classification is kept only for *what a row shows*, not *which side it is on*. | Anything shown at a finer resolution than its refresh interval must be derived on the display side, or the two visibly disagree. One fact, one owner. The clock is *computed during render*, never mirrored into state, so a late-arriving org `tz` is correct on the first render that has it. **The clock outlived the marker it used to draw**: it is not there to be displayed, it is there so `hasDeparted` reparts the list and re-renders on the minute — a slot crossing its hour still drops into the collapsed segment on its own. |
+| **D19** ~~*(retired with the chips — see D23)*~~ | A departed row is de-emphasised in **text only**; its **chips keep full strength**. A row that crosses the marker between polls keeps its seat line but **loses its chip entirely** until boarding data arrives. | Dimming the whole row would dim the amber *sin usar* chip. **Retired 2026-08-17**: with no chips left, "past" is carried entirely by de-emphasised ink. The ≤60 s honesty rule survives in stronger form — the transient row no longer shows *any* availability figure (D23), because «N disponibles» on a service that has left is not merely a forward-looking claim, it is false. |
+| **D20** ~~*(retired — see D26)*~~ | The rail **is the time column**: ONE absolutely-positioned 1px `grey.200` hairline behind the rows, with the «Ahora» marker as a 9px ink dot centered on that spine. *(Rev. 2026-08-16: the first cut drew the rail as per-row `borderLeft`, leaving a hole at the marker row, and «Ahora» as a 2px full-width crossbar.)* | Zero horizontal cost; structure-first. **Retired 2026-08-17**: the rail drew what the sequence already said. Twice revised and then deleted is the tell — each revision made the ornament *better* without ever asking whether it earned its pixels. |
+| **D21** | The past segment is **collapsed by default** behind a ≥48 px button row carrying `N ya salieron` **and** the day's attendance, in the rows' own vocabulary («170 de 180 asistieron»). It **auto-expands only when nothing is upcoming**; an explicit tap always wins. Departures that sold nothing contribute no aggregate — «0 de 0 asistieron» is true and useless. | D9's argument survives every revision: what is still sellable keeps the top. But collapsing must not hide the day's attendance, so the summary carries it — and once the day is over there is no top left to protect, which is exactly when an admin reconciles. *(Rev. 2026-08-17: the icon-paired amber no-show count became the plain attendance figure; the shortfall is the subtraction, and stating it twice in two vocabularies was the noise, not the signal.)* |
+| **D22** *(title superseded by D27)* | The card title is **day-agnostic**, and the picker's **past-day floor stays** (`PosDatePickerSheet` disables `date < today`). | The strip already names the day; a title changing under the user's thumb is noise. Past days stay out of *Hoy* because the server only computes boarding for today, so a past day would show exactly the numbers you opened it for as blanks; real history is the wasted-seats report's job. |
+
+### Occupancy reduction (Rev. 2026-08-17)
+
+The card had accumulated four vocabularies for one fact — a chip, a colour, an icon and a number,
+all describing how full a departure was. This pass keeps the number.
+
+| # | Decision | Why |
+|---|---|---|
+| **D23** | A row says **one line, in one of four readings**: upcoming → «60 disponibles · 90 vendidos» · departed → «85 asistentes de 90 vendidos» · departed having sold nothing → «Sin ventas» · departed but not yet re-polled → «90 vendidos · asistencia en conteo». The semáforo chips (D11) and the amber no-show chip (D19) are **deleted**. | The chip and the number were the same claim in two notations, and the number is the one that survives translation, colour-blindness and sunlight. The fourth reading is the ≤60 s window where the client's clock has moved a row past its hour but the poll has not returned its boarding numbers: «N disponibles» there is a **lie**, not merely stale, so the row reports only what is still true and waits. |
+| **D24** | The sold figure on an upcoming row is **`booked`, not `vendidos`** — held seats count as sold for this reading. `apartados` stays in the payload for the future detail view. | Product call. It makes `disponibles + vendidos === capacity` hold always, so the admin never sees seats vanish without explanation. The cost is named: the label "vendidos" includes seats that are held but not paid, which the detail view (deferred) is where that distinction belongs. |
+| **D25** | **`+N extra`** survives the chip cull as plain text, shown only when `booked >= capacity`. | It is the one fact a bare «0 disponibles» would hide — a flexible service can still take N more. Removing it would have been deletion dressed as simplification. |
+| **D26** | The time axis is **implicit**: rows are chronological, the hour leads each row inline, and the rail (D20), the fixed time column and the «Ahora» marker are all **removed**. Grouping is whitespace alone — 4 px within a row against 24 px between, a 6:1 ratio. | Order already *is* the timeline; a drawn spine adds no information the sequence does not carry. The eye groups by proximity before it groups by strokes, so the rail was paying pixels for work the spacing did for free — and the marker, having no spine to sit on, had nothing left to mark that the collapsed segment and the muted ink do not already say. |
+| **D27** | The card is titled **«Ocupación»**, not «Salidas»; the collapsed segment reads **«ya salieron»**, not «ya partieron». | «Salidas» names the objects — an inventory of departures. «Ocupación» names the question the card answers, in both tenses: it is the only word that survives a row crossing from «60 disponibles» to «85 asistentes», and it matches the feature's own name (US-A14). «Partir» sounds like boats; «salir» fits any service with a departure hour. |
 
 ## Data model
 
@@ -183,21 +198,23 @@ Server-derived, therefore no request body at all: this surface is a pure read.
    counts render.
 2. **Sales summary** — `SectionCard` with `MoneyText` for *Cobrado hoy*, the *folios de hoy*
    count, and the compact per-seller list (D14).
-3. **«Salidas» — the departures timeline** (`DeparturesTimeline.tsx`, D9-rev): the quick-day strip
-   (reusing the US-AG35 pieces: `FilterStrip` + `PosDatePickerSheet` +
-   `GET /api/pos/availability/days`) above one `SectionCard` holding the whole day on one axis —
-   collapsed past summary (D21) · departed rows · **«Ahora» node on the spine** (D18/D20, today only) ·
-   upcoming rows, all chronological (D15). Traffic light per D11 on upcoming rows only, suppressed
-   once a row is past (D19): functional colors, icon-paired, cited from `DESIGN_TOKENS.md` §3 —
-   never restated as hex.
+3. **«Ocupación»** (`DeparturesTimeline.tsx`, D9-rev + D27): the quick-day strip (reusing the
+   US-AG35 pieces: `FilterStrip` + `PosDatePickerSheet` + `GET /api/pos/availability/days`) above
+   one `SectionCard` holding the whole day in chronological order (D15) — the collapsed
+   «ya salieron» summary (D21) on top, then departed rows, then upcoming. Each row is two lines:
+   **«HH:MM · Nombre del servicio»**, then its single occupancy reading (D23). No chips, no
+   functional colour, no icons, no rail, no marker (D26) — the leading figure carries `fontWeight`
+   600 in primary ink and everything else stays secondary.
 
-Nothing truncates: the name wraps and the semáforo chip drops below the numbers when the width
-runs out, because a departure the admin cannot name is the one thing this screen exists to
-prevent. The rail costs no width because it *is* the time column (D20).
+Nothing truncates: the service name wraps to as many lines as it needs, because a departure the
+admin cannot name is the one thing this screen exists to prevent. Removing the fixed time column
+handed the full card width back to that name.
 
 **Pure module** `features/dashboard/timeline.ts` — `timelineItems(day)` (the D17 concatenation)
-and `hasDeparted(item, now, isToday)` (the D18 predicate that decides which side of the marker a
-row lands on). Kept out of the component so the rule is testable and stated once.
+and `hasDeparted(item, now, isToday)` (the D18 predicate that decides whether a row is past).
+Kept out of the component so the rule is testable and stated once. What the row then *says* is
+pinned separately by the render tests in `DeparturesTimeline.test.tsx` — the two are different
+questions and neither test file can answer the other's.
 
 **New hook** `features/dashboard/hooks/useDashboardDay.ts` — `refetchInterval: 60_000` +
 `refetchOnWindowFocus`; the same interval is applied to `useFolioCounts` while *Hoy* is mounted.
@@ -205,18 +222,27 @@ This is the app's first polling convention; the spec, not the code comment, is i
 
 ## Scenarios
 
-### US-A14 — occupancy traffic light
+### US-A14 — the occupancy reading
 
-**S-1 — the three states render from the numbers**
+**S-1 — a row states its occupancy in numbers** *(rewritten by D23 — was the traffic light)*
 Given today has slots booked 5/20, 17/20 and 20/20
 When the admin opens *Hoy*
-Then the rows read green (available), amber (≥ 80 %), red (full), in `start_time` order, each
-state icon-paired.
+Then the rows read «15 disponibles · 5 vendidos», «3 disponibles · 17 vendidos» and «0 disponibles
+· 20 vendidos», in `start_time` order, each led by the availability figure in primary ink.
+No chip, no functional colour, no icon carries any of it.
+
+**S-14 — held seats never go missing from the arithmetic** *(D24)*
+Given a slot of capacity 150 with 100 booked, of which 10 are apartados and 90 are paid
+When the dashboard is read
+Then the row reads «50 disponibles · 100 vendidos» — never «50 · 90», which would leave 10 seats
+unaccounted for on screen. The sold figure is `booked`; `apartados` rides in the payload for the
+deferred detail view.
 
 **S-2 — a flexible slot full on base capacity shows its margin**
 Given a service with `flex_capacity_pct = 10` and a slot booked 20/20
 When the dashboard is read
-Then the row is red with `flex_extra = 2` («+2 extra») — full on base, honest about the margin.
+Then the row reads «0 disponibles · 20 vendidos · +2 extra» (D25) — full on base, honest about the
+margin, which is the one fact a bare «0 disponibles» would hide.
 
 **S-3 — a zoned service shows reconciled totals**
 Given a zoned service whose slot totals are reconciled from `slot_zones` (18 booked of 26 across
@@ -259,14 +285,22 @@ When the dashboard is read
 Then the per-seller list shows Laura 300 00 and Marco 700 00 (D14 — `collected_by`, not
 `folios.agent_id`).
 
-### US-A90 — the departed segment (above the «Ahora» marker)
+### US-A90 — the departed segment (collapsed «ya salieron»)
 
-**S-9 — a departed slot reports boarding, not availability**
+**S-9 — a departed slot reports attendance, not availability**
 Given today's 07:00 slot sold 18 paid seats of which 16 were redeemed, and it is now 09:30 org
 time
 When the dashboard is read
 Then the slot appears in `departed[]` — not `occupancy[]` — as `vendidos 18 · abordaron 16 ·
-sin_usar 2`.
+sin_usar 2`, and the row reads **«16 asistentes de 18 vendidos»** (D23). The shortfall is the
+subtraction; no amber chip states it a second time.
+
+**S-15 — a departure that sold nothing says so** *(D23/D21)*
+Given today's 13:00 slot has left having sold no seats at all
+When the dashboard is read
+Then the row reads **«Sin ventas»**, not «0 asistentes de 0 vendidos», and it contributes nothing
+to the collapsed summary's attendance figure — which is suppressed entirely if no departure of the
+day sold anything. True and useless is still useless.
 
 **S-10 — a late boarder stops being a no-show**
 Given S-9, and the scanner redeems one more pass at 09:40
@@ -274,21 +308,21 @@ When the next poll fires
 Then the row reads `abordaron 17 · sin_usar 1` — nothing stored was reversed (US-A85: fulfilment
 is derived).
 
-**S-11 — a future day has nothing above the marker**
+**S-11 — a future day has no past segment at all**
 Given the admin selects tomorrow on the day strip
 When the dashboard is read with that date
-Then `departed` is empty, the timeline renders **no past segment and no «Ahora» marker** (D22),
-and the summary/pills remain today's (D12). Regression guard: before D9-rev the departed card was
-fed from the *today* query unconditionally, so tomorrow's list carried today's departures beneath
-it, unlabelled.
+Then `departed` is empty, the card renders **no «ya salieron» segment**, and the summary/pills
+remain today's (D12). Regression guard: before D9-rev the departed card was fed from the *today*
+query unconditionally, so tomorrow's list carried today's departures beneath it, unlabelled.
 
 **S-13 — a slot that departs between two polls**
 Given today's 14:30 slot is still in `occupancy[]` because the last poll ran at 14:29
 When the org-local clock reaches 14:31
-Then the row moves **above** the marker and greys immediately (D18), keeps its seat line because
-no boarding data exists yet, and shows **no chip** — never a greyed "Disponible" (D19); the
-collapsed summary counts it but makes no boarding claim about it (D21). On the next poll it gains
-`abordaron / sin usar`.
+Then the row moves into the **collapsed past segment** and greys immediately (D18), and reads
+**«N vendidos · asistencia en conteo»** — it must NOT keep showing «N disponibles», which is false
+the instant the service leaves (D23, strengthening the retired D19). The collapsed summary counts
+it but makes no attendance claim about it (D21). On the next poll it gains its «N asistentes de N
+vendidos».
 
 ### Multitenancy isolation (required)
 
@@ -317,6 +351,19 @@ org B's numbers appear nowhere.
 - [x] `SPEC.md`: glossary pair entry replaced, US-A90 + both Features-by-Phase lines re-worded and
       ticked (the boxes mean merged code, which #103/#104 delivered)
 
+### Occupancy reduction (Rev. 2026-08-17)
+
+- [x] `RowChip` (5 branches), `NowMarker`, the rail and the fixed time column **deleted**; the
+      component drops from 296 to ~215 lines and from 6 icon imports to 1
+- [x] The four readings of D23, incl. «Sin ventas» and the ≤60 s «asistencia en conteo»
+- [x] S-1 rewritten, S-14 and S-15 added; render tests in
+      `app-turistear/src/features/dashboard/components/DeparturesTimeline.test.tsx`
+- [x] `timeline.ts` and its 8 unit tests **unedited** — the split is logic, the chips were paint
+- [x] `GET /api/dashboard/day` untouched again; `apartados` and `sin_usar` stay in the payload
+      for the deferred detail view
+- [x] `SPEC.md`: glossary entry re-titled «Ocupación», US-A90 and the Features-by-Phase line
+      re-worded
+
 ## Deferred — and why each is safe to defer
 
 | What | Why it can wait |
@@ -327,6 +374,7 @@ org B's numbers appear nowhere.
 | US-AG26 — the agent's daily snapshot in Caja | A different role, screen and read; the Phase-2 bundle names it, this spec splits it out (D4). |
 | Any seller-facing *Hoy* | Upholds `role-based-ia-reorganization.md` Q3; revisiting it is a product decision, not a gap. |
 | Push infrastructure (SSE / Durable Objects) | The 60 s poll is operationally equivalent for seat counts; push is a stack-level commitment to make once something needs sub-second truth. |
+| **The row's detail view** (Rev. 2026-08-17) | Named at the reduction: tapping a row would open the full picture — the vendidos/apartados split D24 folds together, the per-folio attendance behind «85 de 90», and who has not shown up. The list's job is *monitoring*; drilling in is a second job with its own navigation question (sheet vs. route vs. deep-link into `/folios?slot=`), so it gets its own story rather than riding along. Everything it needs is **already in the payload** — `apartados` and `sin_usar` are returned and deliberately left unrendered. |
 
 ## Known behaviour change
 
