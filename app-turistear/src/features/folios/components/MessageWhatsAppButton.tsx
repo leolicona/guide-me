@@ -1,5 +1,5 @@
 import { Button, Tooltip } from '@mui/material'
-import WhatsAppIcon from '@mui/icons-material/WhatsApp'
+import { WhatsApp as WhatsAppIcon } from '@mui/icons-material'
 import { isSendablePhone, normalizePhone } from '../../pos/phone'
 
 // US-A82 D7/D8 — the card's RESTING verb: what the one button says when the folio owes no work.

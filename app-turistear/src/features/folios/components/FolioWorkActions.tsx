@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Alert, Button, Stack, TextField, Typography } from '@mui/material'
-import CheckCircleRounded from '@mui/icons-material/CheckCircleRounded'
+import { CheckCircleRounded } from '@mui/icons-material'
 import { ConfirmSheet, FormSheet, SectionCard } from '../../../components'
 import {
   useVerifyPayment,

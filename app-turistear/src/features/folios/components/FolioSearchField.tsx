@@ -1,6 +1,5 @@
 import { IconButton, InputAdornment, TextField } from '@mui/material'
-import SearchRounded from '@mui/icons-material/SearchRounded'
-import CloseRounded from '@mui/icons-material/CloseRounded'
+import { SearchRounded, CloseRounded } from '@mui/icons-material'
 
 // US-A83 (D1) — the search field: fixed above the filter strip, never behind a magnifier tap.
 //

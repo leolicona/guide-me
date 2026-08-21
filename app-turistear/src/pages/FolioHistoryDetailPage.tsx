@@ -12,7 +12,7 @@ import {
   Divider,
   Chip,
 } from '@mui/material'
-import ArrowBackRounded from '@mui/icons-material/ArrowBackRounded'
+import { ArrowBackRounded } from '@mui/icons-material'
 import { useFolio, useFolioCancellationQuote, useFolioEvents } from '../features/pos/hooks'
 import { useOrgDateFormatter } from '../features/organization'
 import { TicketQr } from '../features/pos/components/TicketQr'

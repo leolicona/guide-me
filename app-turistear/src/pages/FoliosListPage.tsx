@@ -8,8 +8,7 @@ import {
   Fade,
   Stack,
 } from '@mui/material'
-import TuneRounded from '@mui/icons-material/TuneRounded'
-import CalendarMonthRounded from '@mui/icons-material/CalendarMonthRounded'
+import { TuneRounded, CalendarMonthRounded } from '@mui/icons-material'
 import {
   useFolios,
   useFolioCounts,

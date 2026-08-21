@@ -12,10 +12,7 @@ import {
   Divider,
   Chip,
 } from '@mui/material'
-import CheckCircleRounded from '@mui/icons-material/CheckCircleRounded'
-import EventAvailableRounded from '@mui/icons-material/EventAvailableRounded'
-import EventBusyRounded from '@mui/icons-material/EventBusyRounded'
-import HourglassTopRounded from '@mui/icons-material/HourglassTopRounded'
+import { CheckCircleRounded, EventAvailableRounded, EventBusyRounded, HourglassTopRounded } from '@mui/icons-material'
 import { useFolio, useFolioCancellationQuote } from '../features/pos/hooks'
 import { PaymentBreakdown } from '../features/pos/components/PaymentBreakdown'
 import { TicketQr } from '../features/pos/components/TicketQr'

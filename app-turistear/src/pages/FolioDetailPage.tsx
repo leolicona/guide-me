@@ -18,7 +18,7 @@ import {
   FormControlLabel,
   Switch,
 } from '@mui/material'
-import ArrowBackRounded from '@mui/icons-material/ArrowBackRounded'
+import { ArrowBackRounded, BlockRounded, RemoveDoneRounded, CheckCircleRounded, ScheduleRounded, PhoneRounded, MailOutlineRounded, WhatsApp as WhatsAppIcon } from '@mui/icons-material'
 import {
   useFolio,
   useCancelFolio,
@@ -34,13 +34,7 @@ import { FolioWorkActions } from '../features/folios/components/FolioWorkActions
 import type { FolioDetail } from '../features/folios/types'
 import { useOrgDateFormatter } from '../features/organization'
 import type { CancellationQuote } from '../features/organization/types'
-import BlockRounded from '@mui/icons-material/BlockRounded'
-import RemoveDoneRounded from '@mui/icons-material/RemoveDoneRounded'
-import CheckCircleRounded from '@mui/icons-material/CheckCircleRounded'
-import ScheduleRounded from '@mui/icons-material/ScheduleRounded'
-import PhoneRounded from '@mui/icons-material/PhoneRounded'
-import MailOutlineRounded from '@mui/icons-material/MailOutlineRounded'
-import WhatsAppIcon from '@mui/icons-material/WhatsApp'
+
 import { isSendablePhone, normalizePhone } from '../features/pos/phone'
 import { BookingActions } from '../features/bookings'
 import { ServiceError } from '../services/authService'

@@ -1,6 +1,6 @@
 import { Button, Snackbar } from '@mui/material'
 import { useState } from 'react'
-import CheckCircleRounded from '@mui/icons-material/CheckCircleRounded'
+import { CheckCircleRounded } from '@mui/icons-material'
 import { useVerifyPayment, useMarkTicketsSent } from '../../bookings'
 import { useMyOrganization } from '../../organization'
 import { useMe } from '../../auth/hooks/useMe'
