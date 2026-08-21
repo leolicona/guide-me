@@ -105,10 +105,10 @@ async function addUnit(user: ReturnType<typeof userEvent.setup>, name: string) {
   console.log('DBG hiddenChain:', JSON.stringify(chain))
 }
 
-// BUG-032 — MUI leaves the wizard's container `aria-hidden` after a BottomSheet (SwipeableDrawer,
+// BUG-033 — MUI leaves the wizard's container `aria-hidden` after a BottomSheet (SwipeableDrawer,
 // keepMounted) closes, so the chrome's footer drops out of the accessibility tree. Pre-existing:
 // it reproduces on the untouched create path too. These queries opt into hidden nodes rather than
-// assert the bug is absent — drop `{ hidden: true }` when BUG-032 is fixed.
+// assert the bug is absent — drop `{ hidden: true }` when BUG-033 is fixed.
 const chromeButton = (name: RegExp) => screen.getByRole('button', { name, hidden: true })
 
 // Mounting the whole wizard — MUI theme, two keepMounted drawers, RHF + zodResolver — is the only

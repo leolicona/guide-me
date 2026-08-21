@@ -12,7 +12,7 @@ import {
 } from '@mui/material'
 import { usePosService } from '../features/pos/hooks'
 import { ServiceSelectionPanel } from '../features/pos/components/ServiceSelectionPanel'
-import { todayStr, addDays } from '../features/pos/dates'
+import { todayStr, posWindow, eachDay } from '../features/pos/dates'
 import { usePosFilters } from '../store/posFilters'
 import { ROUTES } from '../config/routes'
 
@@ -21,15 +21,15 @@ import { ROUTES } from '../config/routes'
 // the selection logic lives in exactly one place.
 export default function PosServicePage() {
   const { id } = useParams<{ id: string }>()
-  // US-AG30/AG33/AG35 — inherit the catalog's selection start day. An explicit pick stays a
-  // single day; the "Hoy" default (null) expands to the 3-day window [today, today+2].
-  const anchor = usePosFilters((s) => s.selection?.from ?? null)
+  // US-AG30/AG33/AG35, BUG-032 — inherit the catalog's selection WHOLE, the same way the Bottom
+  // Sheet does: a range keeps its `to`, a single-day pick collapses to that day, and no pick at
+  // all means the contextual week. Reading only `selection.from` hid every departure after the
+  // range's first day.
+  const selection = usePosFilters((s) => s.selection)
   const today = todayStr()
-  const days = anchor
-    ? [anchor]
-    : [today, addDays(today, 1), addDays(today, 2)]
-  const range = { from: days[0], to: days[days.length - 1] }
-  const { data: service, isLoading, isError } = usePosService(id, range)
+  const win = posWindow(selection, today)
+  const days = eachDay(win.from, win.to)
+  const { data: service, isLoading, isError } = usePosService(id, win)
   const navigate = useNavigate()
 
   const [added, setAdded] = useState(false)

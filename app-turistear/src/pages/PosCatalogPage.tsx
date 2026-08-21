@@ -137,14 +137,11 @@ export default function PosCatalogPage() {
     setActiveCategories((prev) =>
       prev.includes(c) ? prev.filter((x) => x !== c) : [...prev, c],
     )
-  // US-AG31 — tapping a card opens this service in the Bottom Sheet (no navigation, the
-  // catalog stays mounted). We carry the card's `next_slot_date` so the sheet can open on the
-  // service's next available departure (US-AG33) without touching the global filter. `added`
-  // drives the success Snackbar lifted up from the sheet.
-  const [openService, setOpenService] = useState<{
-    id: string
-    nextSlotDate: string | null
-  } | null>(null)
+  // US-AG31 — tapping a card opens this service in the Bottom Sheet (no navigation, the catalog
+  // stays mounted). The sheet needs nothing but the id: it derives its own day axis from the same
+  // date filter this page reads (BUG-032), so the card's `next_slot_date` is by construction the
+  // first departure it renders. `added` drives the success Snackbar lifted up from the sheet.
+  const [openServiceId, setOpenServiceId] = useState<string | null>(null)
   // US-AG36 (v2) — a unit-type card opens the type-centric stay sheet instead of the slot sheet.
   const [openLodging, setOpenLodging] = useState<LodgingStayTarget | null>(null)
   // US-AG45 — the ⚡ opens the SAME sheet in express mode (today-only, phone-only, cash).
@@ -291,10 +288,7 @@ export default function PosCatalogPage() {
                             propertyName: item.property_name || undefined,
                             maxCapacity: item.max_capacity,
                           })
-                        : setOpenService({
-                            id: item.id,
-                            nextSlotDate: item.next_slot_date,
-                          })
+                        : setOpenServiceId(item.id)
                     }
                     sx={{
                       height: '100%',
@@ -484,11 +478,10 @@ export default function PosCatalogPage() {
 
       {/* US-AG31 — Bottom Sheet for fast sale config; closes + snackbars on add. */}
       <ServiceSheet
-        serviceId={openService?.id ?? null}
-        nextSlotDate={openService?.nextSlotDate ?? null}
-        onClose={() => setOpenService(null)}
+        serviceId={openServiceId}
+        onClose={() => setOpenServiceId(null)}
         onAdded={() => {
-          setOpenService(null)
+          setOpenServiceId(null)
           setAdded(true)
         }}
       />

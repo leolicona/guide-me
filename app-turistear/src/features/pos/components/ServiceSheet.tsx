@@ -10,16 +10,12 @@ import { usePosService } from '../hooks'
 import { usePosFilters } from '../../../store/posFilters'
 import { ServiceSelectionPanel } from './ServiceSelectionPanel'
 import { ExpressSalePanel } from './ExpressSalePanel'
-import { todayStr, addDays } from '../dates'
+import { todayStr, posWindow, eachDay } from '../dates'
 import { useMyOrganization } from '../../organization'
 
 interface ServiceSheetProps {
   /** The service to configure; `null` keeps the sheet closed. */
   serviceId: string | null
-  /** US-AG33 — the catalog card's next available departure (bounded to the agent's selected
-   * window). With no explicit date pick, the sheet opens its 3-day window here so the service's
-   * upcoming schedule shows immediately. `null` (no in-window availability) falls back to today. */
-  nextSlotDate?: string | null
   /** US-AG45 (D1) — ⚡ Venta Express: same sheet, second body. Express is same-day ONLY and
    * IGNORES the catalog's selected date (D5 — the customer is standing at the counter). */
   express?: boolean
@@ -34,34 +30,27 @@ interface ServiceSheetProps {
 // context (US-AG30), so the slot matrix matches the date the agent filtered to.
 export function ServiceSheet({
   serviceId,
-  nextSlotDate,
   express = false,
   onClose,
   onAdded,
 }: ServiceSheetProps) {
-  // US-AG30/AG33 — inherit the catalog's selected day. An explicit date stays a single day
-  // (a hyper-specific search shouldn't get extra noise). With no explicit pick, the sheet opens
-  // on the service's next available departure (`nextSlotDate`) rather than blindly on today, so a
-  // service that doesn't run today still surfaces its upcoming schedule immediately — then a
-  // rolling 3-day window [start, start+2] from there. Falls back to today when the card reported
-  // no in-window availability. The global filter is never mutated (`today` stays real today).
-  const anchor = usePosFilters((s) => s.selection?.from ?? null)
+  // US-AG30/AG33/AG35, BUG-032 — the sheet reads the SAME window as the catalog behind it:
+  // the agent's selection whole (a range keeps its `to`; a single-day pick collapses to that
+  // day), or the contextual week when nothing is picked. Reading only `selection.from` is what
+  // made a card advertising Saturday's departure open on an empty Thursday. The global filter is
+  // never mutated (`today` stays real today).
+  const selection = usePosFilters((s) => s.selection)
   const { data: org } = useMyOrganization()
   const today = todayStr(org?.timezone) // US-A66 — org-local "today"
-  const start = anchor ?? nextSlotDate ?? today
   // US-AG45 (D5) — Express is TODAY only, whatever the catalog is filtered to: a walk-up at the
   // counter must never be sold a ticket for the day the agent happened to be browsing.
-  const days = express
-    ? [today]
-    : anchor
-      ? [anchor]
-      : [start, addDays(start, 1), addDays(start, 2)]
-  const range = { from: days[0], to: days[days.length - 1] }
+  const win = express ? { from: today, to: today } : posWindow(selection, today)
+  const days = eachDay(win.from, win.to)
   const {
     data: service,
     isLoading,
     isError,
-  } = usePosService(serviceId ?? undefined, range)
+  } = usePosService(serviceId ?? undefined, win)
 
   return (
     <SwipeableDrawer

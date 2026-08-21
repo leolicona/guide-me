@@ -220,7 +220,7 @@ Then the payload and navigation are byte-identical to the pre-feature flow
 
 | Question | Smallest change that answers it |
 |---|---|
-| Does a closed `BottomSheet` really strand the page outside the accessibility tree in a real browser, as it does in jsdom (**BUG-032**, found writing these tests)? | Open the unit sheet in Chrome with VoiceOver, close it, and try to reach the wizard footer. If it reproduces, the fix is in `BottomSheet`, not here — every sheet host in the app inherits it. |
+| Does a closed `BottomSheet` really strand the page outside the accessibility tree in a real browser, as it does in jsdom (**BUG-033**, found writing these tests)? | Open the unit sheet in Chrome with VoiceOver, close it, and try to reach the wizard footer. If it reproduces, the fix is in `BottomSheet`, not here — every sheet host in the app inherits it. |
 | Does the picker need a *«Vi mal, quiero crear una propiedad»* affordance in Step 2, after the choice is committed? | Today the answer is the Back button. If usage shows people finishing wizards against the wrong property, add the property name in Step 2 as a chip with «Cambiar» that returns to Step 1 with drafts intact. |
 | Should ⊕ stay visible once an org has, say, 20 properties — or does it become the rarer act that deserves demotion? | A count threshold on the ⊕ row's prominence. One constant; not worth guessing before there is an org with 20. |
 | Is «en total» the right second figure on the catalog row, or should it be a money anchor («desde $1,200/noche», already computed)? | One string in `ServiceRow.tsx:48`; both values are in hand. |

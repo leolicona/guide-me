@@ -224,6 +224,14 @@ const { data: service } = usePosService(id, range)
 So an agent who filtered the catalog to a date drills into a detail that already
 shows that day's slots — the day context is inherited, no re-selection.
 
+> **Amended by BUG-032 (2026-08-21).** The snippet above is US-AG30's single-day world. US-AG35
+> made the selection a **range** (`{ from, to? }`), and this reader — the sheet's twin included —
+> kept taking `selection.from` alone, so a 21–23 Aug filter opened the detail on the 21st and
+> called the 22nd's departure nonexistent. Both detail hosts now resolve the window with
+> `posWindow(selection, today)` from `features/pos/dates.ts` — the same call the catalog list
+> makes. What this section asserts is unchanged and now actually true: **the day context is
+> inherited, no re-selection.** All of it, not its first day.
+
 ---
 
 ### Catalog card — the «Próximo» block (US-AG56, amendment)
