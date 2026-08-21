@@ -78,9 +78,25 @@ const voidFolio = async (email: string, id: string) => {
 
 const getFolioRow = (id: string) =>
   env.DB.prepare(
-    `SELECT status, sale_mode, customer_name, amount_paid, commission_amount, refund_status,
-            refund_amount, refund_pin, refunded_at, cancellation_source
-     FROM folios WHERE id = ?`,
+    `SELECT f.*,
+      (SELECT CASE
+        WHEN COALESCE(SUM(CASE WHEN fl.cancelled_at IS NULL THEN 1 ELSE 0 END),0) = 0 THEN 'cancelled'
+        WHEN COALESCE(SUM(CASE WHEN fl.cancelled_at IS NULL
+            AND COALESCE((SELECT SUM(a2.amount) FROM folio_payment_allocations a2 WHERE a2.folio_line_id = fl.id),0) < fl.line_total
+            THEN 1 ELSE 0 END),0) > 0 THEN 'booking'
+        ELSE 'paid' END
+       FROM folio_lines fl WHERE fl.folio_id = f.id) AS status,
+      (SELECT COALESCE(
+        (SELECT MIN(fl.booking_expires_at) FROM folio_lines fl
+          WHERE fl.folio_id = f.id AND fl.cancelled_at IS NULL AND fl.booking_expires_at IS NOT NULL),
+        (SELECT MIN(fl.booking_expires_at) FROM folio_lines fl
+          WHERE fl.folio_id = f.id AND fl.booking_expires_at IS NOT NULL))) AS booking_expires_at,
+      (SELECT CASE
+        WHEN EXISTS (SELECT 1 FROM folio_lines fl WHERE fl.folio_id = f.id AND fl.refund_status = 'pending') THEN 'pending'
+        WHEN EXISTS (SELECT 1 FROM folio_lines fl WHERE fl.folio_id = f.id AND fl.refund_status = 'refunded') THEN 'refunded'
+        ELSE 'none' END) AS refund_status,
+      (SELECT SUM(fl.refund_amount) FROM folio_lines fl WHERE fl.folio_id = f.id AND fl.refund_status <> 'none') AS refund_amount
+     FROM folios f WHERE f.id = ?`,
   )
     .bind(id)
     .first<any>()
@@ -363,6 +379,30 @@ describe('US-AG47 — the 60-second void', () => {
       const row = await getFolioRow(id)
       expect(row.status).toBe('paid')
     }
+  })
+
+  it('S-26 — Enviado alone no longer forfeits the void (WhatsApp-first, D28)', async () => {
+    const { organizationId } = await seedUser({ email: AGENT_EMAIL, role: 'agent' })
+    const serviceId = await seedService(organizationId, { commissionValue: 1000 })
+    const slotId = await seedSlot(organizationId, serviceId)
+
+    const sale = await expressConfirm(AGENT_EMAIL, slotId)
+    expect(sale.status).toBe(201)
+    // WhatsApp-first stamps the send at Cobrar (D26/D27) — same write the mark endpoint makes.
+    // The customer has NOT opened it: tickets_viewed_at stays null.
+    await env.DB.prepare(
+      `UPDATE folios SET tickets_sent_at = unixepoch() WHERE id = ?`,
+    )
+      .bind(sale.json.folio.id)
+      .run()
+
+    const { status, json } = await voidFolio(AGENT_EMAIL, sale.json.folio.id)
+    expect(status, JSON.stringify(json)).toBe(200)
+    expect(json.status).toBe('cancelled')
+    const row = await getFolioRow(sale.json.folio.id)
+    expect(row.status).toBe('cancelled')
+    expect(row.refund_status).toBe('refunded')
+    expect(row.refund_pin).toBeNull() // D15 still holds under the relaxed guard
   })
 
   it('S-22 — another org\'s folio cannot be voided (404, never 403)', async () => {

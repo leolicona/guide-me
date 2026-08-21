@@ -5,7 +5,6 @@ import {
   Typography,
   Button,
   IconButton,
-  ButtonBase,
   Card,
   CardActionArea,
   CardContent,
@@ -17,7 +16,7 @@ import {
   Badge,
   Snackbar,
 } from '@mui/material'
-import { filterChipSx, filterStripSx } from '../features/filters'
+import { ClearableFilterChip, filterStripSx } from '../features/filters'
 import { MoneyText } from '../components'
 import ShoppingCartRounded from '@mui/icons-material/ShoppingCartRounded'
 import BoltRounded from '@mui/icons-material/BoltRounded'
@@ -64,6 +63,29 @@ const rangePillLabel = (from: string, to: string): string => {
   return a.getUTCMonth() === b.getUTCMonth()
     ? `${a.getUTCDate()}–${b.getUTCDate()} ${MONTHS_ES[b.getUTCMonth()]}`
     : `${a.getUTCDate()} ${MONTHS_ES[a.getUTCMonth()]} – ${b.getUTCDate()} ${MONTHS_ES[b.getUTCMonth()]}`
+}
+
+// The resting label of the calendar chip — the name of the default window. `contextPills(today)[0]`
+// is ALWAYS `(hoy → domingo próximo)`: both branches compute the same `comingSunday`, only the
+// (never-rendered) internal key flips esta_semana/este_fin by weekday. So one static word is true
+// all seven days. On a Sunday the span collapses to today alone — not a lie: the week has one day
+// left. Naming it here is what stops the default from being an invisible state.
+const DEFAULT_RANGE_LABEL = 'Esta semana'
+
+// The resting label of the category chip. It names the AXIS, not the state, because "Todas" is
+// already the sheet's word for the empty selection (PosCategorySheet) — reusing it out here would
+// give one word two jobs one tap apart. Paired with DEFAULT_RANGE_LABEL the strip reads as a
+// sentence at rest ("Categorías · Esta semana") instead of two mute icons.
+const DEFAULT_CATEGORY_LABEL = 'Categorías'
+
+// The category chip's label: the default axis name, one category by name, or the first + a "+N"
+// overflow. "Tours +1" beats "2 categorías" — it keeps a real name on the chip, so the agent reads
+// WHAT is filtered rather than only how many. The first is taken in SERVICE_CATEGORIES order, not
+// tap order, so the same selection always renders the same label however it was assembled.
+const categoryChipLabel = (active: ServiceCategory[]): string => {
+  if (active.length === 0) return DEFAULT_CATEGORY_LABEL
+  const [first, ...rest] = SERVICE_CATEGORIES.filter((c) => active.includes(c))
+  return rest.length === 0 ? categoryLabel(first) : `${categoryLabel(first)} +${rest.length}`
 }
 
 // "VIE 27 JUN" — fuller label for the "Próximo" footer field (adds month for context).
@@ -166,38 +188,50 @@ export default function PosCatalogPage() {
       <Fade in timeout={400}>
         <Box>
         {/* US-AG35/A37 — Filter Strip: a category-filter button (opens the category Bottom Sheet)
-            beside the calendar button. Both are icon buttons at the SAME 48px height (filterChipSx),
-            each showing its active selection inline. The 24px bottom margin separates this control
-            group from the service list below. */}
+            beside the calendar button. Both are ClearableFilterChip at the SAME 48px height; each
+            shows its active selection inline, carries its own ✕ to drop it, and NAMES its default
+            when there is no selection — so the strip always states the catalog's scope rather than
+            leaving "no filter" as a mute icon. The 24px bottom margin separates this control group
+            from the service list below. */}
         <Box sx={{ ...filterStripSx, mb: 3 }}>
           {/* Category filter — opens the sheet; mirrors the calendar button's height. Shown only
               when the catalog actually has categories to filter by. */}
           {presentCategories.length > 0 && (
-            <ButtonBase
+            <ClearableFilterChip
+              active={activeCategories.length > 0}
               onClick={() => setCategoryPickerOpen(true)}
-              sx={filterChipSx(activeCategories.length > 0)}
-              aria-label="Filtrar por categoría"
+              onClear={() => setActiveCategories([])}
+              clearLabel="Quitar el filtro de categoría"
+              aria-label={
+                activeCategories.length > 0
+                  ? `Filtrar por categoría — ${activeCategories.map(categoryLabel).join(', ')}`
+                  : 'Filtrar por categoría'
+              }
+              startIcon={<TuneRounded sx={{ fontSize: 20 }} />}
             >
-              <TuneRounded sx={{ fontSize: 20 }} />
-              {activeCategories.length > 0 &&
-                (activeCategories.length === 1
-                  ? categoryLabel(activeCategories[0])
-                  : `${activeCategories.length} categorías`)}
-            </ButtonBase>
+              {categoryChipLabel(activeCategories)}
+            </ClearableFilterChip>
           )}
 
-          {/* Calendar button — opens the sheet; shows any explicit day/range pick. */}
-          <ButtonBase
+          {/* Calendar button — opens the sheet. It shows an explicit day/range pick, and NAMES the
+              default window (DEFAULT_RANGE_LABEL) when there is none, so "no filter" is a stated
+              scope rather than a bare icon. Its ✕ returns the catalog to that default (US-AG35).
+              Note what the ✕ deliberately does NOT touch: `hideSoldOut` is a persisted Settings
+              preference, not a strip filter — resetting it here would surprise the agent later. */}
+          <ClearableFilterChip
+            active={calendarSelection !== null}
             onClick={() => setDatePickerOpen(true)}
-            sx={filterChipSx(calendarSelection !== null)}
+            onClear={() => setSelection(null)}
+            clearLabel="Quitar el filtro de fecha"
             aria-label="Abrir calendario"
+            startIcon={<CalendarMonthRounded sx={{ fontSize: 20 }} />}
           >
-            <CalendarMonthRounded sx={{ fontSize: 20 }} />
-            {calendarSelection &&
-              (calendarSelection.to
+            {calendarSelection
+              ? calendarSelection.to
                 ? rangePillLabel(calendarSelection.from, calendarSelection.to)
-                : dayPillLabel(calendarSelection.from))}
-          </ButtonBase>
+                : dayPillLabel(calendarSelection.from)
+              : DEFAULT_RANGE_LABEL}
+          </ClearableFilterChip>
         </Box>
 
         {isLoading && (
@@ -420,6 +454,7 @@ export default function PosCatalogPage() {
           setSelection(r)
           setDatePickerOpen(false)
         }}
+        onClear={() => setSelection(null)}
       />
 
       {/* US-A37 — the category filter Bottom Sheet (multi-select, applies live). */}

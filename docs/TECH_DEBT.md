@@ -2,26 +2,51 @@
 
 This document tracks known technical debt, deferred tasks, and architectural improvements that are planned for future phases.
 
-## 25. `folios.status` (+ its sibling roll-ups) Survive as Reconciled Columns — the 0065 Drop Is Deferred — ⚠️ OPEN
+## 26. `contextPills` Carries Copy the UI Never Renders (`PILL_LABELS`)
 
-**Context:** Line Autonomy (`docs/folios/line-autonomy.spec.md`) planned migration `0065` to drop
-`folios.status`, `booking_expires_at`, `refund_status` and `refund_amount` once every reader
-derived from the lines. The reader migration IS complete (PRs #95–#97: serializers, the five QR
-gates, the `/t` page, filters and facets all answer from `folio_lines` + `folio_payment_allocations`),
-and the write paths maintain the columns as worst-case roll-ups **in the same commits** — they
-cannot drift, exactly like `amount_paid`/`commission_amount` after the paid-ledger.
+**Context:** `features/pos/dates.ts:90` defines `PILL_LABELS` (`ESTA SEMANA` / `ESTE FIN` /
+`SIG. SEMANA`) and `contextPills` returns a `label` on every pill. Those labels were specified by
+US-AG35 and **never rendered**: the only consumer, `PosCatalogPage`, reads `contextPills(today)[0]`
+for its `from`/`to` and nothing else. `SPEC.md`'s US-AG35 line described the pills as shipped for
+months — the drift that left the catalog's default window nameless until US-AG55
+(`docs/pos/filter-strip-reset.spec.md` D12).
 
-**Why deferred:** the physical drop collides with the spec's own mechanical scope boundary.
-27 test files hand-seed `INSERT INTO folios (…, status, …)` — including
-`test/cash/agent-balance-cash-drops.test.ts`, which the boundary requires to pass **unedited** —
-so the drop forces the exact big-bang the epic's phasing was designed to avoid.
+**Also unused:** the second pill of each branch (`este_fin` on Mon–Thu, `sig_semana` on Fri–Sun).
+Only index `0` is ever read, and both branches compute the same `[0]` range (`today → comingSunday`).
 
-**Exit path:** one mechanical PR that (1) centralizes folio seeding into a shared test helper,
-(2) sweeps the 27 column lists, (3) amends the scope boundary's wording to cover fixture-only
-edits, then (4) ships `0065` and deletes the three legacy valves that read the column
-(`deriveStatusSql`'s no-allocations branch, the scanner/`/t` fallbacks, `anyLineStatusSql`'s
-fallback) plus the columns from `schema.ts`/Zod/app types. Until then the columns are caches with
-a single writer each — safe, but a second home for facts the lines own.
+**Why deferred:** `dates.test.ts` asserts the labels and both pills by name, and US-AG55's scope
+boundary pins that file to pass **unedited** — so removing the copy means editing the very test that
+proves US-AG55 changed no ranges. Doing it in the same PR would blur the two.
+
+**Action required:**
+- **Who:** whoever next touches `/pos` date context — or, if the context pills return as real
+  controls, whoever builds them (at which point this stops being debt).
+- **What:** collapse `contextPills` to the single default range it actually serves, drop
+  `PILL_LABELS` and `ContextPillKey`, and rewrite `dates.test.ts` around the surviving contract.
+- **Reference:** `docs/pos/filter-strip-reset.spec.md` (D12, Deferred table).
+
+
+## 25. `folios.status` (+ its sibling roll-ups) Survive as Reconciled Columns — ✅ CLOSED (2026-08-12)
+
+**Closed:** migration `0065` drops `folios.status`, `booking_expires_at`, `refund_status` and
+`refund_amount`. No code in `src/` reads or writes them; every one of those four facts now derives
+from `folio_lines` + `folio_payment_allocations` (`utils/folioStatus.ts`), and the three legacy
+valves that used to fall back to the columns are deleted — a folio with no allocations reads as an
+unpaid hold, which is the honest answer (`test/folios/derived-status.test.ts`). `cancelled_at`
+carries what `status = 'cancelled'` used to: it is both the fact and the optimistic-flip guard.
+The refund obligation travels to the lines through `applyCancellation`'s `reversal.refundAmount`
+rather than through a folio column.
+
+**Residual (fixtures only, no production surface):** `test/helpers/apply-migrations.ts` re-adds the
+four columns as **test-only dead storage** after the migrations run, because ~27 test files express
+a folio's intent by hand-seeding `INSERT INTO folios (…, status, …)` — including
+`test/cash/agent-balance-cash-drops.test.ts`, which the line-autonomy spec's scope boundary requires
+to pass unedited. `materializeSeededFolio` (`test/helpers/tenancy.ts`) reads that intent and
+materializes it as line facts (a minimal line, the ledger row, the allocations, the stamps, the
+clock) — the same shape 0062–0064 gave real pre-feature folios — and `readDerivedFolio` gives an
+assertion the same answer the API serves. Sweep fixtures onto real line seeding opportunistically,
+then delete the shim. Nothing in `src` can see those columns, so a fixture reading one gets what it
+wrote, never the product's answer.
 
 ## 24. Two Date Vocabularies: `useOrgDateFormatter` Follows the BROWSER's Locale — ✅ CLOSED (2026-08-07)
 

@@ -139,7 +139,7 @@ export const viewTicket = async (c: TicketContext) => {
       // outer-column correlations (the displayMethodSql trick).
       lineAllocated: sql<number | null>`(select sum(a.amount) from folio_payment_allocations a where a.folio_line_id = folio_lines.id)`,
       linePending: sql<number>`exists(select 1 from folio_payment_allocations a join folio_payments p on p.id = a.payment_id where a.folio_line_id = folio_lines.id and p.verification = 'pending')`,
-      folioStatus: folios.status,
+      folioCancelledAt: folios.cancelledAt,
       paymentVerification: folios.paymentVerification,
       description: services.description,
     })
@@ -167,15 +167,17 @@ export const viewTicket = async (c: TicketContext) => {
   // US-A22 (line-autonomy F2) — the line's own cancellation counts: a half-cancelled folio stays
   // `paid`, so without the line half this page would show a valid-looking pass for a line whose
   // seat went back to the pool.
-  const cancelled = row.folioStatus === 'cancelled' || row.lineCancelledAt !== null
+  const cancelled = row.folioCancelledAt !== null || row.lineCancelledAt !== null
   // US-A89 (F4, PR-7) — the pass shows when THE LINE is paid and ITS money is cleared: a line
   // settled per line renders while its siblings keep the folio a `booking`, and a sibling's
   // pending transfer no longer hides a cash-funded line's pass. Legacy rows (no allocations)
   // keep the folio-level answer until the column retires (TECH_DEBT #25).
+  // Valve deleted (TECH_DEBT #25): no allocations → fail closed, never render a pass on
+  // missing facts.
   const linePaidCleared =
-    row.lineAllocated === null
-      ? row.folioStatus === 'paid' && row.paymentVerification !== 'pending'
-      : Math.max(0, Number(row.lineAllocated)) >= row.lineTotal && !row.linePending
+    row.lineAllocated !== null &&
+    Math.max(0, Number(row.lineAllocated)) >= row.lineTotal &&
+    !row.linePending
   if (!cancelled && !linePaidCleared) {
     return renderNotFound(c)
   }

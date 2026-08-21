@@ -1,6 +1,6 @@
 import type { Context } from 'hono'
 import type { BatchItem } from 'drizzle-orm/batch'
-import { and, asc, desc, eq, gte, inArray, lte, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, gte, inArray, isNull, lte, sql } from 'drizzle-orm'
 import { getDb, type Db } from '../../db/client'
 import {
   accommodationReservations,
@@ -72,7 +72,7 @@ import {
   orderForCascade,
   seedAndCascade,
 } from '../../utils/folioAllocations'
-import { anyLineStatusSql, deriveStatusSql } from '../../utils/folioStatus'
+import { anyLineStatusSql, deriveBookingExpiresAtSql, deriveStatusSql } from '../../utils/folioStatus'
 import {
   readListCancellationRequests,
   readListLines,
@@ -1495,7 +1495,6 @@ export const confirmSale = async (c: PosContext) => {
       customerName: input.customer_name ?? null,
       customerEmail: input.customer_email ?? null,
       customerPhone: input.customer_phone ?? null,
-      status,
       // US-LG08 — the folio no longer stores a payment method; it is DERIVED from the ledger's
       // collection rows (the payment row written below), shown as the shared method or 'Mixto'.
       // US-AG41/US-A67 — the transfer's reference + the verification gate (see `cleared` above).
@@ -1506,7 +1505,6 @@ export const confirmSale = async (c: PosContext) => {
       total,
       amountPaid,
       commissionAmount,
-      bookingExpiresAt,
       // Cancellation Policy Engine (D6) — freeze the refund ladder in force RIGHT NOW. The customer
       // agreed to the terms they were shown, so a later edit to the org's policy must never re-price
       // this sale. Copied verbatim (it was validated on the way into the column) and never rewritten
@@ -2333,9 +2331,9 @@ export const settleBooking = async (c: PosContext) => {
   const folioRows = await db
     .select({
       id: folios.id,
-      status: folios.status,
+      status: deriveStatusSql, // TECH_DEBT #25
       total: folios.total,
-      bookingExpiresAt: folios.bookingExpiresAt,
+      bookingExpiresAt: deriveBookingExpiresAtSql, // TECH_DEBT #25 — epoch seconds
       customerName: folios.customerName,
       customerEmail: folios.customerEmail,
       // The deposit's method — the settle default when the caller sends none (US-LG08).
@@ -2360,7 +2358,7 @@ export const settleBooking = async (c: PosContext) => {
   if (folio.status === 'cancelled') {
     throw new ApiError('FOLIO_CANCELLED', 409, 'Folio is cancelled')
   }
-  if (folio.bookingExpiresAt && folio.bookingExpiresAt.getTime() <= Date.now()) {
+  if (folio.bookingExpiresAt && folio.bookingExpiresAt * 1000 <= Date.now()) {
     throw new ApiError('BOOKING_EXPIRED', 409, 'Booking has expired')
   }
 
@@ -2524,7 +2522,7 @@ export const settleBooking = async (c: PosContext) => {
       db
         .update(folios)
         .set({
-          status: 'paid',
+          // TECH_DEBT #25 — status derives from the lines (this settle fully allocates them).
           // With a cancelled line this is NOT the folio's total: the customer pays what the live
           // lines are owed, and amount_paid records what was actually collected.
           amountPaid: folio.amountPaid + balanceAmount,
@@ -2577,8 +2575,7 @@ export const settleBooking = async (c: PosContext) => {
     db
       .update(folios)
       .set({
-        status: 'paid',
-        // With a cancelled line this is NOT the folio's total (see the deferred branch).
+        // TECH_DEBT #25 — status derives from the lines (see the deferred branch).
         amountPaid: folio.amountPaid + balanceAmount,
         commissionAmount: folio.commissionAmount + commissionTopUp,
         settledAt: settledNow,
@@ -2691,7 +2688,7 @@ export const settleFolioLine = async (c: PosContext) => {
   const folioRows = await db
     .select({
       id: folios.id,
-      status: folios.status,
+      status: deriveStatusSql, // TECH_DEBT #25
       total: folios.total,
       amountPaid: folios.amountPaid,
       commissionAmount: folios.commissionAmount,
@@ -2836,7 +2833,7 @@ export const settleFolioLine = async (c: PosContext) => {
         amountPaid: folio.amountPaid + lineRemaining,
         commissionAmount: folio.commissionAmount + commissionDelta,
         ...(completing
-          ? { status: 'paid' as const, settledAt: settledNow, settledBy: agent.userId }
+          ? { settledAt: settledNow, settledBy: agent.userId } // status derives (TECH_DEBT #25)
           : {}),
         ...(balanceNeedsVerification
           ? {
@@ -2918,7 +2915,7 @@ export const cancelBookingLine = async (c: PosContext) => {
 
   const folioRows = await db
     .select({
-      status: folios.status,
+      status: deriveStatusSql, // TECH_DEBT #25
       paymentVerification: folios.paymentVerification,
       customerEmail: folios.customerEmail,
     })
@@ -2996,7 +2993,7 @@ export const verifyPayment = async (c: PosContext) => {
     .select({
       id: folios.id,
       agentId: folios.agentId,
-      status: folios.status,
+      status: deriveStatusSql, // TECH_DEBT #25
       paymentMethod: displayMethodSql,
       paymentVerification: folios.paymentVerification,
       paymentReference: folios.paymentReference,
@@ -3235,12 +3232,11 @@ export const rejectPayment = async (c: PosContext) => {
     db
       .update(folios)
       .set({
-        status: 'cancelled',
+        // TECH_DEBT #25 — status/refund derive from the lines; the stamp is the fact.
         cancelledAt: now,
         cancelledBy: admin.userId,
         cancellationReason: body.reason ?? 'Pago electrónico rechazado',
         cancellationClawback: true, // the sale was void — the seller loses the commission
-        refundStatus: 'none', // nothing was collected, so nothing to refund
         updatedAt: now,
       })
       .where(and(eq(folios.id, id), eq(folios.organizationId, org))),
@@ -3356,7 +3352,7 @@ export const cancelBooking = async (c: PosContext) => {
   const body = (await c.req.json().catch(() => ({}))) as { reason?: string }
 
   const folioRows = await db
-    .select({ status: folios.status, paymentVerification: folios.paymentVerification })
+    .select({ status: deriveStatusSql, paymentVerification: folios.paymentVerification })
     .from(folios)
     .where(folioActionFilter(id, agent))
     .limit(1)
@@ -3430,7 +3426,9 @@ export const cancelBooking = async (c: PosContext) => {
 // commission ledger rows IN FULL, releases the seats, records the refund as already handed back
 // across the counter (no Refund PIN, D15), and NEVER consults the cancellation ladder — for a
 // same-day departure the terminal tier would keep 100% of a sale that never happened (D14).
-// Strictly the selling seller's own Express sale, inside the window, undelivered, unscanned.
+// Strictly the selling seller's own Express sale, inside the window, unopened, unscanned — since
+// the WhatsApp-first amendment (D26–D28) every successful sale is Enviado at birth, so a launched
+// send alone no longer blocks; the guard trusts tickets_viewed_at, set by the tourist's own device.
 const VOID_WINDOW_SECONDS = 60
 
 export const voidExpressSale = async (c: PosContext) => {
@@ -3444,11 +3442,10 @@ export const voidExpressSale = async (c: PosContext) => {
   const folioRows = await db
     .select({
       agentId: folios.agentId,
-      status: folios.status,
+      status: deriveStatusSql, // TECH_DEBT #25
       saleMode: folios.saleMode,
       amountPaid: folios.amountPaid,
       commissionAmount: folios.commissionAmount,
-      ticketsSentAt: folios.ticketsSentAt,
       ticketsViewedAt: folios.ticketsViewedAt,
       settledAt: folios.settledAt,
       // ONE clock — the DB's. The Workers runtime freezes Date.now() per request (and the test
@@ -3474,8 +3471,11 @@ export const voidExpressSale = async (c: PosContext) => {
   if (Number(folio.elapsedSeconds) > VOID_WINDOW_SECONDS) {
     throw closed('La ventana de anulación (60 s) ya cerró')
   }
-  // Delivered = the ticket left the counter; the void's premise (nothing happened) is gone.
-  if (folio.ticketsSentAt || folio.ticketsViewedAt) {
+  // Delivered = the customer OPENED the ticket (beacon or scan, which stamps both — D13); only
+  // then is the void's premise (nothing happened) gone. tickets_sent_at deliberately does NOT
+  // block (D28): under WhatsApp-first it is stamped on every successful Cobrar, and the old guard
+  // would close the 60-second window the moment it opens.
+  if (folio.ticketsViewedAt) {
     throw closed('Los boletos ya fueron entregados')
   }
 
@@ -3502,19 +3502,20 @@ export const voidExpressSale = async (c: PosContext) => {
   const flipped = await db
     .update(folios)
     .set({
-      status: 'cancelled',
+      // TECH_DEBT #25 — status/refund derive from the lines (the void's line stamps below carry
+      // refund_status 'refunded' + the amount); the folio keeps the hand-back audit.
       cancelledAt: now,
       cancelledBy: agent.userId,
       cancellationSource: 'agent',
       cancellationReason: 'Venta Express anulada por el vendedor',
       cancellationClawback: folio.commissionAmount > 0,
-      refundStatus: 'refunded',
-      refundAmount: folio.amountPaid,
       refundedAt: now,
       refundedBy: agent.userId,
       updatedAt: now,
     })
-    .where(and(eq(folios.id, id), eq(folios.organizationId, org), eq(folios.status, 'paid')))
+    // TECH_DEBT #25 — the flip guard is the cancellation stamp itself (the pre-check above
+    // already verified the derived status was 'paid').
+    .where(and(eq(folios.id, id), eq(folios.organizationId, org), isNull(folios.cancelledAt)))
     .returning({ id: folios.id })
   if (flipped.length === 0) throw closed('Esta venta ya no puede anularse')
 
@@ -3636,7 +3637,7 @@ export const claimReminder = async (c: PosContext) => {
 
   const folioRows = await db
     .select({
-      status: folios.status,
+      status: deriveStatusSql, // TECH_DEBT #25
       reminderSentAt: folios.reminderSentAt,
       reminderSentBy: folios.reminderSentBy,
     })
@@ -3804,7 +3805,7 @@ export const listAgentFolios = async (c: PosContext) => {
       amountPaid: folios.amountPaid,
       createdAt: folios.createdAt,
       cancelledAt: folios.cancelledAt,
-      bookingExpiresAt: folios.bookingExpiresAt,
+      bookingExpiresAt: deriveBookingExpiresAtSql, // TECH_DEBT #25 — epoch seconds
       reminderStatus: folios.reminderStatus,
       reminderSentAt: folios.reminderSentAt,
       reminderSentBy: folios.reminderSentBy,
@@ -3866,7 +3867,7 @@ export const listAgentFolios = async (c: PosContext) => {
         ? Math.floor(r.cancelledAt.getTime() / 1000)
         : null,
       booking_expires_at: r.bookingExpiresAt
-        ? Math.floor(r.bookingExpiresAt.getTime() / 1000)
+        ? r.bookingExpiresAt // derived: epoch seconds already
         : null,
       reminder_status: r.reminderStatus,
       reminder_sent_at: r.reminderSentAt
@@ -3890,7 +3891,7 @@ export const listAgentFolios = async (c: PosContext) => {
       overdue:
         r.status === 'booking' &&
         r.bookingExpiresAt != null &&
-        r.bookingExpiresAt.getTime() < now.getTime(),
+        r.bookingExpiresAt * 1000 < now.getTime(),
     })),
   })
 }

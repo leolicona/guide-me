@@ -29,6 +29,9 @@ export function SectionCard({ title, action, padded = true, children, sx, ...res
               justifyContent: 'space-between',
               gap: 2,
               mb: title ? 2 : 0,
+              // Full-bleed (padded={false}) applies to the CONTENT rows, never the header: the
+              // title keeps the card's 24px inset so every card top reads identically.
+              ...(padded ? {} : { px: 3, pt: 3 }),
             }}
           >
             {typeof title === 'string' ? (

@@ -1,7 +1,8 @@
 # Feature: Line autonomy — the folio becomes the container, the line owns its money and its life
 
-> **Status: BUILT** (PRs #90–#98, 2026-08-11) — F1–F3 in full; F4's readers migrated in full,
-> the physical column drop deferred (see D11's amendment + `TECH_DEBT.md` #25).
+> **Status: BUILT** (PRs #90–#98, 2026-08-11) — F1–F3 in full; F4 complete, including the
+> physical column drop: migration `0065` shipped separately (2026-08-12) and closed
+> `TECH_DEBT.md` #25. D11 lands as originally drafted — the column dies.
 > Supersedes, deliberately and by name:
 > - `docs/folios/folio-state-machine.spec.md` § Scope boundary items 1–2 (*"`folios.status` keeps
 >   exactly three values"* / *"no new writer of state"*) — this feature retires the column itself.
@@ -80,7 +81,7 @@ What this feature must NOT change, checkable by machine:
 | **D8** | **Clearance is derived per line, no new column**: a line's QR signs when the line is *pagada* AND every payment its allocations touch is `verified`/`not_required`. | `folio_payments.verification` is already per movement (paid-ledger). The line-level answer is a join away; a stored per-line clearance would be a second home for a fact the ledger owns. |
 | **D9** | **Commission books per line, at that line's milestones**: percent accrues on money allocated to the line; fixed books when the line reaches *pagada*. `commission`/`commission_reversal` rows in `folio_payments` gain `folio_line_id`; a partial cancellation reverses **only that line's** commission (the split `LineOutcome` already computes). `folios.commission_amount` stays a reconciled roll-up, now Σ of per-line accruals. | The inputs are already snapshotted per line; the reversal math is already per line inside the engine. Folio-level booking would recompute from lines and then discard the per-line result — doing the work without keeping the data. |
 | **D10** | **Deterministic total backfill, `backfilled = true` — one code path after** (precedent: migration 0061). Each phase's migration backfills what its columns need, purely from columns that already exist: **paid** folios → every line's allocations sum exactly to `line_total` (a fully-paid folio is unambiguous; only the payment→line detail is reconstructed, oldest payment first through the same cascade); **booking** folios → the D2/D3 seed-and-cascade applied **retroactively** over the historical `amount_paid`; **cancelled** folios → lines arrive cancelled from the folio's own snapshotted columns, the refund debt distributed pro-rata to each line's allocated money; hold clocks **copied** from the folio's snapshot, never recalculated (0064). Mechanics per 0061: deterministic ids + `NOT EXISTS` guards (idempotent re-run), timestamps from the **source** column, `backfilled = 1` on every synthetic row. The conservation invariants run **twice**: over the whole database as each migration's verification, and forever in the write-path tests. | *(Reverses the no-backfill decision taken during the interview: an organization is **live in production**, realized 2026-08-11.)* Orphan rows would force every reader — gates, cards, reports, cancellation — to carry `if (has allocations) … else legacy` indefinitely; the backfill makes "every folio has allocations" true for the whole universe once, so the branch dies before it is born. `backfilled` separates memory from reconstruction — forensic metadata, **never a logic branch** — and makes a wrong seeding rule reparable (`DELETE WHERE backfilled = 1`, re-run corrected). The retroactive cascade is written **once**, in TypeScript (the live path); the migration SQL is verified against it as an **oracle** on a copied fixture, so the rule never exists twice unchecked. |
-| **D11** *(amended at close)* | **`folios.status`: every reader derives from the lines; the column survives as a RECONCILED roll-up** — the paid-ledger's exact posture for `amount_paid`/`commission_amount`. *(As drafted the column died in 0065; the drop collided with this spec's own scope boundary — 27 hand-seeded test fixtures including a boundary file — and is deferred to `TECH_DEBT.md` #25 with its exit path. Writers maintain the roll-up in the same commits, so it cannot drift.)* Original: the column dies; the API field survives as a derived roll-up until the epic's last PR. Worst-case derivation: any line apartada → `booking` · all lines cancelled → `cancelled` · else → `paid`. Readers (lists, facets, search, reports, portal, the five QR gates) migrate to line states PR by PR inside F4; the derived field is deleted in the last one. | One truth (the lines) with no big-bang: rewriting six surfaces + the portal in one release makes any single bug block the whole deploy. With no external API consumers the compat field is a *sequencing convenience within the epic*, not a contract to maintain — so "desaparece del modelo" completes, in order. |
+| **D11** *(shipped in full)* | **`folios.status`: every reader derives from the lines, and the column is GONE** (migration `0065`, 2026-08-12). *(It briefly survived as a reconciled roll-up because the drop collided with this spec's own scope boundary — 27 hand-seeded fixtures including a boundary file. Resolved without editing that file: the columns live on as test-only dead storage in the harness, and the fixtures' intent is materialized as line facts. `TECH_DEBT.md` #25 is closed.)* Original: the column dies; the API field survives as a derived roll-up until the epic's last PR. Worst-case derivation: any line apartada → `booking` · all lines cancelled → `cancelled` · else → `paid`. Readers (lists, facets, search, reports, portal, the five QR gates) migrate to line states PR by PR inside F4; the derived field is deleted in the last one. | One truth (the lines) with no big-bang: rewriting six surfaces + the portal in one release makes any single bug block the whole deploy. With no external API consumers the compat field is a *sequencing convenience within the epic*, not a contract to maintain — so "desaparece del modelo" completes, in order. |
 | **D12** | **What stays on the folio**: identity & contact, the portal token and PIN, the delivery axis (`tickets_sent_at`/`tickets_viewed_at`), the reminder claim, and the credit aggregate (`credit_amount` accrues per line-expiry, spends folio-level). | The gesture is one: one WhatsApp send, one portal link, one reminder listing every pending line *inside* the message. Splitting them multiplies agent taps without new information — and converting agent work into taps is the named failure mode of the outbox spec (`folio-state-machine` § Context 3), not its goal. |
 | **D13** | **`folio_line_id`, nullable, on `folio_events` AND `notifications`.** Null = folio-scoped (`created`, `tickets_sent`…); set = line-scoped (`payment`, `cancelled`, `rescheduled`…). The outbox re-send guard becomes a **unique expression index** on `(folio_id, COALESCE(folio_line_id,''), event, channel)`. | One story per folio, now naming its protagonists (*"Canceló Chichén Itzá (jue 16) — reembolso $350"*); a separate line-events table would mean braiding two timelines at every render, forever. The `COALESCE` is load-bearing: SQLite treats NULLs as distinct in unique indexes, so a plain composite index would let folio-scoped rows duplicate — and without the line in the key, cancelling line B months after line A **collides with A's guard and the customer is silently never told** (same defect class the guard exists to prevent, pointed the other way). |
 | **D14** | **The card: customer stays in the header (US-A82 stands); the rail becomes an attention semaphore** derived from the pending-work set (`folioPendingWork` extended per line): empty → green *(all good)* · work exists → amber *(transfer to verify, balance to collect, live petition, tickets unsent)* · urgent → red *(refund owed, line expiring today)*. Always icon-paired; each line in the card's body carries its own icon + state; one shared derivation feeds rail, pills and facets. | *(User decision.)* A mixed folio has no single honest money color, but it has a single honest answer to *"does this need me?"* — which is the seller's actual question at the list. Deriving rail and pill counts from one function means the color and the count can never disagree (the US-A84 property). Functional colors and the never-color-alone rule per `DESIGN_TOKENS.md` §3 — this spec cites, never restates, hex. |
@@ -174,22 +175,25 @@ UPDATE folio_lines SET booking_expires_at =
   WHERE booking_expires_at IS NULL AND …  -- apartada lines only; exact predicate in the body
 ```
 
-### Phase 4 — migration `0065_retire_folio_status.sql` *(DEFERRED at close — TECH_DEBT #25)*
+### Phase 4 — migration `0065_retire_folio_status.sql` *(SHIPPED 2026-08-12)*
 
 ```sql
--- D11 (as drafted). The columns whose facts moved to the lines:
---   ALTER TABLE folios DROP COLUMN status;
---   ALTER TABLE folios DROP COLUMN booking_expires_at;
---   ALTER TABLE folios DROP COLUMN refund_status;
---   ALTER TABLE folios DROP COLUMN refund_amount;
--- NOT SHIPPED: the drop breaks 27 hand-seeded test fixtures including the scope boundary's own
--- "passes unedited" file — the exact big-bang the phasing forbids. The columns remain as
--- reconciled roll-ups (the paid-ledger posture); TECH_DEBT #25 records the exit path.
+-- D11 as drafted. The columns whose facts moved to the lines:
+ALTER TABLE folios DROP COLUMN status;
+ALTER TABLE folios DROP COLUMN booking_expires_at;
+ALTER TABLE folios DROP COLUMN refund_status;
+ALTER TABLE folios DROP COLUMN refund_amount;
 ```
 
+The fixtures that made this a big-bang are handled without editing the boundary file: the test
+harness re-adds the four columns as **test-only dead storage** after the migrations run, and
+`materializeSeededFolio` turns what a fixture declares there into the line facts the product
+actually reads. `src` cannot see them. `TECH_DEBT.md` #25 carries that residual.
+
 **Authoritative vs derived, stated once:** allocations (+ the line's cancellation columns) are
-authoritative. *Pagada/apartada*, clearance (D8), the folio's `status` field (D11, until
-removed), `pending_balance` per line, the semaphore, and fulfilment are all derivations.
+authoritative. *Pagada/apartada*, clearance (D8), the folio's `status` field (D11 — served from
+the lines, with no column behind it since 0065), `pending_balance` per line, the semaphore, and
+fulfilment are all derivations.
 The refund PIN, portal token, delivery axis and credit stay folio-authoritative (D12).
 
 ## Business rules (enforced server-side)
@@ -377,8 +381,9 @@ that timestamp — none extended, none shortened.
       served from the lines; the column behind it is a reconciled roll-up (D11 amendment).*
 - [x] Card semaphore + per-line rows (D14); facets any-line (D15)
 - [x] `SPEC.md`: boxes ticked, superseded decisions annotated in their home specs
-- [ ] Migration 0065 (the physical drop) — DEFERRED to `TECH_DEBT.md` #25, blocker + exit path
-      recorded there
+- [x] Migration 0065 — the physical drop, plus the deletion of the three legacy fallback valves.
+      A folio with no allocations now reads as an unpaid hold rather than trusting a column
+      (`test/folios/derived-status.test.ts`). Residual, fixtures only: `TECH_DEBT.md` #25.
 
 ## Deferred — and why each is safe to defer
 

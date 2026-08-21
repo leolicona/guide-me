@@ -16,14 +16,20 @@ import AddRounded from '@mui/icons-material/AddRounded'
 import RemoveRounded from '@mui/icons-material/RemoveRounded'
 import BoltRounded from '@mui/icons-material/BoltRounded'
 import QrCode2Rounded from '@mui/icons-material/QrCode2Rounded'
+import UndoRounded from '@mui/icons-material/UndoRounded'
 import { useQueryClient } from '@tanstack/react-query'
 import { useConfirmSale } from '../hooks'
 import { useRepeatPress } from '../hooks'
 import { effectiveRemaining } from '../capacity'
 import { isSendablePhone } from '../phone'
+import { ticketWhatsAppUrl, DEFAULT_TICKET_TEMPLATE } from '../delivery'
 import { voidExpressSale } from '../../../services/posService'
 import { ServiceError } from '../../../services/authService'
 import { formatMoney, amountToCents, centsToAmount } from '../../catalog/types'
+import { useMyOrganization } from '../../organization'
+import { useMe } from '../../auth/hooks/useMe'
+import { useMarkTicketsSent } from '../../bookings/hooks/useBookingActions'
+import { TicketWhatsAppButton } from '../../bookings/components/TicketWhatsAppButton'
 import { ExpressTicketOverlay } from './ExpressTicketOverlay'
 import type { PosServiceDetail, PosSlot, Folio } from '../types'
 import { POS_QUERY_KEY } from '../hooks/usePosServices'
@@ -53,9 +59,15 @@ const errorMessage = (error: unknown): string => {
 // none hidden — D6/D7 diverge from US-AG32 deliberately) · price inside [mín, base] · phone ·
 // Cobrar. After each sale the service AND departure stay selected (D20): seats → 1, price → base,
 // phone cleared, tally up — the next customer in the queue starts at zero taps.
+// WhatsApp-first (D26–D27): Cobrar launches the wa.me ticket send and lands back on this reset
+// form; the strip carries WhatsApp · Mostrar QR · Deshacer, and the QR overlay is the backup.
 export function ExpressSalePanel({ service, today }: ExpressSalePanelProps) {
   const queryClient = useQueryClient()
   const confirm = useConfirmSale()
+  // D26 — the WhatsApp-first send needs the org template + the sender's name at Cobrar time.
+  const { data: org } = useMyOrganization()
+  const { data: me } = useMe()
+  const markSent = useMarkTicketsSent('seller')
 
   const todaySlots = useMemo(
     () =>
@@ -151,10 +163,21 @@ export function ExpressSalePanel({ service, today }: ExpressSalePanelProps) {
       },
       {
         onSuccess: (folio) => {
-          const token = folio.lines[0]?.qr_token ?? null
           setLastSale({ folio, at: Date.now() })
           setVoidWindowOpen(true)
-          setOverlayToken(token) // the QR IS the delivery — full-bleed, immediately
+          // D26/D27 — WhatsApp-first: Cobrar LAUNCHES the send; the QR overlay stays closed
+          // (the backup, via Mostrar QR). Enviado is stamped ONLY when the window actually
+          // opened — a popup blocker, or user activation expired over slow signal, leaves the
+          // folio Pendiente so the US-A80 queue catches it and the strip's button is the retry.
+          const waUrl = folio.portal_link
+            ? ticketWhatsAppUrl(org?.wa_ticket_template || DEFAULT_TICKET_TEMPLATE, {
+                folio,
+                agentName: me?.name ?? '',
+                orgName: org?.name ?? 'Turistear Ya!',
+                portalLink: folio.portal_link,
+              })
+            : null
+          if (waUrl && window.open(waUrl, '_blank')) markSent.mutate(folio.id)
           setTally((t) => ({ count: t.count + 1, cents: t.cents + folio.total }))
           // D20 — reset for the next customer: service + departure HELD.
           setSeats(1)
@@ -387,6 +410,10 @@ export function ExpressSalePanel({ service, today }: ExpressSalePanelProps) {
             <Typography variant="body2" sx={{ fontWeight: 600, flex: 1, minWidth: 140 }}>
               ✓ Venta · {formatMoney(lastSale.folio.total)}
             </Typography>
+            {/* D26 (amending D20) — the strip is the landing surface: the WhatsApp re-send
+                (doubling as the retry when the launch was blocked, D27), the QR backup, and
+                Deshacer while the 60s window lasts. */}
+            <TicketWhatsAppButton folio={lastSale.folio} variant="icon" />
             <Button
               size="small"
               startIcon={<QrCode2Rounded />}
@@ -394,6 +421,17 @@ export function ExpressSalePanel({ service, today }: ExpressSalePanelProps) {
             >
               Mostrar QR
             </Button>
+            {inVoidWindow && (
+              <Button
+                size="small"
+                color="error"
+                startIcon={<UndoRounded />}
+                disabled={voiding}
+                onClick={handleVoid}
+              >
+                Deshacer
+              </Button>
+            )}
           </Stack>
         )}
 
@@ -417,9 +455,8 @@ export function ExpressSalePanel({ service, today }: ExpressSalePanelProps) {
         </Button>
       </Box>
 
-      {/* The handoff screen carries the sale's actions too (amended): WhatsApp + Deshacer live
-          next to the QR, so Cobrar lands on ONE surface and "Siguiente venta" returns to the
-          already-reset form. The footer strip keeps only Mostrar QR to re-open it. */}
+      {/* D26 — the BACKUP handoff: opened via Mostrar QR for the customer who prefers to scan
+          (or when the send launch failed). Cobrar no longer opens it. */}
       <ExpressTicketOverlay
         qrToken={overlayToken}
         serviceName={service.name}

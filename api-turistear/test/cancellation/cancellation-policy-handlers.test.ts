@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { env, SELF } from 'cloudflare:test'
-import { seedUser, seedTwoOrgs, clearTenancyDb } from '../helpers/tenancy'
+import { materializeSeededFolio, seedUser, seedTwoOrgs, clearTenancyDb } from '../helpers/tenancy'
 import { buildFakeJwt } from '../helpers/jwt'
 
 // Cancellation Policy Engine — the WIRING.
@@ -182,14 +182,34 @@ const seedLedger = async (o: {
       )
       .run()
   }
+  // TECH_DEBT #25 — the ledger is the last thing a fixture seeds, so this is where the folio's
+  // lines get their allocations (what the product now reads instead of `folios.amount_paid`).
+  await materializeSeededFolio(o.folioId)
 }
 
 // --- reads -----------------------------------------------------------------
 
 const folioRow = (id: string) =>
   env.DB.prepare(
-    `SELECT status, refund_status, refund_amount, refund_pin, cancellation_clawback,
-            cancellation_source, cancellation_reason FROM folios WHERE id = ?`,
+    `SELECT f.*,
+      (SELECT CASE
+        WHEN COALESCE(SUM(CASE WHEN fl.cancelled_at IS NULL THEN 1 ELSE 0 END),0) = 0 THEN 'cancelled'
+        WHEN COALESCE(SUM(CASE WHEN fl.cancelled_at IS NULL
+            AND COALESCE((SELECT SUM(a2.amount) FROM folio_payment_allocations a2 WHERE a2.folio_line_id = fl.id),0) < fl.line_total
+            THEN 1 ELSE 0 END),0) > 0 THEN 'booking'
+        ELSE 'paid' END
+       FROM folio_lines fl WHERE fl.folio_id = f.id) AS status,
+      (SELECT COALESCE(
+        (SELECT MIN(fl.booking_expires_at) FROM folio_lines fl
+          WHERE fl.folio_id = f.id AND fl.cancelled_at IS NULL AND fl.booking_expires_at IS NOT NULL),
+        (SELECT MIN(fl.booking_expires_at) FROM folio_lines fl
+          WHERE fl.folio_id = f.id AND fl.booking_expires_at IS NOT NULL))) AS booking_expires_at,
+      (SELECT CASE
+        WHEN EXISTS (SELECT 1 FROM folio_lines fl WHERE fl.folio_id = f.id AND fl.refund_status = 'pending') THEN 'pending'
+        WHEN EXISTS (SELECT 1 FROM folio_lines fl WHERE fl.folio_id = f.id AND fl.refund_status = 'refunded') THEN 'refunded'
+        ELSE 'none' END) AS refund_status,
+      (SELECT SUM(fl.refund_amount) FROM folio_lines fl WHERE fl.folio_id = f.id AND fl.refund_status <> 'none') AS refund_amount
+     FROM folios f WHERE f.id = ?`,
   )
     .bind(id)
     .first<{
@@ -336,6 +356,8 @@ describe('Scenario 3 — a redeemed line retains everything (D7)', () => {
       lineTotal: 50_000, redeemedCount: 1,
     })
     await seedLine({ organizationId, folioId, serviceId, slotId, slotDate: date, slotStartTime: time, lineTotal: 50_000 })
+    // The line swap took the old allocations with it (CASCADE) — re-spread the same money.
+    await materializeSeededFolio(folioId)
 
     const { json } = await cancel(ADMIN, folioId)
     // 50_000 (delivered, full) + 25_000 (half of the unused line) = 75_000 retained.

@@ -23,13 +23,12 @@ interface ExpressTicketOverlayProps {
   onClose: () => void
 }
 
-// US-T07 / US-AG45 (D20, amended) — the counter-handoff surface IS the confirmation surface:
-// the QR full-bleed on PURE WHITE at ≥280px / level L (a dense URL-form token scanned off
-// another phone's screen, possibly in direct sun), with the sale's actions ON the same screen —
-// WhatsApp for the customer who asks for the receipt instead of scanning, Deshacer while the 60s
-// window lasts, and one primary "Siguiente venta" back to the reset form. Merging the two
-// surfaces removes the Listo → strip hop: Cobrar lands here, one tap returns to selling.
-// Auto-hides after ~20s so the code isn't left exposed to the queue; re-opened by "Mostrar QR".
+// US-T07 / US-AG45 (D26 — the BACKUP handoff): the QR full-bleed on PURE WHITE at ≥280px /
+// level L (a dense URL-form token scanned off another phone's screen, possibly in direct sun).
+// Since WhatsApp-first, Cobrar launches the wa.me send and lands on the strip — this surface
+// opens only via "Mostrar QR", for the customer who prefers to scan or when the launch failed.
+// It keeps the sale's actions (WhatsApp re-send, Deshacer) so the backup path is still complete.
+// Auto-hides after ~20s so the code isn't left exposed to the queue.
 const AUTO_HIDE_MS = 20_000
 
 export function ExpressTicketOverlay({
@@ -94,10 +93,10 @@ export function ExpressTicketOverlay({
           <br />y su boleto queda entregado.
         </Typography>
 
-        {/* The sale's actions, on the same screen as its QR (amended in build): WhatsApp for
-            the customer who asks for the receipt instead of scanning; Deshacer while the 60s
-            window lasts. Sending by WhatsApp marks the tickets delivered, which closes the
-            void window — the server enforces that order regardless of what renders here. */}
+        {/* The sale's actions stay on the backup surface too: WhatsApp re-send, and Deshacer
+            while the 60s window lasts. Since D28 a launched send no longer closes the void
+            window — only the customer opening the ticket (Visto) or a scan does, and the
+            server enforces that regardless of what renders here. */}
         <Stack direction="row" spacing={2} sx={{ alignItems: 'center' }}>
           {folio && <TicketWhatsAppButton folio={folio} variant="icon" />}
           {inVoidWindow && (

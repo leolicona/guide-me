@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest'
 import { env, SELF } from 'cloudflare:test'
-import { seedUser, seedTwoOrgs, clearAffiliateDb } from '../helpers/tenancy'
+import { materializeSeededFolio, seedUser, seedTwoOrgs, clearAffiliateDb } from '../helpers/tenancy'
 import { buildFakeJwt } from '../helpers/jwt'
 
 // US-AG52 — reagendar mientras el lugar es tuyo.
@@ -91,6 +91,7 @@ const seedFolio = async (opts: {
     .run()
   await env.DB.prepare(`UPDATE slots SET booked = booked + ? WHERE id = ?`)
     .bind(qty, opts.slotId).run()
+  await materializeSeededFolio(folioId)
   return { folioId, lineId }
 }
 
@@ -133,7 +134,25 @@ describe('US-AG52 — a live apartado moves to another departure', () => {
     expect((await line(lineId)).slot_date).toBe(dayOffset(9))
 
     // D17 — recomputed from the new departure, so "pagas 24 h antes de tu primer tour" stays true.
-    const folio = await env.DB.prepare(`SELECT booking_expires_at, status FROM folios WHERE id = ?`)
+    const folio = await env.DB.prepare(`SELECT f.*,
+      (SELECT CASE
+        WHEN COALESCE(SUM(CASE WHEN fl.cancelled_at IS NULL THEN 1 ELSE 0 END),0) = 0 THEN 'cancelled'
+        WHEN COALESCE(SUM(CASE WHEN fl.cancelled_at IS NULL
+            AND COALESCE((SELECT SUM(a2.amount) FROM folio_payment_allocations a2 WHERE a2.folio_line_id = fl.id),0) < fl.line_total
+            THEN 1 ELSE 0 END),0) > 0 THEN 'booking'
+        ELSE 'paid' END
+       FROM folio_lines fl WHERE fl.folio_id = f.id) AS status,
+      (SELECT COALESCE(
+        (SELECT MIN(fl.booking_expires_at) FROM folio_lines fl
+          WHERE fl.folio_id = f.id AND fl.cancelled_at IS NULL AND fl.booking_expires_at IS NOT NULL),
+        (SELECT MIN(fl.booking_expires_at) FROM folio_lines fl
+          WHERE fl.folio_id = f.id AND fl.booking_expires_at IS NOT NULL))) AS booking_expires_at,
+      (SELECT CASE
+        WHEN EXISTS (SELECT 1 FROM folio_lines fl WHERE fl.folio_id = f.id AND fl.refund_status = 'pending') THEN 'pending'
+        WHEN EXISTS (SELECT 1 FROM folio_lines fl WHERE fl.folio_id = f.id AND fl.refund_status = 'refunded') THEN 'refunded'
+        ELSE 'none' END) AS refund_status,
+      (SELECT SUM(fl.refund_amount) FROM folio_lines fl WHERE fl.folio_id = f.id AND fl.refund_status <> 'none') AS refund_amount
+     FROM folios f WHERE f.id = ?`)
       .bind(folioId).first<any>()
     expect(folio.status).toBe('booking')
     const expected = Math.floor(new Date(`${dayOffset(9)}T09:00:00Z`).getTime() / 1000) - 86_400
@@ -150,15 +169,39 @@ describe('US-AG52 — a live apartado moves to another departure', () => {
     await reschedule(AGENT, folioId, [{ folio_line_id: lineId, to_slot_id: to }])
 
     const folio = await env.DB.prepare(
-      `SELECT amount_paid, commission_amount, cancellation_policy_snapshot FROM folios WHERE id = ?`,
+      `SELECT f.*,
+      (SELECT CASE
+        WHEN COALESCE(SUM(CASE WHEN fl.cancelled_at IS NULL THEN 1 ELSE 0 END),0) = 0 THEN 'cancelled'
+        WHEN COALESCE(SUM(CASE WHEN fl.cancelled_at IS NULL
+            AND COALESCE((SELECT SUM(a2.amount) FROM folio_payment_allocations a2 WHERE a2.folio_line_id = fl.id),0) < fl.line_total
+            THEN 1 ELSE 0 END),0) > 0 THEN 'booking'
+        ELSE 'paid' END
+       FROM folio_lines fl WHERE fl.folio_id = f.id) AS status,
+      (SELECT COALESCE(
+        (SELECT MIN(fl.booking_expires_at) FROM folio_lines fl
+          WHERE fl.folio_id = f.id AND fl.cancelled_at IS NULL AND fl.booking_expires_at IS NOT NULL),
+        (SELECT MIN(fl.booking_expires_at) FROM folio_lines fl
+          WHERE fl.folio_id = f.id AND fl.booking_expires_at IS NOT NULL))) AS booking_expires_at,
+      (SELECT CASE
+        WHEN EXISTS (SELECT 1 FROM folio_lines fl WHERE fl.folio_id = f.id AND fl.refund_status = 'pending') THEN 'pending'
+        WHEN EXISTS (SELECT 1 FROM folio_lines fl WHERE fl.folio_id = f.id AND fl.refund_status = 'refunded') THEN 'refunded'
+        ELSE 'none' END) AS refund_status,
+      (SELECT SUM(fl.refund_amount) FROM folio_lines fl WHERE fl.folio_id = f.id AND fl.refund_status <> 'none') AS refund_amount
+     FROM folios f WHERE f.id = ?`,
     ).bind(folioId).first<any>()
     expect(folio.amount_paid).toBe(90000)
     expect(folio.commission_amount).toBe(0)
-    const payments = await env.DB.prepare(
-      `SELECT COUNT(*) AS n FROM folio_payments WHERE folio_id = ?`,
-    ).bind(folioId).first<{ n: number }>()
-    // A reschedule moves a DATE. The ladder never runs.
-    expect(payments!.n).toBe(0)
+    // A reschedule moves a DATE. The ladder never runs: no refund, no clawback, no new charge —
+    // only the deposit the fixture already collected. (TECH_DEBT #25: the deposit HAS to exist as
+    // a ledger row now, because that is where the line's coverage comes from.)
+    const payments = (
+      await env.DB.prepare(
+        `SELECT entry_type, amount FROM folio_payments WHERE folio_id = ? ORDER BY created_at`,
+      )
+        .bind(folioId)
+        .all()
+    ).results as Array<{ entry_type: string; amount: number }>
+    expect(payments).toEqual([{ entry_type: 'payment', amount: 90000 }])
   })
 
   it('S-3 — a full destination refuses, and the SOURCE still holds the seats', async () => {
@@ -354,7 +397,25 @@ describe('US-AG52 — a live apartado moves to another departure', () => {
 
     await reschedule(AGENT, folioId, [{ folio_line_id: lineId, to_slot_id: to }])
 
-    const folio = await env.DB.prepare(`SELECT reminder_status FROM folios WHERE id = ?`)
+    const folio = await env.DB.prepare(`SELECT f.*,
+      (SELECT CASE
+        WHEN COALESCE(SUM(CASE WHEN fl.cancelled_at IS NULL THEN 1 ELSE 0 END),0) = 0 THEN 'cancelled'
+        WHEN COALESCE(SUM(CASE WHEN fl.cancelled_at IS NULL
+            AND COALESCE((SELECT SUM(a2.amount) FROM folio_payment_allocations a2 WHERE a2.folio_line_id = fl.id),0) < fl.line_total
+            THEN 1 ELSE 0 END),0) > 0 THEN 'booking'
+        ELSE 'paid' END
+       FROM folio_lines fl WHERE fl.folio_id = f.id) AS status,
+      (SELECT COALESCE(
+        (SELECT MIN(fl.booking_expires_at) FROM folio_lines fl
+          WHERE fl.folio_id = f.id AND fl.cancelled_at IS NULL AND fl.booking_expires_at IS NOT NULL),
+        (SELECT MIN(fl.booking_expires_at) FROM folio_lines fl
+          WHERE fl.folio_id = f.id AND fl.booking_expires_at IS NOT NULL))) AS booking_expires_at,
+      (SELECT CASE
+        WHEN EXISTS (SELECT 1 FROM folio_lines fl WHERE fl.folio_id = f.id AND fl.refund_status = 'pending') THEN 'pending'
+        WHEN EXISTS (SELECT 1 FROM folio_lines fl WHERE fl.folio_id = f.id AND fl.refund_status = 'refunded') THEN 'refunded'
+        ELSE 'none' END) AS refund_status,
+      (SELECT SUM(fl.refund_amount) FROM folio_lines fl WHERE fl.folio_id = f.id AND fl.refund_status <> 'none') AS refund_amount
+     FROM folios f WHERE f.id = ?`)
       .bind(folioId).first<{ reminder_status: string }>()
     // Keeping the flag is exactly what makes the second cycle silent today.
     expect(folio!.reminder_status).toBe('none')
@@ -395,7 +456,25 @@ describe('US-AG52 — a PAID folio moves, and its ticket moves with it (D16)', (
     expect(rows).toHaveLength(2)
     expect(rows.every((r) => r.status === 'pending')).toBe(true)
 
-    const folio = await env.DB.prepare(`SELECT amount_paid, status FROM folios WHERE id = ?`)
+    const folio = await env.DB.prepare(`SELECT f.*,
+      (SELECT CASE
+        WHEN COALESCE(SUM(CASE WHEN fl.cancelled_at IS NULL THEN 1 ELSE 0 END),0) = 0 THEN 'cancelled'
+        WHEN COALESCE(SUM(CASE WHEN fl.cancelled_at IS NULL
+            AND COALESCE((SELECT SUM(a2.amount) FROM folio_payment_allocations a2 WHERE a2.folio_line_id = fl.id),0) < fl.line_total
+            THEN 1 ELSE 0 END),0) > 0 THEN 'booking'
+        ELSE 'paid' END
+       FROM folio_lines fl WHERE fl.folio_id = f.id) AS status,
+      (SELECT COALESCE(
+        (SELECT MIN(fl.booking_expires_at) FROM folio_lines fl
+          WHERE fl.folio_id = f.id AND fl.cancelled_at IS NULL AND fl.booking_expires_at IS NOT NULL),
+        (SELECT MIN(fl.booking_expires_at) FROM folio_lines fl
+          WHERE fl.folio_id = f.id AND fl.booking_expires_at IS NOT NULL))) AS booking_expires_at,
+      (SELECT CASE
+        WHEN EXISTS (SELECT 1 FROM folio_lines fl WHERE fl.folio_id = f.id AND fl.refund_status = 'pending') THEN 'pending'
+        WHEN EXISTS (SELECT 1 FROM folio_lines fl WHERE fl.folio_id = f.id AND fl.refund_status = 'refunded') THEN 'refunded'
+        ELSE 'none' END) AS refund_status,
+      (SELECT SUM(fl.refund_amount) FROM folio_lines fl WHERE fl.folio_id = f.id AND fl.refund_status <> 'none') AS refund_amount
+     FROM folios f WHERE f.id = ?`)
       .bind(folioId).first<any>()
     expect(folio.status).toBe('paid')
     expect(folio.amount_paid).toBe(300000)
@@ -442,6 +521,8 @@ describe('US-AG52 — a PAID folio moves, and its ticket moves with it (D16)', (
        VALUES (?, ?, ?, ?, ?, 'Tour Isla Mujeres', ?, '11:00', 2, 150000, 100000, 150000, 300000, 'tok-b', 0, ?)`,
     ).bind(futureLine, organizationId, folioId, serviceId, future, dayOffset(5), nowSec()).run()
     await env.DB.prepare(`UPDATE slots SET booked = booked + 2 WHERE id = ?`).bind(future).run()
+    // The new line needs its share of the money, or the PAID folio reads as a hold.
+    await materializeSeededFolio(folioId)
 
     const res = await reschedule(AGENT, folioId, [{ folio_line_id: futureLine, to_slot_id: to }])
     expect(res.status).toBe(200)

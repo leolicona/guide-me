@@ -217,7 +217,11 @@ describe('Online QR Scanner', () => {
   it('Scenario 7 — cancelled folio refuses admission', async () => {
     const { organizationId } = await seedUser({ email: AGENT_EMAIL, role: 'agent' })
     const { folioId, lineId, token } = await mintTicket(AGENT_EMAIL, organizationId)
-    await env.DB.prepare(`UPDATE folios SET status = 'cancelled' WHERE id = ?`)
+    // TECH_DEBT #25 — cancelling is stamping: the folio's own stamp plus its lines'.
+    await env.DB.prepare(`UPDATE folios SET cancelled_at = unixepoch() WHERE id = ?`)
+      .bind(folioId)
+      .run()
+    await env.DB.prepare(`UPDATE folio_lines SET cancelled_at = unixepoch() WHERE folio_id = ?`)
       .bind(folioId)
       .run()
 

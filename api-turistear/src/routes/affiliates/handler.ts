@@ -1,6 +1,6 @@
 import type { Context } from 'hono'
 import type { BatchItem } from 'drizzle-orm/batch'
-import { and, asc, eq, gte, inArray, lte, ne, sql } from 'drizzle-orm'
+import { and, asc, eq, gte, inArray, isNull, lte, ne, sql } from 'drizzle-orm'
 import { getDb } from '../../db/client'
 import {
   affiliateCommissions,
@@ -528,7 +528,7 @@ export const getAffiliateReport = async (c: AffiliatesContext) => {
   const folioRange = [
     eq(folios.organizationId, org),
     eq(folios.affiliateCompanyId, id),
-    ne(folios.status, 'cancelled'),
+    isNull(folios.cancelledAt), // TECH_DEBT #25 — the full-cancel stamp carries this
     ...(fromTs ? [gte(folios.createdAt, fromTs)] : []),
     ...(toTs ? [lte(folios.createdAt, toTs)] : []),
   ]

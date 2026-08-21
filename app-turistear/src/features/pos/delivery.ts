@@ -92,11 +92,16 @@ export interface TemplateContext {
   portalLink: string
 }
 
+// express-sale D29 — the addressee when the folio has no name (an Express sale, D17). A fallback
+// at substitution time degrades ANY org-authored template shape — "Hola viajero," / "¡Hola
+// viajero!" — where an empty string would leave "Hola ," in every WhatsApp-first send.
+const NAMELESS_ADDRESSEE = 'viajero'
+
 /** Substitute placeholders (D11). Unknown `{tokens}` are left untouched. */
 export function fillTemplate(template: string, ctx: TemplateContext): string {
   const f = ctx.folio
   const map: Record<string, string> = {
-    '{customer_name}': f.customer_name ?? '',
+    '{customer_name}': f.customer_name || NAMELESS_ADDRESSEE,
     '{agent_name}': ctx.agentName,
     '{org_name}': ctx.orgName,
     '{folio_ref}': f.id.slice(0, 8),

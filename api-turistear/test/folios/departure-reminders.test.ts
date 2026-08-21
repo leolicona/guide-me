@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { env } from 'cloudflare:test'
-import { seedUser, seedTwoOrgs, clearAffiliateDb } from '../helpers/tenancy'
+import { materializeSeededFolio, seedUser, seedTwoOrgs, clearAffiliateDb } from '../helpers/tenancy'
 import { sweepDepartureReminders } from '../../src/routes/pos/reminders'
 
 // US-T08 — the departure reminder, and the review request.
@@ -33,11 +33,15 @@ const seedFolio = async (opts: {
        (id, organization_id, agent_id, customer_name, customer_email, customer_phone,
         status, subtotal, discount_total, total, amount_paid, created_at, updated_at,
         payment_verification)
-     VALUES (?, ?, ?, 'Ana Buceo', ?, '+529981234567', ?, 200000, 0, 200000, 200000, ?, ?, ?)`,
+     VALUES (?, ?, ?, 'Ana Buceo', ?, '+529981234567', ?, 200000, 0, 200000, ?, ?, ?, ?)`,
   )
     .bind(
       id, opts.organizationId, opts.agentId, opts.customerEmail ?? null,
-      opts.status ?? 'paid', nowSec(), nowSec(),
+      opts.status ?? 'paid',
+      // TECH_DEBT #25 — an apartado is one whose lines are NOT covered; the deposit is what makes
+      // it one now, not a word in a column.
+      opts.status === 'booking' ? 60000 : 200000,
+      nowSec(), nowSec(),
       opts.paymentVerification ?? 'verified',
     )
     .run()
@@ -59,6 +63,7 @@ const seedFolio = async (opts: {
       opts.redeemedCount ?? 0, nowSec(),
     )
     .run()
+  await materializeSeededFolio(id)
   return id
 }
 
@@ -170,6 +175,7 @@ describe('US-T08 — the departure reminder', () => {
         utcDay(departsAt + 3 * HOUR), utcTime(departsAt + 3 * HOUR), nowSec(),
       )
       .run()
+    await materializeSeededFolio(folioId)
 
     const r = await sweepDepartureReminders(env as never)
     // Three messages about one trip is how a number gets blocked.

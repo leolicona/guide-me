@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { env, SELF } from 'cloudflare:test'
-import { seedUser, seedTwoOrgs, clearTenancyDb } from '../helpers/tenancy'
+import { materializeSeededFolio, seedUser, seedTwoOrgs, clearTenancyDb } from '../helpers/tenancy'
 import { buildFakeJwt } from '../helpers/jwt'
 
 // US-A82 / US-AG49 — the folio list identifies a sale without opening it.
@@ -130,6 +130,7 @@ const seedLine = async (opts: {
       opts.createdAt,
     )
     .run()
+  await materializeSeededFolio(opts.folioId)
 }
 
 const seedPortalToken = async (opts: {
@@ -277,13 +278,15 @@ describe('US-A82 — identify a sale from the list', () => {
 
   it('S-5 — a cancelled folio still owing money carries the debt', async () => {
     const { userId, organizationId } = await seedUser({ email: ADMIN_EMAIL })
-    await seedFolio({
-      organizationId,
-      agentId: userId,
-      status: 'cancelled',
-      refundStatus: 'pending',
-      refundAmount: 240000,
-    })
+    await materializeSeededFolio(
+      await seedFolio({
+        organizationId,
+        agentId: userId,
+        status: 'cancelled',
+        refundStatus: 'pending',
+        refundAmount: 240000,
+      }),
+    )
 
     const [row] = await list()
 

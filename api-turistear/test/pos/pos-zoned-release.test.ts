@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { env, SELF } from 'cloudflare:test'
-import { seedUser, clearTenancyDb } from '../helpers/tenancy'
+import { seedUser, clearTenancyDb , readDerivedFolio} from '../helpers/tenancy'
 import { buildFakeJwt } from '../helpers/jwt'
 import { sweepExpiredBookings } from '../../src/routes/pos/sweep'
 
@@ -71,10 +71,10 @@ const slotBooked = async (slotId: string): Promise<number> =>
     booked: number
   }).booked
 
+// TECH_DEBT #25 — the folio's status is derived from its lines (readDerivedFolio mirrors
+// utils/folioStatus.ts), never a stored column.
 const folioStatus = async (id: string): Promise<string> =>
-  ((await env.DB.prepare('SELECT status FROM folios WHERE id = ?').bind(id).first()) as {
-    status: string
-  }).status
+  ((await readDerivedFolio(id)) as { status: string }).status
 
 // --- Actions ---------------------------------------------------------------
 

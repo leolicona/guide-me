@@ -1,31 +1,20 @@
 import { sql } from 'drizzle-orm'
 
-// US-A89 (docs/folios/line-autonomy.spec.md, D11 — F4 step one). The folio's `status` FIELD stops
-// reading the column and derives, worst-case, from the lines that own the facts:
-//
+// US-A89 (docs/folios/line-autonomy.spec.md, D11 — completed by TECH_DEBT #25). The folio's
+// roll-up FIELDS derive from the lines that own the facts; the columns behind them are gone
+// (migration 0065). Every correlation names outer columns RAW (`folios.id`, the displayMethodSql
+// trick): an interpolated column reference resolves in the subquery's own scope and silently
+// correlates to nothing.
+
+// The folio's status, worst-case from its lines:
 //   every line cancelled                                → 'cancelled'
 //   any LIVE line holding less than its line_total      → 'booking'
 //   otherwise                                           → 'paid'
-//
 // A line's money comes from its allocations (US-LG09); its cancellation from its written stamp.
-// By construction this equals the column on every folio the write paths touch (they keep the
-// column as the same worst-case while it lives), so responses are byte-identical — the point of
-// this step is that the TRUTH now flows from the lines, provably, before any reader changes.
-//
-// The first branch is the transition's honesty valve: a folio with no allocations AT ALL (a
-// hand-seeded legacy fixture — never a production folio, which 0062's backfill covered) falls
-// back to the column rather than reading as an apartado it never was. TECH_DEBT #25 deletes the fallback
-// together with the column.
-//
-// Correlations name outer columns RAW (`folios.id`, the displayMethodSql trick): an interpolated
-// column reference resolves in the subquery's own scope and silently correlates to nothing.
+// The no-allocations fallback died with the column: 0062's backfill covered every real folio,
+// and the fixtures now seed allocations through the shared helper (TECH_DEBT #25).
 export const deriveStatusSql = sql<'paid' | 'booking' | 'cancelled'>`(
   select case
-    when not exists (
-      select 1 from folio_payment_allocations a
-      join folio_lines fl2 on a.folio_line_id = fl2.id
-      where fl2.folio_id = folios.id
-    ) then folios.status
     when coalesce(sum(case when fl.cancelled_at is null then 1 else 0 end), 0) = 0
       then 'cancelled'
     when coalesce(sum(case
@@ -41,28 +30,57 @@ export const deriveStatusSql = sql<'paid' | 'booking' | 'cancelled'>`(
 
 // D15 — facet/filter semantics are ANY-LINE, deliberately different from the field's worst-case
 // above: the filter answers "is there work of this kind here?", and a mixed folio genuinely has
-// both kinds (S-12: it may appear under two facets at once). Same legacy valve: a folio with no
-// allocations at all answers by its column; the valve dies with the column (TECH_DEBT #25).
+// both kinds (S-12: it may appear under two facets at once).
 export const anyLineStatusSql = (status: 'paid' | 'booking' | 'cancelled') => {
   if (status === 'cancelled') {
-    // Cancellation is a written stamp — no allocations needed to read it.
-    return sql`(folios.status = 'cancelled' or exists (
+    return sql`exists (
       select 1 from folio_lines fl where fl.folio_id = folios.id and fl.cancelled_at is not null
-    ))`
+    )`
   }
   const lineCondition =
     status === 'paid'
       ? sql`coalesce((select sum(a.amount) from folio_payment_allocations a where a.folio_line_id = fl.id), 0) >= fl.line_total`
       : sql`coalesce((select sum(a.amount) from folio_payment_allocations a where a.folio_line_id = fl.id), 0) < fl.line_total`
-  return sql`(case
-    when not exists (
-      select 1 from folio_payment_allocations a
-      join folio_lines fl2 on a.folio_line_id = fl2.id
-      where fl2.folio_id = folios.id
-    ) then folios.status = ${status}
-    else exists (
-      select 1 from folio_lines fl
-      where fl.folio_id = folios.id and fl.cancelled_at is null and ${lineCondition}
-    )
-  end)`
+  return sql`exists (
+    select 1 from folio_lines fl
+    where fl.folio_id = folios.id and fl.cancelled_at is null and ${lineCondition}
+  )`
 }
+
+// The folio's hold clock: MIN over its LIVE lines' clocks — the exact roll-up the column held —
+// falling back to MIN over ALL lines so a LAPSED apartado (every line expired and cancelled)
+// still reads as one, which is how the UI tells a lapse from an admin cancellation.
+export const deriveBookingExpiresAtSql = sql<number | null>`(
+  select coalesce(
+    (select min(fl.booking_expires_at) from folio_lines fl
+      where fl.folio_id = folios.id and fl.cancelled_at is null and fl.booking_expires_at is not null),
+    (select min(fl.booking_expires_at) from folio_lines fl
+      where fl.folio_id = folios.id and fl.booking_expires_at is not null)
+  )
+)`
+
+// The refund obligation, rolled up from the line debts (D6): pending while ANY line owes,
+// refunded when something was handed back and nothing is owed, none otherwise.
+export const deriveRefundStatusSql = sql<'none' | 'pending' | 'refunded'>`(
+  select case
+    when exists (select 1 from folio_lines fl where fl.folio_id = folios.id and fl.refund_status = 'pending')
+      then 'pending'
+    when exists (select 1 from folio_lines fl where fl.folio_id = folios.id and fl.refund_status = 'refunded')
+      then 'refunded'
+    else 'none'
+  end
+)`
+
+// The obligation's amount: what is still OWED while anything is pending, else what was refunded.
+// NULL when there is no obligation at all — the shape the column always had.
+export const deriveRefundAmountSql = sql<number | null>`(
+  select case
+    when exists (select 1 from folio_lines fl where fl.folio_id = folios.id and fl.refund_status = 'pending')
+      then (select sum(fl.refund_amount) from folio_lines fl
+             where fl.folio_id = folios.id and fl.refund_status = 'pending')
+    when exists (select 1 from folio_lines fl where fl.folio_id = folios.id and fl.refund_status = 'refunded')
+      then (select sum(fl.refund_amount) from folio_lines fl
+             where fl.folio_id = folios.id and fl.refund_status = 'refunded')
+    else null
+  end
+)`
