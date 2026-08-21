@@ -147,15 +147,6 @@ export const availabilityDaysQuerySchema = z.object({
         : undefined,
     )
     .transform((arr) => (arr && arr.length > 0 ? arr : undefined)),
-  // US-AG57 — scope the month to ONE service (the sale sheet's calendar). Its presence also
-  // switches on the `sold_out` array: the sheet needs three day states (available / sold out /
-  // non-operating) and `days` alone can only express two. Absent ⟹ the org-wide, category-scoped
-  // response is byte-identical to today's (spec rule 4).
-  service_id: z.string().uuid().optional(),
-  // US-AG57 — seats the day must be able to take. Filtered server-side with the same
-  // effective-capacity arithmetic as the sale, so the grid can never offer a day the confirm
-  // would refuse. Query strings arrive as text, hence coerce.
-  party: z.coerce.number().int().min(1).optional().default(1),
 })
 
 export type AvailabilityDaysQuery = z.infer<typeof availabilityDaysQuerySchema>

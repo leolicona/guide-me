@@ -1,7 +1,6 @@
 export * from './usePosServices'
 export * from './usePosService'
 export * from './usePosAvailableDays'
-export * from './useServiceMonth'
 export * from './useConfirmSale'
 export * from './useFolio'
 export * from './useMyFolios'
