@@ -6,6 +6,47 @@ Tracks confirmed bugs, root causes, and fixes. Each entry is immutable once clos
 
 ---
 
+## BUG-033 — A Closed Bottom Sheet Leaves the Wizard Hidden From Screen Readers — ⚠️ OPEN
+
+**Found:** 2026-08-21, writing the US-A91 wizard tests. Every query for the wizard's footer after a
+`BottomSheet` had been opened and closed failed with *"Unable to find an accessible element with
+the role button"* — while the button was plainly in the DOM.
+
+**Affected component:** `app-turistear/src/components/BottomSheet.tsx` (and every host built on it:
+`FormSheet`, `ConfirmSheet`, `UnitDraftSheet`, the wizard's discard confirm).
+
+### Symptom
+
+After a sheet closes, an ancestor `<div>` of the page content still carries `aria-hidden="true"`.
+The content is visible and clickable with a mouse; it is simply **absent from the accessibility
+tree**, so a screen reader announces nothing and the whole surface is unreachable by assistive
+navigation until a full remount.
+
+Reproduced in jsdom on the **untouched** create path (open the unit sheet from wizard step 2, add a
+unit, then query the footer), so it predates US-A91 and is not specific to the attach flow.
+
+### Suspected cause
+
+`BottomSheet` renders MUI's `SwipeableDrawer`, which is `keepMounted` by default (it needs the node
+present to support the iOS swipe-to-open gesture). MUI's `Modal` applies `aria-hidden` to the
+siblings of an open modal and removes it on close; with two keepMounted drawers mounted by the same
+subtree (the draft sheet and the discard `ConfirmSheet`), the un-hiding appears not to complete.
+
+### Impact
+
+Screen-reader users lose the wizard — and any screen where a sheet has been opened and dismissed —
+until they navigate away and back. Sighted mouse/touch users are unaffected, which is why it went
+unnoticed: nothing looks wrong.
+
+### Not yet verified in a real browser
+
+The reproduction is in jsdom. Before fixing, confirm it in Chrome/Safari with VoiceOver — MUI's
+`ariaHidden` bookkeeping is not jsdom-specific, but the ref-counting could behave differently where
+transitions actually run.
+
+**Workaround in tests:** `ServiceWizard.test.tsx` queries the wizard chrome with `{ hidden: true }`,
+with a comment pointing here. Drop that option when this is fixed — it is the assertion that would
+catch a regression.
 ## BUG-032 — The POS Detail Answers for the First Day of a Range and Calls the Rest Nonexistent — ✅ FIXED
 
 **Found:** 2026-08-21, reported from the floor: filter `/pos` to **21–23 Aug**, open the card for

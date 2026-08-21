@@ -97,30 +97,31 @@ export function UnitFields({ disabled, inheritedCommissionLabel }: UnitFieldsPro
         fullWidth
         disabled={disabled}
         error={!!errors.name}
-        helperText={errors.name?.message ?? 'Ej. "Cabaña 1", "Suite Vista"'}
+        helperText={errors.name?.message ?? 'Ej. "Cabaña Río", "Suite Vista"'}
         {...register('name')}
       />
       <TextField
-        label="Tipo (opcional)"
+        label="¿Qué es? (opcional)"
         fullWidth
         disabled={disabled}
         error={!!errors.unit_type}
-        helperText={errors.unit_type?.message ?? 'Ej. cabaña, suite, habitación'}
+        helperText={errors.unit_type?.message ?? 'Cabaña, habitación, suite…'}
         {...register('unit_type')}
       />
 
       <GroupLabel>Inventario y capacidad</GroupLabel>
-      {/* v2 — how many interchangeable rooms of this type exist. 1 = a unique cabin/suite
-          (boutique); a hotel enters its room count. Occupancy/capacity are PER ROOM. */}
+      {/* v2 — how many interchangeable rooms this unit represents (`inventory_count`). 1 = a
+          unique cabin/suite (boutique); a hotel enters its room count. US-A91 D10 asks it as a
+          plain question: the owner owns cabins, not types of cabins. Occupancy is PER ROOM. */}
       <TextField
-        label="Habitaciones de este tipo"
+        label="¿Cuántas iguales tienes?"
         type="number"
         fullWidth
         disabled={disabled}
         error={!!errors.inventory_count}
         helperText={
           errors.inventory_count?.message ??
-          '¿Cuántas habitaciones idénticas de este tipo tienes? (1 = única)'
+          '1 si es única; un hotel con 8 habitaciones iguales pone 8'
         }
         slotProps={{ htmlInput: { step: 1, min: 1, inputMode: 'numeric' } }}
         {...register('inventory_count', { valueAsNumber: true })}

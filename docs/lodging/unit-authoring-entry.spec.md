@@ -52,7 +52,7 @@ already holds.
 | **D1** | The choice lives **inside wizard Step 1**, rendered when `inventoryModel(category) === 'units'` — not on a screen before the wizard and not behind a second entry button. | A pre-wizard sheet would ask for the category twice and leave an escape hatch: pick *Tours* in the sheet, switch to *Hospedaje* inside the wizard, and you are back in the create-only flow. Bound to the category field, the control cannot be outrun. |
 | **D2** | **One control**, not a mode radio plus a property field: a single-select list of the org's active lodging properties whose last row is **⊕ Crear una propiedad nueva**. Choosing ⊕ reveals the name + description fields inline. | Two controls make the user answer a question about the *system's* structure («¿existente o nueva?») before answering one about their *business* («¿cuál?»). One list asks only the second. |
 | **D3** | Rows, **not chips**. Each row is the property name over a summary line — «3 unidades · 8 en total». | A chip carries a label only. With «Cabañas Imperial», «Villas del Mar», «Hotel Centro» side by side, the summary is what makes the right one recognisable; without it the user is recalling, not choosing. Selected state reuses the `AmenityPicker` grammar (`teal-50` surface, `teal-700` border, check icon) so no new visual language appears. |
-| **D4** | Scaling is by count: **0** → the control is not rendered · **1–6** → all rows visible · **7+** → a search field above a list scrolled to ~4 rows, ordered by most recently used. | A wrap of 15 rows buries the action. Search appears only where it earns its space. |
+| **D4** | Scaling is by count: **0** → the control is not rendered · **1–6** → all rows visible · **7+** → a search field above a list scrolled to ~4 rows, in the catalog's own order (`GET /api/services` sorts by name; there is no usage signal to sort by, and inventing one is a separate feature). | A wrap of 15 rows buries the action. Search appears only where it earns its space. |
 | **D5** | **⊕ never enters the scroll region and never enters the search filter** — it is anchored below the list. | Inside the list, an org with 15 properties must scroll to the bottom to create one; worse, typing «Cabaña» to search would filter ⊕ away at the exact moment the user wants it. |
 | **D6** | Preselection: when the org has **exactly one** active lodging property, that row is preselected. With **two or more**, nothing is preselected and Step 1 does not advance until a row (or ⊕) is chosen. | With one property, preselection is unambiguous and free. With several, preselecting the alphabetically-first row invites blow-through into the *wrong* property — a misattribution quieter than the bug being fixed, since a unit filed under the wrong building looks correct everywhere. |
 | **D7** | Attaching to an existing property makes the wizard **two steps** (Información → Unidades). The **Comisión step is not shown**. | `StepCommission` writes `commission_type`/`commission_value` **on the service**. Running it against an existing property would silently rewrite the commission governing every unit already under it — a bug that moves sellers' money, strictly worse than the one this feature fixes. Nothing is lost: each unit carries its own **Heredar / % / $** control (`UnitFields.tsx:166`), defaulted to `inherit`. |
@@ -79,8 +79,9 @@ recorded under *Deferred*.
 
 1. The property control renders **iff** `inventoryModel(category) === 'units'` **and** the org has
    ≥ 1 active lodging service.
-2. Step 1 cannot be advanced in attach mode until a property is selected; in create mode the
-   existing `name` + `category` gate is unchanged. `stepFields()` becomes aware of the mode.
+2. Step 1 cannot be advanced while the picker is on screen and nothing is chosen; in create mode
+   the existing `name` + `category` gate is unchanged. `stepFields()` becomes aware of the mode, and
+   the choice itself is gated in `goNext()` alongside the other wizard-local arrays.
 3. Attach mode never sends `POST /services`. It calls `POST /services/:id/units` per unit, then
    that unit's seasons and block-outs — the existing per-unit fan-out of `useCreateLodgingFull`.
 4. Attach mode never sends service-level `commission_type` / `commission_value`.
@@ -105,7 +106,7 @@ route and therefore no new isolation surface.
 | `features/catalog/components/wizard/StepBasicInfo.tsx` | Renders `PropertyPicker` when the category is unit-based; name/description reveal only under ⊕. New helper copy. |
 | `features/catalog/components/wizard/PropertyPicker.tsx` *(new)* | The single-select list + anchored ⊕ + search above 6 rows. Selection styling mirrors `AmenityPicker`. |
 | `features/catalog/components/wizard/wizardTypes.ts` | `totalSteps()` / `stepTitle()` take the mode: attach → 2 steps, no «Comisión». |
-| `features/catalog/components/wizard/wizardSchema.ts` | `property_id` field; `stepFields()` mode-aware (`['category','property_id']` vs `['category','name']`). |
+| `features/catalog/components/wizard/wizardSchema.ts` | `stepFields()` mode-aware: `['category']` when attaching vs `['category','name']` when creating. The chosen property is **wizard-local state**, not an RHF field — it is a routing decision, and putting it in `WizardFormData` would place it in the service payload type it must never reach. |
 | `features/catalog/components/wizard/ServiceWizard.tsx` | Mode state; `saveLodging()` branches to attach; dynamic page title («Agregar unidad» / «Nuevo servicio»). |
 | `features/catalog/components/wizard/StepUnits.tsx` | Subtitle names the target property; `existingNames` merges server units (D11); name prefill from D9. |
 | `features/catalog/hooks/useCreateLodgingFull.ts` | Attach variant that skips `createService` and fans out units against a given `serviceId`. |
@@ -185,14 +186,16 @@ Then the payload and navigation are byte-identical to the pre-feature flow
 
 ## Definition of Done
 
-- [ ] `PropertyPicker` + Step 1 integration, with the 0 / 1–6 / 7+ scaling of D4
-- [ ] Mode-aware `totalSteps` / `stepTitle` / `stepFields`; attach path in `useCreateLodgingFull`
-- [ ] Duplicate-name guard fed from `useUnits(propertyId)` (D11)
-- [ ] Rename sweep (D10) across the 18 strings listed above, POS included
-- [ ] Catalog button relabelled; wizard title dynamic; snackbar + navigation per D15
-- [ ] S-1…S-10 covered in `app-turistear/src/features/catalog/components/wizard/*.test.tsx`
-- [ ] `pnpm build:app` clean (bare `tsc --noEmit` checks nothing here — solution-style tsconfig)
-- [ ] `SPEC.md`: US-A91, Features by Phase line, glossary rows for *Propiedad* and *Unidad*
+- [x] `PropertyPicker` + Step 1 integration, with the 0 / 1–6 / 7+ scaling of D4
+- [x] Mode-aware `totalSteps` / `stepTitle` / `stepFields`; attach path (`useAttachLodgingUnits`)
+- [x] Duplicate-name guard fed from `useUnits(propertyId)` (D11), blocking per rule 5
+- [x] Rename sweep (D10) across the strings listed above, POS included
+- [x] Catalog button relabelled; wizard title dynamic; snackbar + navigation per D15
+- [x] Scenarios covered across three files, by cost: `wizardTypes.test.ts` (step machinery),
+      `PropertyPicker.test.tsx` (scaling + the ⊕ escape), `ServiceWizard.test.tsx` (what reaches
+      the API — the only assertions that justify mounting the whole wizard)
+- [x] `pnpm build:app` clean (bare `tsc --noEmit` checks nothing here — solution-style tsconfig)
+- [x] `SPEC.md`: US-A91, Features by Phase line, glossary rows for *Propiedad* and *Unidad*
 
 ## Deferred — and why each is safe to defer
 
@@ -217,6 +220,7 @@ Then the payload and navigation are byte-identical to the pre-feature flow
 
 | Question | Smallest change that answers it |
 |---|---|
+| Does a closed `BottomSheet` really strand the page outside the accessibility tree in a real browser, as it does in jsdom (**BUG-033**, found writing these tests)? | Open the unit sheet in Chrome with VoiceOver, close it, and try to reach the wizard footer. If it reproduces, the fix is in `BottomSheet`, not here — every sheet host in the app inherits it. |
 | Does the picker need a *«Vi mal, quiero crear una propiedad»* affordance in Step 2, after the choice is committed? | Today the answer is the Back button. If usage shows people finishing wizards against the wrong property, add the property name in Step 2 as a chip with «Cambiar» that returns to Step 1 with drafts intact. |
 | Should ⊕ stay visible once an org has, say, 20 properties — or does it become the rarer act that deserves demotion? | A count threshold on the ⊕ row's prominence. One constant; not worth guessing before there is an org with 20. |
 | Is «en total» the right second figure on the catalog row, or should it be a money anchor («desde $1,200/noche», already computed)? | One string in `ServiceRow.tsx:48`; both values are in hand. |

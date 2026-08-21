@@ -270,7 +270,7 @@ export function LodgingStaySheet({
             hint={
               maxRooms !== undefined && rooms < maxRooms
                 ? 'Capacidad máxima — agrega otra habitación'
-                : 'Capacidad máxima de este tipo'
+                : 'Capacidad máxima de esta unidad'
             }
             onChange={setGuests}
           />
@@ -281,7 +281,7 @@ export function LodgingStaySheet({
             value={rooms}
             min={1}
             max={maxRooms}
-            hint={maxRooms !== undefined ? `Este tipo tiene ${maxRooms} en total` : undefined}
+            hint={maxRooms !== undefined ? `Esta unidad tiene ${maxRooms} en total` : undefined}
             onChange={changeRooms}
           />
         </Stack>

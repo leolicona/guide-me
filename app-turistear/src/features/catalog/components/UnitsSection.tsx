@@ -17,8 +17,8 @@ interface UnitsSectionProps {
 
 type SheetTarget = { kind: 'seasons' | 'blockouts'; unit: AccommodationUnitType } | null
 
-// US-A59 (v2) — the lodging service detail's Unit Types section (Detail-screen archetype). The
-// single accent affordance is "Agregar tipo"; rows expose Editar / Temporadas / Bloqueos /
+// US-A59 (v2) — the lodging service detail's Units section (Detail-screen archetype). The
+// single accent affordance is "Agregar unidad"; rows expose Editar / Temporadas / Bloqueos /
 // Desactivar. Each row carries its inventory count (rooms of the type).
 export function UnitsSection({ serviceId }: UnitsSectionProps) {
   const { data: units, isLoading } = useUnits(serviceId)
@@ -29,7 +29,7 @@ export function UnitsSection({ serviceId }: UnitsSectionProps) {
 
   return (
     <SectionCard
-      title="Tipos de unidad"
+      title="Unidades"
       action={
         <Button
           variant="contained"
@@ -37,7 +37,7 @@ export function UnitsSection({ serviceId }: UnitsSectionProps) {
           startIcon={<AddRounded />}
           onClick={() => setCreating(true)}
         >
-          Agregar tipo
+          Agregar unidad
         </Button>
       }
     >
@@ -97,7 +97,7 @@ export function UnitsSection({ serviceId }: UnitsSectionProps) {
         </Stack>
       ) : (
         <Typography color="text.secondary">
-          Aún no hay tipos de unidad — agrega el primero para poder vender.
+          Aún no hay unidades — agrega la primera para poder vender.
         </Typography>
       )}
 

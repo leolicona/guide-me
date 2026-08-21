@@ -38,21 +38,40 @@ export const STEP_TITLES: Record<WizardStep, string> = {
   4: 'Extras',
 }
 
-// US-A59 (v2) — the lodging track is 3 steps (no slots/extras; unit types replace availability).
-// The types come BEFORE the commission so the property-wide rate is decided with the nightly
+/** US-A91 — which property the lodging track is working against. `create` builds a new property
+ * (today's 3-step track); `attach` files units under one that already exists. */
+export type LodgingMode = 'create' | 'attach'
+
+// US-A59 (v2) — the lodging track is 3 steps (no slots/extras; units replace availability).
+// The units come BEFORE the commission so the property-wide rate is decided with the nightly
 // prices in view (a fixed $-per-stay commission is meaningless without a rate anchor).
 const LODGING_STEP_TITLES: Record<number, string> = {
   1: 'Información',
-  2: 'Tipos de unidad',
+  2: 'Unidades',
   3: 'Comisión',
 }
 
-/** Category-aware step count: slot track 4 · unit track 3. */
-export const totalSteps = (category: ServiceCategory | ''): number =>
-  inventoryModel(category) === 'units' ? 3 : TOTAL_STEPS
+// US-A91 D7 — attaching to an existing property is 2 steps: the Comisión step writes the
+// SERVICE's commission, so running it here would silently rewrite the rate governing every unit
+// already under that property. Each unit keeps its own Heredar/%/$ override.
+const LODGING_ATTACH_STEP_TITLES: Record<number, string> = {
+  1: 'Información',
+  2: 'Unidades',
+}
+
+/** Category-aware step count: slot track 4 · unit track 3 (create) or 2 (attach). */
+export const totalSteps = (
+  category: ServiceCategory | '',
+  mode: LodgingMode = 'create',
+): number =>
+  inventoryModel(category) === 'units' ? (mode === 'attach' ? 2 : 3) : TOTAL_STEPS
 
 /** Category-aware step title. */
-export const stepTitle = (category: ServiceCategory | '', step: number): string =>
+export const stepTitle = (
+  category: ServiceCategory | '',
+  step: number,
+  mode: LodgingMode = 'create',
+): string =>
   inventoryModel(category) === 'units'
-    ? (LODGING_STEP_TITLES[step] ?? '')
+    ? ((mode === 'attach' ? LODGING_ATTACH_STEP_TITLES : LODGING_STEP_TITLES)[step] ?? '')
     : (STEP_TITLES[step as WizardStep] ?? '')

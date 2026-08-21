@@ -28,10 +28,14 @@ interface UnitDraftSheetProps {
    * parent list — it's only added on save, so the labels must read as "add", not "edit". */
   mode?: 'add' | 'edit' | 'duplicate'
   onSave: (draft: UnitDraft) => void
-  /** Names of the property's OTHER type drafts — powers the non-blocking duplicate-name
-   * warning (distinct names are what tell the POS type cards apart; the API doesn't enforce
-   * uniqueness, so this is a nudge, not a gate). */
+  /** Names already taken inside the target property — the other local drafts plus, in the
+   * wizard's attach mode, the property's ACTIVE server-side units (US-A91 D11). Distinct names
+   * are the only thing telling two POS cards apart, and the API enforces no uniqueness
+   * (TECH_DEBT #28), so this is the gate. */
   existingNames?: string[]
+  /** US-A91 D9 — seeds the name of a NEW draft (ignored when editing/duplicating): the property
+   * name the user typed before realising the unit belonged to an existing property. */
+  suggestedName?: string
 }
 
 const EMPTY: UnitFormData = {
@@ -97,13 +101,16 @@ export function UnitDraftSheet({
   mode = initial ? 'edit' : 'add',
   onSave,
   existingNames = [],
+  suggestedName,
 }: UnitDraftSheetProps) {
   const methods = useForm<UnitFormData>({
     resolver: zodResolver(unitFormSchema),
     defaultValues: EMPTY,
   })
 
-  // Non-blocking duplicate-name nudge (case-insensitive, trimmed).
+  // Duplicate-name gate (case-insensitive, trimmed). Blocking, not advisory: two units sharing
+  // a name reach the POS as two visually identical cards with no way to tell which inventory
+  // each draws from, and nothing downstream can recover the distinction (US-A91 D11).
   const draftName = methods.watch('name')
   const isDuplicateName =
     !!draftName?.trim() &&
@@ -146,7 +153,8 @@ export function UnitDraftSheet({
         setSeasonsOpen(s.length > 0) // a draft with seasons opens that section expanded
         setBlockoutsOpen(b.length > 0)
       } else {
-        methods.reset(EMPTY)
+        // D9 — a rescued property name seeds a NEW draft; everything else stays blank.
+        methods.reset(suggestedName ? { ...EMPTY, name: suggestedName } : EMPTY)
         setSeasons([])
         setBlockouts([])
         setSeasonsOpen(false)
@@ -156,6 +164,7 @@ export function UnitDraftSheet({
   }
 
   const submit = methods.handleSubmit((form) => {
+    if (isDuplicateName) return
     onSave({
       tempId: initial?.tempId ?? crypto.randomUUID(),
       ...form,
@@ -181,15 +190,21 @@ export function UnitDraftSheet({
     <BottomSheet
       open={open}
       onClose={onClose}
-      title={mode === 'edit' ? 'Editar unidad' : mode === 'duplicate' ? 'Duplicar tipo' : 'Nueva unidad'}
+      title={mode === 'edit' ? 'Editar unidad' : mode === 'duplicate' ? 'Duplicar unidad' : 'Nueva unidad'}
       header={
         <Typography variant="h6" sx={{ px: 2, pb: 1 }}>
-          {mode === 'edit' ? 'Editar unidad' : mode === 'duplicate' ? 'Duplicar tipo' : 'Nueva unidad'}
+          {mode === 'edit' ? 'Editar unidad' : mode === 'duplicate' ? 'Duplicar unidad' : 'Nueva unidad'}
         </Typography>
       }
       footer={
         <Box sx={{ p: 2 }}>
-          <Button fullWidth variant="contained" disableElevation onClick={submit}>
+          <Button
+            fullWidth
+            variant="contained"
+            disableElevation
+            disabled={isDuplicateName}
+            onClick={submit}
+          >
             {mode === 'edit' ? 'Guardar' : 'Agregar'}
           </Button>
         </Box>
@@ -197,9 +212,9 @@ export function UnitDraftSheet({
     >
       <Box sx={{ px: 2, pb: 2 }}>
         {isDuplicateName && (
-          <Alert severity="warning" sx={{ mb: 2 }}>
-            Ya existe un tipo con este nombre en la propiedad — usa nombres distintos para
-            diferenciarlos en el punto de venta.
+          <Alert severity="error" sx={{ mb: 2 }}>
+            Ya existe una unidad con este nombre en esta propiedad — usa nombres distintos para
+            diferenciarlas en el punto de venta.
           </Alert>
         )}
         <FormProvider {...methods}>
