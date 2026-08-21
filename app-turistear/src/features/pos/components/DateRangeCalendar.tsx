@@ -47,11 +47,6 @@ interface DateRangeCalendarProps {
    * it is simply full — because «no sale ese día» and «ya se llenó» are different answers to
    * give a customer (US-AG33's distinction, carried onto the grid). */
   dayState?: Map<string, 'available' | 'sold_out' | 'non_operating'>
-  /** US-AG57 — tighter geometry for the sale sheet, which hosts the grid inside a Bottom Sheet
-   * capped at 85vh alongside a header, a day pager, time chips, zones, extras and a pinned
-   * footer. Square cells and 8px gaps cost ~90px the sheet does not have; the full-page and
-   * lodging hosts keep the roomier default. */
-  compact?: boolean
   /** US-AG57 — the visible month changed (`YYYY-MM`). The month grid owns its own paging, but
    * a caller fetching per-month availability needs to know which one to ask for. */
   onVisibleMonthChange?: (month: string) => void
@@ -70,7 +65,6 @@ export function DateRangeCalendar({
   availabilityDots = false,
   mode = 'range',
   dayState,
-  compact = false,
   onVisibleMonthChange,
 }: DateRangeCalendarProps) {
   const currentMonth = monthOf(today)
@@ -137,7 +131,7 @@ export function DateRangeCalendar({
         </IconButton>
       </Box>
 
-      <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: compact ? 0.5 : 1, mb: compact ? 0.5 : 1 }}>
+      <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 1, mb: 1 }}>
         {WEEKDAY_HEADERS.map((w, i) => (
           <Typography key={i} variant="caption" sx={{ textAlign: 'center', color: 'text.secondary', fontWeight: 600 }}>
             {w}
@@ -145,7 +139,7 @@ export function DateRangeCalendar({
         ))}
       </Box>
 
-      <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: compact ? 0.5 : 1 }}>
+      <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 1 }}>
         {Array.from({ length: leadingBlanks }, (_, i) => (
           <Box key={`blank-${i}`} />
         ))}
@@ -189,9 +183,7 @@ export function DateRangeCalendar({
                 border: 'none',
                 font: 'inherit',
                 p: 0,
-                // Compact trades the square cell for a fixed 40px row: still above the 40px
-                // minimum for a thumb inside a grid of peers, and ~90px shorter over six rows.
-                ...(compact ? { height: 40 } : { aspectRatio: '1 / 1' }),
+                aspectRatio: '1 / 1',
                 borderRadius: 2,
                 display: 'flex',
                 flexDirection: availabilityDots ? 'column' : 'row',
@@ -247,24 +239,30 @@ export function DateRangeCalendar({
         })}
       </Box>
 
-      {/* D18 — the three-state host prints NO legend: the paint carries it. A dot means the day
-          can be sold, a tint means it runs but is full, a flat cell means it does not run. D8's
-          distinction survives in the cells; what goes is the caption, so the grid stops spending
-          two lines explaining itself inside a sheet that needs the height. The range hosts keep
-          theirs, where a tint is the only signal and has no dot to lean on. */}
-      {!dayState && dayRemaining && (
+      {/* D8 — with three states the legend must name the tinted one specifically: a flat cell
+          and a tinted cell now mean different things, and "Sin disponibilidad" covered both. */}
+      {dayState ? (
         <Stack direction="row" spacing={2} sx={{ mt: 1.5, justifyContent: 'center' }}>
-          <Legend color="var(--slate-300, #CBD5E1)" label="Sin disponibilidad" />
+          <Legend color="var(--slate-300, #CBD5E1)" label="Agotado" square />
+          <Legend color="var(--teal-700, #0F766E)" label="Con lugares" />
         </Stack>
+      ) : (
+        dayRemaining && (
+          <Stack direction="row" spacing={2} sx={{ mt: 1.5, justifyContent: 'center' }}>
+            <Legend color="var(--slate-300, #CBD5E1)" label="Sin disponibilidad" />
+          </Stack>
+        )
       )}
     </Box>
   )
 }
 
-function Legend({ color, label }: { color: string; label: string }) {
+function Legend({ color, label, square = false }: { color: string; label: string; square?: boolean }) {
   return (
     <Stack direction="row" spacing={0.5} sx={{ alignItems: 'center' }}>
-      <Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: color }} />
+      {/* The swatch mirrors the cell it explains: a filled square for the tinted sold-out day,
+          a dot for the availability mark. Shape carries the difference, not colour alone. */}
+      <Box sx={{ width: 8, height: 8, borderRadius: square ? 0.5 : '50%', bgcolor: color }} />
       <Typography variant="caption" color="text.secondary">
         {label}
       </Typography>
