@@ -2,6 +2,11 @@
 
 > Process: `docs/PROCESS.md`. **Status: BUILT.** Refines `docs/pos/date-filter-calendar-sheet.spec.md`
 > (US-AG35) and amends its SPEC.md registration to match what actually shipped.
+>
+> **Amended 2026-08-21 (post-merge of #109).** **D3 is superseded by D14**: the calendar chip's
+> resting label adapts to how much of the week is left rather than reading one static string. The
+> amendment answers this spec's own *Open* question about Sunday, and closes **TECH_DEBT 26** by
+> making the dead `PILL_LABELS` copy live — collapsed into the one function it always served (D15).
 
 ## Context
 
@@ -43,8 +48,12 @@ Two smaller defects fall out of the same neglect:
 
 This feature must not change what the catalog **requests**, only what it **says**:
 
-- **`app-turistear/src/features/pos/dates.test.ts` must pass unedited.** `contextPills` and its
-  ranges are untouched; this feature reads `[0]` exactly as before.
+- **The date ranges must not move.** *(Amended for D15: `dates.test.ts` can no longer pass unedited,
+  because the function it names is deleted.)* The replacement boundary is an **equivalence proof**:
+  every concrete expected value the `contextPills` suite asserted for index `0` — Mon `2026-08-03`,
+  Wed `2026-08-05`, Thu `2026-08-06`, Fri `2026-08-07`, Sun `2026-08-09` — is ported **verbatim** to
+  `defaultWindow`, alongside the two 14-day invariants (`from <= to`, and `from === today` on every
+  day of the week). Same inputs, same outputs, different function name.
 - **With no explicit selection, `usePosServices` receives byte-identical arguments** to develop
   (`today`, `defaultWeek.from`, `defaultWeek.to`). Naming the default must not move the default.
 - **No route, handler, schema or migration is touched.** `GET /api/pos/services` and
@@ -58,7 +67,12 @@ This feature must not change what the catalog **requests**, only what it **says*
 |---|---|---|
 | **D1** | The reset lives **on each chip as a ✕**, not as a third strip-wide "Limpiar" chip. | Each control clears exactly what it set, so scope is never ambiguous; it costs no width on a strip that already scrolls on mobile; it keeps working unchanged when a third filter joins. With at most two filters active, "clear everything" is two taps. |
 | **D2** | What gets a name is the **default**, not the reset. | The original brief was "name the reset chip". The real defect is that the *default state* has no representation on screen — a reset button would have given the agent a way out of a state they still could not read. Naming the default makes the strip a sentence at rest and makes the ✕'s destination obvious. |
-| **D3** | The calendar's resting label is **«Esta semana»** — one static string, all seven days. | `contextPills(today)[0]` is **always** `(today, comingSunday)`: both branches compute the same `comingSunday` and only the never-rendered internal key flips `esta_semana`/`este_fin`. So a static label is true every day. The domain already calls this range `esta_semana`. On a Sunday the span collapses to today alone — not a lie: the week has one day left. |
+| **D3 (superseded by D14)** | ~~The calendar's resting label is **«Esta semana»** — one static string, all seven days.~~ | `contextPills(today)[0]` is **always** `(today, comingSunday)`: both branches compute the same `comingSunday` and only the never-rendered internal key flips `esta_semana`/`este_fin`. So a static label is true every day. The domain already calls this range `esta_semana`. On a Sunday the span collapses to today alone — not a lie: the week has one day left. |
+| **D14** | The resting label **adapts to how much of the week the window still covers**: **«Esta semana»** (Mon–Thu) · **«Fin de semana»** (Fri–Sat) · **«Hoy»** (Sun). | D3 was right that the *formula* is identical every day and wrong that the *extent* is: the window is **7 days on a Monday and 1 day on a Sunday**. A static label hides a **7×** variation in what is listed — the very defect this feature exists to fix, reintroduced in miniature. The Mon–Thu / Fri–Sun boundary is inherited unchanged from `contextPills` (`idx <= 3`); only Sunday is a new branch, and there the window genuinely *is* today. «Hoy» is already this product's word for exactly one day (`SlotPicker` relative labels, `DayStrip`'s first pill, the admin nav), so on a Sunday the strip and the sheet's day matrix agree rather than compete. |
+| **D15** | `contextPills` collapses into **`defaultWindow(today)`** + **`defaultWindowLabel(today)`**. `PILL_LABELS`, `ContextPillKey`, `ContextPill` and the never-read second pill are deleted. | D14 makes the labels **live**, which is the escape clause TECH_DEBT 26 named. Half-reviving them — live copy beside a zombie two-pill structure branching on the same `mondayIndexOf` — would be the worst state: two weekday branchers, one real. The types had **zero consumers outside `dates.ts`**, and only index `0` was ever read. Labels no longer map to `ContextPillKey` anyway (`este_fin` covered Fri–**Sun**; D14 splits Sunday off), so reusing the keys was never on the table. |
+| **D16** | The calendar chip's **accessible name carries the window**: `«Abrir calendario — Esta semana»` / `«— SÁB 14»`. | Same reasoning as D7, now applying to the calendar: a dynamic visible label behind a static `aria-label` means a screen-reader user hears "Abrir calendario" and never learns which window is active. |
+| **D17** | Picking today on a **Sunday** is **not** normalised back to the default. | `DayStrip` does normalise (`onSelect(d === today ? null : d)`) because *its* default is always a single day. On `/pos` the default is a window that collapses to one day **only on Sundays**, so normalising would be a special case for one weekday. The ✕ already distinguishes "default" from "explicit pick", which is the distinction that matters — the labels differing («Hoy» vs «DOM 23») is the tell, not a bug. |
+| **D18** | Rejected: labelling by **count** («7 días» / «3 días» / «Hoy»). | Maximally honest about extent and useless as an anchor — an agent thinks in "esta semana", not in "5 días". The semantic label plus the ✕'s destination carries the same information in the vocabulary the work already uses. |
 | **D4** | Rejected: **«Próximos»**. | Open-ended forward reading, which the bounded `hoy → domingo` window is not; and it collides with **«Próximo»**, already printed on every catalog card for `next_slot_date` — one word, two meanings, 200px apart. |
 | **D5** | The category chip's resting label names the **axis** (**«Categorías»**), not the empty state. | **«Todas»** is already the `PosCategorySheet` chip for the empty selection. Reusing it on the strip would give one word two jobs one tap apart. |
 | **D6** | Multi-select reads **«Tours +1»**, not «2 categorías»; the first is taken in `SERVICE_CATEGORIES` order, not tap order. | A real name beats a count — the agent reads *what* is filtered, not only how many. Canonical order means the same selection always renders the same label however it was assembled; tap order makes deselect-then-reselect flip the visible name with the set unchanged. |
@@ -96,10 +110,21 @@ No new state, no new store, no new read. Design system: `.design/design-system/D
 
 ### US-AG55 — The strip states its scope and can be returned to it
 
-**S-1 — The default window is named**
+**S-1 — The default window is named, and the name tracks how much week is left** *(amended, D14)*
 Given an agent opens `/pos` with no explicit date selection
-Then the calendar chip reads **«Esta semana»** and the category chip reads **«Categorías»**
-And neither chip renders a ✕.
+Then the category chip reads **«Categorías»**, neither chip renders a ✕, and the calendar chip reads:
+
+| Org-local today | Window | Chip |
+|---|---|---|
+| Mon–Thu | today → coming Sunday (7…4 days) | **«Esta semana»** |
+| Fri–Sat | today → Sunday (3…2 days) | **«Fin de semana»** |
+| Sun | today alone (1 day) | **«Hoy»** |
+
+**S-1b — The label changes, the window does not**
+Given the same catalog on a Thursday and on a Friday
+Then the chip reads «Esta semana» and then «Fin de semana»
+And `defaultWindow(d).from === d` on both, with `to` the same coming Sunday — the label tracks the
+**extent** of an unchanged formula, never a different query shape.
 
 **S-2 — Naming the default does not move the default**
 Given the same state as S-1
@@ -138,6 +163,23 @@ Then the footer offers **«Limpiar»** (enabled)
 When they tap it
 Then the selection clears **and the sheet closes**, with the strip behind it reading «Esta semana».
 
+**S-11 — Sunday's default and an explicit Sunday read differently, on purpose** *(D17)*
+Given org-local today is a Sunday
+Then with no selection the chip reads **«Hoy»** with **no ✕**
+And after the agent picks that same Sunday in the calendar it reads **«DOM 23» with a ✕**
+And both list the same services — the ✕ is what distinguishes default from explicit pick.
+
+**S-12 — The window is in the accessible name** *(D16)*
+Given no explicit selection on a Monday
+Then the calendar chip's accessible name is **«Abrir calendario — Esta semana»**
+And with `SÁB 14` picked it is **«Abrir calendario — SÁB 14»**.
+
+**S-13 — The collapse moved no dates** *(D15, scope boundary)*
+Given the concrete days the retired `contextPills` suite pinned — `2026-08-03` (Mon), `-05` (Wed),
+`-06` (Thu), `-07` (Fri), `-09` (Sun)
+Then `defaultWindow` returns the `from`/`to` those tests asserted for index `0`, verbatim
+And across any 14 consecutive days, `from <= to` and `from === today`.
+
 **S-9 — The dashboard's day strip clears to its own default**
 Given the dashboard's `DayStrip` has an explicit day pinned
 When the agent opens its calendar sheet and taps **«Limpiar»**
@@ -156,7 +198,18 @@ no read; it changes labels and client-side state on `/pos`. The catalog and avai
 sits on top of are already org-scoped and their isolation tests are unchanged
 (`docs/pos/default-filtered-catalog.spec.md`).
 
-## Definition of Done
+## Definition of Done — amendment (D14–D18)
+
+- [x] `dates.ts`: `defaultWindow` + `defaultWindowLabel`; `contextPills`, `PILL_LABELS`,
+      `ContextPillKey`, `ContextPill` deleted
+- [x] `dates.test.ts`: the equivalence proof (S-13) replaces the `contextPills` suite; new coverage
+      for the three labels
+- [x] `PosCatalogPage`: resting label from `defaultWindowLabel`; accessible name carries the window
+- [x] `pnpm build:app` green, `pnpm lint:app` 0 errors, full suite passing
+- [x] `SPEC.md`: US-AG55's line amended; glossary «Default window» updated
+- [x] `TECH_DEBT.md`: entry 26 marked CLOSED
+
+## Definition of Done — as originally shipped (#109)
 
 - [x] `ClearableFilterChip` primitive + `features/filters` export
 - [x] Both strip chips migrated; defaults named; `+N` label with a full accessible name
@@ -183,6 +236,11 @@ rest instead of two icons. No request, price, availability or stored value chang
 functional gain is that an abandoned date filter is now recoverable in one tap instead of requiring
 a page reload — including for the service-detail view that silently inherited it.
 
+**Amendment (D14):** the resting label is no longer one word all week. An agent who learned
+«Esta semana» will see **«Fin de semana»** from Friday and **«Hoy»** on Sunday. Nothing about the
+query changes — the same `hoy → domingo` window is requested every day; the label now states how
+much of it is left, which on a Sunday is one day. No stored value, price or availability moves.
+
 The dashboard's `DayStrip` (`/`) hosts the same calendar sheet and therefore also gains **«Limpiar»**,
 which returns it to **«Hoy»** (D13). That second host was missed locally because the bare
 `tsc --noEmit` used to check it is a no-op against a solution-style `tsconfig.json`; `pnpm build:app`
@@ -193,4 +251,3 @@ caught both it and an `sx`-array typing fault. Verify this repo's frontend with 
 | Question | Smallest change that answers it |
 |---|---|
 | Should «Todas» in `PosCategorySheet` close the sheet, like the date sheet's «Limpiar» (D11)? | Add `onClose()` to its `onClear` handler. |
-| Is «Esta semana» right on a Sunday, when the window is one day? | If field use says no, make the label a function of `mondayIndexOf(today)` returning «Hoy» on Sunday — the range stays untouched either way. |
