@@ -2,6 +2,34 @@
 
 This document tracks known technical debt, deferred tasks, and architectural improvements that are planned for future phases.
 
+## 27. `updateService` Can Strand a Slot at Negative Effective Remaining — ⚠️ OPEN
+
+**Context:** `routes/services/handler.ts:267–269` writes `flexCapacityPct: input.is_flexible ?
+(input.flex_capacity_pct ?? 0) : 0` with **no validation against seats already sold**. A Soft Cap
+service at `capacity 40 / flex 10 %` legally reaches `booked = 43`; turning Soft Cap off then
+leaves that departure at an effective remaining of `(40 − 43) + 0 = −3`. The same hole exists for
+*lowering* the percentage rather than clearing it.
+
+**Why it is not fixed in the US-AG56 PR:** that PR fixes the **read** (BUG-031), and the read must
+be correct however the write is later hardened. Deferring is safe *for the catalog* because the
+read no longer sums: a negative slot can now only fail to advertise itself, where before it could
+**suppress a sellable sibling** and make the card contradict the calendar.
+
+**What is still wrong:** the stranded departure is scheduled but unsellable — it renders in the
+service sheet, and every per-slot availability path correctly refuses it, with nothing anywhere
+telling the admin they created it. The customers holding those 43 seats are unaffected; only new
+sales into that departure are impossible.
+
+**Fix when picked up:** refuse the update (`409`) when any future slot of the service would land
+below zero under the new capacity mode, naming the departures — the same shape as the zone
+operations, which already reconcile every future slot in one statement
+(`routes/services/zones.reconcile.ts`). An admin who genuinely wants the reduction should cancel
+or move the excess bookings first, which is a decision only they can make.
+
+**Found:** 2026-08-21, while establishing the root cause of BUG-031.
+
+---
+
 ## 26. `contextPills` Carries Copy the UI Never Renders (`PILL_LABELS`)
 
 **Context:** `features/pos/dates.ts:90` defines `PILL_LABELS` (`ESTA SEMANA` / `ESTE FIN` /
