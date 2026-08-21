@@ -72,17 +72,25 @@ export function DeparturePicker({
   isFlexible,
   flexCapacityPct,
 }: DeparturePickerProps) {
-  // The grid opens expanded and collapses on the first pick (D6). Re-expanding is «Cambiar».
-  const [expanded, setExpanded] = useState(true)
+  // D6 (revised) — the sheet opens COLLAPSED, on the day the anchor already chose: the catalog
+  // filter, else the service's next departure with room (US-AG56), else today. The grid remains
+  // the only way to pick a date — that is what D1 decided — but expanding it on open pushed the
+  // header, pager, chips, zones, extras and the pinned footer past 85vh, so every sale began with
+  // a scroll. «Cambiar» opens it for the case it exists to serve: a date other than the one the
+  // seller was already looking at.
+  const [expanded, setExpanded] = useState(false)
   const [visibleMonth, setVisibleMonth] = useState(() => monthOf(selectedDate))
 
   // D2 — ~1 KB of date strings per month, not 60 days of slots. Party-scoped server-side, so a
   // day the group cannot take is never offered (D4).
+  // Deferred until the grid is actually open: a sheet opened to sell today's 15:00 should not
+  // spend a round trip painting a month nobody asked to see (D2's point was cheap, not free).
   const { data: month, isLoading: monthLoading } = useServiceMonth(
     serviceId,
     visibleMonth,
     partySize,
     today,
+    expanded,
   )
   const dayState = buildDayState(visibleMonth, month, today)
 
@@ -107,6 +115,7 @@ export function DeparturePicker({
             today={today}
             dayState={dayState}
             availabilityDots
+            compact
             onVisibleMonthChange={setVisibleMonth}
           />
           {monthLoading && (
