@@ -70,7 +70,7 @@ export function ServiceSheet({
   const {
     data: service,
     isLoading,
-    isPlaceholderData,
+    isFetching,
     isError,
   } = usePosService(serviceId ?? undefined, range)
 
@@ -143,7 +143,7 @@ export function ServiceSheet({
             service={service}
             selectedDate={selectedDate}
             onSelectDate={setSelectedDate}
-            slotsLoading={isPlaceholderData}
+            slotsLoading={isFetching}
             today={today}
             onAdded={onAdded}
           />
