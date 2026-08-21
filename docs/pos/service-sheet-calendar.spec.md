@@ -33,9 +33,16 @@ customer asking about a date outside the next three days does not cost me three 
 
 Stated as a mechanical test, per `PROCESS.md`:
 
-- `test/pos/pos-availability-days.test.ts` must pass **unedited** — the org-wide, category-scoped
-  behaviour of `GET /api/pos/availability/days` is unchanged; this feature only *adds* optional
-  parameters and an *additional* response field.
+- Every **existing case** in `test/pos/pos-availability-days.test.ts` passes with its assertions
+  **unchanged** — the org-wide, category-scoped behaviour of `GET /api/pos/availability/days` is
+  untouched; this feature only *adds* optional parameters and an *additional* response field.
+  *(Corrected during the build: this originally read "the file passes unedited", which the build
+  falsified — S9 seeds an affiliate allow-list whose FK to `services` blocks the file's shared
+  teardown, so three `DELETE`s and a link-release `UPDATE` were added to it. No existing
+  assertion changed. The boundary is about **behaviour**, and saying "unedited" made it a claim
+  about the file, which is a different and weaker thing.)*
+- **S7 is the boundary made mechanical**: without `service_id` the response body must have no
+  `sold_out` key at all.
 - `RescheduleSheet` renders and behaves identically after being migrated to the shared
   `mode="single"` prop, and `test/pos/pos-bookings-reschedule.test.ts` passes unedited.
 - The lodging stay sheet (`LodgingStaySheet`), the only **range** consumer of
@@ -57,6 +64,7 @@ Stated as a mechanical test, per `PROCESS.md`:
 | **D9** | The absent-from-the-map day now means **non-operating**, inverting `dayRemaining`'s current *"absent = the server decides"* contract. | With D3 the client knows the full truth for the fetched month, so "absent" stops meaning "unknown". Callers that do **not** pass the new day-state map keep the old contract, so the lodging sheet is unaffected. |
 | **D10** | Time chips read **«29 lugares»**, and US-AG34's amber cushion warning **survives** with an icon. | The shorter phrasing fits a chip and is how a seller speaks. But the cushion warning is the only signal that a sale is eating into controlled overbooking, and `DESIGN_TOKENS.md` forbids colour-only state — so it keeps its wording and gains an icon rather than being dropped for brevity. |
 | **D11** | `SlotPicker.tsx` is **deleted**, not left unused. | `ServiceSelectionPanel` is its only consumer. A component kept "just in case" is a second renderer of the same concept, which is the condition this feature exists to end. |
+| **D13** | A day whose departures have **all passed the sales cutoff** reads **Agotado**, not non-operating. The cutoff lives inside the classification `CASE`, not in the `WHERE`. | *Added during the build — the interview never reached this branch.* The service **does** run that day; only the selling window closed. Telling the seller *"no sale ese día"* when the truth is *"ya salieron"* is the same class of lie D8 exists to prevent, and «Agotado» is exactly what "you cannot sell it" means to the person at the counter. |
 | **D12** | Changing `party` **re-classifies days** and clears a selected slot that no longer fits. | Already US-AG32's rule inside the sheet (`incrementParty` clears a non-fitting slot); D4 simply extends it to the calendar, so the grid never offers a day the chosen group cannot take. |
 
 ## Data Model

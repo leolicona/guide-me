@@ -427,7 +427,13 @@ export const listPosServices = async (c: PosContext) => {
 // day for this org. Returns only date strings — no slot-level or per-service data.
 export const listAvailabilityDays = async (c: PosContext) => {
   const agent = c.get('user')
-  const { month, today: todayParam, categories } = c.req.valid('query')
+  const {
+    month,
+    today: todayParam,
+    categories,
+    service_id: serviceId,
+    party,
+  } = c.req.valid('query')
   const db = getDb(c.env)
   const { tz, cutoffOffsetMin } = await loadOrgTiming(db, agent.organizationId)
   const today = todayParam ?? orgToday(tz)
@@ -438,7 +444,9 @@ export const listAvailabilityDays = async (c: PosContext) => {
   // month `windowFrom` exceeds `windowEnd`; short-circuit rather than issue a no-row query.
   const windowFrom = today > monthStart ? today : monthStart
   if (windowFrom > monthEnd) {
-    return c.json({ days: [] })
+    // US-AG57 — an empty month still has to carry the `sold_out` key when scoped to a service,
+    // so the client can tell "nothing here" from "this response does not classify days".
+    return c.json(serviceId ? { days: [], sold_out: [] } : { days: [] })
   }
 
   // US-A47 — drop days whose only slots have passed the sales cutoff (no past times in the picker).
@@ -447,6 +455,39 @@ export const listAvailabilityDays = async (c: PosContext) => {
     cutoffOffsetMin,
     tz,
   )
+
+  // US-AG57 — a `service_id` switches to the three-state, party-aware classification the sale
+  // sheet's calendar needs. It is a different question (one service, "can this group go?") with a
+  // different answer shape, so it gets its own reader rather than a flag threaded through this one.
+  if (serviceId) {
+    // Defence in depth, mirroring `getPosService` (affiliate-portal §4.2): an affiliate may only
+    // read a curated service's calendar. A hand-crafted id returns an EMPTY month rather than a
+    // 404 — the calendar is a paint, not a resource, and an error here would tell the caller the
+    // service exists (S9).
+    if (agent.role === 'affiliate') {
+      const allowed = await db
+        .select({ id: affiliateCommissions.id })
+        .from(affiliateCommissions)
+        .where(
+          and(
+            eq(affiliateCommissions.affiliateCompanyId, agent.affiliateCompanyId ?? ''),
+            eq(affiliateCommissions.serviceId, serviceId),
+          ),
+        )
+        .limit(1)
+      if (allowed.length === 0) {
+        return c.json({ days: [], sold_out: [] })
+      }
+    }
+    return listServiceAvailabilityDays(
+      c,
+      serviceId,
+      party,
+      windowFrom,
+      monthEnd,
+      sellableThreshold,
+    )
+  }
 
   const rows = await db
     .select({ date: slots.date })
@@ -487,6 +528,60 @@ export const listAvailabilityDays = async (c: PosContext) => {
   }
 
   return c.json({ days: [...days].sort() })
+}
+
+// US-AG57 — the SERVICE-SCOPED month: the sale sheet's calendar needs three day states, and
+// `days: string[]` can only carry two. One grouped scan classifies every day of the window:
+//
+//   operates  ⟺ the day has ≥ 1 active slot at all          → the row exists
+//   available ⟺ ≥ 1 of them is sellable AND seats `party`   → sellableRoom = 1
+//   sold out  ⟺ operates but not available
+//
+// The cutoff lives INSIDE the CASE rather than in the WHERE (D13): a day whose departures have
+// all left is still a day the service *operates*, and telling the seller "no sale ese día" when
+// the truth is "ya salieron" is the same class of lie US-AG33 wrote the distinction to prevent.
+// It reads as **Agotado**, which is what "you cannot sell it" means to the person at the counter.
+const listServiceAvailabilityDays = async (
+  c: PosContext,
+  serviceId: string,
+  party: number,
+  windowFrom: string,
+  monthEnd: string,
+  sellableThreshold: string,
+) => {
+  const agent = c.get('user')
+  const db = getDb(c.env)
+
+  const rows = await db
+    .select({
+      date: slots.date,
+      sellableRoom: sql<number>`max(
+        CASE WHEN ${sellableSlotSql(sellableThreshold)} AND ${slotHasRoomSql(party)}
+             THEN 1 ELSE 0 END
+      )`,
+    })
+    .from(slots)
+    .innerJoin(services, eq(slots.serviceId, services.id))
+    .where(
+      and(
+        // Multitenancy: BOTH sides are org-scoped, so a foreign `service_id` matches nothing
+        // rather than leaking another org's calendar (spec rule 5 / S8).
+        eq(slots.organizationId, agent.organizationId),
+        eq(services.organizationId, agent.organizationId),
+        eq(slots.serviceId, serviceId),
+        eq(slots.status, 'active'),
+        eq(services.status, 'active'),
+        gte(slots.date, windowFrom),
+        lte(slots.date, monthEnd),
+      ),
+    )
+    .groupBy(slots.date)
+    .orderBy(asc(slots.date))
+
+  const days: string[] = []
+  const soldOut: string[] = []
+  for (const r of rows) (Number(r.sellableRoom) === 1 ? days : soldOut).push(r.date)
+  return c.json({ days, sold_out: soldOut })
 }
 
 // US-AG03 / AG04 / AG05 — POS service detail: one active service in the caller's org
@@ -740,11 +835,16 @@ const sellableSlotSql = (thresholdStr: string) =>
 // NEGATIVE term — cancelling out a sibling that genuinely has seats. The sum answers "is the
 // fleet net-positive", which is a different question from "can I sell anything", and the two
 // diverge exactly when one slot goes negative (BUG-031 (b)).
-const slotHasRoomSql = () =>
+//
+// US-AG57 — `party` generalises the threshold from "any seat" to "enough seats for this group",
+// with the SAME arithmetic the sale applies, so the calendar can never offer a day the confirm
+// would refuse. Default 1 ⟹ `>= 1` ⟺ `> 0`, which is exactly the three existing callers'
+// behaviour — they pass nothing and are unaffected.
+const slotHasRoomSql = (party = 1) =>
   sql`((${slots.capacity} - ${slots.booked})
        + (CASE WHEN ${services.isFlexible}
                THEN (${slots.capacity} * ${services.flexCapacityPct}) / 100
-               ELSE 0 END)) > 0`
+               ELSE 0 END)) >= ${party}`
 
 // BUG-031 (a) — the next departure is the MINIMUM OF THE (date, time) PAIR, not `min(date)`.
 // `min(date)` names the earliest day and then cannot name a time on it, and picks a sold-out
