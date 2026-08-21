@@ -243,11 +243,14 @@ export function RescheduleSheet({ open, onClose, folioId, lines, isPaid }: Resch
           ) : (
             <>
               {/* The month grid first — the map. Dotted days fit the group; one tap lands. */}
+              {/* US-AG57 D7 — `mode="single"` replaces the `check_out ?? check_in` workaround
+                  this sheet was carrying: a range component was being asked to pick one day, and
+                  the POS calendar would have been the second copy of the same trick. */}
               <DateRangeCalendar
+                mode="single"
                 value={{ check_in: activeDate, check_out: null }}
                 onChange={(v) => {
-                  const tapped = v.check_out ?? v.check_in
-                  if (tapped && dates.includes(tapped)) goTo(tapped)
+                  if (v.check_in && dates.includes(v.check_in)) goTo(v.check_in)
                 }}
                 today={range.from}
                 dayRemaining={dayRemaining}
