@@ -1,5 +1,5 @@
 import { Box, Chip, Typography } from '@mui/material'
-import CheckRounded from '@mui/icons-material/CheckRounded'
+import { CheckRounded } from '@mui/icons-material'
 import { AMENITY_OPTIONS, type AmenityKey } from '../lodging'
 
 interface AmenityPickerProps {

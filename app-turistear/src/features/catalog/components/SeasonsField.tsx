@@ -9,8 +9,7 @@ import {
   InputAdornment,
   Alert,
 } from '@mui/material'
-import AddRounded from '@mui/icons-material/AddRounded'
-import DeleteOutlineRounded from '@mui/icons-material/DeleteOutlineRounded'
+import { AddRounded, DeleteOutlineRounded } from '@mui/icons-material'
 import { MoneyText } from '../../../components'
 import { amountToCents } from '../types'
 import { seasonFormSchema, seasonOverlaps } from '../schemas'

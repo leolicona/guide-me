@@ -8,8 +8,7 @@ import {
   TextField,
   Typography,
 } from '@mui/material'
-import AddRounded from '@mui/icons-material/AddRounded'
-import CloseRounded from '@mui/icons-material/CloseRounded'
+import { AddRounded, CloseRounded } from '@mui/icons-material'
 import { FormSheet } from '../../../components'
 import { ServiceError } from '../../../services/authService'
 import { useZoneMutations } from '../hooks/useZones'

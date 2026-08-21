@@ -1,7 +1,6 @@
 import { useState } from 'react'
 import { Box, Button, Chip, Divider, Stack, Typography } from '@mui/material'
-import AddRounded from '@mui/icons-material/AddRounded'
-import GridViewRounded from '@mui/icons-material/GridViewRounded'
+import { AddRounded, GridViewRounded } from '@mui/icons-material'
 import { SectionCard, ConfirmSheet } from '../../../components'
 import { useZoneMutations } from '../hooks/useZones'
 import { EnableZonesSheet } from './EnableZonesSheet'

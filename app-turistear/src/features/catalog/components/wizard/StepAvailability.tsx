@@ -14,8 +14,7 @@ import {
   Button,
   Alert,
 } from '@mui/material'
-import AddRounded from '@mui/icons-material/AddRounded'
-import CloseRounded from '@mui/icons-material/CloseRounded'
+import { AddRounded, CloseRounded } from '@mui/icons-material'
 import { FLEX_CAP_MAX_PCT } from '../../types'
 import { todayStr } from '../../dates'
 import type { WizardFormData } from './wizardSchema'

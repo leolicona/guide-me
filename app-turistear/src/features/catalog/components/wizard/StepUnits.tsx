@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Stack, Button, Box, Typography, Alert } from '@mui/material'
-import AddRounded from '@mui/icons-material/AddRounded'
+import { AddRounded } from '@mui/icons-material'
 import { StepIntro } from './StepIntro'
 import { UnitRow } from '../UnitRow'
 import { fromNightlyRate } from '../../lodging'

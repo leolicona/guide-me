@@ -11,7 +11,7 @@ import {
   Chip,
   ButtonBase,
 } from '@mui/material'
-import ExpandMoreRounded from '@mui/icons-material/ExpandMoreRounded'
+import { ExpandMoreRounded } from '@mui/icons-material'
 import { BottomSheet } from '../../../../components'
 import { unitFormSchema, type UnitFormData } from '../../schemas'
 import { UnitFields } from '../UnitFields'
@@ -76,7 +76,7 @@ function DisclosureHeader({
         minHeight: 48,
         px: 1,
         justifyContent: 'space-between',
-        borderRadius: 'var(--radius-md, 12px)',
+        borderRadius: 1,
       }}
       aria-expanded={open}
     >
