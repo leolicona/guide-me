@@ -200,14 +200,14 @@ sits on top of are already org-scoped and their isolation tests are unchanged
 
 ## Definition of Done — amendment (D14–D18)
 
-- [ ] `dates.ts`: `defaultWindow` + `defaultWindowLabel`; `contextPills`, `PILL_LABELS`,
+- [x] `dates.ts`: `defaultWindow` + `defaultWindowLabel`; `contextPills`, `PILL_LABELS`,
       `ContextPillKey`, `ContextPill` deleted
-- [ ] `dates.test.ts`: the equivalence proof (S-13) replaces the `contextPills` suite; new coverage
+- [x] `dates.test.ts`: the equivalence proof (S-13) replaces the `contextPills` suite; new coverage
       for the three labels
-- [ ] `PosCatalogPage`: resting label from `defaultWindowLabel`; accessible name carries the window
-- [ ] `pnpm build:app` green, `pnpm lint:app` 0 errors, full suite passing
-- [ ] `SPEC.md`: US-AG55's line amended; glossary «Default window» updated
-- [ ] `TECH_DEBT.md`: entry 26 marked CLOSED
+- [x] `PosCatalogPage`: resting label from `defaultWindowLabel`; accessible name carries the window
+- [x] `pnpm build:app` green, `pnpm lint:app` 0 errors, full suite passing
+- [x] `SPEC.md`: US-AG55's line amended; glossary «Default window» updated
+- [x] `TECH_DEBT.md`: entry 26 marked CLOSED
 
 ## Definition of Done — as originally shipped (#109)
 

@@ -44,7 +44,7 @@ import {
 import { ROUTES } from '../config/routes'
 // Org-local "today" (device-local calendar string, BUG-007) — the anchor for the default
 // week context and the floor for the date picker; shared with the sheet/detail views.
-import { todayStr, contextPills } from '../features/pos/dates'
+import { todayStr, defaultWindow, defaultWindowLabel } from '../features/pos/dates'
 import { useMyOrganization } from '../features/organization'
 
 const WEEKDAYS_ES = ['DOM', 'LUN', 'MAR', 'MIÉ', 'JUE', 'VIE', 'SÁB']
@@ -65,17 +65,11 @@ const rangePillLabel = (from: string, to: string): string => {
     : `${a.getUTCDate()} ${MONTHS_ES[a.getUTCMonth()]} – ${b.getUTCDate()} ${MONTHS_ES[b.getUTCMonth()]}`
 }
 
-// The resting label of the calendar chip — the name of the default window. `contextPills(today)[0]`
-// is ALWAYS `(hoy → domingo próximo)`: both branches compute the same `comingSunday`, only the
-// (never-rendered) internal key flips esta_semana/este_fin by weekday. So one static word is true
-// all seven days. On a Sunday the span collapses to today alone — not a lie: the week has one day
-// left. Naming it here is what stops the default from being an invisible state.
-const DEFAULT_RANGE_LABEL = 'Esta semana'
-
-// The resting label of the category chip. It names the AXIS, not the state, because "Todas" is
+// The resting label of the CATEGORY chip. It names the AXIS, not the state, because "Todas" is
 // already the sheet's word for the empty selection (PosCategorySheet) — reusing it out here would
-// give one word two jobs one tap apart. Paired with DEFAULT_RANGE_LABEL the strip reads as a
-// sentence at rest ("Categorías · Esta semana") instead of two mute icons.
+// give one word two jobs one tap apart. Its calendar counterpart is `defaultWindowLabel(today)`
+// (D14), a function rather than a constant: the window's formula never changes but its extent does,
+// and the label follows the extent. Together the strip reads as a sentence at rest.
 const DEFAULT_CATEGORY_LABEL = 'Categorías'
 
 // The category chip's label: the default axis name, one category by name, or the first + a "+N"
@@ -107,8 +101,8 @@ export default function PosCatalogPage() {
 
   // US-AG35 — when no explicit selection is made, the catalog defaults to the contextual week
   // (today → Sunday). The date filter is picked from the calendar sheet; the week is the anchor.
-  const defaultWeek = contextPills(today)[0]
-  const effective = selection ?? { from: defaultWeek.from, to: defaultWeek.to }
+  const defaultWeek = defaultWindow(today)
+  const effective = selection ?? defaultWeek
 
   const { data: services, isLoading, isError } = usePosServices(
     today,
@@ -214,8 +208,8 @@ export default function PosCatalogPage() {
           )}
 
           {/* Calendar button — opens the sheet. It shows an explicit day/range pick, and NAMES the
-              default window (DEFAULT_RANGE_LABEL) when there is none, so "no filter" is a stated
-              scope rather than a bare icon. Its ✕ returns the catalog to that default (US-AG35).
+              default window when there is none — «Esta semana» / «Fin de semana» / «Hoy» by how
+              much of the week is left (D14) — so "no filter" is a stated scope, not a bare icon. Its ✕ returns the catalog to that default (US-AG35).
               Note what the ✕ deliberately does NOT touch: `hideSoldOut` is a persisted Settings
               preference, not a strip filter — resetting it here would surprise the agent later. */}
           <ClearableFilterChip
@@ -223,14 +217,22 @@ export default function PosCatalogPage() {
             onClick={() => setDatePickerOpen(true)}
             onClear={() => setSelection(null)}
             clearLabel="Quitar el filtro de fecha"
-            aria-label="Abrir calendario"
+            aria-label={
+              calendarSelection
+                ? `Abrir calendario — ${
+                    calendarSelection.to
+                      ? rangePillLabel(calendarSelection.from, calendarSelection.to)
+                      : dayPillLabel(calendarSelection.from)
+                  }`
+                : `Abrir calendario — ${defaultWindowLabel(today)}`
+            }
             startIcon={<CalendarMonthRounded sx={{ fontSize: 20 }} />}
           >
             {calendarSelection
               ? calendarSelection.to
                 ? rangePillLabel(calendarSelection.from, calendarSelection.to)
                 : dayPillLabel(calendarSelection.from)
-              : DEFAULT_RANGE_LABEL}
+              : defaultWindowLabel(today)}
           </ClearableFilterChip>
         </Box>
 
