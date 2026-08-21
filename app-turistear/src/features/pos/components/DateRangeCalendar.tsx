@@ -36,6 +36,20 @@ interface DateRangeCalendarProps {
    * (`PosDatePickerSheet`) already taught the seller. Opt-in: only days PRESENT in `dayRemaining`
    * can earn one (absent days merely count as "server decides", which is not a promise). */
   availabilityDots?: boolean
+  /** US-AG57 (D7) — `'single'` picks ONE day: every tap reports it as `check_in` with a null
+   * `check_out`, and nothing ever fills as a range. Default `'range'`, so the lodging stay sheet
+   * is untouched. This replaces the `{check_in: d, check_out: null}` + `v.check_out ?? v.check_in`
+   * workaround `RescheduleSheet` was carrying, before the POS became its second copy. */
+  mode?: 'range' | 'single'
+  /** US-AG57 (D8/D9) — the THREE-state paint. When supplied it supersedes `dayRemaining`, and
+   * the contract inverts: a day absent from this map is one the service **does not operate**
+   * (flat, inert), not one the server will decide on. `sold_out` days tint — the service runs,
+   * it is simply full — because «no sale ese día» and «ya se llenó» are different answers to
+   * give a customer (US-AG33's distinction, carried onto the grid). */
+  dayState?: Map<string, 'available' | 'sold_out' | 'non_operating'>
+  /** US-AG57 — the visible month changed (`YYYY-MM`). The month grid owns its own paging, but
+   * a caller fetching per-month availability needs to know which one to ask for. */
+  onVisibleMonthChange?: (month: string) => void
 }
 
 // US-AG36/AG37 — the US-AG35 day grid extended to RANGE selection: first tap = check-in, second =
@@ -49,9 +63,16 @@ export function DateRangeCalendar({
   dayRemaining,
   requiredQuantity = 1,
   availabilityDots = false,
+  mode = 'range',
+  dayState,
+  onVisibleMonthChange,
 }: DateRangeCalendarProps) {
   const currentMonth = monthOf(today)
   const [visibleMonth, setVisibleMonth] = useState(() => monthOf(value.check_in ?? today))
+  const goToMonth = (next: string) => {
+    setVisibleMonth(next)
+    onVisibleMonthChange?.(next)
+  }
 
   // Every night in [from, to) has enough remaining rooms. Nights missing from the map count as
   // available (outside the fetched window the server stays authoritative at confirm).
@@ -65,6 +86,11 @@ export function DateRangeCalendar({
   }
 
   const handleTap = (date: string) => {
+    // D7 — a single-day picker has no second tap and no span to validate.
+    if (mode === 'single') {
+      onChange({ check_in: date, check_out: null })
+      return
+    }
     // No range yet, or a complete range exists → start fresh at this date.
     if (!value.check_in || (value.check_in && value.check_out)) {
       onChange({ check_in: date, check_out: null })
@@ -94,13 +120,13 @@ export function DateRangeCalendar({
       <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1 }}>
         <IconButton
           aria-label="Mes anterior"
-          onClick={() => setVisibleMonth((m) => addMonths(m, -1))}
+          onClick={() => goToMonth(addMonths(visibleMonth, -1))}
           disabled={atCurrentMonth}
         >
           <ChevronLeftRounded />
         </IconButton>
         <Typography sx={{ fontWeight: 600, fontSize: 17 }}>{monthLabel(visibleMonth)}</Typography>
-        <IconButton aria-label="Mes siguiente" onClick={() => setVisibleMonth((m) => addMonths(m, 1))}>
+        <IconButton aria-label="Mes siguiente" onClick={() => goToMonth(addMonths(visibleMonth, 1))}>
           <ChevronRightRounded />
         </IconButton>
       </Box>
@@ -121,8 +147,16 @@ export function DateRangeCalendar({
           const date = `${visibleMonth}-${pad2(day)}`
           const isPast = date < today
           const remaining = dayRemaining?.get(date)
-          const unavailable = remaining !== undefined && remaining < requiredQuantity
-          const disabled = isPast || unavailable
+          // D9 — with `dayState` the client knows the whole truth for this month, so "absent"
+          // stops meaning "unknown" and starts meaning "the service does not run".
+          const state = dayState?.get(date) ?? (dayState ? 'non_operating' : undefined)
+          // Only a day that OPERATES and is full tints; a non-operating day stays flat, so the
+          // two never read as the same fact (D8).
+          const unavailable = state
+            ? state === 'sold_out'
+            : remaining !== undefined && remaining < requiredQuantity
+          const inert = state ? state !== 'available' : false
+          const disabled = isPast || unavailable || inert
           const isEndpoint = date === value.check_in || date === value.check_out
           const isInRange = inRange(date)
           // The dot promises "this day fits the group", so only a day the map KNOWS earns one —
@@ -131,8 +165,9 @@ export function DateRangeCalendar({
             availabilityDots &&
             !isPast &&
             !isEndpoint &&
-            remaining !== undefined &&
-            remaining >= requiredQuantity
+            (state
+              ? state === 'available'
+              : remaining !== undefined && remaining >= requiredQuantity)
 
           return (
             <Box
@@ -204,19 +239,30 @@ export function DateRangeCalendar({
         })}
       </Box>
 
-      {dayRemaining && (
+      {/* D8 — with three states the legend must name the tinted one specifically: a flat cell
+          and a tinted cell now mean different things, and "Sin disponibilidad" covered both. */}
+      {dayState ? (
         <Stack direction="row" spacing={2} sx={{ mt: 1.5, justifyContent: 'center' }}>
-          <Legend color="var(--slate-300, #CBD5E1)" label="Sin disponibilidad" />
+          <Legend color="var(--slate-300, #CBD5E1)" label="Agotado" square />
+          <Legend color="var(--teal-700, #0F766E)" label="Con lugares" />
         </Stack>
+      ) : (
+        dayRemaining && (
+          <Stack direction="row" spacing={2} sx={{ mt: 1.5, justifyContent: 'center' }}>
+            <Legend color="var(--slate-300, #CBD5E1)" label="Sin disponibilidad" />
+          </Stack>
+        )
       )}
     </Box>
   )
 }
 
-function Legend({ color, label }: { color: string; label: string }) {
+function Legend({ color, label, square = false }: { color: string; label: string; square?: boolean }) {
   return (
     <Stack direction="row" spacing={0.5} sx={{ alignItems: 'center' }}>
-      <Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: color }} />
+      {/* The swatch mirrors the cell it explains: a filled square for the tinted sold-out day,
+          a dot for the availability mark. Shape carries the difference, not colour alone. */}
+      <Box sx={{ width: 8, height: 8, borderRadius: square ? 0.5 : '50%', bgcolor: color }} />
       <Typography variant="caption" color="text.secondary">
         {label}
       </Typography>

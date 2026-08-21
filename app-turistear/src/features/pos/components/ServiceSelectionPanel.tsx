@@ -11,7 +11,7 @@ import {
 import AddRounded from '@mui/icons-material/AddRounded'
 import RemoveRounded from '@mui/icons-material/RemoveRounded'
 import ShoppingCartRounded from '@mui/icons-material/ShoppingCartRounded'
-import { SlotPicker } from './SlotPicker'
+import { DeparturePicker } from './DeparturePicker'
 import { effectiveRemaining } from '../capacity'
 import { useRepeatPress } from '../hooks'
 import type { PosServiceDetail, PosSlot, PosSlotZone } from '../types'
@@ -21,10 +21,13 @@ import { chipPillSx } from '../../filters'
 
 interface ServiceSelectionPanelProps {
   service: PosServiceDetail
-  /** US-AG33 — the day axis to render (from the owner): 3 days on the "Hoy" anchor, 1 for
-   * an explicit catalog date. */
-  days: string[]
-  /** Real org-local today, for the "Hoy" relative label. */
+  /** US-AG57 — the day whose departures are shown. Owned by the sheet, because it also scopes
+   * the slot fetch (`service.slots` are this day's). Replaces US-AG33's fixed three-day axis. */
+  selectedDate: string
+  onSelectDate: (date: string) => void
+  /** The sheet is re-fetching this day's slots. */
+  slotsLoading?: boolean
+  /** Real org-local today — the calendar's floor. */
   today: string
   /** Fired after a line is successfully staged in the cart — the owner (sheet / page)
    * decides what happens next (close + snackbar, or its own snackbar). */
@@ -38,7 +41,9 @@ interface ServiceSelectionPanelProps {
 // source of truth — the bounds here are display/input guards only.
 export function ServiceSelectionPanel({
   service,
-  days,
+  selectedDate,
+  onSelectDate,
+  slotsLoading = false,
   today,
   onAdded,
 }: ServiceSelectionPanelProps) {
@@ -56,6 +61,9 @@ export function ServiceSelectionPanel({
   // US-AG32 — the largest group any in-window slot can seat (Effective Capacity, US-A36). On a
   // zoned service a party can't span zones, so the ceiling is the biggest single-zone remaining.
   // Caps the People counter so the agent can never request a group no slot/zone fits.
+  // US-AG57 — the window is now ONE day, so this ceiling is that day's biggest departure. It
+  // still exists to stop the stepper offering a group no slot can seat; moving to another day
+  // re-derives it from that day's slots.
   const maxParty = useMemo(
     () =>
       zonesEnabled
@@ -233,24 +241,25 @@ export function ServiceSelectionPanel({
       {/* ── Scrollable matrix (the ONLY overflow-y region) ── */}
       <Box sx={{ flex: 1, minHeight: 0, overflowY: 'auto', px: 3, py: 2.5 }}>
         <Typography variant="subtitle2" color="text.secondary" sx={{ mb: 1.5 }}>
-          Elige un horario
+          Elige una fecha y horario
         </Typography>
-        {service.slots.length === 0 ? (
-          <Typography color="text.secondary">
-            No hay horarios disponibles para este servicio.
-          </Typography>
-        ) : (
-          <SlotPicker
-            slots={service.slots}
-            days={days}
-            today={today}
-            partySize={partySize}
-            selectedId={slot?.id ?? null}
-            onSelect={handleSelectSlot}
-            isFlexible={service.is_flexible}
-            flexCapacityPct={service.flex_capacity_pct}
-          />
-        )}
+        <DeparturePicker
+          serviceId={service.id}
+          selectedDate={selectedDate}
+          onSelectDate={(d) => {
+            onSelectDate(d)
+            // A new day invalidates the departure, its zone and the extras priced against it.
+            clearSelection()
+          }}
+          slots={service.slots}
+          slotsLoading={slotsLoading}
+          today={today}
+          partySize={partySize}
+          selectedSlotId={slot?.id ?? null}
+          onSelectSlot={handleSelectSlot}
+          isFlexible={service.is_flexible}
+          flexCapacityPct={service.flex_capacity_pct}
+        />
 
         {/* US-A64 — zone chips: pick a physical zone on the chosen departure. Bound by the zone's
             own remaining; a zone that can't seat the party (or is closed) is disabled. */}

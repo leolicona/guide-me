@@ -109,6 +109,30 @@ export const getPosAvailabilityDays = async (
   return res.days
 }
 
+/** US-AG57 — one service's month, classified. A day in NEITHER array is one the service does
+ * not operate (D9); the client paints three states from these two lists. */
+export interface ServiceMonthAvailability {
+  days: string[]
+  sold_out: string[]
+}
+
+// US-AG57 — the sale sheet's calendar. Scoped to one service and to the party being sold, so
+// the server answers "can this group go that day?" with the same effective-capacity arithmetic
+// the confirm applies — the grid can never offer a day the sale would refuse. ~1 KB per month:
+// date strings only, no slot-level data (the US-AG30 rule still holds for anything list-shaped).
+export const getServiceAvailabilityDays = async (
+  serviceId: string,
+  month: string,
+  party: number,
+  today?: string,
+): Promise<ServiceMonthAvailability> => {
+  const params = new URLSearchParams({ month, service_id: serviceId, party: String(party) })
+  if (today) params.set('today', today)
+  return request<ServiceMonthAvailability>(
+    `/api/pos/availability/days?${params.toString()}`,
+  )
+}
+
 // US-AG03 / AG04 / AG05 — active service detail (active extras + active future slots).
 export const getPosService = async (
   id: string,

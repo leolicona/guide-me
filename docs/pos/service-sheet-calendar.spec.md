@@ -180,18 +180,21 @@ passes unedited (rule 4).
 
 ## Definition of Done
 
-- [ ] `availabilityDaysQuerySchema` accepts `service_id` + `party`; `listAvailabilityDays`
+- [x] `availabilityDaysQuerySchema` accepts `service_id` + `party`; `listAvailabilityDays`
       returns `sold_out` only when `service_id` is present.
-- [ ] `slotHasRoomSql` generalised from `> 0` to `>= party` with `party = 1` preserving today's
+- [x] `slotHasRoomSql` generalised from `> 0` to `>= party` with `party = 1` preserving today's
       behaviour for all four existing callers.
-- [ ] Scenarios S1–S9 covered; `pos-availability-days.test.ts` passes **unedited**.
-- [ ] `DateRangeCalendar`: `mode="single"`, `dayState`, the three-state paint and the new legend.
-- [ ] `RescheduleSheet` migrated to `mode="single"`; `pos-bookings-reschedule.test.ts` unedited.
-- [ ] `ServiceSelectionPanel` is calendar-first with the collapsing grid; `SlotPicker.tsx`
+- [x] Scenarios S1–S9 covered; `pos-availability-days.test.ts` passes **unedited**.
+- [x] `DateRangeCalendar`: `mode="single"`, `dayState`, the three-state paint and the new legend.
+- [x] `RescheduleSheet` migrated to `mode="single"`; `pos-bookings-reschedule.test.ts` unedited.
+- [x] `ServiceSelectionPanel` is calendar-first with the collapsing grid; `SlotPicker.tsx`
       deleted; US-AG34's cushion warning still renders, icon-paired.
-- [ ] `LodgingStaySheet` behaviour unchanged (range mode is the default).
-- [ ] `SPEC.md`: US-AG57 story + Features-by-Phase line + glossary term.
-- [ ] `pnpm --filter api-turistear test` green; `pnpm build:app` clean.
+- [x] `LodgingStaySheet` behaviour unchanged (range mode is the default).
+- [x] `SPEC.md`: US-AG57 story + Features-by-Phase line + glossary term.
+- [x] `pnpm --filter api-turistear test` green (**960**, up from 951); frontend **566** green
+      (incl. `RescheduleSheet.test.tsx`, which pins the D7 migration); `pnpm build:app` clean.
+- [x] `buildDayState` + `dayState.test.ts` — the client-side three-way classification, incl. the
+      empty-month, undefined-month and stale-past-day cases.
 
 ## Deferred — and why each is safe to defer
 

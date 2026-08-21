@@ -12,7 +12,7 @@ import {
 } from '@mui/material'
 import { usePosService } from '../features/pos/hooks'
 import { ServiceSelectionPanel } from '../features/pos/components/ServiceSelectionPanel'
-import { todayStr, addDays } from '../features/pos/dates'
+import { todayStr } from '../features/pos/dates'
 import { usePosFilters } from '../store/posFilters'
 import { ROUTES } from '../config/routes'
 
@@ -21,15 +21,15 @@ import { ROUTES } from '../config/routes'
 // the selection logic lives in exactly one place.
 export default function PosServicePage() {
   const { id } = useParams<{ id: string }>()
-  // US-AG30/AG33/AG35 — inherit the catalog's selection start day. An explicit pick stays a
-  // single day; the "Hoy" default (null) expands to the 3-day window [today, today+2].
+  // US-AG57 — the deep-link page follows the sheet: it opens on the catalog's selection (else
+  // today) and the panel's own calendar takes over from there, fetching ONE day at a time. This
+  // page has no `next_slot_date` to anchor on — it is reached by URL, not from a card — so the
+  // filter and today are the whole ladder.
   const anchor = usePosFilters((s) => s.selection?.from ?? null)
   const today = todayStr()
-  const days = anchor
-    ? [anchor]
-    : [today, addDays(today, 1), addDays(today, 2)]
-  const range = { from: days[0], to: days[days.length - 1] }
-  const { data: service, isLoading, isError } = usePosService(id, range)
+  const [selectedDate, setSelectedDate] = useState(anchor ?? today)
+  const range = { from: selectedDate, to: selectedDate }
+  const { data: service, isLoading, isFetching, isError } = usePosService(id, range)
   const navigate = useNavigate()
 
   const [added, setAdded] = useState(false)
@@ -76,7 +76,9 @@ export default function PosServicePage() {
             <CardContent>
               <ServiceSelectionPanel
                 service={service}
-                days={days}
+                selectedDate={selectedDate}
+                onSelectDate={setSelectedDate}
+                slotsLoading={isFetching}
                 today={today}
                 onAdded={() => setAdded(true)}
               />

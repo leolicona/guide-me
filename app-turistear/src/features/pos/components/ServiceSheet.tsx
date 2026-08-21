@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import {
   SwipeableDrawer,
   Box,
@@ -10,7 +11,7 @@ import { usePosService } from '../hooks'
 import { usePosFilters } from '../../../store/posFilters'
 import { ServiceSelectionPanel } from './ServiceSelectionPanel'
 import { ExpressSalePanel } from './ExpressSalePanel'
-import { todayStr, addDays } from '../dates'
+import { todayStr } from '../dates'
 import { useMyOrganization } from '../../organization'
 
 interface ServiceSheetProps {
@@ -39,27 +40,37 @@ export function ServiceSheet({
   onClose,
   onAdded,
 }: ServiceSheetProps) {
-  // US-AG30/AG33 — inherit the catalog's selected day. An explicit date stays a single day
-  // (a hyper-specific search shouldn't get extra noise). With no explicit pick, the sheet opens
-  // on the service's next available departure (`nextSlotDate`) rather than blindly on today, so a
-  // service that doesn't run today still surfaces its upcoming schedule immediately — then a
-  // rolling 3-day window [start, start+2] from there. Falls back to today when the card reported
-  // no in-window availability. The global filter is never mutated (`today` stays real today).
+  // US-AG57 (D5) — the sheet OPENS on the catalog's filter → else the service's next departure
+  // WITH ROOM (`nextSlotDate`, corrected by US-AG56) → else today. From there the seller navigates
+  // freely inside the sheet's own calendar: the opening day is a starting point, not a restriction,
+  // so a customer changing their mind at the counter no longer costs a close-refilter-reopen. The
+  // global filter is never mutated (`today` stays real today).
   const anchor = usePosFilters((s) => s.selection?.from ?? null)
   const { data: org } = useMyOrganization()
   const today = todayStr(org?.timezone) // US-A66 — org-local "today"
-  const start = anchor ?? nextSlotDate ?? today
+  const opening = anchor ?? nextSlotDate ?? today
+  const [selectedDate, setSelectedDate] = useState(opening)
+
+  // Re-anchor whenever the sheet opens on a different service (the component stays mounted
+  // across cards). Render-time "store previous prop" so it lands before paint.
+  const [lastServiceId, setLastServiceId] = useState(serviceId)
+  if (serviceId !== lastServiceId) {
+    setLastServiceId(serviceId)
+    setSelectedDate(opening)
+  }
+
   // US-AG45 (D5) — Express is TODAY only, whatever the catalog is filtered to: a walk-up at the
   // counter must never be sold a ticket for the day the agent happened to be browsing.
-  const days = express
-    ? [today]
-    : anchor
-      ? [anchor]
-      : [start, addDays(start, 1), addDays(start, 2)]
-  const range = { from: days[0], to: days[days.length - 1] }
+  // US-AG57 (D2) — otherwise the sheet fetches ONE day at a time. The month's availability marks
+  // come from the ~1 KB `/availability/days` read instead, so opening a card no longer has to
+  // choose between a short window and a heavy payload.
+  const range = express
+    ? { from: today, to: today }
+    : { from: selectedDate, to: selectedDate }
   const {
     data: service,
     isLoading,
+    isFetching,
     isError,
   } = usePosService(serviceId ?? undefined, range)
 
@@ -130,7 +141,9 @@ export function ServiceSheet({
         ) : (
           <ServiceSelectionPanel
             service={service}
-            days={days}
+            selectedDate={selectedDate}
+            onSelectDate={setSelectedDate}
+            slotsLoading={isFetching}
             today={today}
             onAdded={onAdded}
           />
