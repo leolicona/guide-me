@@ -31,7 +31,12 @@ export const datePillSx = (active: boolean): SxProps<Theme> => ({
 // otherwise. Reserves the solid teal fill (datePillSx / buttons) for true CTAs, so a strip
 // of these reads as filters, not actions. Kept at 48px — unlike the denser chipPillSx (36px)
 // — for outdoor one-handed touch (brief: reach & repetition).
-export const filterChipSx = (active: boolean): SxProps<Theme> => ({
+// NOTE the deliberately absent `: SxProps<Theme>` return annotation, unlike its siblings above.
+// `SxProps` is a union that itself admits arrays, so a value declared that way cannot legally be an
+// ELEMENT of an `sx` array. Letting TS infer the object literal keeps it assignable to `sx` exactly
+// as before AND composable — which is what lets ClearableFilterChip write
+// `sx={[filterChipSx(active), { px: 0 }]}` to move the pill's styling onto its container.
+export const filterChipSx = (active: boolean) => ({
   flexShrink: 0,
   height: 48,
   px: 2,

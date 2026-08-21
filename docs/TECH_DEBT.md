@@ -2,6 +2,30 @@
 
 This document tracks known technical debt, deferred tasks, and architectural improvements that are planned for future phases.
 
+## 26. `contextPills` Carries Copy the UI Never Renders (`PILL_LABELS`)
+
+**Context:** `features/pos/dates.ts:90` defines `PILL_LABELS` (`ESTA SEMANA` / `ESTE FIN` /
+`SIG. SEMANA`) and `contextPills` returns a `label` on every pill. Those labels were specified by
+US-AG35 and **never rendered**: the only consumer, `PosCatalogPage`, reads `contextPills(today)[0]`
+for its `from`/`to` and nothing else. `SPEC.md`'s US-AG35 line described the pills as shipped for
+months — the drift that left the catalog's default window nameless until US-AG55
+(`docs/pos/filter-strip-reset.spec.md` D12).
+
+**Also unused:** the second pill of each branch (`este_fin` on Mon–Thu, `sig_semana` on Fri–Sun).
+Only index `0` is ever read, and both branches compute the same `[0]` range (`today → comingSunday`).
+
+**Why deferred:** `dates.test.ts` asserts the labels and both pills by name, and US-AG55's scope
+boundary pins that file to pass **unedited** — so removing the copy means editing the very test that
+proves US-AG55 changed no ranges. Doing it in the same PR would blur the two.
+
+**Action required:**
+- **Who:** whoever next touches `/pos` date context — or, if the context pills return as real
+  controls, whoever builds them (at which point this stops being debt).
+- **What:** collapse `contextPills` to the single default range it actually serves, drop
+  `PILL_LABELS` and `ContextPillKey`, and rewrite `dates.test.ts` around the surviving contract.
+- **Reference:** `docs/pos/filter-strip-reset.spec.md` (D12, Deferred table).
+
+
 ## 25. `folios.status` (+ its sibling roll-ups) Survive as Reconciled Columns — ✅ CLOSED (2026-08-12)
 
 **Closed:** migration `0065` drops `folios.status`, `booking_expires_at`, `refund_status` and

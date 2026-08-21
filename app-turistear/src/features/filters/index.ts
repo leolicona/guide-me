@@ -1,4 +1,5 @@
 export { FilterPill } from './components/FilterPill'
+export { ClearableFilterChip } from './components/ClearableFilterChip'
 export { FilterStrip } from './components/FilterStrip'
 export { BottomSheet } from './components/BottomSheet'
 export { DateRangeSheet } from './components/DateRangeSheet'
