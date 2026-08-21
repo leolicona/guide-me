@@ -30,7 +30,23 @@ or move the excess bookings first, which is a decision only they can make.
 
 ---
 
-## 26. `contextPills` Carries Copy the UI Never Renders (`PILL_LABELS`)
+## 26. `contextPills` Carries Copy the UI Never Renders (`PILL_LABELS`) — ✅ CLOSED (2026-08-21)
+
+**Closed:** the copy became **live** rather than being deleted — which is the escape clause this
+entry named. `defaultWindowLabel(today)` renders «Esta semana» / «Fin de semana» / «Hoy» on the
+`/pos` calendar chip (`filter-strip-reset.spec.md` D14), so the strip states how much of the week it
+is listing instead of hiding a 7× swing behind one word. `contextPills`, `PILL_LABELS`,
+`ContextPillKey`, `ContextPill` and the never-read second pill are **deleted**; what survives is
+`defaultWindow(today)` — the one range the function always served — plus the labeller.
+
+The deferral reason resolved itself: this change *is* the PR where rewriting `dates.test.ts` is the
+point. The old suite's concrete expected values for index `0` are ported verbatim to
+`defaultWindow`, so the collapse carries its own equivalence proof (spec S-13) rather than leaning
+on a boundary it had to edit.
+
+<details>
+<summary>Original entry (for history)</summary>
+
 
 **Context:** `features/pos/dates.ts:90` defines `PILL_LABELS` (`ESTA SEMANA` / `ESTE FIN` /
 `SIG. SEMANA`) and `contextPills` returns a `label` on every pill. Those labels were specified by
@@ -52,6 +68,8 @@ proves US-AG55 changed no ranges. Doing it in the same PR would blur the two.
 - **What:** collapse `contextPills` to the single default range it actually serves, drop
   `PILL_LABELS` and `ContextPillKey`, and rewrite `dates.test.ts` around the surviving contract.
 - **Reference:** `docs/pos/filter-strip-reset.spec.md` (D12, Deferred table).
+
+</details>
 
 
 ## 25. `folios.status` (+ its sibling roll-ups) Survive as Reconciled Columns — ✅ CLOSED (2026-08-12)

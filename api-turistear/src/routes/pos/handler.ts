@@ -210,7 +210,7 @@ const extraReadColumns = {
 // Sheet lit the same day up (see `slotHasRoomSql`).
 //
 // The window is the SEMANTIC DATE RANGE the agent selected — `from`/`to` (a US-AG35 calendar
-// range, or the `contextPills` default of today … coming Sunday) — or a single `date` (legacy
+// range, or the `defaultWindow` default of today … coming Sunday) — or a single `date` (legacy
 // single-day pick). `AVAILABILITY_WINDOW_DAYS` below is only a fallback for a caller that sends
 // neither; the shipped client always sends `from`/`to`, so it never fires.
 export const listPosServices = async (c: PosContext) => {

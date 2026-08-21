@@ -78,48 +78,27 @@ export const firstWeekdayMondayBased = (month: string): number => {
 const mondayIndexOf = (date: string): number =>
   (new Date(`${date}T00:00:00Z`).getUTCDay() + 6) % 7
 
-export type ContextPillKey = 'esta_semana' | 'este_fin' | 'sig_semana'
-
-export interface ContextPill {
-  key: ContextPillKey
-  label: string
+/** An inclusive naive date range (`from <= to`). */
+export interface DateWindow {
   from: string
   to: string
 }
 
-const PILL_LABELS: Record<ContextPillKey, string> = {
-  esta_semana: 'ESTA SEMANA',
-  este_fin: 'ESTE FIN',
-  sig_semana: 'SIG. SEMANA',
-}
+// US-AG35 / US-AG55 — the window the POS catalog lists when the agent has picked nothing: today
+// through the COMING SUNDAY, Monday-first (es-MX). The formula is the same every day of the week;
+// what changes is how much week is left — 7 days on a Monday, 1 on a Sunday.
+export const defaultWindow = (today: string): DateWindow => ({
+  from: today,
+  to: addDays(today, 6 - mondayIndexOf(today)),
+})
 
-// US-AG35 — the dynamic, week-based context pills that adapt to the current day of the week
-// (Monday-first, es-MX). Mon–Thu offer "ESTA SEMANA" (today → Sunday, default) + "ESTE FIN"
-// (Fri → Sun); Fri–Sun offer "ESTE FIN" (today → Sun, default) + "SIG. SEMANA" (next Mon → Sun).
-// The FIRST pill is the contextual default. All ranges are inclusive naive YYYY-MM-DD.
-export const contextPills = (today: string): ContextPill[] => {
+// US-AG55 (D14) — what the calendar chip reads at rest. It names the window's remaining EXTENT,
+// which `defaultWindow`'s identical formula hides: one static string would read the same on a
+// Monday listing a whole week and on a Sunday listing a single day. Sentence case, to sit beside
+// «Categorías» on the strip (the "SÁB 14" pills are uppercase as ABBREVIATIONS, not as a style).
+export const defaultWindowLabel = (today: string): string => {
   const idx = mondayIndexOf(today) // 0 = Mon … 6 = Sun
-  const comingSunday = addDays(today, 6 - idx)
-  const pill = (key: ContextPillKey, from: string, to: string): ContextPill => ({
-    key,
-    label: PILL_LABELS[key],
-    from,
-    to,
-  })
-
-  if (idx <= 3) {
-    // Monday–Thursday.
-    const thisFriday = addDays(today, 4 - idx)
-    return [
-      pill('esta_semana', today, comingSunday),
-      pill('este_fin', thisFriday, comingSunday),
-    ]
-  }
-  // Friday–Sunday.
-  const nextMonday = addDays(comingSunday, 1)
-  const nextSunday = addDays(nextMonday, 6)
-  return [
-    pill('este_fin', today, comingSunday),
-    pill('sig_semana', nextMonday, nextSunday),
-  ]
+  if (idx <= 3) return 'Esta semana' // Mon–Thu — a working stretch of the week is still ahead
+  if (idx <= 5) return 'Fin de semana' // Fri–Sat — what remains IS the weekend
+  return 'Hoy' // Sunday — the window collapses to today, this app's established word for one day
 }
