@@ -218,6 +218,137 @@ describe('US-AG35 — catalog availability over a selected date range', () => {
 })
 
 // ---------------------------------------------------------------------------
+// US-AG56 / BUG-031 — the next departure that actually has room
+// Spec: docs/pos/default-filtered-catalog.spec.md (Scenarios 12–17, D7–D14).
+//
+// Scenarios 1–11 above are left UNEDITED on purpose: they are the mechanical proof that
+// US-AG30's contract survived this amendment. What they never arranged — and what the defect
+// needed — is a sold-out departure standing IN FRONT OF an available one.
+//
+// The suite's clock is frozen at 2026-06-14T12:00Z and test orgs are seeded in UTC with a
+// sales-cutoff offset of 0, so the cutoff threshold is exactly '2026-06-14T12:00'.
+// ---------------------------------------------------------------------------
+const CLOCK_DAY = '2026-06-14' // the frozen "now" day — used only by the cutoff scenario
+
+describe('US-AG56 — the catalog names the next departure with room', () => {
+  it('Scenario 12 — a sold-out earlier time does not win the day', async () => {
+    const { organizationId } = await seedUser({ email: AGENT_EMAIL, role: 'agent' })
+    const { serviceId } = await seedService({ organizationId, name: 'Reef Snorkel' })
+    // Same date, two departures: the morning is full, the afternoon has three seats.
+    await seedSlot({ organizationId, serviceId, date: TOMORROW, startTime: '09:00', capacity: 12, booked: 12 })
+    await seedSlot({ organizationId, serviceId, date: TOMORROW, startTime: '15:00', capacity: 12, booked: 9 })
+
+    const { services } = await listCatalog(AGENT_EMAIL, `?today=${TODAY}`)
+    expect(services[0]).toMatchObject({
+      has_availability: true,
+      next_slot_date: TOMORROW,
+      // The defect returned this date with no time at all; naming the earliest time ON it
+      // would have been the same lie in a new field.
+      next_slot_time: '15:00',
+    })
+  })
+
+  it('Scenario 13 — a fully sold-out day yields to the next day', async () => {
+    const { organizationId } = await seedUser({ email: AGENT_EMAIL, role: 'agent' })
+    const { serviceId } = await seedService({ organizationId })
+    await seedSlot({ organizationId, serviceId, date: TODAY, startTime: '08:00', capacity: 12, booked: 12 })
+    await seedSlot({ organizationId, serviceId, date: TODAY, startTime: '17:00', capacity: 12, booked: 12 })
+    await seedSlot({ organizationId, serviceId, date: TOMORROW, startTime: '08:00', capacity: 12, booked: 0 })
+
+    const { services } = await listCatalog(AGENT_EMAIL, `?today=${TODAY}`)
+    // Ordering is over the (date, time) PAIR — a sold-out earlier date cannot claim the answer.
+    expect(services[0]).toMatchObject({
+      has_availability: true,
+      next_slot_date: TOMORROW,
+      next_slot_time: '08:00',
+    })
+  })
+
+  it('Scenario 14 — a negative slot cannot suppress a sellable sibling (BUG-031 (b))', async () => {
+    const { organizationId } = await seedUser({ email: AGENT_EMAIL, role: 'agent' })
+    const { serviceId } = await seedService({ organizationId, isFlexible: false, flexCapacityPct: 0 })
+    // The stranded departure: 43 seats were sold under a 10% Soft Cap margin (ceiling 44), then
+    // an admin turned Soft Cap off. Effective remaining is now (40 - 43) + 0 = -3.
+    await seedSlot({ organizationId, serviceId, date: TODAY, startTime: '09:00', capacity: 40, booked: 43 })
+    // …and a sibling that genuinely has two seats.
+    await seedSlot({ organizationId, serviceId, date: TOMORROW, startTime: '09:00', capacity: 12, booked: 10 })
+
+    const { services } = await listCatalog(AGENT_EMAIL, `?today=${TODAY}`)
+    // The old Σ read -3 + 2 = -1 and reported "Agotado" — while the calendar Bottom Sheet,
+    // which tests per slot, lit TOMORROW up. One screen, two answers.
+    expect(services[0]).toMatchObject({
+      has_availability: true,
+      next_slot_date: TOMORROW,
+      next_slot_time: '09:00',
+    })
+  })
+
+  it('Scenario 15 — the Soft Cap margin alone can be the next departure', async () => {
+    const { organizationId } = await seedUser({ email: AGENT_EMAIL, role: 'agent' })
+    const { serviceId } = await seedService({ organizationId, isFlexible: true, flexCapacityPct: 20 })
+    // Full on raw capacity; floor(10 × 20 / 100) = 2 sellable margin seats (US-A36).
+    await seedSlot({ organizationId, serviceId, date: TOMORROW, startTime: '07:30', capacity: 10, booked: 10 })
+
+    const { services } = await listCatalog(AGENT_EMAIL, `?today=${TODAY}`)
+    expect(services[0]).toMatchObject({
+      has_availability: true,
+      next_slot_date: TOMORROW,
+      next_slot_time: '07:30',
+    })
+  })
+
+  it('Scenario 16 — a departure past the sales cutoff is never the answer', async () => {
+    const { organizationId } = await seedUser({ email: AGENT_EMAIL, role: 'agent' })
+    const { serviceId } = await seedService({ organizationId })
+    // Both have seats; the 10:00 has already departed against the frozen 12:00 threshold.
+    await seedSlot({ organizationId, serviceId, date: CLOCK_DAY, startTime: '10:00', capacity: 12, booked: 0 })
+    await seedSlot({ organizationId, serviceId, date: CLOCK_DAY, startTime: '18:00', capacity: 12, booked: 0 })
+
+    const { services } = await listCatalog(
+      AGENT_EMAIL,
+      `?today=${CLOCK_DAY}&from=${CLOCK_DAY}&to=${CLOCK_DAY}`,
+    )
+    // US-A47 is unchanged by this amendment: the cutoff still runs before the has-room test.
+    expect(services[0]).toMatchObject({
+      has_availability: true,
+      next_slot_date: CLOCK_DAY,
+      next_slot_time: '18:00',
+    })
+  })
+
+  it('a sold-out service reports both fields null (D12 — the named loss)', async () => {
+    const { organizationId } = await seedUser({ email: AGENT_EMAIL, role: 'agent' })
+    const { serviceId } = await seedService({ organizationId })
+    await seedSlot({ organizationId, serviceId, date: TODAY, startTime: '09:00', capacity: 12, booked: 12 })
+
+    const { services } = await listCatalog(AGENT_EMAIL, `?today=${TODAY}`)
+    // The card drops its «Próximo» block entirely rather than naming a date nobody can sell.
+    expect(services[0]).toMatchObject({
+      has_availability: false,
+      next_slot_date: null,
+      next_slot_time: null,
+    })
+  })
+
+  it('has_availability is derived from the departure, so they cannot disagree (D9)', async () => {
+    const { organizationId } = await seedUser({ email: AGENT_EMAIL, role: 'agent' })
+    const { serviceId: openId } = await seedService({ organizationId, name: 'A Open' })
+    await seedSlot({ organizationId, serviceId: openId, date: TODAY, startTime: '09:00', capacity: 12, booked: 1 })
+    const { serviceId: fullId } = await seedService({ organizationId, name: 'B Full' })
+    await seedSlot({ organizationId, serviceId: fullId, date: TODAY, startTime: '09:00', capacity: 12, booked: 12 })
+
+    const { services } = await listCatalog(AGENT_EMAIL, `?today=${TODAY}`)
+    // The invariant, asserted over the whole payload rather than one row: the flag IS the
+    // non-nullness of the departure. This is what makes the BUG-031 (b) contradiction
+    // unrepresentable instead of merely untested.
+    for (const s of services) {
+      expect(s.has_availability).toBe(s.next_slot_date !== null)
+      expect(s.next_slot_date === null).toBe(s.next_slot_time === null)
+    }
+  })
+})
+
+// ---------------------------------------------------------------------------
 // Multitenancy isolation (required — Scenario 11, B4)
 // ---------------------------------------------------------------------------
 describe('US-AG30 — multitenancy isolation', () => {

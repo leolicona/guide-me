@@ -22,8 +22,14 @@ export interface PosTourCard {
   /** US-AG30 — lightweight availability flag: true when ≥ 1 active slot inside the availability
    * window (a rolling 3-day span or the selected range) has effective remaining > 0. */
   has_availability: boolean
-  /** Earliest active slot date inside the availability window, or null when none. */
+  /** US-AG56 — the next departure that actually HAS ROOM inside the availability window,
+   * ordered by the (date, time) pair; `null` when the window holds none. Not the earliest
+   * *scheduled* departure, which is what this field named before BUG-031 and which may be
+   * sold out. Always windowed: «Próximo» means next available in what you are looking at. */
   next_slot_date: string | null
+  /** Its naive `HH:MM` wall clock, `null` exactly when `next_slot_date` is. Rendered raw —
+   * never through a `Date` — matching `SlotPicker`, so the card and the sheet agree. */
+  next_slot_time: string | null
   /** US-AG45 (D4) — the ⚡ Venta Express renders only when true: slot-based, non-zoned, with a
    * sellable departure TODAY (today-anchored regardless of the selected window — D5). The server
    * re-enforces at confirm (EXPRESS_NOT_ELIGIBLE). */
@@ -51,7 +57,9 @@ export interface PosUnitTypeCard {
   has_availability: boolean
   /** Min remaining rooms across the window — drives the "Quedan N" badge. */
   remaining: number
+  /** A stay has no departure; both null keep `PosCatalogItem` exhaustive (US-AG56). */
   next_slot_date: null
+  next_slot_time: null
 }
 
 export type PosCatalogItem = PosTourCard | PosUnitTypeCard
@@ -130,7 +138,7 @@ export interface PosExtra {
 }
 
 export interface PosServiceDetail
-  extends Omit<PosTourCard, 'item_type' | 'has_availability' | 'next_slot_date'> {
+  extends Omit<PosTourCard, 'item_type' | 'has_availability' | 'next_slot_date' | 'next_slot_time'> {
   /** US-A64 — when true, each slot carries a `zones` array and the agent must pick a zone. */
   zones_enabled?: boolean
   extras: PosExtra[]

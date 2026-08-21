@@ -6,6 +6,100 @@ Tracks confirmed bugs, root causes, and fixes. Each entry is immutable once clos
 
 ---
 
+## BUG-031 — The POS Catalog Advertises a Departure That Is Already Sold Out — ⚠️ OPEN
+
+**Found:** 2026-08-21, adding the departure **time** beside the date on the POS service card (the
+question "which time do we show?" had no correct answer, because the date it would sit beside was
+not the next *sellable* departure).
+
+**Affected component:** `api-turistear/src/routes/pos/handler.ts` (`listPosServices`) and its
+contract in `docs/pos/default-filtered-catalog.spec.md` § API surface.
+
+**Severity:** Medium — the catalog makes a factual claim about inventory that the sale then
+refuses, on the screen an agent uses to quote a customer standing in front of them.
+
+### Symptom
+
+Two distinct wrong answers from the same aggregate.
+
+**(a) `next_slot_date` names a sold-out departure.** A service whose Tuesday 09:00 is full and
+whose Tuesday 15:00 has room advertises **Tuesday** — correct by luck. A service whose *only*
+Tuesday departure is full and which has room on Wednesday still advertises **Tuesday**. The agent
+quotes a date they cannot sell.
+
+**(b) `has_availability` reads `Agotado` on a service that has seats.** With the numbers below the
+card says sold out while the calendar Bottom Sheet lights the same day up.
+
+### Root cause
+
+Both live in one aggregate (`handler.ts:274–302`), whose `WHERE` filters on `status = 'active'`,
+the availability window, and the sales cutoff (`sellableSlotSql`) — **and on nothing about
+remaining spots**:
+
+```ts
+availableSpots: sql`sum((capacity - booked) + CASE WHEN is_flexible …)`,
+nextSlotDate:   sql`min(${slots.date})`,     // ← no remaining > 0 predicate
+```
+
+`min(date)` therefore ranges over every *scheduled* slot, sold out or not — defect (a). It is also
+`min(date)` rather than `min(date, start_time)`, so it could not name a time even if it wanted to.
+
+Defect (b) is subtler, and the spec states the false premise out loud:
+
+> *"Effective remaining is always ≥ 0, so `Σ effective_remaining over window slots > 0` is an
+> exact, single-query test for 'any slot in window is sellable.'"*
+> — `default-filtered-catalog.spec.md` § API surface
+
+**Effective remaining is not always ≥ 0.** `updateService` (`routes/services/handler.ts:267–269`)
+turns Soft Cap off — writing `flex_capacity_pct: 0` — **without validating against seats already
+sold under the old margin**:
+
+| Step | capacity | booked | flex % | effective |
+|---|---|---|---|---|
+| Soft Cap on, margin 10% → ceiling 44 | 40 | — | 10 | — |
+| 43 sold on Tuesday (legal) | 40 | 43 | 10 | `−3 + 4 = 1` |
+| Admin turns Soft Cap **off** | 40 | 43 | **0** | **`−3`** |
+
+With 2 seats free on Wednesday the window sums to `−3 + 2 = −1`, so `has_availability` is `false`
+— while `listAvailabilityDays`, which applies the same arithmetic **per slot**, lights Wednesday
+up. One screen, two contradictory answers, from data an admin can produce in three clicks.
+
+A negative slot cannot be *made* sellable by the sum, but it can silently **cancel out** a sibling
+that is. A `Σ > 0` test answers "is the fleet net-positive", not "is any one of them sellable" —
+and those diverge exactly when a per-slot value goes negative.
+
+### Why it survived
+
+`has_availability` and the calendar dots were built in different features (US-AG30 and US-AG35)
+and never had to agree in a test. `next_slot_date` was carried as a "cheap `min(date)` … useful,
+lightweight UI hint" (the spec's own Open decision 2) — hint-shaped things do not attract
+assertions, and no scenario in the spec ever placed a sold-out slot **before** an available one.
+
+### Fix
+
+Not yet merged — see `docs/pos/default-filtered-catalog.spec.md` (amended) and **US-AG56**. One
+aggregate replaces two, carrying the per-slot predicate `listAvailabilityDays` already uses, so
+card, calendar and Express share a single definition of *sellable*:
+
+```
+MIN(date || 'T' || start_time)            -- the existing lexicographic departure key
+WHERE status='active' AND date BETWEEN :from AND :to
+  AND (date || 'T' || start_time) > :cutoff
+  AND ((capacity - booked)
+       + CASE WHEN is_flexible THEN (capacity * flex_pct)/100 ELSE 0 END) > 0
+GROUP BY service_id
+```
+
+`has_availability` becomes `next_departure IS NOT NULL` — the two fields can no longer disagree,
+because there is only one of them. `express_eligible` takes the same `EXISTS` over today.
+
+**Deliberately not fixed here:** `updateService` still lets an admin strand a slot at negative
+effective remaining. That is a separate defect with a separate blast radius (it also makes the
+slot unsellable-but-scheduled), and the read path must be correct regardless of how the write path
+gets fixed. Filed as `TECH_DEBT.md` rather than widened into this change.
+
+---
+
 ## BUG-030 — Cancelling an Unverified-Transfer Folio Mints a Refund PIN for Money Never Confirmed — ✅ FIXED
 
 **Found:** 2026-08-07, designing the folio detail's blocking-first action ladder (the question "should

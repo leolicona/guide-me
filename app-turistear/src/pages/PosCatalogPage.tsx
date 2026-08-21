@@ -426,6 +426,19 @@ export default function PosCatalogPage() {
                             <Typography sx={{ fontSize: 13, fontWeight: 500 }}>
                               {nextDateLabel(item.next_slot_date)}
                             </Typography>
+                            {/* US-AG56 — the departure hour, on its own line so the pair never
+                                competes with MoneyText for width at 390px (the #104 lesson).
+                                Printed as the stored naive `HH:MM`: no `Date` is constructed, so
+                                no device time zone can shift it, and it reads identically to the
+                                slot chip the agent taps next in the sheet. */}
+                            {item.next_slot_time && (
+                              <Typography
+                                className="numeric"
+                                sx={{ fontSize: 15, fontWeight: 700, lineHeight: 1 }}
+                              >
+                                {item.next_slot_time}
+                              </Typography>
+                            )}
                           </Box>
                         )}
                       </Box>
