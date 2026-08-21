@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Box, Typography, Button, IconButton, CircularProgress } from '@mui/material'
+import { Box, Stack, Typography, Button, IconButton, CircularProgress } from '@mui/material'
 import { alpha } from '@mui/material/styles'
 import ChevronLeftRounded from '@mui/icons-material/ChevronLeftRounded'
 import ChevronRightRounded from '@mui/icons-material/ChevronRightRounded'
@@ -29,6 +29,8 @@ interface PosDatePickerSheetProps {
   onPickDay: (date: string) => void
   /** Commit a multi-day range (lodging-only; tours anchor on `from`). */
   onPickRange: (range: PosDateRange) => void
+  /** Drop the explicit pick and fall back to the contextual default week (US-AG35). */
+  onClear: () => void
 }
 
 const MONTHS_ES = [
@@ -75,6 +77,7 @@ export function PosDatePickerSheet({
   categories,
   onPickDay,
   onPickRange,
+  onClear,
 }: PosDatePickerSheetProps) {
   const currentMonth = monthOf(today)
   // The visible month + the draft selection reset each time the sheet opens. Done in render
@@ -128,6 +131,19 @@ export function PosDatePickerSheet({
     }
   }
 
+  // The way back to the default. Without it the sheet is one-way: an agent who opens the calendar
+  // to UNDO their filter finds the only exit behind the sheet they just opened.
+  //
+  // Closing mirrors onPickDay/onPickRange: every footer action that commits a filter change also
+  // dismisses, so "Limpiar" is not the one control that leaves the agent staring at a sheet. The
+  // draft reset is only for the closing animation — the sheet re-initialises its draft from props
+  // on each open anyway, so without it the grid would flash the stale days on the way out.
+  const clear = () => {
+    setDraft({ from: null, to: null })
+    onClear()
+    onClose()
+  }
+
   const atCurrentMonth = visibleMonth <= currentMonth
   const leadingBlanks = firstWeekdayMondayBased(visibleMonth)
   const total = daysInMonth(visibleMonth)
@@ -168,12 +184,22 @@ export function PosDatePickerSheet({
     </Box>
   )
 
+  // Two actions, mirroring FolioStateSheet's footer so the app speaks one filter language:
+  // a text "Limpiar" (inert when there is nothing to undo) beside the contained commit.
   const footer = (
-    <Box sx={{ px: 3, py: 2 }}>
+    <Stack direction="row" spacing={1} sx={{ px: 3, py: 2 }}>
+      <Button
+        fullWidth
+        variant="text"
+        onClick={clear}
+        disabled={!selectedDate && !dateRange}
+      >
+        Limpiar
+      </Button>
       <Button fullWidth variant="contained" onClick={apply} disabled={!draft.from}>
         {applyLabel}
       </Button>
-    </Box>
+    </Stack>
   )
 
   return (
