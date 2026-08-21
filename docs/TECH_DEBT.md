@@ -2,6 +2,30 @@
 
 This document tracks known technical debt, deferred tasks, and architectural improvements that are planned for future phases.
 
+## 28. Two Units of One Property May Share a Name — ⚠️ OPEN
+
+**Context:** `migrations/0035_create_accommodation_units.sql` declares `name text NOT NULL` with no
+UNIQUE, and `routes/services/lodging.handler.ts:194` inserts without checking, so one property can
+hold two active units called «Cabaña Río». Because the POS catalog is flattened — one card per unit
+(US-AG37) — the duplicate reaches the seller as two visually identical cards with no way to tell
+which inventory each draws from.
+
+**Why it is not fixed in the US-A91 PR:** that PR closes both **reachable** frontend doors — the
+wizard's attach mode feeds its guard from `useUnits(propertyId)` (D11) and the detail page's
+`UnitFormSheet` shares `UnitFields` — so no UI path creates a duplicate any more. The server-side
+constraint is a different unit of work: it needs a migration, a decision about duplicates that may
+already exist in the live org (`prod` has a real tenant), and a `DUPLICATE_UNIT_NAME` error
+contract. Bolting that onto a frontend-only PR would break its scope boundary.
+
+**What is still wrong:** a direct API call, a seed script, or a future non-UI writer can still
+create the collision, and nothing in the database prevents it.
+
+**Fix when picked up:** a partial UNIQUE index over `(service_id, lower(name))` limited to
+`status = 'active'` (deactivated units must be free to keep their names — folio history reads
+them), a backfill that renames any existing collision deterministically, and `409
+DUPLICATE_UNIT_NAME` declared in the spec's error table before it exists in code.
+**Reference:** `docs/lodging/unit-authoring-entry.spec.md` § Deferred.
+
 ## 27. `updateService` Can Strand a Slot at Negative Effective Remaining — ⚠️ OPEN
 
 **Context:** `routes/services/handler.ts:267–269` writes `flexCapacityPct: input.is_flexible ?
