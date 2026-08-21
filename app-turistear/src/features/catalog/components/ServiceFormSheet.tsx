@@ -240,7 +240,7 @@ export function ServiceFormSheet({
               // A unit-based service prices and allocates per unit type, so the service-level
               // fields below don't apply — surfaced so the shorter form doesn't read as broken.
               <Typography variant="body2" color="text.secondary">
-                Las tarifas y el cupo de un hospedaje se definen en cada tipo de unidad.
+                Las tarifas y el cupo de un hospedaje se definen en cada unidad.
               </Typography>
             )}
 

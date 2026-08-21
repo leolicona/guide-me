@@ -22,7 +22,7 @@ interface ServiceRowProps {
 }
 
 // The unit-based (lodging) meta line: the service record carries canonical zeros, so the
-// row's useful numbers live on its unit types. This shares UnitsSection's query key, so the
+// row's useful numbers live on its units. This shares UnitsSection's query key, so the
 // list fetch pre-warms the detail page's cache (and vice versa).
 function LodgingSummary({ serviceId }: { serviceId: string }) {
   const { data: units, isLoading } = useUnits(serviceId)
@@ -35,7 +35,7 @@ function LodgingSummary({ serviceId }: { serviceId: string }) {
   if (active.length === 0) {
     return (
       <Typography variant="body2" color="text.secondary">
-        Sin tipos de unidad
+        Sin unidades
       </Typography>
     )
   }
@@ -45,8 +45,7 @@ function LodgingSummary({ serviceId }: { serviceId: string }) {
 
   return (
     <Typography variant="body2" color="text.secondary" className="numeric">
-      {active.length} tipo{active.length === 1 ? '' : 's'} ·{' '}
-      {rooms === 1 ? '1 habitación' : `${rooms} habitaciones`} · desde{' '}
+      {active.length} unidad{active.length === 1 ? '' : 'es'} · {rooms} en total · desde{' '}
       {formatMoney(fromRate)}/noche
     </Typography>
   )

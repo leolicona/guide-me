@@ -131,7 +131,7 @@ export const STEP_FIELDS = {
   4: [],
 } as const satisfies Record<number, readonly (keyof WizardFormData)[]>
 
-// Lodging track step fields (3 steps): básica · tipos de unidad · comisión. Step 2 gates on the
+// Lodging track step fields (3 steps): básica · unidades · comisión. Step 2 gates on the
 // wizard-local `units` array (not RHF fields); the commission closes the track so it's decided
 // with the nightly rates in view.
 const LODGING_STEP_FIELDS: Record<number, readonly (keyof WizardFormData)[]> = {
@@ -140,11 +140,21 @@ const LODGING_STEP_FIELDS: Record<number, readonly (keyof WizardFormData)[]> = {
   3: ['commission_type', 'commission_value'],
 }
 
-/** Category-aware RHF fields to validate when leaving a step (slot track 4 steps · unit track 3). */
+// US-A91 — attaching to an existing property (2 steps). `name` belongs to a property being
+// created, so it is NOT validated here; the chosen property gates step 1 instead, in wizard-local
+// state (like `units` and `times` — it never reaches the service payload). The commission step
+// does not exist in this mode (D7).
+const LODGING_ATTACH_STEP_FIELDS: Record<number, readonly (keyof WizardFormData)[]> = {
+  1: ['category'],
+  2: [],
+}
+
+/** Category-aware RHF fields to validate when leaving a step (slot track 4 · unit track 3 or 2). */
 export const stepFields = (
   category: WizardFormData['category'] | '',
   step: number,
+  mode: 'create' | 'attach' = 'create',
 ): readonly (keyof WizardFormData)[] =>
   inventoryModel(category) === 'units'
-    ? (LODGING_STEP_FIELDS[step] ?? [])
+    ? ((mode === 'attach' ? LODGING_ATTACH_STEP_FIELDS : LODGING_STEP_FIELDS)[step] ?? [])
     : (STEP_FIELDS[step as keyof typeof STEP_FIELDS] ?? [])
