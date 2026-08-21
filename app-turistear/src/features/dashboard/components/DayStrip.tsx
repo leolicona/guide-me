@@ -69,6 +69,9 @@ export function DayStrip({ today, selected, onSelect }: DayStripProps) {
           onSelect(r.from === today ? null : r.from)
           setCalendarOpen(false)
         }}
+        // This strip's default is "Hoy" (selected === null), not the POS week — the sheet's
+        // "Limpiar" returns each host to ITS OWN default rather than to a shared one.
+        onClear={() => onSelect(null)}
       />
     </>
   )

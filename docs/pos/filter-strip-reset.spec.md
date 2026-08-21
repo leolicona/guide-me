@@ -67,6 +67,7 @@ This feature must not change what the catalog **requests**, only what it **says*
 | **D9** | The ✕ is a **sibling `<button>`**, never nested in the chip body. The pill's styling moves to a non-interactive container. | A button inside a button is the nesting/a11y fault the ⚡ Express control already avoids on the catalog card (`PosCatalogPage`). Moving the style, not the behaviour, lets both children own real hit areas at the full 48px (brief: *reach & repetition*). |
 | **D10** | `PosDatePickerSheet` gains a **«Limpiar»** text button beside `Aplicar`, and **closes** on clear. | Mirrors `FolioStateSheet`'s footer so the app speaks one filter language. Closing mirrors `onPickDay`/`onPickRange`: every footer action that commits a filter change also dismisses, so `Limpiar` is not the one control that leaves the agent staring at a sheet. |
 | **D11** | `PosCategorySheet`'s **«Todas» does not close.** | There, clearing is a chip inside a live multi-select (the catalog re-filters behind the sheet; `Listo` dismisses), not a footer action. Closing would break the agent who taps «Todas» to start over and pick a different category immediately. |
+| **D13** | The sheet's «Limpiar» returns each **host** to *its own* default, not to a shared one. | `PosDatePickerSheet` has **two** hosts: `/pos` (default = the «Esta semana» window) and the dashboard's `DayStrip` (default = **«Hoy»**, `selected === null`, which its own first pill already sets). Wiring `onClear` per host keeps the sheet ignorant of what "default" means, which is why it can serve both. Found by CI, not by the local build — see *Known behaviour change*. |
 | **D12** | The **context pills are not built.** US-AG35's `SPEC.md` line is amended to describe the strip that shipped. | The pills were specified, never rendered, and their absence is what left the default nameless. Naming the default resolves the same need at a fraction of the strip width. `PILL_LABELS` stays in `dates.ts` (its tests assert it) and is logged as debt rather than deleted here, to keep this diff to one idea. |
 
 ## Frontend
@@ -137,7 +138,13 @@ Then the footer offers **«Limpiar»** (enabled)
 When they tap it
 Then the selection clears **and the sheet closes**, with the strip behind it reading «Esta semana».
 
-**S-9 — «Limpiar» is inert with nothing to undo**
+**S-9 — The dashboard's day strip clears to its own default**
+Given the dashboard's `DayStrip` has an explicit day pinned
+When the agent opens its calendar sheet and taps **«Limpiar»**
+Then `onSelect(null)` fires — the strip lands back on **«Hoy»**, not on the POS week — and the sheet
+closes. The `/pos` filter store is untouched (`DayStrip` never writes it, D5 of the occupancy spec).
+
+**S-10 — «Limpiar» is inert with nothing to undo**
 Given no explicit selection
 When the agent opens the calendar sheet
 Then **«Limpiar»** is disabled.
@@ -155,7 +162,8 @@ sits on top of are already org-scoped and their isolation tests are unchanged
 - [x] Both strip chips migrated; defaults named; `+N` label with a full accessible name
 - [x] `PosDatePickerSheet` footer: `Limpiar` + `Aplicar`; clears and closes
 - [x] `dates.test.ts` passes unedited (scope boundary) — full app suite: 561 tests, 32 files
-- [x] `tsc --noEmit` clean; `pnpm lint:app` reports 0 errors
+- [x] `pnpm build:app` (`tsc -b && vite build`) green — **the only real type check**: `app-turistear/tsconfig.json` is solution-style (`"files": []` + `references`), so a bare `tsc --noEmit` against it checks **zero files** and exits 0
+- [x] `pnpm lint:app` reports 0 errors
 - [x] `SPEC.md`: US-AG55 story, Features by Phase line, glossary; US-AG35's line amended to the
       strip that shipped (D12)
 - [x] `TECH_DEBT.md`: `PILL_LABELS` dead copy (entry 26)
@@ -174,6 +182,11 @@ Agents see **two words that were not there before**: the strip reads «Categorí
 rest instead of two icons. No request, price, availability or stored value changes. The one
 functional gain is that an abandoned date filter is now recoverable in one tap instead of requiring
 a page reload — including for the service-detail view that silently inherited it.
+
+The dashboard's `DayStrip` (`/`) hosts the same calendar sheet and therefore also gains **«Limpiar»**,
+which returns it to **«Hoy»** (D13). That second host was missed locally because the bare
+`tsc --noEmit` used to check it is a no-op against a solution-style `tsconfig.json`; `pnpm build:app`
+caught both it and an `sx`-array typing fault. Verify this repo's frontend with `pnpm build:app`.
 
 ## Open
 
