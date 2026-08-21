@@ -29,7 +29,7 @@ export default function PosServicePage() {
   const today = todayStr()
   const [selectedDate, setSelectedDate] = useState(anchor ?? today)
   const range = { from: selectedDate, to: selectedDate }
-  const { data: service, isLoading, isFetching, isError } = usePosService(id, range)
+  const { data: service, isLoading, isPlaceholderData, isError } = usePosService(id, range)
   const navigate = useNavigate()
 
   const [added, setAdded] = useState(false)
@@ -78,7 +78,7 @@ export default function PosServicePage() {
                 service={service}
                 selectedDate={selectedDate}
                 onSelectDate={setSelectedDate}
-                slotsLoading={isFetching}
+                slotsLoading={isPlaceholderData}
                 today={today}
                 onAdded={() => setAdded(true)}
               />

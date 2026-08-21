@@ -47,6 +47,11 @@ interface DateRangeCalendarProps {
    * it is simply full — because «no sale ese día» and «ya se llenó» are different answers to
    * give a customer (US-AG33's distinction, carried onto the grid). */
   dayState?: Map<string, 'available' | 'sold_out' | 'non_operating'>
+  /** US-AG57 — tighter geometry for the sale sheet, which hosts the grid inside a Bottom Sheet
+   * capped at 85vh alongside a header, a day pager, time chips, zones, extras and a pinned
+   * footer. Square cells and 8px gaps cost ~90px the sheet does not have; the full-page and
+   * lodging hosts keep the roomier default. */
+  compact?: boolean
   /** US-AG57 — the visible month changed (`YYYY-MM`). The month grid owns its own paging, but
    * a caller fetching per-month availability needs to know which one to ask for. */
   onVisibleMonthChange?: (month: string) => void
@@ -65,6 +70,7 @@ export function DateRangeCalendar({
   availabilityDots = false,
   mode = 'range',
   dayState,
+  compact = false,
   onVisibleMonthChange,
 }: DateRangeCalendarProps) {
   const currentMonth = monthOf(today)
@@ -131,7 +137,7 @@ export function DateRangeCalendar({
         </IconButton>
       </Box>
 
-      <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 1, mb: 1 }}>
+      <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: compact ? 0.5 : 1, mb: compact ? 0.5 : 1 }}>
         {WEEKDAY_HEADERS.map((w, i) => (
           <Typography key={i} variant="caption" sx={{ textAlign: 'center', color: 'text.secondary', fontWeight: 600 }}>
             {w}
@@ -139,7 +145,7 @@ export function DateRangeCalendar({
         ))}
       </Box>
 
-      <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 1 }}>
+      <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: compact ? 0.5 : 1 }}>
         {Array.from({ length: leadingBlanks }, (_, i) => (
           <Box key={`blank-${i}`} />
         ))}
@@ -183,7 +189,9 @@ export function DateRangeCalendar({
                 border: 'none',
                 font: 'inherit',
                 p: 0,
-                aspectRatio: '1 / 1',
+                // Compact trades the square cell for a fixed 40px row: still above the 40px
+                // minimum for a thumb inside a grid of peers, and ~90px shorter over six rows.
+                ...(compact ? { height: 40 } : { aspectRatio: '1 / 1' }),
                 borderRadius: 2,
                 display: 'flex',
                 flexDirection: availabilityDots ? 'column' : 'row',
