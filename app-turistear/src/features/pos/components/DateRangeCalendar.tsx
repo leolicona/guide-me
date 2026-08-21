@@ -247,30 +247,24 @@ export function DateRangeCalendar({
         })}
       </Box>
 
-      {/* D8 — with three states the legend must name the tinted one specifically: a flat cell
-          and a tinted cell now mean different things, and "Sin disponibilidad" covered both. */}
-      {dayState ? (
+      {/* D18 — the three-state host prints NO legend: the paint carries it. A dot means the day
+          can be sold, a tint means it runs but is full, a flat cell means it does not run. D8's
+          distinction survives in the cells; what goes is the caption, so the grid stops spending
+          two lines explaining itself inside a sheet that needs the height. The range hosts keep
+          theirs, where a tint is the only signal and has no dot to lean on. */}
+      {!dayState && dayRemaining && (
         <Stack direction="row" spacing={2} sx={{ mt: 1.5, justifyContent: 'center' }}>
-          <Legend color="var(--slate-300, #CBD5E1)" label="Agotado" square />
-          <Legend color="var(--teal-700, #0F766E)" label="Con lugares" />
+          <Legend color="var(--slate-300, #CBD5E1)" label="Sin disponibilidad" />
         </Stack>
-      ) : (
-        dayRemaining && (
-          <Stack direction="row" spacing={2} sx={{ mt: 1.5, justifyContent: 'center' }}>
-            <Legend color="var(--slate-300, #CBD5E1)" label="Sin disponibilidad" />
-          </Stack>
-        )
       )}
     </Box>
   )
 }
 
-function Legend({ color, label, square = false }: { color: string; label: string; square?: boolean }) {
+function Legend({ color, label }: { color: string; label: string }) {
   return (
     <Stack direction="row" spacing={0.5} sx={{ alignItems: 'center' }}>
-      {/* The swatch mirrors the cell it explains: a filled square for the tinted sold-out day,
-          a dot for the availability mark. Shape carries the difference, not colour alone. */}
-      <Box sx={{ width: 8, height: 8, borderRadius: square ? 0.5 : '50%', bgcolor: color }} />
+      <Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: color }} />
       <Typography variant="caption" color="text.secondary">
         {label}
       </Typography>

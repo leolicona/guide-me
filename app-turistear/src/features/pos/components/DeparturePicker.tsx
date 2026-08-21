@@ -77,13 +77,15 @@ export function DeparturePicker({
   isFlexible,
   flexCapacityPct,
 }: DeparturePickerProps) {
-  // D6 (revised) — the sheet opens COLLAPSED, on the day the anchor already chose: the catalog
-  // filter, else the service's next departure with room (US-AG56), else today. The grid remains
-  // the only way to pick a date — that is what D1 decided — but expanding it on open pushed the
-  // header, pager, chips, zones, extras and the pinned footer past 85vh, so every sale began with
-  // a scroll. «Cambiar» opens it for the case it exists to serve: a date other than the one the
-  // seller was already looking at.
-  const [expanded, setExpanded] = useState(false)
+  // D6, revised twice. The grid is VISIBLE on open, as it is in the lodging sheet and Reagendar.
+  // The previous pass collapsed it to stop the sheet overflowing 85vh, but that treated the
+  // symptom: the height was going to a header carrying the service description, the price line
+  // and the Personas stepper ABOVE the calendar. D18 removes all three and moves Personas below,
+  // which buys back ~150px and lets the calendar lead the sheet the way it leads everywhere else.
+  //
+  // It still collapses once a day is picked: zones and extras appear below it for the services
+  // that have them, and «Agregar al carrito» must never scroll away.
+  const [expanded, setExpanded] = useState(true)
   const [visibleMonth, setVisibleMonth] = useState(() => monthOf(selectedDate))
 
   // D2 — ~1 KB of date strings per month, not 60 days of slots. Party-scoped server-side, so a
