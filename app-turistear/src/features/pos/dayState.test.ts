@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest'
-import { buildDayState } from './dayState'
+import {
+  buildDayState,
+  sellableDayAxis,
+  nextSellableDay,
+  prevSellableDay,
+} from './dayState'
 
 const MONTH = '2026-08'
 const TODAY = '2026-08-10'
@@ -40,5 +45,45 @@ describe('US-AG57 — buildDayState', () => {
       TODAY,
     )
     expect(s.get('2026-08-27')).toBe('available')
+  })
+})
+
+describe('US-AG57 D17 — the pager axis skips days that cannot be sold', () => {
+  const AUG = { days: ['2026-08-21', '2026-08-14'], sold_out: ['2026-08-15'] }
+  const SEP = { days: ['2026-09-02'], sold_out: [] }
+  const TODAY = '2026-08-10'
+
+  it('sorts, and never lets a sold-out day become a step target', () => {
+    const axis = sellableDayAxis([AUG], TODAY)
+    expect(axis).toEqual(['2026-08-14', '2026-08-21'])
+    expect(axis).not.toContain('2026-08-15')
+  })
+
+  it('drops past days a stale cached month still carries', () => {
+    const axis = sellableDayAxis([{ days: ['2026-08-01', '2026-08-14'], sold_out: [] }], TODAY)
+    expect(axis).toEqual(['2026-08-14'])
+  })
+
+  it('deduplicates overlapping months, so one tap never appears to do nothing', () => {
+    expect(sellableDayAxis([AUG, AUG], TODAY)).toEqual(['2026-08-14', '2026-08-21'])
+  })
+
+  it('steps over the gap, not into it', () => {
+    const axis = sellableDayAxis([AUG], TODAY)
+    // 15 is sold out and 16–20 do not run; ▶ from the 14th lands on the 21st.
+    expect(nextSellableDay(axis, '2026-08-14')).toBe('2026-08-21')
+    expect(prevSellableDay(axis, '2026-08-21')).toBe('2026-08-14')
+  })
+
+  it('crosses a month boundary once the neighbour is loaded', () => {
+    expect(nextSellableDay(sellableDayAxis([AUG], TODAY), '2026-08-21')).toBeUndefined()
+    expect(nextSellableDay(sellableDayAxis([AUG, SEP], TODAY), '2026-08-21')).toBe('2026-09-02')
+  })
+
+  it('an undefined month contributes nothing rather than throwing', () => {
+    expect(sellableDayAxis([undefined, AUG, undefined], TODAY)).toEqual([
+      '2026-08-14',
+      '2026-08-21',
+    ])
   })
 })

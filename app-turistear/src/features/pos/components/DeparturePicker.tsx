@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { Box, Typography, Stack, ButtonBase, IconButton, Skeleton } from '@mui/material'
 import { alpha } from '@mui/material/styles'
 import CalendarMonthRounded from '@mui/icons-material/CalendarMonthRounded'
@@ -7,9 +7,14 @@ import ChevronRightRounded from '@mui/icons-material/ChevronRightRounded'
 import WarningAmberRounded from '@mui/icons-material/WarningAmberRounded'
 import { DateRangeCalendar } from './DateRangeCalendar'
 import { useServiceMonth } from '../hooks'
-import { buildDayState } from '../dayState'
+import {
+  buildDayState,
+  sellableDayAxis,
+  nextSellableDay,
+  prevSellableDay,
+} from '../dayState'
 import { effectiveRemaining } from '../capacity'
-import { monthOf, addDays } from '../dates'
+import { monthOf, addMonths } from '../dates'
 import type { PosSlot } from '../types'
 
 // US-AG57 — the sale sheet's departure picker: a month grid with availability marks, then that
@@ -83,16 +88,51 @@ export function DeparturePicker({
 
   // D2 — ~1 KB of date strings per month, not 60 days of slots. Party-scoped server-side, so a
   // day the group cannot take is never offered (D4).
-  // Deferred until the grid is actually open: a sheet opened to sell today's 15:00 should not
-  // spend a round trip painting a month nobody asked to see (D2's point was cheap, not free).
-  const { data: month, isLoading: monthLoading } = useServiceMonth(
+  // D17 — the ◀ ▶ pager steps to the next day that CAN BE SOLD, never to the calendar's next
+  // day. A service running Fri/Sat/Sun makes the naive stepper four taps of "no sale ese día" to
+  // cross a week, which is the flat-list problem this feature exists to end, re-created inside
+  // the sheet. `RescheduleSheet` never had it because its axis was only ever days with room.
+  //
+  // Skipping needs to KNOW which days have room, so the selected day's month is always fetched
+  // (~1 KB) — this narrows D15's deferral: the *grid's* month is still deferred when the seller
+  // pages to a different one, but the pager's month is load-bearing.
+  const pagerMonth = monthOf(selectedDate)
+  const pager = useServiceMonth(serviceId, pagerMonth, partySize, today)
+
+  // The grid's month, deferred until it is open (D15). Usually the same key as `pager`, in which
+  // case TanStack serves it from cache and no second request happens.
+  const grid = useServiceMonth(serviceId, visibleMonth, partySize, today, expanded)
+  const dayState = buildDayState(visibleMonth, grid.data ?? pager.data, today)
+  const monthLoading = grid.isLoading
+
+  // A month boundary must not read as "no more departures": a service whose next run is the 2nd
+  // has nothing left in `pagerMonth`, and disabling ▶ there would hide real inventory. The
+  // neighbours load ONLY when the current month cannot answer, so the common case stays at one
+  // request and stepping across a boundary costs one more.
+  const inMonth = pager.data?.days ?? []
+  const hasLater = inMonth.some((d) => d > selectedDate)
+  const hasEarlier = inMonth.some((d) => d < selectedDate && d >= today)
+  const nextMonth = addMonths(pagerMonth, 1)
+  const prevMonth = addMonths(pagerMonth, -1)
+  const ahead = useServiceMonth(serviceId, nextMonth, partySize, today, !!pager.data && !hasLater)
+  const behind = useServiceMonth(
     serviceId,
-    visibleMonth,
+    prevMonth,
     partySize,
     today,
-    expanded,
+    // Never look back past the month containing today — the server floors its window there
+    // anyway, so the request could only ever come back empty.
+    !!pager.data && !hasEarlier && prevMonth >= monthOf(today),
   )
-  const dayState = buildDayState(visibleMonth, month, today)
+
+  // Every sellable day we currently know about, ascending. Past days cannot be sold, so they are
+  // never step targets even if a stale cache still carries them.
+  const sellableDays = useMemo(
+    () => sellableDayAxis([behind.data, pager.data, ahead.data], today),
+    [behind.data, pager.data, ahead.data, today],
+  )
+  const nextDay = nextSellableDay(sellableDays, selectedDate)
+  const prevDay = prevSellableDay(sellableDays, selectedDate)
 
   // US-AG32 — only departures that seat the whole group; the rest never reach the DOM.
   const fitting = slots
@@ -157,15 +197,21 @@ export function DeparturePicker({
           already gave (D8). */}
       <Box sx={{ mt: 2 }}>
         <Stack direction="row" sx={{ alignItems: 'center', justifyContent: 'space-between', mb: 1 }}>
+          {/* D17 — the arrows name what they do: the NEXT day with room, not tomorrow. Disabled
+              only when nothing further is known, which the neighbour-month reads make rare. */}
           <IconButton
-            aria-label="Día anterior"
-            onClick={() => onSelectDate(addDays(selectedDate, -1))}
-            disabled={selectedDate <= today}
+            aria-label="Día disponible anterior"
+            onClick={() => prevDay && onSelectDate(prevDay)}
+            disabled={!prevDay}
           >
             <ChevronLeftRounded />
           </IconButton>
           <Typography sx={{ fontWeight: 600 }}>{dayHeadline(selectedDate)}</Typography>
-          <IconButton aria-label="Día siguiente" onClick={() => onSelectDate(addDays(selectedDate, 1))}>
+          <IconButton
+            aria-label="Día disponible siguiente"
+            onClick={() => nextDay && onSelectDate(nextDay)}
+            disabled={!nextDay}
+          >
             <ChevronRightRounded />
           </IconButton>
         </Stack>

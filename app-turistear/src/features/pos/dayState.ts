@@ -62,3 +62,30 @@ export const buildDayState = (
   }
   return state
 }
+
+/**
+ * US-AG57 (D17) — the ◀ ▶ pager's axis: every day we currently know can be sold, ascending and
+ * deduplicated, assembled from one to three loaded months.
+ *
+ * Past days are dropped rather than trusted: the server floors its window at `today`, so a day
+ * before it can only come from a cached month that went stale when the clock rolled over, and
+ * stepping onto one would offer a departure that has already left.
+ *
+ * Deduplication matters because the neighbour months are fetched lazily and can briefly overlap
+ * with the primary one in cache — a duplicated day would make one ▶ tap appear to do nothing.
+ */
+export const sellableDayAxis = (
+  months: (ServiceMonth | undefined)[],
+  today: string,
+): string[] =>
+  [...new Set(months.flatMap((m) => m?.days ?? []))].filter((d) => d >= today).sort()
+
+/** The nearest sellable day strictly after `from`, or `undefined` when none is known. */
+export const nextSellableDay = (axis: string[], from: string): string | undefined =>
+  axis.find((d) => d > from)
+
+/** The nearest sellable day strictly before `from`, or `undefined` when none is known. */
+export const prevSellableDay = (axis: string[], from: string): string | undefined => {
+  for (let i = axis.length - 1; i >= 0; i -= 1) if (axis[i] < from) return axis[i]
+  return undefined
+}
