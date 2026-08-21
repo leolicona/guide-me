@@ -165,18 +165,39 @@ export function ServiceSelectionPanel({
         <Typography variant="h5" component="h2" sx={{ fontWeight: 600 }}>
           {service.name}
         </Typography>
-        {service.description && (
-          <Typography color="text.secondary" sx={{ mt: 0.5 }}>
-            {service.description}
-          </Typography>
-        )}
-        <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-          {formatMoney(service.base_price)} · mín {formatMoney(service.minimum_price)}
-        </Typography>
+      </Box>
 
+      <Divider />
+
+      {/* ── Scrollable body (the ONLY overflow-y region) ── */}
+      <Box sx={{ flex: 1, minHeight: 0, overflowY: 'auto', px: 3, py: 2.5 }}>
+        <DeparturePicker
+          serviceId={service.id}
+          selectedDate={selectedDate}
+          onSelectDate={(d) => {
+            onSelectDate(d)
+            // A new day invalidates the departure, its zone and the extras priced against it.
+            clearSelection()
+          }}
+          slots={service.slots}
+          slotsLoading={slotsLoading}
+          today={today}
+          partySize={partySize}
+          selectedSlotId={slot?.id ?? null}
+          onSelectSlot={handleSelectSlot}
+          isFlexible={service.is_flexible}
+          flexCapacityPct={service.flex_capacity_pct}
+        />
+
+        {/* D18 — Personas follows the date, mirroring the lodging sheet's steppers-after-calendar
+            order. It re-classifies the grid ABOVE it (D4/D12): growing the group can turn an
+            available day sold-out and clears a departure that no longer seats it, so the seller
+            sees the calendar answer change to their own input rather than being asked to guess
+            the group before seeing a single date. */}
+        <Divider sx={{ my: 2.5 }} />
         <Stack
           direction="row"
-          sx={{ alignItems: 'center', justifyContent: 'space-between', mt: 2.5 }}
+          sx={{ alignItems: 'center', justifyContent: 'space-between' }}
         >
           <Box>
             <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
@@ -234,32 +255,6 @@ export function ServiceSelectionPanel({
             </Tooltip>
           </Stack>
         </Stack>
-      </Box>
-
-      <Divider />
-
-      {/* ── Scrollable matrix (the ONLY overflow-y region) ── */}
-      <Box sx={{ flex: 1, minHeight: 0, overflowY: 'auto', px: 3, py: 2.5 }}>
-        <Typography variant="subtitle2" color="text.secondary" sx={{ mb: 1.5 }}>
-          Elige una fecha y horario
-        </Typography>
-        <DeparturePicker
-          serviceId={service.id}
-          selectedDate={selectedDate}
-          onSelectDate={(d) => {
-            onSelectDate(d)
-            // A new day invalidates the departure, its zone and the extras priced against it.
-            clearSelection()
-          }}
-          slots={service.slots}
-          slotsLoading={slotsLoading}
-          today={today}
-          partySize={partySize}
-          selectedSlotId={slot?.id ?? null}
-          onSelectSlot={handleSelectSlot}
-          isFlexible={service.is_flexible}
-          flexCapacityPct={service.flex_capacity_pct}
-        />
 
         {/* US-A64 — zone chips: pick a physical zone on the chosen departure. Bound by the zone's
             own remaining; a zone that can't seat the party (or is closed) is disabled. */}
