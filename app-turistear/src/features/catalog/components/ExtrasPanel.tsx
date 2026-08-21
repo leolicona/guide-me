@@ -10,9 +10,7 @@ import {
   Alert,
   Divider,
 } from '@mui/material'
-import AddRounded from '@mui/icons-material/AddRounded'
-import EditRounded from '@mui/icons-material/EditRounded'
-import DeleteOutlineRounded from '@mui/icons-material/DeleteOutlineRounded'
+import { AddRounded, EditRounded, DeleteOutlineRounded } from '@mui/icons-material'
 import { useService } from '../hooks/useService'
 import { useRemoveExtra } from '../hooks/useRemoveExtra'
 import { formatMoney } from '../types'

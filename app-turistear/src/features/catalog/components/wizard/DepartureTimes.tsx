@@ -1,7 +1,6 @@
 import { useState } from 'react'
 import { Box, Stack, TextField, Button, Chip, Typography } from '@mui/material'
-import AddRounded from '@mui/icons-material/AddRounded'
-import ScheduleRounded from '@mui/icons-material/ScheduleRounded'
+import { AddRounded, ScheduleRounded } from '@mui/icons-material'
 import type { DepartureTime } from './wizardTypes'
 
 interface DepartureTimesProps {

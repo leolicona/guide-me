@@ -8,8 +8,7 @@ import {
   Typography,
   Alert,
 } from '@mui/material'
-import AddRounded from '@mui/icons-material/AddRounded'
-import DeleteOutlineRounded from '@mui/icons-material/DeleteOutlineRounded'
+import { AddRounded, DeleteOutlineRounded } from '@mui/icons-material'
 import { blockoutFormSchema } from '../schemas'
 
 // A block-out row as held in the controlled value. `id` is the stable list key (tempId / server id).

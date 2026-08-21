@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Box, Button, Typography, CircularProgress, Stack } from '@mui/material'
-import AddRounded from '@mui/icons-material/AddRounded'
+import { AddRounded } from '@mui/icons-material'
 import { SectionCard } from '../../../components'
 import { useUnits } from '../hooks/useUnits'
 import { useUnitMutations } from '../hooks/useUnitMutations'
