@@ -8,6 +8,8 @@ import {
   firstWeekdayMondayBased,
   defaultWindow,
   defaultWindowLabel,
+  posWindow,
+  eachDay,
 } from './dates'
 
 // Calendar arithmetic, which is where off-by-one lives. Every clock-dependent test pins the system
@@ -178,5 +180,66 @@ describe('defaultWindowLabel', () => {
       const day = addDays('2026-08-03', i)
       expect(defaultWindowLabel(day), day).toBeTruthy()
     }
+  })
+})
+
+// BUG-032 — the window every POS surface resolves. The catalog list and the service detail read
+// the agent's filter through this one function; when they disagreed, a card advertising Saturday's
+// departure opened on a Thursday with no horarios.
+describe('posWindow', () => {
+  it('keeps a range WHOLE — the bug was reading only `from`', () => {
+    expect(posWindow({ from: '2026-08-21', to: '2026-08-23' }, '2026-08-21')).toEqual({
+      from: '2026-08-21',
+      to: '2026-08-23',
+    })
+  })
+
+  it('collapses a single-day pick to that day (a hyper-specific search gets no extra noise)', () => {
+    expect(posWindow({ from: '2026-08-22' }, '2026-08-21')).toEqual({
+      from: '2026-08-22',
+      to: '2026-08-22',
+    })
+  })
+
+  it('falls back to the contextual week when nothing is picked', () => {
+    // Friday 2026-08-07 → through Sunday the 9th, exactly what the catalog lists.
+    expect(posWindow(null, '2026-08-07')).toEqual(defaultWindow('2026-08-07'))
+  })
+
+  it('resolves the SAME window the catalog queries, for every shape of selection', () => {
+    const today = '2026-08-21'
+    for (const sel of [null, { from: today }, { from: today, to: '2026-08-23' }]) {
+      const w = posWindow(sel, today)
+      // The catalog's own expression: `selection ?? defaultWindow(today)`, `to ?? from`.
+      const catalog = sel ?? defaultWindow(today)
+      expect(w).toEqual({ from: catalog.from, to: catalog.to ?? catalog.from })
+    }
+  })
+})
+
+describe('eachDay', () => {
+  it('spells out an inclusive range — the 21st through the 23rd is three days, not one', () => {
+    expect(eachDay('2026-08-21', '2026-08-23')).toEqual([
+      '2026-08-21',
+      '2026-08-22',
+      '2026-08-23',
+    ])
+  })
+
+  it('yields a single day when both bounds are the same day', () => {
+    expect(eachDay('2026-08-22', '2026-08-22')).toEqual(['2026-08-22'])
+  })
+
+  it('crosses a month boundary without skipping or repeating a day', () => {
+    expect(eachDay('2026-08-30', '2026-09-02')).toEqual([
+      '2026-08-30',
+      '2026-08-31',
+      '2026-09-01',
+      '2026-09-02',
+    ])
+  })
+
+  it('degrades to the start day on an inverted window rather than rendering no days at all', () => {
+    expect(eachDay('2026-08-23', '2026-08-21')).toEqual(['2026-08-23'])
   })
 })

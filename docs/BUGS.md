@@ -6,6 +6,77 @@ Tracks confirmed bugs, root causes, and fixes. Each entry is immutable once clos
 
 ---
 
+## BUG-032 — The POS Detail Answers for the First Day of a Range and Calls the Rest Nonexistent — ✅ FIXED
+
+**Found:** 2026-08-21, reported from the floor: filter `/pos` to **21–23 Aug**, open the card for
+«Taller del alfarero» that reads **«Próximo: Sáb 22»**, and the sheet says *No hay horarios
+disponibles para este servicio*.
+
+**Affected component:** `app-turistear/src/features/pos/components/ServiceSheet.tsx` and
+`app-turistear/src/pages/PosServicePage.tsx` (frontend only — the API was correct throughout).
+
+**Severity:** High — the service looks unsellable. An agent with a customer in front of them reads
+the empty state as *this tour has no departures* and quotes something else, or nothing.
+
+### Symptom
+
+The catalog card and the detail that opens from it disagree about the same service, in the same
+session, one tap apart. The card names a departure; the detail denies every departure exists.
+
+Any range whose **first day** the service does not run reproduces it. A range whose first day it
+does run hides the defect — the sheet shows that day's times and silently omits the rest.
+
+### Root cause
+
+`store/posFilters.ts` holds the agent's pick as `DateSelection = { from, to? }`. The catalog reads
+it whole (`selection ?? defaultWindow(today)`, then `to ?? from`) and asks the API for
+`?from=2026-08-21&to=2026-08-23`; `next_slot_date` comes back as **the 22nd**, correctly.
+
+The detail read only `from`:
+
+```ts
+const anchor = usePosFilters((s) => s.selection?.from ?? null)
+const days = anchor ? [anchor] : [start, addDays(start, 1), addDays(start, 2)]
+const range = { from: days[0], to: days[days.length - 1] }   // → { from: 21, to: 21 }
+```
+
+So it asked for `?from=2026-08-21&to=2026-08-21`. The server obeyed
+(`gte(slots.date, from)` + `lte(slots.date, to)`, `handler.ts` § `getPosService`), returned zero
+slots, and `ServiceSelectionPanel` rendered its empty state. Every layer behaved as written.
+
+`anchor ? [anchor]` is US-AG33 code, from when a selection **was** a single day. US-AG35 added
+ranges to the store, to the catalog and to the endpoint — and the detail was never revisited. Its
+own comment still read *"An explicit date stays a single day"*, which is why nobody caught it by
+reading: the code matched a promise the product had stopped making.
+
+The same divergence had a quieter second face. With **no** pick the catalog lists the contextual
+week (today → Sunday) while the sheet opened a rolling 3-day window — so a Monday agent browsing
+the week could not see Thursday's departure in a detail whose card advertised it.
+
+### Fix (#TBD)
+
+One function resolves the window, and every POS surface calls it —
+`posWindow(selection, today)` in `features/pos/dates.ts`, with `eachDay(from, to)` spelling out the
+day axis the slot matrix renders. The catalog's expression is now the definition rather than one of
+three copies: a range keeps its `to`, a single-day pick collapses to that day, no pick means
+`defaultWindow(today)`. ⚡ Express is untouched — it is pinned to today by US-AG45 D5, whatever the
+catalog is filtered to.
+
+The card's `next_slot_date` therefore stops being a hint the sheet had to be handed: computed over
+the window the sheet now reads, it is by construction the first departure the sheet renders, so
+`ServiceSheet`'s `nextSlotDate` prop and the catalog state carrying it are gone.
+
+Pinned by `src/features/pos/components/ServiceSheet.test.tsx` — the reported scenario as a whole
+(21–23 Aug, a service that runs only on the 22nd), which fails on the old code with the exact
+string from the report — plus `posWindow` / `eachDay` in `src/features/pos/dates.test.ts`.
+
+**Resolves the open question in `docs/pos/date-filter-calendar-sheet.spec.md`'s DoD** — *"tours
+evaluate availability over the whole selected range, not the start date only — confirm which
+reading is intended"*. The whole range was the intended reading; it had been implemented on one
+side of the drill-in only, and a half-applied answer is what this bug is.
+
+---
+
 ## BUG-031 — The POS Catalog Advertises a Departure That Is Already Sold Out — ⚠️ OPEN
 
 **Found:** 2026-08-21, adding the departure **time** beside the date on the POS service card (the
