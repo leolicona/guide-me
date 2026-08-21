@@ -417,25 +417,28 @@ never set `has_availability` or seed a chip for `org_a`.
 
 ### Amendment DoD — US-AG56 / BUG-031 (2026-08-21)
 
-- [ ] `listPosServices` computes `MIN(date || 'T' || start_time)` over slots filtered by the
+- [x] `listPosServices` computes `MIN(date || 'T' || start_time)` over slots filtered by the
       **per-slot** effective-remaining predicate; the `Σ available_spots` column is **deleted**
       (D8, D9).
-- [ ] `has_availability` is derived as `next_slot_date !== null` — no second query (D9).
-- [ ] `express_eligible` uses the same per-slot `EXISTS` over today; its Σ is deleted (D13).
-- [ ] Payload carries `next_slot_time: string | null`, `null` exactly when `next_slot_date` is.
-- [ ] `PosTourCard.next_slot_time` added; `PosUnitTypeCard.next_slot_time: null` keeps the union
+- [x] `has_availability` is derived as `next_slot_date !== null` — no second query (D9).
+- [x] `express_eligible` uses the same per-slot `EXISTS` over today; its Σ is deleted (D13).
+- [x] Payload carries `next_slot_time: string | null`, `null` exactly when `next_slot_date` is.
+- [x] `PosTourCard.next_slot_time` added; `PosUnitTypeCard.next_slot_time: null` keeps the union
       exhaustive.
-- [ ] `PosCatalogPage` «Próximo» block renders date over time, raw `HH:MM`, tabular figures.
-- [ ] `ServiceSheet.tsx` **not modified** — the corrected anchor is a behaviour change with an
+- [x] `PosCatalogPage` «Próximo» block renders date over time, raw `HH:MM`, tabular figures.
+- [x] `ServiceSheet.tsx` **not modified** — the corrected anchor is a behaviour change with an
       empty diff, recorded in § Frontend rather than in code.
-- [ ] Scenarios 12–17 covered in `test/pos/pos-catalog-availability.test.ts`; Scenario 17 in
+- [x] Scenarios 12–17 covered in `test/pos/pos-catalog-availability.test.ts`; Scenario 17 in
       `test/pos/express-sale.test.ts`.
-- [ ] The false premise in § API surface is annotated, not silently deleted (`PROCESS.md`
+- [x] The false premise in § API surface is annotated, not silently deleted (`PROCESS.md`
       § Amending a spec).
-- [ ] `SPEC.md`: US-AG56 story + Features-by-Phase line amended + glossary term.
+- [x] `SPEC.md`: US-AG56 story + Features-by-Phase line amended + glossary term.
 - [ ] `BUGS.md`: BUG-031 flipped to ✅ FIXED with the merged PR number.
-- [ ] `TECH_DEBT.md`: the `updateService` negative-remaining hole filed (D14).
-- [ ] `pnpm --filter api-turistear test` green; `pnpm build:app` clean (`tsc -b` + vite).
+- [x] `TECH_DEBT.md`: the `updateService` negative-remaining hole filed (D14).
+- [x] `pnpm --filter api-turistear test` green (**951**, up from 942); `pnpm build:app` clean
+      (`tsc -b` + vite). Scenarios 1–11 pass **unedited** — the mechanical proof that US-AG30's
+      contract survived. Scenarios 12–14 and the D12 loss were re-run against the restored defect
+      and **fail**, so they detect the bug rather than merely describing it.
 
 ---
 
