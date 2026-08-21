@@ -102,3 +102,24 @@ export const defaultWindowLabel = (today: string): string => {
   if (idx <= 5) return 'Fin de semana' // Fri–Sat — what remains IS the weekend
   return 'Hoy' // Sunday — the window collapses to today, this app's established word for one day
 }
+
+// BUG-032 — the ONE window every POS surface reads. The catalog list and the service detail must
+// resolve the agent's date filter identically: a card that says «Próximo: sábado 22» because the
+// list looked at 21–23 is a lie if the detail then looks only at the 21st. `selection` is the
+// agent's explicit pick — one day (`to` omitted) or an inclusive range; `null` is no pick, which
+// means the contextual week (`defaultWindow`).
+export const posWindow = (
+  selection: { from: string; to?: string } | null | undefined,
+  today: string,
+): DateWindow =>
+  selection ? { from: selection.from, to: selection.to ?? selection.from } : defaultWindow(today)
+
+// The inclusive day axis of a window, ascending. The slot matrix renders a row per candidate day
+// (dropping the ones the service doesn't operate), so it needs the days spelled out, not the
+// bounds. An inverted window (`to` before `from`) yields `[from]` rather than an empty axis — a
+// screen with no day rows at all is a worse failure than a one-day one.
+export const eachDay = (from: string, to: string): string[] => {
+  const days = [from]
+  for (let d = addDays(from, 1); d <= to; d = addDays(d, 1)) days.push(d)
+  return days
+}
