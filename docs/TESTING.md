@@ -163,6 +163,7 @@ Playwright runs in its own workflow: nightly against `app-dev`, and on demand wh
 | Fixtures | Response fixtures copy the shapes the **API tests** assert, not shapes invented for convenience. A fixture that no API test would produce is a test that passes against a fiction |
 | Type-checking tests | A `tsconfig.test.json` in the project references, so `tsc -b` covers test files while `tsconfig.app.json` excludes them from the production build |
 | E2E secrets | Environment variables only, never committed — the existing `e2e/helpers.ts` `env()` pattern is the standard |
+| Timeouts | `testTimeout: 15_000` in `vitest.config.ts`, not the 5 s default. The slowest component tests measure **2.8–8.7 s** (a screen render with MSW + TanStack Query, sometimes typing into a debounced field), so 5 s left no headroom and the suite failed on a different test each parallel run (BUG-036). A test that needs more than 15 s is **hung, not slow** — which is what the timeout is for. Measure with `vitest run --reporter=json` before changing it |
 
 ---
 

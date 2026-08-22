@@ -6,7 +6,7 @@ Tracks confirmed bugs, root causes, and fixes. Each entry is immutable once clos
 
 ---
 
-## BUG-036 — The App Test Suite Flakes Under Parallel Load — ⚠️ OPEN
+## BUG-036 — The App Test Suite Flakes Under Parallel Load — ✅ FIXED
 
 **Found:** 2026-08-22, while verifying the heading-outline fix. Two full-suite runs failed on
 **different** tests each time, always with `Test timed out in 5000ms` — and one of them
@@ -25,10 +25,24 @@ time out waiting for a render that eventually happens.
 read. It also masks real regressions: two red tests you have learned to re-run are two tests you no
 longer trust.
 
-**What to try, cheapest first:** raise `testTimeout` for the render-heavy files; cap
-`poolOptions.threads.maxThreads` in the app's vitest config; or split the folio screen suites, which
-are the slowest (`FolioDetailScreen.test.tsx` alone runs ~16 s). Measure before choosing — this
-entry records the symptom, not a diagnosis.
+### Fix — 2026-08-22
+
+Measured first, per that note. `vitest run --reporter=json` over the whole suite says the slowest
+individual tests take **2.8 s, 4.6 s and 8.7 s** — a screen render with MSW and TanStack Query,
+sometimes typing into a debounced field. Against a **5 s** default, several tests had no headroom at
+all, and under vitest's default file parallelism on 8 cores whichever one loses the CPU race crosses
+it. Nothing was hanging: they time out waiting for a render that does arrive.
+
+So the timeout was the defect, not the tests. `testTimeout: 15_000` in
+`app-turistear/vitest.config.ts`, documented in `docs/TESTING.md` § Conventions with the numbers and
+with the rule that anything needing more than 15 s is hung rather than slow.
+
+**Verified:** three consecutive full runs in the default parallel mode, 39 files / 649 tests green
+each time — against two of two runs failing before.
+
+**Not done, deliberately:** capping `maxThreads` would trade wall-clock for determinism the timeout
+already buys, and making the slow tests fast is a different project (the three worst are the catalog
+wizard's, not the folio screens'). What was wrong here was the budget.
 
 ---
 
