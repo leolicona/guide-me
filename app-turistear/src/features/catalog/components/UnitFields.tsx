@@ -162,6 +162,27 @@ export function UnitFields({ disabled, inheritedCommissionLabel }: UnitFieldsPro
         />
       </Stack>
 
+      <GroupLabel>Descuento</GroupLabel>
+      {/* US-A92 — how far an agent may take this unidad's stay total at the POS. A PERCENT, not an
+          amount: the total is assembled per night (temporada > fin de semana > base, × cuartos,
+          + persona extra), so only a relative ceiling stays true without re-deriving that. */}
+      <TextField
+        label="Descuento máximo"
+        type="number"
+        fullWidth
+        disabled={disabled}
+        error={!!errors.max_discount_pct}
+        helperText={
+          errors.max_discount_pct?.message ??
+          '0% = sin descuento. El agente no podrá bajar la estancia más de este porcentaje.'
+        }
+        slotProps={{
+          input: { endAdornment: <InputAdornment position="end">%</InputAdornment> },
+          htmlInput: { step: 1, min: 0, max: 100, inputMode: 'numeric' },
+        }}
+        {...register('max_discount_pct', { valueAsNumber: true })}
+      />
+
       <GroupLabel>Comisión</GroupLabel>
       <Controller
         name="commission_type"

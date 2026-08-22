@@ -121,6 +121,17 @@ export const unitFormSchema = z
     // when inheriting (RHF setValueAs in UnitFields).
     commission_type: z.enum(['inherit', 'percent', 'fixed']),
     commission_value: amount.nullable(),
+    // US-A92 — how far an agent may discount a stay of this unidad, as a whole percent of the
+    // quoted total. 0 = no discount, which is what every unidad carries until an admin changes it.
+    max_discount_pct: z
+      .number({ error: 'Ingresa un porcentaje' })
+      .int('Usa un número entero')
+      .min(0, 'El mínimo es 0%')
+      .max(100, 'El máximo es 100%')
+      // Optional, not defaulted: `.default()` splits zod's input and output types and RHF's
+      // Resolver stops typechecking. Absent means "no discount" — the same thing migration 0066
+      // says about every row that predates it — resolved at the one place that serialises.
+      .optional(),
   })
   .refine((v) => v.max_capacity >= v.base_occupancy, {
     message: 'La capacidad máxima no puede ser menor a la base',

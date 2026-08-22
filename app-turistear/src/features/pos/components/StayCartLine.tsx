@@ -1,10 +1,19 @@
 import { useState } from 'react'
-import { Box, Stack, Typography, IconButton, Collapse, Button } from '@mui/material'
+import {
+  Box,
+  Stack,
+  Typography,
+  IconButton,
+  Collapse,
+  Button,
+  TextField,
+  InputAdornment,
+} from '@mui/material'
 import DeleteOutlineRounded from '@mui/icons-material/DeleteOutlineRounded'
 import ExpandMoreRounded from '@mui/icons-material/ExpandMoreRounded'
 import { MoneyText } from '../../../components'
-import { formatMoney } from '../../catalog/types'
-import type { StayCartLine as StayCartLineModel } from '../../../store/posCart'
+import { formatMoney, centsToAmount, amountToCents } from '../../catalog/types'
+import { usePosCart, type StayCartLine as StayCartLineModel } from '../../../store/posCart'
 
 const WEEKDAYS_ES = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb']
 
@@ -17,6 +26,60 @@ const dayLabel = (date: string): string => {
 interface StayCartLineProps {
   line: StayCartLineModel
   onRemove: () => void
+}
+
+// US-AG57 — the stay's discount. Shaped like the tour line's «Precio unitario» field, but bound to
+// the SERVER's floor (`min_total`) rather than to a percent recomputed here, so the number the
+// agent is shown and the number the confirm enforces are the same one (D6). Edits stay local while
+// typing so the store's clamp does not fight the keystrokes; on blur the total commits and snaps
+// back into [min_total, quoted_total].
+function StayTotalField({ line }: { line: StayCartLineModel }) {
+  const setStayTotal = usePosCart((s) => s.setStayTotal)
+  const [value, setValue] = useState(String(centsToAmount(line.total)))
+
+  const cents = value === '' ? NaN : amountToCents(Number(value))
+  const belowMin = cents < line.min_total
+  const aboveQuote = cents > line.quoted_total
+  const invalid = Number.isNaN(cents) || belowMin || aboveQuote
+
+  const commit = () => {
+    const next = Number.isNaN(cents)
+      ? line.total
+      : Math.min(Math.max(cents, line.min_total), line.quoted_total)
+    setStayTotal(line.id, next)
+    setValue(String(centsToAmount(next)))
+  }
+
+  return (
+    <TextField
+      label="Total"
+      type="number"
+      size="small"
+      value={value}
+      onChange={(e) => setValue(e.target.value)}
+      onBlur={commit}
+      error={value !== '' && invalid}
+      helperText={
+        belowMin
+          ? `Mínimo ${formatMoney(line.min_total)}`
+          : aboveQuote
+            ? `Máximo ${formatMoney(line.quoted_total)}`
+            : `Mín ${formatMoney(line.min_total)}`
+      }
+      slotProps={{
+        inputLabel: { shrink: true },
+        input: { startAdornment: <InputAdornment position="start">$</InputAdornment> },
+        htmlInput: {
+          min: centsToAmount(line.min_total),
+          max: centsToAmount(line.quoted_total),
+          step: 0.01,
+          inputMode: 'decimal',
+          'aria-label': 'Total de la estancia',
+        },
+      }}
+      sx={{ width: 150 }}
+    />
+  )
 }
 
 // US-AG38 — the checkout line for a stay (transactional hierarchy: the total reads first, the
@@ -54,7 +117,14 @@ export function StayCartLine({ line, onRemove }: StayCartLineProps) {
           )}
         </Box>
         <Stack spacing={0.5} sx={{ alignItems: 'flex-end', flexShrink: 0 }}>
-          <MoneyText cents={line.total} variant="subtitle2" srLabel="Total de la estancia" />
+          {/* D7 — a unidad with no discount ceiling renders the total as text. A control that can
+              only ever reject the agent's input is noise on a counter, and this keeps the feature
+              invisible until an admin turns it on. */}
+          {line.min_total < line.quoted_total ? (
+            <StayTotalField line={line} />
+          ) : (
+            <MoneyText cents={line.total} variant="subtitle2" srLabel="Total de la estancia" />
+          )}
           <IconButton size="small" aria-label="Eliminar estancia" onClick={onRemove}>
             <DeleteOutlineRounded fontSize="small" />
           </IconButton>

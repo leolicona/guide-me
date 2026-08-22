@@ -49,6 +49,7 @@ import {
   nightsBetween,
   parseCsvInts,
   quoteStay,
+  stayFloor,
   type SeasonRate,
 } from '../../utils/lodging'
 import { lodgingAvailableDays, lodgingTypeCards } from './lodging.handler'
@@ -1088,6 +1089,7 @@ export const confirmSale = async (c: PosContext) => {
           baseOccupancy: accommodationUnitTypes.baseOccupancy,
           maxCapacity: accommodationUnitTypes.maxCapacity,
           minNights: accommodationUnitTypes.minNights,
+          maxDiscountPct: accommodationUnitTypes.maxDiscountPct, // US-A92 — the discount ceiling
           // Waterfall commission inputs: the type's own override (nullable) + the service base.
           typeCommissionType: accommodationUnitTypes.commissionType,
           typeCommissionValue: accommodationUnitTypes.commissionValue,
@@ -1173,6 +1175,27 @@ export const confirmSale = async (c: PosContext) => {
         weekendDays,
       )
 
+      // US-AG57 — the controlled discount, for a stay. `unit_price` is the WHOLE-LINE total (a
+      // stay has no per-spot price), bounded below by the type's percentage ceiling and above by
+      // the quote itself, mirroring the tour line's [minimum_price, base_price] window. Omitted ⇒
+      // the quote, so a client that never sends the field is byte-identical to before (D3).
+      const stayMinimum = stayFloor(quote.total, unitType.maxDiscountPct)
+      const stayPrice = line.unit_price ?? quote.total
+      if (stayPrice < stayMinimum) {
+        throw new ApiError(
+          'PRICE_BELOW_MINIMUM',
+          400,
+          'Stay price is below the minimum price for this unit type',
+        )
+      }
+      if (stayPrice > quote.total) {
+        throw new ApiError(
+          'VALIDATION_ERROR',
+          400,
+          'Stay price may not exceed the quoted total',
+        )
+      }
+
       // Commission waterfall (US-A12): type override ?? service base; affiliate's per-affiliate
       // rate still wins over both (its own allow-list-gated system, unchanged).
       let stayCommType = unitType.typeCommissionType ?? unitType.svcCommissionType
@@ -1202,10 +1225,13 @@ export const confirmSale = async (c: PosContext) => {
         slotDate: null,
         slotStartTime: null,
         quantity: line.quantity, // rooms — a fixed commission counts per room-stay (D13)
-        basePrice: quote.total, // no per-night discounting → base == sold (whole line)
-        minimumPrice: 0,
-        unitPrice: quote.total,
-        lineTotal: quote.total,
+        basePrice: quote.total, // what the stay is worth before any discount (whole line)
+        // US-AG57 (D8) — the RESOLVED floor, not the 0 this used to hardcode. The type's percent
+        // can be edited after the sale, so without the snapshot nobody could reconstruct what the
+        // line was actually validated against — the reason a tour line snapshots its own.
+        minimumPrice: stayMinimum,
+        unitPrice: stayPrice,
+        lineTotal: stayPrice,
         commissionType: stayCommType,
         commissionValue: stayCommValue,
         isFlexible: false,
@@ -1395,8 +1421,13 @@ export const confirmSale = async (c: PosContext) => {
   }
 
   const subtotal = prepared.reduce((sum, l) => sum + l.lineTotal, 0)
+  // US-AG57 (D9) — a stay's discount counts ONCE. For a slot line base/unit are per-SPOT and
+  // `quantity` is spots, so the multiplication is right. For a stay line they are whole-line
+  // totals and `quantity` is ROOMS: a $150 discount on a two-room stay would otherwise be
+  // persisted, and shown back to the org, as $300.
   const discountTotal = prepared.reduce(
-    (sum, l) => sum + (l.basePrice - l.unitPrice) * l.quantity,
+    (sum, l) =>
+      sum + (l.basePrice - l.unitPrice) * (l.lineType === 'stay' ? 1 : l.quantity),
     0,
   )
   const total = subtotal
@@ -1414,8 +1445,24 @@ export const confirmSale = async (c: PosContext) => {
         : 0),
     0,
   )
+  // US-AG57 (D10) — a FIXED commission on a stay line is clamped to that line's discounted
+  // total. accommodation-stays.spec.md § 5 exempted lodging from the `fixed ≤ minimum_price` cap
+  // *because lodging had no floor*; stay discounts create one, so the exemption's reason is gone.
+  // Authoring-time validation cannot replace this: the floor is a percent of a total that does
+  // not exist until dates, rooms and guests are known. A `percent` rate needs no clamp — it is
+  // basis points of the discounted line total and cannot exceed it.
+  //
+  // A SLOT line is left alone (D1): its authoring guard already pins `fixed ≤ minimum_price`, and
+  // minimum_price ≤ unit_price, so commissionValue × quantity ≤ lineTotal holds by construction.
+  // Clamping it too would be a no-op that quietly claims the tour path was in scope.
   const fullFixedCommission = prepared.reduce(
-    (sum, l) => sum + (l.commissionType === 'fixed' ? l.commissionValue * l.quantity : 0),
+    (sum, l) =>
+      sum +
+      (l.commissionType === 'fixed'
+        ? l.lineType === 'stay'
+          ? Math.min(l.commissionValue * l.quantity, l.lineTotal)
+          : l.commissionValue * l.quantity
+        : 0),
     0,
   )
 

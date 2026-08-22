@@ -58,6 +58,7 @@ const toUnitInput = (u: UnitDraft) => ({
   checkin_time: u.checkin_time,
   checkout_time: u.checkout_time,
   amenities: u.amenities,
+  max_discount_pct: u.max_discount_pct ?? 0, // US-A92 — absent ⇒ no discount
   // Waterfall override → API (null ⇒ inherit the service base commission).
   ...unitCommissionToApi(u.commission_type, u.commission_value),
 })
