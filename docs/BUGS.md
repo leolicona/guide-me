@@ -6,7 +6,7 @@ Tracks confirmed bugs, root causes, and fixes. Each entry is immutable once clos
 
 ---
 
-## BUG-034 — A Cancelled Sale Tells the Seller Nothing About the Money — ⚠️ OPEN
+## BUG-034 — A Cancelled Sale Tells the Seller Nothing About the Money — ✅ FIXED
 
 **Found:** 2026-08-22, comparing `/history/:id` against `/folios/:id` while writing
 `docs/oversight/folio-surface-parity.spec.md`.
@@ -40,10 +40,20 @@ one screen they can open says the sale was paid and stops. They cannot state the
 state the retention, and cannot see a credit they are expected to honour as a manual discount
 (US-A87 D6/D10). No money is wrong — only what the person answering for it can see.
 
-### Fix
+### Fix — 2026-08-22
 
-`folio-surface-parity.spec.md` **D6**: one shared `serializeFolioDetail` both handlers call, with a
-parity test asserting the two payloads deep-equal. Ships in PR-1 of that spec's plan (S-1/S-2).
+`folio-surface-parity.spec.md` **D6**, PR-1. The two hand-maintained payloads became one function,
+`api-turistear/src/utils/folioDetail.ts` (`readFolioDetail`), which both `getFolioDetail` and the
+POS `getFolio` call; the seller surface passes `agentId`, and that caller scope is the ONLY thing
+that differs between them. The gap was wider than first recorded: the seller's payload also lacked
+the folio-level `booking_expires_at`, `pending_balance`, the reminder stamps and `fulfillment`.
+
+The frontend rows moved into a shared `FolioMoneyOutcome` — the admin's detail rendered them as
+inline JSX, and copying that JSX would have made a second copy of the thing that already drifted.
+
+**What keeps it fixed:** `test/folios/folio-surface-parity.test.ts` S-3 asserts the two detail GETs
+are **deep-equal** — whole response, not a chosen subset. A field that reaches one audience and not
+the other now fails CI instead of surviving three releases.
 
 ---
 

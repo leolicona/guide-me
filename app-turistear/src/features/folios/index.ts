@@ -14,3 +14,5 @@ export * from './folioSearch'
 export { PendingWorkBar } from './components/PendingWorkBar'
 // US-A24 / US-AG53 — the sale as a story, on both detail pages (D6).
 export { FolioTimeline } from './components/FolioTimeline'
+// US-AG59 — the cancellation's money outcome + the credit, rendered identically on both details.
+export { FolioMoneyOutcome } from './components/FolioMoneyOutcome'

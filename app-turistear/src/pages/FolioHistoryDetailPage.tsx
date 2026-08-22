@@ -17,7 +17,13 @@ import { useFolio, useFolioCancellationQuote, useFolioEvents } from '../features
 import { useOrgDateFormatter } from '../features/organization'
 import { TicketQr } from '../features/pos/components/TicketQr'
 import { BookingActions, TicketWhatsAppButton, DeliveryBadge } from '../features/bookings'
-import { FolioStatusChip, FolioTimeline, folioTimeChip, useNowSeconds } from '../features/folios'
+import {
+  FolioMoneyOutcome,
+  FolioStatusChip,
+  FolioTimeline,
+  folioTimeChip,
+  useNowSeconds,
+} from '../features/folios'
 import { MoneyText, SectionCard, StatusChip } from '../components'
 import { formatMoney } from '../features/catalog/types'
 import { folioLineMeta } from '../features/folios/folioLineLabel'
@@ -103,6 +109,14 @@ export default function FolioHistoryDetailPage() {
                 {folio.payment_verification === 'pending' && (
                   <StatusChip status="pending" label="Por verificar" />
                 )}
+                {/* US-AG59 — the debt axis, in the admin detail's fixed position (money ·
+                    clearance · debt · time). The seller answers for this refund in person. */}
+                {folio.refund_status === 'pending' && (
+                  <StatusChip status="pending" label="Reembolso pendiente" />
+                )}
+                {folio.refund_status === 'refunded' && (
+                  <StatusChip status="paid" label="Reembolsado" />
+                )}
                 {timeChip && (
                   <Chip
                     size="small"
@@ -119,9 +133,17 @@ export default function FolioHistoryDetailPage() {
                 the `cancelled` row says when and why. */}
 
             {/* US-AG53 — the sale as a story, COLLAPSED between the state and the money (D6:
-                identical placement to the admin detail). The POS detail carries no folio-level
-                fulfilment, so the Salida marker ships date-only here. */}
-            <FolioTimeline events={events} lines={folio.lines} collapsible />
+                identical placement to the admin detail). US-AG59 finally makes good on «identical
+                by design»: the fulfilment roll-up, the petitions and the override note reach this
+                payload now, so the Salida marker and the rejected-petition rows render here too. */}
+            <FolioTimeline
+              events={events}
+              lines={folio.lines}
+              fulfillment={folio.fulfillment}
+              requests={folio.folio_requests}
+              refundNote={folio.refund_note}
+              collapsible
+            />
 
             <Card>
               <CardContent>
@@ -194,6 +216,9 @@ export default function FolioHistoryDetailPage() {
                       </Typography>
                     </Stack>
                   )}
+                  {/* US-AG59 / BUG-034 — where the money went. This screen used to read
+                      «Pagado $3,000» and stop, in front of the customer disputing it. */}
+                  <FolioMoneyOutcome folio={folio} formatDate={formatDate} />
                 </Stack>
               </CardContent>
             </Card>

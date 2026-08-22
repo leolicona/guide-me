@@ -24,6 +24,7 @@ import {
   useCancelFolio,
   useCancelFolioLine,
   useConfirmRefund,
+  FolioMoneyOutcome,
   FolioStatusChip,
   FolioTimeline,
   folioTimeChip,
@@ -481,93 +482,11 @@ export default function FolioDetailPage() {
                       </Typography>
                     </Stack>
                   )}
-                  {/* The cancellation's money OUTCOME, recorded where money lives — the same
-                      "Se devuelve / La empresa retiene" pair the RefundQuote previewed before
-                      the admin committed: the quote was the decision's preview, this is its
-                      record. Without it a cancelled folio read as if the sale were still whole
-                      (`Pagado $3,000` and silence). `refund_status: 'none'` with money paid is
-                      the 0%-ladder case — full retention, said out loud, because that is
-                      exactly where silence confuses most. Delivery state is icon-paired on the
-                      row (never color-alone); the WHEN and HOW stay the Historial's. */}
-                  {isCancelled && folio.amount_paid > 0 && (
-                    <>
-                      {(folio.refund_amount ?? 0) > 0 && (
-                        <Stack direction="row" sx={{ justifyContent: 'space-between' }}>
-                          <Box>
-                            <Typography color="text.secondary">Se devuelve al cliente</Typography>
-                            {folio.refund_status === 'refunded' ? (
-                              <Typography
-                                variant="caption"
-                                sx={{
-                                  display: 'flex',
-                                  alignItems: 'center',
-                                  gap: 0.5,
-                                  color: 'success.main',
-                                  fontWeight: 600,
-                                }}
-                              >
-                                <CheckCircleRounded sx={{ fontSize: 14 }} />
-                                Entregado
-                              </Typography>
-                            ) : (
-                              <Typography
-                                variant="caption"
-                                sx={{
-                                  display: 'flex',
-                                  alignItems: 'center',
-                                  gap: 0.5,
-                                  color: 'warning.main',
-                                  fontWeight: 600,
-                                }}
-                              >
-                                <ScheduleRounded sx={{ fontSize: 14 }} />
-                                Por entregar
-                              </Typography>
-                            )}
-                          </Box>
-                          <Typography className="numeric">
-                            {formatMoney(folio.refund_amount ?? 0)}
-                          </Typography>
-                        </Stack>
-                      )}
-                      {folio.amount_paid - (folio.refund_amount ?? 0) > 0 && (
-                        <Stack direction="row" sx={{ justifyContent: 'space-between' }}>
-                          <Typography color="text.secondary">La empresa retiene</Typography>
-                          <Typography className="numeric">
-                            {formatMoney(folio.amount_paid - (folio.refund_amount ?? 0))}
-                          </Typography>
-                        </Stack>
-                      )}
-                    </>
-                  )}
-                  {/* US-A87 (D6/D10) — what the close left the customer, and until when. This is
-                      the number the agent honours by MANUAL DISCOUNT while the checkout cannot
-                      spend it — an agent who cannot see the credit cannot decide to apply it.
-                      Positive green: it is the customer's money, not the company's. */}
-                  {(folio.credit_amount ?? 0) > 0 && (
-                    <Stack direction="row" sx={{ justifyContent: 'space-between', alignItems: 'baseline' }}>
-                      <Box>
-                        <Typography color="text.secondary">Saldo a favor del cliente</Typography>
-                        {folio.credit_expires_at && (
-                          <Typography variant="caption" color="text.secondary">
-                            Vigente hasta el {formatDate(folio.credit_expires_at)}
-                          </Typography>
-                        )}
-                        {/* The retired ExpiredBookingBanner's one non-redundant sentence, anchored
-                            to the money it was about: if the customer returns, it is a NEW sale,
-                            and this credit is honoured by manual discount (US-A87 D6/D10). */}
-                        <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
-                          Se aplica como descuento manual en una venta nueva
-                        </Typography>
-                      </Box>
-                      <MoneyText
-                        cents={folio.credit_amount!}
-                        variant="h6"
-                        semantic="positive"
-                        srLabel="Saldo a favor del cliente"
-                      />
-                    </Stack>
-                  )}
+                  {/* US-AG59 (folio-surface-parity D6) — the cancellation's money outcome and
+                      the customer's credit, in the component the SELLER's detail renders too.
+                      These rows lived here as inline JSX while the seller's screen showed nothing
+                      (BUG-034); a second copy would have repeated the drift, so there is one. */}
+                  <FolioMoneyOutcome folio={folio} formatDate={formatDate} />
                 </Stack>
               </CardContent>
             </Card>

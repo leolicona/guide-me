@@ -32,12 +32,12 @@ import type { AppVariables, UserPayload } from '../../types/context'
 import {
   deriveOrgKey,
   signTicket,
-  verifyTicket,
   type TicketPayload,
 } from '../../utils/qr'
 import { generatePortalToken, portalTokenExpiry } from '../../utils/portal'
 import { naiveEpoch, orgToday, orgWallClockMinute } from '../../utils/tz'
 import { folioFulfillment } from '../../utils/folioFulfillment'
+import { readFolioDetail } from '../../utils/folioDetail'
 import {
   rescheduleFolio,
   reissueTicketsAfterReschedule,
@@ -63,7 +63,6 @@ import {
   buildCancellationReversal,
   displayMethodSql,
   depositMethodSql,
-  readFolioPayments,
 } from '../../utils/folioPayments'
 // US-LG09 — the pure allocation engine (docs/folios/line-autonomy.spec.md D1–D3): which lines a
 // payment funds. Allocations ride the payment row's own batch; nothing reads them yet (F1).
@@ -2112,212 +2111,18 @@ export const confirmSale = async (c: PosContext) => {
   )
 }
 
-// Re-read a folio (with lines + extras) scoped to the caller agent, for the response
-// shape. Shared by getFolio; returns null when no such folio belongs to the agent.
-const readFolio = async (
+// docs/oversight/folio-surface-parity.spec.md D6 — the folio detail is read and serialized in ONE
+// place, shared with the admin's surface (`utils/folioDetail.ts`). The caller scope is the only
+// thing this surface adds: `agentId` comes from the session, so a foreign folio is a 404 and never
+// a filtered-out row.
+const readFolio = (
   db: Db,
   org: string,
   agentId: string,
   folioId: string,
   qrSecret: string,
   apiBaseUrl: string,
-) => {
-  const folioRows = await db
-    .select({
-      id: folios.id,
-      status: deriveStatusSql, // D11 — derived from the lines; equals the column by construction
-      paymentMethod: displayMethodSql,
-      paymentReference: folios.paymentReference,
-      paymentVerification: folios.paymentVerification,
-      paymentVerifiedAt: folios.paymentVerifiedAt,
-      customerName: folios.customerName,
-      customerEmail: folios.customerEmail,
-      customerPhone: folios.customerPhone,
-      subtotal: folios.subtotal,
-      discountTotal: folios.discountTotal,
-      total: folios.total,
-      amountPaid: folios.amountPaid,
-      commissionAmount: folios.commissionAmount,
-      cancelledAt: folios.cancelledAt,
-      ticketsSentAt: folios.ticketsSentAt,
-      ticketsViewedAt: folios.ticketsViewedAt,
-      // US-AF13 — the shift operator who made the sale ("Vendido por: {name}"); null if the
-      // manager/agent sold directly.
-      operatorName: affiliateOperators.name,
-      createdAt: folios.createdAt,
-    })
-    .from(folios)
-    .leftJoin(affiliateOperators, eq(folios.operatorId, affiliateOperators.id))
-    .where(
-      and(
-        eq(folios.id, folioId),
-        eq(folios.organizationId, org),
-        eq(folios.agentId, agentId),
-      ),
-    )
-    .limit(1)
-
-  const folio = folioRows[0]
-  if (!folio) return null
-
-  const lineRows = await db
-    .select({
-      id: folioLines.id,
-      serviceId: folioLines.serviceId,
-      slotId: folioLines.slotId,
-      serviceName: folioLines.serviceName,
-      slotDate: folioLines.slotDate,
-      slotStartTime: folioLines.slotStartTime,
-      zoneName: folioLines.zoneName,
-      quantity: folioLines.quantity,
-      basePrice: folioLines.basePrice,
-      minimumPrice: folioLines.minimumPrice,
-      unitPrice: folioLines.unitPrice,
-      lineTotal: folioLines.lineTotal,
-      qrToken: folioLines.qrToken,
-      lineType: folioLines.lineType,
-      unitTypeId: folioLines.unitTypeId,
-      checkIn: folioLines.checkIn,
-      checkOut: folioLines.checkOut,
-      guests: folioLines.guests,
-      nights: folioLines.nights,
-      // US-A22 — the line's own life, mirrored on the seller detail (same fields the admin GET
-      // widened by; the raw outer-column correlation is the displayMethodSql trick).
-      cancelledAt: folioLines.cancelledAt,
-      cancellationSource: folioLines.cancellationSource,
-      lineRefundStatus: folioLines.refundStatus,
-      lineRefundAmount: folioLines.refundAmount,
-      // US-AG54 (D5) — the line's own hold clock, for the per-line countdown + Liquidar rows.
-      lineBookingExpiresAt: folioLines.bookingExpiresAt,
-      allocated: sql<number>`coalesce((select sum(a.amount) from folio_payment_allocations a where a.folio_line_id = folio_lines.id), 0)`,
-    })
-    .from(folioLines)
-    .where(and(eq(folioLines.folioId, folioId), eq(folioLines.organizationId, org)))
-    .orderBy(asc(folioLines.createdAt))
-
-  const extraRows = await db
-    .select({
-      id: folioLineExtras.id,
-      folioLineId: folioLineExtras.folioLineId,
-      extraId: folioLineExtras.extraId,
-      name: folioLineExtras.name,
-      price: folioLineExtras.price,
-      quantity: folioLineExtras.quantity,
-    })
-    .from(folioLineExtras)
-    .where(
-      and(
-        eq(folioLineExtras.folioId, folioId),
-        eq(folioLineExtras.organizationId, org),
-      ),
-    )
-
-  const extrasByLine = new Map<string, typeof extraRows>()
-  for (const ex of extraRows) {
-    const list = extrasByLine.get(ex.folioLineId) ?? []
-    list.push(ex)
-    extrasByLine.set(ex.folioLineId, list)
-  }
-
-  // Decode (and integrity-check) each stored ticket for the UI echo. Tokenless lines
-  // (folios sold before the QR feature) and any corrupt token resolve to qr: null.
-  const orgKey = await deriveOrgKey(qrSecret, org)
-  const lines = await Promise.all(
-    lineRows.map(async (line) => {
-      const payload = line.qrToken
-        ? await verifyTicket(line.qrToken, orgKey)
-        : null
-      return {
-        id: line.id,
-        line_type: line.lineType,
-        service_id: line.serviceId,
-        slot_id: line.slotId,
-        service_name: line.serviceName,
-        slot_date: line.slotDate,
-        slot_start_time: line.slotStartTime,
-        // US-A64 — the physical zone (null for an unzoned or lodging line).
-        zone_name: line.zoneName,
-        // Lodging stay fields (null for a tour line).
-        unit_type_id: line.unitTypeId,
-        check_in: line.checkIn,
-        check_out: line.checkOut,
-        guests: line.guests,
-        nights: line.nights,
-        // US-A22 — the line's own money state (derived from allocations; cancellation read from
-        // its written stamp), same shape as the admin detail.
-        money_state: line.cancelledAt
-          ? ('cancelled' as const)
-          : Math.max(0, Number(line.allocated ?? 0)) >= line.lineTotal
-            ? ('paid' as const)
-            : ('booking' as const),
-        allocated: Math.max(0, Number(line.allocated ?? 0)),
-        pending_balance: line.cancelledAt
-          ? 0
-          : Math.max(0, line.lineTotal - Math.max(0, Number(line.allocated ?? 0))),
-        cancelled_at: line.cancelledAt ? Math.floor(line.cancelledAt.getTime() / 1000) : null,
-        cancellation_source: line.cancellationSource,
-        refund_status: line.lineRefundStatus,
-        refund_amount: line.lineRefundAmount,
-        booking_expires_at: line.lineBookingExpiresAt
-          ? Math.floor(line.lineBookingExpiresAt.getTime() / 1000)
-          : null,
-        quantity: line.quantity,
-        base_price: line.basePrice,
-        minimum_price: line.minimumPrice,
-        unit_price: line.unitPrice,
-        line_total: line.lineTotal,
-        qr_token: line.qrToken ?? null,
-        qr: payload ? qrEcho(payload) : null,
-        extras: (extrasByLine.get(line.id) ?? []).map((ex) => ({
-          id: ex.id,
-          extra_id: ex.extraId,
-          name: ex.name,
-          price: ex.price,
-          quantity: ex.quantity,
-        })),
-      }
-    }),
-  )
-
-  const portalLink = await folioPortalLink(db, org, folioId, apiBaseUrl)
-  // US-LG08 — the per-payment breakdown (deposit vs balance, each with its own method).
-  const payments = await readFolioPayments(db, org, folioId)
-
-  return {
-    id: folio.id,
-    status: folio.status,
-    payment_method: folio.paymentMethod,
-    // US-AG41/US-A67 — payment reference + verification gate (the delivery UI blocks while pending).
-    payment_reference: folio.paymentReference,
-    payment_verification: folio.paymentVerification,
-    payment_verified_at: folio.paymentVerifiedAt
-      ? Math.floor(folio.paymentVerifiedAt.getTime() / 1000)
-      : null,
-    customer_name: folio.customerName,
-    customer_email: folio.customerEmail,
-    customer_phone: folio.customerPhone,
-    subtotal: folio.subtotal,
-    discount_total: folio.discountTotal,
-    total: folio.total,
-    amount_paid: folio.amountPaid,
-    commission_amount: folio.commissionAmount,
-    cancelled_at: folio.cancelledAt
-      ? Math.floor(folio.cancelledAt.getTime() / 1000)
-      : null,
-    // US-AF13 — operator attribution (null ⇒ manager/agent sold directly).
-    operator_name: folio.operatorName ?? null,
-    // Delivery axis (whatsapp-qr-delivery) — portal_link drives the WhatsApp send; sent/viewed
-    // stamps drive the Pendiente → Enviado → Visto badge.
-    portal_link: portalLink,
-    tickets_sent_at: folio.ticketsSentAt ? Math.floor(folio.ticketsSentAt.getTime() / 1000) : null,
-    tickets_viewed_at: folio.ticketsViewedAt
-      ? Math.floor(folio.ticketsViewedAt.getTime() / 1000)
-      : null,
-    created_at: Math.floor(folio.createdAt.getTime() / 1000),
-    payments,
-    lines,
-  }
-}
+) => readFolioDetail(db, org, folioId, { agentId, qrSecret, apiBaseUrl })
 
 // US-AG08 — read back one of the caller agent's own folios (receipt). Foreign /
 // other-agent / unknown → 404.

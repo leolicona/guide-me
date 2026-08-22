@@ -212,11 +212,11 @@ Then `404`, and seller B's sales never appear in A's list.
 
 ## Definition of Done
 
-**PR-1 — the payload and the money (US-AG59, BUG-034)**
-- [ ] Shared detail serializer; both handlers call it
-- [ ] Seller detail renders refund outcome, credit, fulfilment, petitions, commission
-- [ ] S-1…S-3, S-12, S-13 covered
-- [ ] `BUGS.md` BUG-034 closed
+**PR-1 — the payload and the money (US-AG59, BUG-034)** ✅
+- [x] Shared detail serializer; both handlers call it (`utils/folioDetail.ts`)
+- [x] Seller detail renders refund outcome, credit, fulfilment, petitions, commission
+- [x] S-1…S-3, S-12, S-13 covered (`test/folios/folio-surface-parity.test.ts`)
+- [x] `BUGS.md` BUG-034 closed
 
 **PR-2 — the shared list (US-AG58)**
 - [ ] `FolioListScreen` + two wrappers; `ToggleButtonGroup` deleted

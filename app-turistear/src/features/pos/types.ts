@@ -2,6 +2,9 @@
 // (centavos) — render with the helpers in features/catalog/types.
 
 import type { ServiceCategory } from '../catalog/categories'
+// US-AG59 — the petition row the folio detail carries. Type-only, so this is erased at build and
+// creates no runtime dependency between the two feature modules.
+import type { FolioCancellationRequest, RefundStatus } from '../folios/types'
 
 // --- Flattened POS catalog (spec §4.3, D14) — a MIXED list discriminated by `item_type` ---
 
@@ -277,6 +280,37 @@ export interface Folio {
   operator_name?: string | null
   /** US-LG08 — the money movements that make up amount_paid (deposit, balance, reversals). */
   payments?: FolioPaymentEntry[]
+  /** The seller's own commission on this sale — the per-folio resolution of what `/balance`
+   *  already shows aggregated. */
+  commission_amount?: number
+  // --- US-AG59 (folio-surface-parity D6) --------------------------------------------------------
+  // Everything below reached the admin's detail and not the seller's, because the payload was
+  // written twice by hand. It is now ONE serializer (`api-turistear/src/utils/folioDetail.ts`),
+  // asserted deep-equal by `test/folios/folio-surface-parity.test.ts` — so a field added for one
+  // audience reaches the other or fails CI. Do not add a field here without adding it there.
+  /** Who cancelled it and why (BUG-034: the seller had neither). */
+  cancelled_by?: string | null
+  cancellation_reason?: string | null
+  /** US-A23 — the cash refund's state and amount. The refund PIN is NEVER serialized: it lives in
+   *  the tourist's portal, and learning it in person is what proves the cash changed hands. */
+  refund_status?: RefundStatus
+  refund_amount?: number | null
+  /** The admin's audit note on a no-PIN override confirm. */
+  refund_note?: string | null
+  refunded_at?: number | null
+  refunded_by?: string | null
+  /** US-A87 — what a closed apartado left the customer, and until when. Honoured by manual
+   *  discount while the checkout cannot spend it — a seller who cannot see it cannot apply it. */
+  credit_amount?: number | null
+  credit_expires_at?: number | null
+  /** US-A85 (D7) — the worst of the folio's lines. */
+  fulfillment?: Fulfillment
+  /** US-A84 rule 7 — the folio's petition history, newest first. The timeline renders rejected
+   *  ones as derived rows; nothing else records that they happened. */
+  folio_requests?: FolioCancellationRequest[]
+  reminder_status?: ReminderStatus
+  reminder_sent_at?: number | null
+  reminder_sent_by?: string | null
   created_at: number
   lines: FolioLine[]
 }

@@ -1,13 +1,11 @@
 import type { Context } from 'hono'
 import type { BatchItem } from 'drizzle-orm/batch'
-import { and, asc, desc, eq, inArray, isNotNull, isNull, lt, ne, sql, type SQL } from 'drizzle-orm'
+import { and, desc, eq, inArray, isNull, ne, sql, type SQL } from 'drizzle-orm'
 import { getDb, type Db } from '../../db/client'
 import {
   accommodationReservations,
   affiliateOperators,
   folioRequests,
-  folioAccessTokens,
-  folioLineExtras,
   folioLines,
   folioPaymentAllocations,
   folios,
@@ -29,7 +27,7 @@ import {
   type CancellationEmailInput,
 } from '../../services/resend'
 import { generateRefundPin } from '../../utils/portal'
-import { folioFulfillment, lineFulfillment } from '../../utils/folioFulfillment'
+import { folioFulfillment } from '../../utils/folioFulfillment'
 import {
   anyLineStatusSql,
   deriveBookingExpiresAtSql,
@@ -43,8 +41,9 @@ import {
   viableAlternatives,
 } from '../pos/reschedule'
 import { emitNotification, recordEmailOutcome } from '../../utils/notifications'
-import { buildCancellationReversal, displayMethodSql, readFolioPayments } from '../../utils/folioPayments'
+import { buildCancellationReversal, displayMethodSql } from '../../utils/folioPayments'
 import { folioEventRow, readFolioEvents } from '../../utils/folioEvents'
+import { readFolioDetail } from '../../utils/folioDetail'
 import {
   readListCancellationRequests,
   readListLines,
@@ -84,328 +83,16 @@ export type FoliosContext = Context<{
 
 const tsOrNull = (d: Date | null) => (d ? Math.floor(d.getTime() / 1000) : null)
 
-// --- Admin folio detail read (org-scoped; no QR echo — admins don't scan) -----
-
-// Re-read one folio (lines + extras) scoped to the caller's org, with its cancellation
-// audit. Returns null when no such folio exists in the org. Shared by getFolioDetail and
-// the response of cancelFolio.
-const readFolio = async (db: Db, org: string, folioId: string, apiBaseUrl?: string) => {
-  const folioRows = await db
-    .select({
-      id: folios.id,
-      agentId: folios.agentId,
-      agentName: users.name,
-      operatorName: affiliateOperators.name,
-      status: deriveStatusSql, // D11 — derived from the lines; equals the column by construction
-      ticketsSentAt: folios.ticketsSentAt,
-      ticketsViewedAt: folios.ticketsViewedAt,
-      paymentMethod: displayMethodSql,
-      paymentReference: folios.paymentReference,
-      paymentVerification: folios.paymentVerification,
-      paymentVerifiedAt: folios.paymentVerifiedAt,
-      customerName: folios.customerName,
-      customerEmail: folios.customerEmail,
-      customerPhone: folios.customerPhone,
-      subtotal: folios.subtotal,
-      discountTotal: folios.discountTotal,
-      total: folios.total,
-      amountPaid: folios.amountPaid,
-      commissionAmount: folios.commissionAmount,
-      cancelledAt: folios.cancelledAt,
-      cancelledBy: folios.cancelledBy,
-      cancellationReason: folios.cancellationReason,
-      // US-AG07/D5 — apartado state, so the admin detail can show the expiry banner +
-      // Liquidar/Reactivar and the reminder status.
-      // TECH_DEBT #25 — the roll-ups derive from the lines; the columns are gone (0065).
-      bookingExpiresAt: deriveBookingExpiresAtSql,
-      reminderStatus: folios.reminderStatus,
-      reminderSentAt: folios.reminderSentAt,
-      reminderSentBy: folios.reminderSentBy,
-      // US-A23 — refund tracking. refund_pin is DELIBERATELY not selected: the PIN is
-      // portal-only (spec D6) — the admin learns it from the tourist in person, which is
-      // exactly what proves the cash changed hands.
-      refundStatus: deriveRefundStatusSql,
-      creditAmount: folios.creditAmount,
-      creditExpiresAt: folios.creditExpiresAt,
-      refundAmount: deriveRefundAmountSql,
-      refundNote: folios.refundNote,
-      refundedAt: folios.refundedAt,
-      refundedBy: folios.refundedBy,
-      createdAt: folios.createdAt,
-    })
-    .from(folios)
-    .innerJoin(users, eq(folios.agentId, users.id))
-    .leftJoin(affiliateOperators, eq(folios.operatorId, affiliateOperators.id))
-    .where(and(eq(folios.id, folioId), eq(folios.organizationId, org)))
-    .limit(1)
-
-  const folio = folioRows[0]
-  if (!folio) return null
-
-  // Delivery axis (whatsapp-qr-delivery) — the newest portal token's URL, for the admin's
-  // "Enviar/Reenviar por WhatsApp" affordance. Only when a base URL is supplied.
-  let portalLink: string | null = null
-  if (apiBaseUrl) {
-    const tokenRows = await db
-      .select({ token: folioAccessTokens.token })
-      .from(folioAccessTokens)
-      .where(
-        and(eq(folioAccessTokens.folioId, folioId), eq(folioAccessTokens.organizationId, org)),
-      )
-      .orderBy(desc(folioAccessTokens.createdAt))
-      .limit(1)
-    if (tokenRows[0]) portalLink = `${apiBaseUrl}/portal/${tokenRows[0].token}`
-  }
-
-  // US-A84 rule 7 — this folio's cancellation-request history, newest first. This is where the
-  // absorbed *Solicitudes* tab actually lands (D2): a rejected request never changed the folio, so
-  // the folio it was about is the only surface that can carry it. One folio, one cheap read.
-  const requestRows = await db
-    .select({
-      id: folioRequests.id,
-      // US-AG52 — the review surface must know WHAT it is approving. A reschedule petition
-      // presented as a cancellation is a button that lies about the destructive half.
-      kind: folioRequests.kind,
-      status: folioRequests.status,
-      reason: folioRequests.reason,
-      resolutionNote: folioRequests.resolutionNote,
-      resolvedBy: folioRequests.resolvedBy,
-      resolvedAt: folioRequests.resolvedAt,
-      createdAt: folioRequests.createdAt,
-      folioLineId: folioRequests.folioLineId,
-      // The requested destination, resolved to a human date — the seller decides on "quiere
-      // moverse al 21 · 09:00", not on a slot UUID.
-      toSlotId: folioRequests.toSlotId,
-      toSlotDate: slots.date,
-      toSlotStartTime: slots.startTime,
-    })
-    .from(folioRequests)
-    .leftJoin(
-      slots,
-      and(eq(slots.id, folioRequests.toSlotId), eq(slots.organizationId, org)),
-    )
-    .where(
-      and(
-        eq(folioRequests.folioId, folioId),
-        eq(folioRequests.organizationId, org),
-      ),
-    )
-    .orderBy(desc(folioRequests.createdAt))
-
-  // US-A85 — fulfilment is derived on read, so the detail resolves the org's clock and margin the
-  // same way the list does. One derivation, two callers: they cannot disagree.
-  const [fulfillmentOrg] = await db
-    .select({ tz: organizations.timezone, noShowMargin: organizations.noShowMarginMinutes })
-    .from(organizations)
-    .where(eq(organizations.id, org))
-    .limit(1)
-  const fulfillmentTz = fulfillmentOrg?.tz ?? 'America/Mexico_City'
-  const fulfillmentMargin = fulfillmentOrg?.noShowMargin ?? 0
-  const nowEpoch = Math.floor(Date.now() / 1000)
-
-  const lineRows = await db
-    .select({
-      id: folioLines.id,
-      serviceId: folioLines.serviceId,
-      slotId: folioLines.slotId,
-      serviceName: folioLines.serviceName,
-      slotDate: folioLines.slotDate,
-      slotStartTime: folioLines.slotStartTime,
-      quantity: folioLines.quantity,
-      basePrice: folioLines.basePrice,
-      minimumPrice: folioLines.minimumPrice,
-      unitPrice: folioLines.unitPrice,
-      lineTotal: folioLines.lineTotal,
-      lineType: folioLines.lineType,
-      unitTypeId: folioLines.unitTypeId,
-      checkIn: folioLines.checkIn,
-      checkOut: folioLines.checkOut,
-      guests: folioLines.guests,
-      nights: folioLines.nights,
-      redeemedCount: folioLines.redeemedCount,
-      // US-A22 — the line's own life: cancellation (written) + refund debt, and the net money its
-      // allocations say it holds (raw outer-column correlation — the displayMethodSql trick).
-      cancelledAt: folioLines.cancelledAt,
-      cancellationSource: folioLines.cancellationSource,
-      lineRefundStatus: folioLines.refundStatus,
-      lineRefundAmount: folioLines.refundAmount,
-      // US-AG54 (D5) — the line's own hold clock, for the per-line countdown.
-      lineBookingExpiresAt: folioLines.bookingExpiresAt,
-      allocated: sql<number>`coalesce((select sum(a.amount) from folio_payment_allocations a where a.folio_line_id = folio_lines.id), 0)`,
-    })
-    .from(folioLines)
-    .where(and(eq(folioLines.folioId, folioId), eq(folioLines.organizationId, org)))
-    .orderBy(asc(folioLines.createdAt))
-
-  const extraRows = await db
-    .select({
-      id: folioLineExtras.id,
-      folioLineId: folioLineExtras.folioLineId,
-      extraId: folioLineExtras.extraId,
-      name: folioLineExtras.name,
-      price: folioLineExtras.price,
-      quantity: folioLineExtras.quantity,
-    })
-    .from(folioLineExtras)
-    .where(
-      and(
-        eq(folioLineExtras.folioId, folioId),
-        eq(folioLineExtras.organizationId, org),
-      ),
-    )
-
-  const extrasByLine = new Map<string, typeof extraRows>()
-  for (const ex of extraRows) {
-    const list = extrasByLine.get(ex.folioLineId) ?? []
-    list.push(ex)
-    extrasByLine.set(ex.folioLineId, list)
-  }
-
-  // US-LG08 — the per-payment breakdown (deposit vs balance, each with its own method).
-  const payments = await readFolioPayments(db, org, folioId)
-
-  return {
-    id: folio.id,
-    agent: { id: folio.agentId, name: folio.agentName },
-    // US-A68 — the affiliate shift operator who took the sale (null ⇒ sold directly).
-    operator_name: folio.operatorName ?? null,
-    status: folio.status,
-    payment_method: folio.paymentMethod,
-    // US-AG41/US-A67 — payment reference + verification gate for the admin detail + verify actions.
-    payment_reference: folio.paymentReference,
-    payment_verification: folio.paymentVerification,
-    payment_verified_at: tsOrNull(folio.paymentVerifiedAt),
-    customer_name: folio.customerName,
-    customer_email: folio.customerEmail,
-    customer_phone: folio.customerPhone,
-    subtotal: folio.subtotal,
-    discount_total: folio.discountTotal,
-    total: folio.total,
-    amount_paid: folio.amountPaid,
-    pending_balance: folio.total - folio.amountPaid,
-    commission_amount: folio.commissionAmount,
-    booking_expires_at: folio.bookingExpiresAt ?? null, // derived: epoch seconds already
-    reminder_status: folio.reminderStatus,
-    reminder_sent_at: tsOrNull(folio.reminderSentAt),
-    reminder_sent_by: folio.reminderSentBy,
-    cancelled_at: tsOrNull(folio.cancelledAt),
-    cancelled_by: folio.cancelledBy,
-    cancellation_reason: folio.cancellationReason,
-    refund_status: folio.refundStatus,
-    // US-A87 — the credit and its expiry, so the detail can state both.
-    credit_amount: folio.creditAmount,
-    credit_expires_at: tsOrNull(folio.creditExpiresAt),
-    refund_amount: folio.refundAmount,
-    refund_note: folio.refundNote,
-    refunded_at: tsOrNull(folio.refundedAt),
-    refunded_by: folio.refundedBy,
-    // Delivery axis (whatsapp-qr-delivery) — portal_link + sent/viewed stamps for the admin's
-    // oversight badge and Reenviar action.
-    portal_link: portalLink,
-    tickets_sent_at: tsOrNull(folio.ticketsSentAt),
-    tickets_viewed_at: tsOrNull(folio.ticketsViewedAt),
-    created_at: Math.floor(folio.createdAt.getTime() / 1000),
-    payments,
-    // US-A84 rule 7 — the absorbed request history (newest first). Empty for the vast majority of
-    // folios, which is why it costs nothing to always send it.
-    folio_requests: requestRows.map((r) => ({
-      id: r.id,
-      kind: r.kind,
-      status: r.status,
-      reason: r.reason,
-      resolution_note: r.resolutionNote,
-      resolved_by: r.resolvedBy,
-      resolved_at: tsOrNull(r.resolvedAt),
-      created_at: Math.floor(r.createdAt.getTime() / 1000),
-      folio_line_id: r.folioLineId,
-      to_slot_id: r.toSlotId,
-      to_slot_date: r.toSlotDate,
-      to_slot_start_time: r.toSlotStartTime,
-    })),
-    // US-A85 (D7) — the worst of the lines. Computed from the same readings the array carries, so
-    // the summary and the breakdown are one number and its parts, never two opinions.
-    fulfillment: folioFulfillment(
-      lineRows.map((line) =>
-        lineFulfillment(
-          {
-            lineId: line.id,
-            lineType: line.lineType,
-            slotDate: line.slotDate,
-            slotStartTime: line.slotStartTime,
-            checkIn: line.checkIn,
-            lineTotal: line.lineTotal,
-            quantity: line.quantity,
-            redeemedCount: line.redeemedCount,
-          },
-          fulfillmentTz,
-          fulfillmentMargin,
-          nowEpoch,
-        ),
-      ),
-    ),
-    lines: lineRows.map((line) => ({
-      id: line.id,
-      line_type: line.lineType,
-      service_id: line.serviceId,
-      slot_id: line.slotId,
-      service_name: line.serviceName,
-      slot_date: line.slotDate,
-      slot_start_time: line.slotStartTime,
-      unit_type_id: line.unitTypeId,
-      check_in: line.checkIn,
-      check_out: line.checkOut,
-      guests: line.guests,
-      nights: line.nights,
-      quantity: line.quantity,
-      // US-A22 — the line's own money state, DERIVED from its allocations (cancellation, being an
-      // action, is read from its written stamp). Same three-value vocabulary as the folio field
-      // it will eventually replace (D11).
-      money_state: line.cancelledAt
-        ? ('cancelled' as const)
-        : Math.max(0, Number(line.allocated ?? 0)) >= line.lineTotal
-          ? ('paid' as const)
-          : ('booking' as const),
-      allocated: Math.max(0, Number(line.allocated ?? 0)),
-      pending_balance: line.cancelledAt
-        ? 0
-        : Math.max(0, line.lineTotal - Math.max(0, Number(line.allocated ?? 0))),
-      cancelled_at: tsOrNull(line.cancelledAt),
-      cancellation_source: line.cancellationSource,
-      refund_status: line.lineRefundStatus,
-      refund_amount: line.lineRefundAmount,
-      booking_expires_at: tsOrNull(line.lineBookingExpiresAt),
-      // US-A85 — the per-line fulfilment the folio's roll-up is made of (D2). The detail is where
-      // "two of four boarded, and the Thursday tour nobody came to" can actually be read.
-      redeemed_count: line.redeemedCount,
-      fulfillment: lineFulfillment(
-        {
-          lineId: line.id,
-          lineType: line.lineType,
-          slotDate: line.slotDate,
-          slotStartTime: line.slotStartTime,
-          checkIn: line.checkIn,
-          lineTotal: line.lineTotal,
-          quantity: line.quantity,
-          redeemedCount: line.redeemedCount,
-        },
-        fulfillmentTz,
-        fulfillmentMargin,
-        nowEpoch,
-      ),
-      base_price: line.basePrice,
-      minimum_price: line.minimumPrice,
-      unit_price: line.unitPrice,
-      line_total: line.lineTotal,
-      extras: (extrasByLine.get(line.id) ?? []).map((ex) => ({
-        id: ex.id,
-        extra_id: ex.extraId,
-        name: ex.name,
-        price: ex.price,
-        quantity: ex.quantity,
-      })),
-    })),
-  }
-}
+// docs/oversight/folio-surface-parity.spec.md D6 — the folio detail is read and serialized in ONE
+// place, shared with the seller's surface (`utils/folioDetail.ts`). This wrapper exists only so the
+// admin call sites keep reading as they did; it is not a second shape.
+const readFolio = (
+  db: Db,
+  org: string,
+  folioId: string,
+  apiBaseUrl?: string,
+  qrSecret?: string,
+) => readFolioDetail(db, org, folioId, { apiBaseUrl, qrSecret })
 
 // --- Admin surface (US-A21) ---------------------------------------------------
 
@@ -681,7 +368,9 @@ export const getFolioDetail = async (c: FoliosContext) => {
   const id = c.req.param('id')
   const db = getDb(c.env)
 
-  const folio = await readFolio(db, admin.organizationId, id, c.env.API_BASE_URL)
+  // US-A93 — the detail GET echoes the access tickets, so the admin can see what the customer is
+  // holding. The mutation replies below deliberately do not: they answer "what did I just change".
+  const folio = await readFolio(db, admin.organizationId, id, c.env.API_BASE_URL, c.env.QR_SECRET)
   if (!folio) {
     throw new ApiError('NOT_FOUND', 404, 'Folio not found')
   }
