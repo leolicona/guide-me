@@ -257,15 +257,15 @@ export function FolioWorkActions({
         title={pendingIsReschedule ? '¿Aprobar la reagenda?' : '¿Aprobar la cancelación?'}
         description={
           pendingIsReschedule
-            ? 'Se mueve el servicio al horario que pidió el cliente y se libera el anterior. Si el folio está pagado, el boleto anterior deja de funcionar y se envía uno nuevo. Si ya no hay lugar, la solicitud se rechaza sola con el motivo y fechas alternativas.'
-            : 'Esto cancela el folio completo: libera todos los lugares, notifica al cliente por correo y — si el folio tiene pago registrado — genera un PIN de reembolso que el cliente verá en su portal. El reembolso y la comisión del vendedor los decide la política de cancelación de la empresa.'
+            ? 'Se mueve el servicio al horario que pidió el cliente y se libera el anterior. Si la venta está pagada, el boleto anterior deja de funcionar y se envía uno nuevo. Si ya no hay lugar, la solicitud se rechaza sola con el motivo y fechas alternativas.'
+            : 'Esto cancela la venta completa: libera todos los lugares, notifica al cliente por correo y — si la venta tiene pago registrado — genera un PIN de reembolso que el cliente verá en su portal. El reembolso y la comisión del vendedor los decide la política de cancelación de la empresa.'
         }
         confirmLabel={
           approveRequest.isPending
             ? 'Aprobando…'
             : pendingIsReschedule
               ? 'Aprobar reagenda'
-              : 'Aprobar y cancelar folio'
+              : 'Aprobar y cancelar venta'
         }
         confirmColor={pendingIsReschedule ? 'primary' : undefined}
         busy={approveRequest.isPending}
@@ -308,7 +308,7 @@ export function FolioWorkActions({
       >
         <Stack spacing={2} sx={{ px: 2, pb: 2 }}>
           <Typography variant="body2" color="text.secondary">
-            La reserva sigue activa y nada cambia en el folio. Explica el motivo — el cliente lo
+            La reserva sigue activa y nada cambia en la venta. Explica el motivo — el cliente lo
             verá en su portal.
           </Typography>
           <TextField

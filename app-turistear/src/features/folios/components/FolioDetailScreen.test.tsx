@@ -148,7 +148,7 @@ describe('US-A93 — the verbs are what differ', () => {
     renderDetail('seller')
     await screen.findAllByText('Tour Isla Mujeres')
 
-    expect(screen.queryByRole('button', { name: 'Cancelar folio' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Cancelar venta' })).toBeNull()
     expect(screen.queryByRole('button', { name: /Cancelar esta actividad/ })).toBeNull()
   })
 
@@ -157,7 +157,7 @@ describe('US-A93 — the verbs are what differ', () => {
     renderDetail('admin')
     await screen.findAllByText('Tour Isla Mujeres')
 
-    expect(screen.getByRole('button', { name: 'Cancelar folio' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Cancelar venta' })).toBeInTheDocument()
   })
 
   it('D8 — the QR is open for the seller and collapsed for the admin', async () => {

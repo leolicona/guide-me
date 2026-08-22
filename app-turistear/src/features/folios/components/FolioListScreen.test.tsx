@@ -171,7 +171,7 @@ describe('US-A83 — finding one sale', () => {
     renderWithProviders(<FolioListScreen surface="admin" />)
     await screen.findByText(/Tour Isla Mujeres/)
 
-    await user.type(screen.getByRole('textbox', { name: 'Buscar folios' }), 'isla')
+    await user.type(screen.getByRole('textbox', { name: 'Buscar ventas' }), 'isla')
 
     await waitFor(() => expect(screen.queryByText(/Chichén/)).toBeNull())
     expect(screen.getByText(/Tour Isla Mujeres/)).toBeInTheDocument()
@@ -199,9 +199,9 @@ describe('US-A83 — finding one sale', () => {
     )
     const user = userEvent.setup()
     renderWithProviders(<FolioListScreen surface="admin" />)
-    await screen.findByRole('textbox', { name: 'Buscar folios' })
+    await screen.findByRole('textbox', { name: 'Buscar ventas' })
 
-    await user.type(screen.getByRole('textbox', { name: 'Buscar folios' }), 'leo')
+    await user.type(screen.getByRole('textbox', { name: 'Buscar ventas' }), 'leo')
 
     // The window bounds the DEFAULT read; it must not bound what is findable (D4). And the label is
     // what keeps the window honest once it can be crossed (D5) — otherwise the same screen shows
@@ -226,9 +226,9 @@ describe('US-A83 — finding one sale', () => {
     )
     const user = userEvent.setup()
     renderWithProviders(<FolioListScreen surface="admin" />)
-    await screen.findByRole('textbox', { name: 'Buscar folios' })
+    await screen.findByRole('textbox', { name: 'Buscar ventas' })
 
-    await user.type(screen.getByRole('textbox', { name: 'Buscar folios' }), 'leo')
+    await user.type(screen.getByRole('textbox', { name: 'Buscar ventas' }), 'leo')
 
     await waitFor(() => expect(screen.getByText(/50 más recientes/)).toBeInTheDocument(), {
       timeout: 3000,
@@ -249,9 +249,9 @@ describe('US-A83 — finding one sale', () => {
     )
     const user = userEvent.setup()
     renderWithProviders(<FolioListScreen surface="admin" />)
-    await screen.findByRole('textbox', { name: 'Buscar folios' })
+    await screen.findByRole('textbox', { name: 'Buscar ventas' })
 
-    await user.type(screen.getByRole('textbox', { name: 'Buscar folios' }), 'a')
+    await user.type(screen.getByRole('textbox', { name: 'Buscar ventas' }), 'a')
 
     // Below the floor the list is untouched: the first keystroke must not empty the screen.
     await waitFor(() => expect(screen.getByText(/María/)).toBeInTheDocument())
@@ -295,7 +295,7 @@ describe('US-A83 — finding one sale', () => {
     // D13 — the banner's one promise is that its count equals what its pill shows (US-A84 S-4).
     // Intersecting it with a leftover query breaks that silently: "1 Reembolso" leading to zero rows.
     await waitFor(() =>
-      expect(screen.getByRole('textbox', { name: 'Buscar folios' })).toHaveValue(''),
+      expect(screen.getByRole('textbox', { name: 'Buscar ventas' })).toHaveValue(''),
     )
     expect(screen.getByRole('button', { name: 'Reembolso' })).toBeInTheDocument()
   })
@@ -335,7 +335,7 @@ describe('US-A83 — the screen states ONE scope at a time', () => {
     renderWithProviders(<FolioListScreen surface="admin" />)
     await screen.findByText(/Últimos 30 días/)
 
-    await user.type(screen.getByRole('textbox', { name: 'Buscar folios' }), 'leo')
+    await user.type(screen.getByRole('textbox', { name: 'Buscar ventas' }), 'leo')
 
     // The footer used to read `data.window_days` — the BASE read — so it kept claiming
     // "últimos 30 días" directly under a banner saying the opposite. Two statements about scope,
@@ -404,7 +404,7 @@ describe.each(SURFACES)('US-AG58 — $surface: the list behaves the same', ({ su
     renderWithProviders(<FolioListScreen surface={surface} />, { initialEntries: [route] })
     await screen.findByText(/Tour Isla Mujeres/)
 
-    await user.type(screen.getByRole('textbox', { name: 'Buscar folios' }), 'isla')
+    await user.type(screen.getByRole('textbox', { name: 'Buscar ventas' }), 'isla')
     await waitFor(() => expect(screen.queryByText(/Chichén Itzá/)).not.toBeInTheDocument())
     expect(screen.getByText(/Tour Isla Mujeres/)).toBeInTheDocument()
   })

@@ -3,14 +3,15 @@ import { MoneyText, SectionCard } from '../../../components'
 import type { DashboardSales } from '../../../services/dashboardService'
 
 // US-A16 / D10 — the day's money as the LEDGER stamped it (net payments − refunds inside the
-// org-tz day), so this figure can never disagree with Caja. The folio count is a separate fact
-// and labeled as such. Attribution follows who took the money (D14), not who made the sale.
+// org-tz day), so this figure can never disagree with Caja. The COUNT is a separate fact and
+// labeled as such — «ventas», the UI's one word for the object (US-UX07); the money above it is
+// «Cobrado hoy», so the two never collide. Attribution follows who took the money (D14), not who made the sale.
 export function DaySalesCard({ sales }: { sales: DashboardSales | undefined }) {
   return (
     <SectionCard title="Cobrado hoy">
       <MoneyText cents={sales?.collected_cents ?? 0} signed srLabel="Cobrado hoy" />
       <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-        {sales ? `${sales.folios_created} folios creados hoy` : 'Cargando…'}
+        {sales ? `${sales.folios_created} ventas creadas hoy` : 'Cargando…'}
       </Typography>
       {sales !== undefined && sales.per_seller.length > 0 && (
         <Stack spacing={1.5} divider={<Divider flexItem />} sx={{ mt: 2.5 }}>

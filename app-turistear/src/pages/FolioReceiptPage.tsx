@@ -61,7 +61,7 @@ export default function FolioReceiptPage() {
         )}
 
         {isError && (
-          <Alert severity="error">No se pudo cargar este folio. Inténtalo de nuevo.</Alert>
+          <Alert severity="error">No se pudo cargar esta venta. Inténtalo de nuevo.</Alert>
         )}
 
         {folio && (
