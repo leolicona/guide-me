@@ -6,6 +6,47 @@ Tracks confirmed bugs, root causes, and fixes. Each entry is immutable once clos
 
 ---
 
+## BUG-034 — A Cancelled Sale Tells the Seller Nothing About the Money — ⚠️ OPEN
+
+**Found:** 2026-08-22, comparing `/history/:id` against `/folios/:id` while writing
+`docs/oversight/folio-surface-parity.spec.md`.
+
+**Affected:** `api-turistear/src/routes/pos/handler.ts` (`getFolio`, line 2277) and
+`app-turistear/src/pages/FolioHistoryDetailPage.tsx`.
+
+### Symptom
+
+A folio the seller sold, paid in full and later cancelled renders in their detail as `Pagado $3,000`
+and nothing else. What was refunded, what the company retained under the cancellation ladder, and
+what credit the customer was left with (US-A87) are all absent. The admin's detail on the same folio
+states all three.
+
+### Cause
+
+`GET /api/pos/folios/:id` never grew the fields. `GET /api/folios/:id` returns `refund_status`,
+`refund_amount`, `refund_note`, `credit_amount`, `credit_expires_at` and `cancellation_reason`
+(`routes/folios/handler.ts:294-300`); the POS serializer is a separate literal that returns none of
+them, and the frontend `Folio` type mirrors that omission. Line-level refund data is already
+identical on both — only the folio level diverged.
+
+This is the same defect `folio-state-machine.spec.md` named *"the `(reembolsado)` bug"* and fixed on
+the admin surface. It survived on the seller's because the two detail pages are separate code with
+separate payloads, and nothing asserts they agree.
+
+### Impact
+
+The seller is the person standing in front of the customer when a cancellation is disputed, and the
+one screen they can open says the sale was paid and stops. They cannot state the refund, cannot
+state the retention, and cannot see a credit they are expected to honour as a manual discount
+(US-A87 D6/D10). No money is wrong — only what the person answering for it can see.
+
+### Fix
+
+`folio-surface-parity.spec.md` **D6**: one shared `serializeFolioDetail` both handlers call, with a
+parity test asserting the two payloads deep-equal. Ships in PR-1 of that spec's plan (S-1/S-2).
+
+---
+
 ## BUG-033 — A Closed Bottom Sheet Leaves the Wizard Hidden From Screen Readers — ⚠️ OPEN
 
 **Found:** 2026-08-21, writing the US-A91 wizard tests. Every query for the wizard's footer after a
