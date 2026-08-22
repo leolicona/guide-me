@@ -6,7 +6,11 @@
 > being a commission rate) and **supersedes** `docs/affiliates/affiliate-portal.spec.md` **D3** and
 > its *Out of scope* line — *"Affiliate-negotiated net prices (sells at the operator's price;
 > margin = commission)"* — which this feature deliberately reverses.
-> **Amends** US-A50 / US-A56 (the captured unit changes; the allow-list mechanic does not).
+> **Amends** US-A50 / US-A56 (the captured unit changes; the allow-list mechanic does not),
+> **US-AF06** (an affiliate line's floor becomes its net price, which may sit below the public
+> `minimum_price`) and **US-AF04** (full payment at the time of sale stops being the only shape).
+> **Retires the percent/fixed commission rate for affiliates entirely** — migration `0067` drops
+> the columns; agents and admins are untouched (`service-based-commission.spec.md` stands).
 > **Depends on:** `affiliate-setup-commissions.spec.md` (companies, allow-list, invitations,
 > attribution) · `affiliate-operators.spec.md` (the token link + PIN shift) ·
 > `pos/express-sale.spec.md` (the one-sheet sale this feature prices) ·
@@ -83,10 +87,13 @@ Stated so a machine can check it:
 2. **A sale with no affiliate is byte-identical.** Every `POST /api/pos/folios` body valid today
    produces the same folio, the same lines, the same ledger rows. `sale_type` (D7) is optional and
    its absence reproduces today's `down_payment` semantics exactly.
-3. **`affiliate_commissions` rows without `net_price` behave as they do today** — the percent/fixed
-   rate still resolves. There is no flag day; the two pricing modes coexist per row (D1).
-4. **No new table, no new balance, no second ledger.** The feature adds columns to two existing
-   tables and one nullable snapshot column to `folio_lines`.
+3. **Every existing allow-list row survives the rebuild with a price, and the same services stay
+   sellable.** `SELECT count(*) FROM affiliate_commissions` is unchanged across the migration and
+   no row has `net_price IS NULL` — the allow-list mechanic (row exists ⇒ sellable) is untouched;
+   only the row's value changes unit (D1).
+4. **No new table, no new balance, no second ledger.** The feature replaces two columns, adds two,
+   adds two nullable policy columns to `affiliate_companies`, and one nullable snapshot column to
+   `folio_lines`.
 
 ---
 
@@ -94,7 +101,7 @@ Stated so a machine can check it:
 
 | # | Decision | Why |
 |---|---|---|
-| **D1** | The allow-list row gains `net_price`; when it is set, the row is priced **net** and its `commission_type`/`commission_value` are ignored. Rows without it keep today's rate. | Net price and fixed commission are the same algebra (`commission = sale − net`), so this is a change of captured unit, not of model. Per-row coexistence removes the flag day and keeps scope boundary #3 mechanical. |
+| **D1** | The rate model is **retired, not coexisted with**. `affiliate_commissions.commission_type` / `commission_value` are dropped and replaced by `net_price` (`NOT NULL`) + `max_price`. Every affiliate is net-priced; there is no pricing mode to choose at any level. | Net price and fixed commission are the same algebra (`commission = sale − net`), so keeping both would be two code paths for one idea — and a per-row or per-company mode would let one partner's catalogue carry **two economies at once**, which is unexplainable to a shift cashier who sets the price on one service and cannot see the margin on the next. The affected production set is one company that has never sold (see *Known behaviour change*), so retiring now costs a deterministic backfill and avoids a permanent fork. |
 | **D2** | `net_price` **may be below** the service's `minimum_price`. | Volume partners are quoted under the public floor — that is the whole commercial point. The alternative (an exception that lets affiliates sell below the floor) would weaken the floor for everyone; a separate negotiated number weakens nothing. |
 | **D3** | `max_price` caps what an affiliate may charge **on a folio it did not fully collect**. Enforced server-side. | In cases A and C **our** counter collects that price under **our** name. Uncapped, we would take mostly-not-ours money from a tourist who believes we charged it — a reputational and invoicing exposure. Case B (the affiliate collects) is unaffected in practice, but the cap is enforced uniformly because the case is not known at confirm time (a $0 hold may settle either way). |
 | **D4** | The margin is **derived**, never configured: `commission_amount = line_total − (net_price × quantity)`, floored at 0. | One source of truth. A stored margin could disagree with the line it describes — exactly the class of defect `folio-state-machine.spec.md` traced to information lost across two representations. |
@@ -115,22 +122,62 @@ Stated so a machine can check it:
 
 ### Migration `0067_affiliate_net_pricing.sql`
 
+`affiliate_commissions` needs a **table rebuild**, not an `ALTER`: `net_price` must be `NOT NULL`
+and SQLite cannot add a `NOT NULL` column without a constant default (the value depends on
+`services.base_price`). A plain `DEFAULT 0` would be worse than nullable — `0` is a syntactically
+valid price meaning *free*. The rebuild is safe here for a reason worth stating, because
+`0040_alter_folio_lines_for_stays.sql` learned it the hard way: **no table holds an inbound FK to
+`affiliate_commissions`**, so `DROP TABLE` orphans nothing and every statement boundary stays valid
+even on D1's remote `/query` endpoint, which enforces FKs per statement and ignores
+`PRAGMA defer_foreign_keys`.
+
 ```sql
 -- US-A94 — the affiliate agreement stops being a commission rate and becomes a net price plus a
--- ceiling. Additive: the existing commission columns stay and still resolve for any row that has
--- no net_price (D1), so no row changes behaviour on the day this lands.
+-- ceiling. The rate model is RETIRED, not coexisted with (D1): one pricing model, one code path.
+-- Rebuild (not ALTER) because net_price is NOT NULL and its value comes from services.base_price.
+-- Safe as a rebuild: nothing holds an FK to this table (verified), unlike the folio_lines case.
 
-ALTER TABLE affiliate_commissions ADD COLUMN net_price INTEGER;   -- minor units per spot; NULL = rate-priced
-ALTER TABLE affiliate_commissions ADD COLUMN max_price INTEGER;   -- minor units per spot; NULL = no ceiling
-
--- Deterministic backfill (the 0049/0061 pattern). A `fixed` rate IS a net price expressed from the
--- other side, so it converts exactly. A `percent` rate has no fixed net equivalent — it depends on
--- a sale price that does not exist yet — so those rows keep their rate and stay rate-priced (D1).
-UPDATE affiliate_commissions
-   SET net_price = (SELECT s.base_price - affiliate_commissions.commission_value
-                      FROM services s WHERE s.id = affiliate_commissions.service_id),
-       max_price = (SELECT s.base_price FROM services s WHERE s.id = affiliate_commissions.service_id)
- WHERE commission_type = 'fixed';
+CREATE TABLE `affiliate_commissions_new` (
+	`id` text PRIMARY KEY NOT NULL,
+	`organization_id` text NOT NULL,
+	`affiliate_company_id` text NOT NULL,
+	`service_id` text NOT NULL,
+	-- Minor units PER SPOT the affiliate owes us. MAY be below the service's minimum_price (D2):
+	-- a partner sending groups is quoted under the public floor by design.
+	`net_price` integer NOT NULL,
+	-- Minor units PER SPOT ceiling on the sold unit price. NULL = uncapped (D3).
+	`max_price` integer,
+	`created_at` integer DEFAULT (unixepoch()) NOT NULL,
+	`updated_at` integer DEFAULT (unixepoch()) NOT NULL,
+	FOREIGN KEY (`organization_id`) REFERENCES `organizations`(`id`) ON UPDATE no action ON DELETE no action,
+	FOREIGN KEY (`affiliate_company_id`) REFERENCES `affiliate_companies`(`id`) ON UPDATE no action ON DELETE no action,
+	FOREIGN KEY (`service_id`) REFERENCES `services`(`id`) ON UPDATE no action ON DELETE no action
+);
+--> statement-breakpoint
+-- Deterministic backfill (the 0049/0061 pattern), ids preserved so the allow-list is bit-identical
+-- in membership. A `fixed` rate IS a net price seen from the other side, so it converts exactly.
+-- A `percent` rate has no fixed net equivalent — it depends on a sale price that does not exist
+-- yet — so it is frozen ONCE against base_price. That is a real (small) change in what such a
+-- partner owes at any other sale price; see Known behaviour change for why it costs nothing here.
+INSERT INTO `affiliate_commissions_new`
+  (id, organization_id, affiliate_company_id, service_id, net_price, max_price, created_at, updated_at)
+SELECT ac.id, ac.organization_id, ac.affiliate_company_id, ac.service_id,
+       CASE ac.commission_type
+         WHEN 'fixed'   THEN s.base_price - ac.commission_value
+         WHEN 'percent' THEN s.base_price - CAST(ROUND(s.base_price * ac.commission_value / 10000.0) AS INTEGER)
+       END,
+       s.base_price,          -- ceiling seeds at the public price; the admin raises it per partner
+       ac.created_at, ac.updated_at
+  FROM `affiliate_commissions` ac
+  JOIN `services` s ON s.id = ac.service_id;
+--> statement-breakpoint
+DROP TABLE `affiliate_commissions`;
+--> statement-breakpoint
+ALTER TABLE `affiliate_commissions_new` RENAME TO `affiliate_commissions`;
+--> statement-breakpoint
+CREATE UNIQUE INDEX `affiliate_commissions_company_service_unique` ON `affiliate_commissions` (`affiliate_company_id`, `service_id`);
+--> statement-breakpoint
+CREATE INDEX `affiliate_commissions_org_company_idx` ON `affiliate_commissions` (`organization_id`, `affiliate_company_id`);
 
 --> statement-breakpoint
 -- US-A94 (D6) — per-affiliate booking policy. NULL inherits the organization's value, so an
@@ -139,17 +186,21 @@ ALTER TABLE affiliate_companies ADD COLUMN booking_min_down_payment_pct INTEGER;
 ALTER TABLE affiliate_companies ADD COLUMN booking_grace_offset_minutes INTEGER;
 
 --> statement-breakpoint
--- D13 — the net price this line was sold under. NULL for every non-affiliate and rate-priced line,
--- which is every line that exists before this migration.
+-- D13 — the net price this line was sold under. NULL for every non-affiliate line, which is every
+-- line that exists before this migration.
 ALTER TABLE folio_lines ADD COLUMN affiliate_net_price INTEGER;
 ```
+
+**Post-migration invariant**, asserted in the migration test: `affiliate_commissions` has the same
+row count and the same `(affiliate_company_id, service_id)` set as before, every `net_price > 0`,
+and no `commission_type` / `commission_value` column remains.
 
 ### Drizzle columns
 
 ```ts
-// affiliateCommissions
-netPrice: integer('net_price'),   // minor units PER SPOT the affiliate owes us. NULL ⇒ rate-priced (D1)
-maxPrice: integer('max_price'),   // minor units PER SPOT ceiling on the sold unit price. NULL ⇒ uncapped
+// affiliateCommissions — commissionType / commissionValue are REMOVED (D1)
+netPrice: integer('net_price').notNull(), // minor units PER SPOT the affiliate owes us (D2)
+maxPrice: integer('max_price'),           // minor units PER SPOT ceiling. NULL ⇒ uncapped (D3)
 
 // affiliateCompanies
 bookingMinDownPaymentPct: integer('booking_min_down_payment_pct'), // NULL ⇒ inherit org (D6)
@@ -168,17 +219,19 @@ this codebase behaves.
 
 ## Business rules (enforced server-side)
 
-1. A `affiliate_commissions` row with `net_price` set is **net-priced**; its `commission_type` /
-   `commission_value` are ignored for pricing. A row without it resolves the rate exactly as today.
+1. Every allow-list row is **net-priced**. The row's existence still **is** the allow-list
+   (US-A50/US-A56, unchanged); its value is the net price. There is no rate and no fallback.
 2. `net_price > 0`. It **may** be below the service's `minimum_price` (D2) and is **not** bound by
    the public discount floor in either direction.
 3. When `max_price` is set, `max_price >= net_price`. Rejected at configuration time.
-4. On a net-priced line, `unit_price` must satisfy `net_price <= unit_price <= max_price`
+4. On an affiliate line, `unit_price` must satisfy `net_price <= unit_price <= max_price`
    (the upper bound only when `max_price` is set). The public `minimum_price` floor **does not
-   apply** to a net-priced line — its floor is the net price.
-5. The line's margin is `max(0, line_total − net_price × quantity)` (D4). The frontend mirrors this
-   for live feedback; the server value is the one written.
-6. On a net-priced line the `commission` ledger row is written with
+   apply** to an affiliate line — its floor is the net price. **This amends US-AF06**, whose
+   "never below the admin-defined minimum price" describes the agent rule only.
+5. The line's margin is `max(0, line_total − net_price × quantity)` (D4). Rule 12 makes the
+   negative case unreachable at confirm; the floor is defence against a later line-total edit. The
+   frontend mirrors this for live feedback; the server value is the one written.
+6. On an affiliate line the `commission` ledger row is written with
    `collected_by = folios.agent_id` — the affiliate manager — whatever `folio_payments.collected_by`
    the money row carries (D5).
 7. `sale_type: 'booking'` permits `down_payment = 0`. `sale_type: 'paid'` requires
@@ -189,12 +242,12 @@ this codebase behaves.
    The grace offset resolves the same way (D6).
 9. A `$0` hold **decrements inventory identically to any other sale** — the atomic conditional
    decrement is unchanged. It is a held seat, not a lesser one.
-10. A net-priced line's `affiliate_net_price` is snapshotted at confirm. Later agreement edits never
+10. An affiliate line's `affiliate_net_price` is snapshotted at confirm. Later agreement edits never
     rewrite a sold line (D13).
 11. Settling a folio at the counter (US-A96) writes the money row with `collected_by` = the counter
     user and leaves the already-accrued margin untouched (rules 5–6 ran at confirm).
-12. A service whose allow-list row is net-priced but whose `net_price` exceeds the sold
-    `unit_price` is rejected at confirm — the affiliate may not sell below what it owes.
+12. A line whose `net_price` exceeds its sold `unit_price` is rejected at confirm — the affiliate
+    may never sell below what it owes.
 
 ---
 
@@ -220,14 +273,14 @@ desired set — a service absent from it is disabled.
 
 ```jsonc
 [
-  { "service_id": "svc_1", "net_price": 11000, "max_price": 18000 },   // net-priced (D1)
-  { "service_id": "svc_2", "commission_type": "percent", "commission_value": 1500 } // rate-priced
+  { "service_id": "svc_1", "net_price": 11000, "max_price": 18000 },
+  { "service_id": "svc_2", "net_price": 9000 }                    // max_price optional = uncapped
 ]
 ```
 
-Server-derived and refused from the body: `organization_id`, `affiliate_company_id`, `id`,
-timestamps. Exactly one of `net_price` or `commission_type`+`commission_value` must be present per
-entry.
+`net_price` is **required** on every entry (D1); `commission_type` / `commission_value` are no
+longer accepted and are rejected as unknown keys. Server-derived and refused from the body:
+`organization_id`, `affiliate_company_id`, `id`, timestamps.
 
 ### `PUT /api/affiliates/:id` *(amended)*
 
@@ -252,7 +305,7 @@ show the seller their floor, their ceiling and their live margin (D-visibility, 
 
 | Code | HTTP | When |
 |---|---|---|
-| `VALIDATION_ERROR` | 400 | `net_price <= 0`; `max_price < net_price`; both pricing modes on one entry; neither on one entry; `down_payment: 0` without `sale_type: 'booking'`; `down_payment` present with `sale_type: 'paid'` |
+| `VALIDATION_ERROR` | 400 | `net_price` missing or `<= 0`; `max_price < net_price`; a legacy `commission_type`/`commission_value` key; `down_payment: 0` without `sale_type: 'booking'`; `down_payment` present with `sale_type: 'paid'` |
 | `PRICE_BELOW_NET` | 400 | A net-priced line's `unit_price < net_price` (rule 12) |
 | `PRICE_ABOVE_MAX` | 400 | A net-priced line's `unit_price > max_price` (rule 4) |
 | `SERVICE_NOT_ALLOWED` | 403 | Existing — a non-allow-list service for an affiliate caller |
@@ -267,7 +320,7 @@ Design system: `.design/design-system/DESIGN_TOKENS.md`. No new token, no new pr
 
 | Screen | Change |
 |---|---|
-| `AffiliateDetailPage` → `CommissionsSheet` | The per-service editor swaps the *Percentage / Fixed* segmented toggle for **Precio neto** + **Precio máximo** inputs on a net-priced row. Reuses `MoneyText` and the existing `CommissionCatalogEditor` row layout. |
+| `AffiliateDetailPage` → `CommissionsSheet` | The per-service editor **drops** the *Percentage / Fixed* segmented toggle — there is no mode to pick — and an enabled row reveals **Precio neto** (required) + **Precio máximo** (optional) instead. Reuses `MoneyText` and the existing `CommissionCatalogEditor` row layout. |
 | `AffiliateWizard` step 2 | Same editor component — the wizard's step 2 already delegates to `CommissionCatalogEditor`, so it inherits the change. |
 | `CompanyInfoSheet` | Gains the two policy overrides (D6) with an explicit *«Usar el valor de la organización»* state for `NULL`. `FormSheet` host, unchanged. |
 | Express Sale sheet (affiliate caller) | Unit price becomes editable within `[net_price, max_price]`, with the seller's **live margin** shown beside it (`MoneyText`, semantic neutral — never teal, per the money rule). Shows both numbers: the affiliate negotiated them, so there is nothing to withhold. |
@@ -275,8 +328,8 @@ Design system: `.design/design-system/DESIGN_TOKENS.md`. No new token, no new pr
 | New: admin capture (US-A95) | The existing POS with an affiliate selector in the checkout. No new route — `/pos` with an admin-only `SectionCard` naming the company the sale is attributed to. |
 | Counter settle (US-A96) | Unchanged UI. The existing folio search + *Liquidar* already covers it; the margin credit is server-side. |
 
-`commission.ts` in `features/affiliates/` gains net-price conversion beside the existing
-display↔storage helpers; `draftToEntries` emits whichever pricing mode a row carries.
+`commission.ts` in `features/affiliates/` loses its basis-point/percent conversion and keeps only
+major↔minor money; `CommissionDraft.commission_type` and its toggle state are deleted with it.
 
 ---
 
@@ -294,10 +347,11 @@ Given `net_price = 11000`
 When the admin sets `max_price = 9000`
 Then `400 VALIDATION_ERROR`, and no row is written.
 
-**S-3 — Both pricing modes on one entry is rejected**
-Given an entry carrying `net_price` **and** `commission_type`
+**S-3 — An entry with no net price is rejected**
+Given an entry carrying only `service_id` (or a legacy `commission_type`/`commission_value`)
 When it is submitted
-Then `400 VALIDATION_ERROR` — the row's mode must be unambiguous (D1).
+Then `400 VALIDATION_ERROR` — every allow-list row must carry a price, and the rate keys no longer
+exist (D1). No row is written, so the affiliate's catalogue is not silently emptied.
 
 **S-4 — Clearing an override restores inheritance**
 Given a company with `booking_min_down_payment_pct = 0` and an org value of `30`
@@ -380,10 +434,13 @@ Then `403 FORBIDDEN`.
 
 ### Regression — the feature is invisible without it
 
-**S-18 — A rate-priced row is unchanged**
-Given an allow-list row with `commission_type='percent'`, `commission_value=1500`, no `net_price`
-When an affiliate sells it
-Then the commission is `round(line_total × 1500 / 10000)`, byte-identical to today (D1).
+**S-18 — The migration preserves the allow-list exactly**
+Given allow-list rows across two organizations, `fixed` and `percent` alike
+When `0067` runs
+Then the row count and the `(affiliate_company_id, service_id)` set are unchanged,
+every row has `net_price > 0`,
+a `fixed` row's net price is exactly `base_price − commission_value`,
+and each affiliate's POS still lists precisely the services it listed before (scope boundary #3).
 
 **S-19 — A non-affiliate sale is unchanged**
 When an agent confirms any sale valid today
@@ -410,8 +467,10 @@ Then `404`.
 
 ### Phase 1 — the agreement (migration `0067`)
 
-- [ ] Migration `0067_affiliate_net_pricing.sql` + Drizzle columns
-- [ ] `PUT /api/affiliates/:id/commissions` accepts both pricing modes; `PUT /api/affiliates/:id` accepts the policy overrides
+- [ ] Migration `0067_affiliate_net_pricing.sql` (rebuild) + Drizzle columns; rate columns gone
+- [ ] Post-migration invariant asserted (row count, id set, `net_price > 0`)
+- [ ] `PUT /api/affiliates/:id/commissions` requires `net_price`; `PUT /api/affiliates/:id` accepts the policy overrides
+- [ ] `commission.ts` percent/basis-point helpers deleted; `pnpm build:app` clean
 - [ ] S-1 … S-4, S-20, S-21 in `test/affiliates/affiliate-net-pricing.test.ts`
 - [ ] `CommissionsSheet` / `CommissionCatalogEditor` / `CompanyInfoSheet` updated; verified with `pnpm build:app`
 - [ ] `SPEC.md`: US-A94 + Features-by-Phase line + glossary (*net price*, *price ceiling*)
@@ -445,21 +504,26 @@ Then `404`.
 | What | Why it can wait |
 |---|---|
 | **Short presentable code for the counter** (D10) | `folioSearch` already finds a folio by phone digits, which covers the common case. The code is only needed when a party registered under one phone arrives split up — and it should be solved once, together with the already-deferred QR short-link, rather than as a second short-code scheme. |
-| **Renaming `affiliate_commissions`** (D14) | The name is wrong the day `net_price` lands, but renaming touches every reader for no behavioural gain. Recorded in `TECH_DEBT.md`; the column comments carry the truth in the meantime. |
+| **Renaming `affiliate_commissions`** (D14) | With the rate columns gone the name is now plainly wrong — the table holds prices, not commissions. Renaming still touches every reader for no behavioural gain, and the rebuild already lands enough risk for one PR. Recorded in `TECH_DEBT.md`; the column comments carry the truth in the meantime. |
 | **Per-affiliate seat allotment** | Rejected for now, not forgotten: a $0 hold could in principle block a departure. The per-affiliate grace override (D6) already bounds the exposure in time, and no partner has abused it. If one does, the allotment is additive. |
 | **WhatsApp Cloud API for capture** | Considered and declined: a conversational flow cannot show live per-slot availability or take the atomic decrement, both of which the token link already does. Cloud API for *delivery* is a real improvement and already has its own spec (`docs/whatsapp-qr-delivery/`). |
-| **Converting `percent` rows to net prices** | No deterministic conversion exists (the migration comment says so). Those rows keep working under D1; the admin recaptures them when the partner is renegotiated. |
 
 ---
 
 ## Known behaviour change
 
-- **Existing affiliate `fixed` rows are re-expressed as net prices** by the backfill:
-  `net_price = base_price − commission_value`, `max_price = base_price`. The money owed is
-  identical — the same number seen from the other side — but the admin screen will show *Precio
-  neto $110* where it previously showed *Comisión $20*. **In this deployment the affected set is one
-  company registered and never sold against**, so no production figure moves.
-- **`percent` affiliate rows are untouched** and keep computing exactly as today.
+- **The commission model is gone for affiliates.** Every allow-list row is re-expressed as a net
+  price and the rate columns are dropped. The admin screen shows *Precio neto $110* where it showed
+  *Comisión $20*, and the *Percentage / Fixed* toggle disappears.
+- **A `fixed` row converts exactly** (`base_price − commission_value`): the money owed is the same
+  number seen from the other side.
+- **A `percent` row is frozen once against `base_price`.** That is a genuine change: a 15% partner
+  used to owe less on a discounted sale and more on a full-price one; now it owes a fixed net price
+  at any sale price. **In this deployment the affected set is one company registered and never sold
+  against**, so no production figure moves — this is stated as a rule, not waived, because the
+  next installation may not be so lucky.
+- **`max_price` seeds at each service's `base_price`**, so on day one no affiliate may charge above
+  the public price. The admin raises it per partner where the commercial deal allows.
 - **Nothing changes for agents, admins, or non-affiliate sales.** The `booking_min_down_payment_pct`
   an organization has set today keeps applying to everyone; only a company with an explicit override
   departs from it.
@@ -475,4 +539,4 @@ Then `404`.
 |---|---|
 | Should `max_price` also bind case B, where the affiliate collects everything itself and our name never appears? | A per-company `enforce_max_on_self_collected` flag. Enforced uniformly for now (D3) because the collection side is unknown at confirm time — a `$0` hold may settle either way. |
 | When the affiliate's balance goes negative (case A), is the margin paid out per corte or per sale? | The running balance already nets it and `payouts` already pays it; the open part is only *cadence*, which is a Settings value, not a schema decision. |
-| Does a net-priced line's cancellation retain differently from a rate-priced one? | US-A72 already reserved per-affiliate retention in `cancellation-policy-engine.spec.md`. Until it is built, a net-priced line follows the org ladder like any other. |
+| On cancelling an affiliate line, does the company keep its margin or does it reverse? | The existing clawback/absorb rule applies unchanged — a reversal row nets the margin to zero, an absorbed cancellation keeps it. US-A72 already reserved *per-affiliate retention* in `cancellation-policy-engine.spec.md`; until it is built, an affiliate line follows the org ladder like any other. |
