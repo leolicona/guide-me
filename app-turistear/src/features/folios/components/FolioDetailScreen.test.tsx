@@ -200,3 +200,31 @@ describe('US-A93 — the heading outline is navigable', () => {
     expect(texts).not.toContain('Total')
   })
 })
+
+describe('Design review, Should Fix 5 — the phone number is a real target', () => {
+  it('the tel: link is at least 48px tall', async () => {
+    withDetail()
+    renderDetail('seller')
+    const link = await screen.findByRole('link', { name: '9981234567' })
+
+    // jsdom has no layout, so the box cannot be measured here — the STYLE is what the review
+    // found wrong (103×20 measured in a real browser) and what a regression would revert.
+    expect(link).toHaveStyle({ minHeight: '48px' })
+    expect(link).toHaveAttribute('href', 'tel:9981234567')
+  })
+})
+
+describe('Could improve 8 — no ticket, no section', () => {
+  it('a paid folio whose lines carry no token renders no «Boletos de acceso»', async () => {
+    const noToken = aDetailFolio()
+    ;(noToken.lines as Record<string, unknown>[])[0].qr_token = null
+    ;(noToken.lines as Record<string, unknown>[])[0].qr = null
+    withDetail(noToken)
+    renderDetail('seller')
+    await screen.findAllByText('Tour Isla Mujeres')
+
+    // It used to render an expanded card whose whole content was «No hay boleto disponible para
+    // esta línea» — the first thing the seller saw under the money.
+    expect(screen.queryByText('Boletos de acceso')).toBeNull()
+  })
+})
