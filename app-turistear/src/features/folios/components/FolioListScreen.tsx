@@ -260,7 +260,7 @@ export function FolioListScreen({ surface }: FolioListScreenProps) {
           </Box>
         )}
         {isError && (
-          <Alert severity="error">No se pudieron cargar los folios. Inténtalo de nuevo.</Alert>
+          <Alert severity="error">No se pudieron cargar las ventas. Inténtalo de nuevo.</Alert>
         )}
 
         {/* D4 — the fallback is in flight: the local pass found nothing and the server is being
@@ -288,7 +288,7 @@ export function FolioListScreen({ surface }: FolioListScreenProps) {
             <Typography color="text.secondary">
               {activeFilterLabels.length > 0
                 ? `Sin resultados para ${activeFilterLabels.join(' · ')}.`
-                : 'No hay folios para mostrar.'}
+                : 'No hay ventas para mostrar.'}
             </Typography>
             {activeFilterLabels.length > 0 && (
               <Typography

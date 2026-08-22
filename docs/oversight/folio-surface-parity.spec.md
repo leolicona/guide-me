@@ -85,7 +85,7 @@ does not — so the admin taking the *"my QR doesn't scan"* call cannot see what
 | **D6** | **One folio detail payload.** `GET /api/pos/folios/:id` returns the same shape as `GET /api/folios/:id`, built by **one shared serializer** both handlers call. `commission_amount` included. | Parity by convention drifts — that is the whole history in this file. Parity by shared function cannot. Commission is included because it is the seller's own earning, already visible aggregated in `/balance`; withholding the per-sale figure would be the single exception everyone has to remember, and exceptions are what this spec exists to delete. |
 | **D7** | **Detail anatomy is identical; only the verbs differ.** H1 = the customer's name on both; `FolioWorkActions` gains `surface` (it hardcodes `"admin"` at line 220) and renders only rungs the surface may press — for a seller, delivery. The hand-rolled *Entregar boletos* `SectionCard` is deleted. | Two anatomies for *"what does this folio need from me"* is two things to keep in step, and the seller's copy was already the one that fell behind. `H1 = "Folio"` names the class, not the instance; the admin's header answers *whose sale is this*, which is the question both audiences open the screen with. |
 | **D8** | **The access QR is information, not capability: the admin gets the same section, collapsed by default.** | *"My QR doesn't work"* reaches the admin, and today they cannot see what the customer is holding. The admin payload already carries the lines; collapsing it keeps the admin's daily reading — money and pending work — undisturbed. |
-| **D9** | **The UI says «Venta» everywhere** — nav, both titles, both back buttons, both empty states. **«Folio» stays** the domain term, the printed ID and the glossary entry. Routes (`/folios`, `/history`) are unchanged. | *Ventas* is already the nav label for both roles and the title of both lists; the two dissenting strings are back buttons. A URL is not copy, and renaming routes would break links already in the wild (US-A84 D17 is still redirecting the last set). |
+| **D9** | **The UI says «Venta» everywhere** — nav, both titles, both back buttons, both empty states, **and the cancel verb** (`Cancelar venta`, amending US-UX05). **«Folio» stays** the domain term, the printed reference the search field matches, and the glossary entry. Routes (`/folios`, `/history`) are unchanged. One named exception: the *Reportes* count column (see *Open*). | *Ventas* is already the nav label for both roles and the title of both lists; the two dissenting strings are back buttons. A URL is not copy, and renaming routes would break links already in the wild (US-A84 D17 is still redirecting the last set). |
 | **D10** | **Tests are parameterized by surface** (`describe.each(['admin','seller'])`) over what must be identical; what differs by capability gets its own assertions. | The invariant belongs in the file that would break it. This is the mechanism that makes the next divergence fail CI instead of surviving three releases. |
 | **D11** | **`?date=` on the seller endpoint is replaced by `from`/`to`** — the admin endpoint's own parameter names, through the same `dateRangeFilter` helper — with no deprecation window. *(The URL the user sees keeps its Spanish `?desde=&hasta=`; that is the app's address bar, not the API.)* | It has **no call sites** — `MyFolioFilters.date` is dead code (`services/posService.ts:189`). Keeping a parameter alive out of habit is how a second date semantics survives; this one also matches UTC days, the defect US-A83 D9 named. |
 | **D12** | **The seller's list query and the delivery-badge count share one cache key.** | `usePendingDeliveryCount` keys on `{status:'paid'}` while the list keys on `{}`; once the list reads unfiltered, they are the same read and the badge stops firing a second request. Consistency comes free with correctness here. |
@@ -239,8 +239,9 @@ Then `404`, and seller B's sales never appear in A's list.
       `PosCancellationQuote` = `CancellationQuote` (the D6 cleanup PR-1 deferred)
 - [x] S-10 covered (`FolioDetailScreen.test.tsx`, `FolioWorkActions.test.tsx` by surface)
 
-**PR-4 — the vocabulary (US-UX07)**
-- [ ] S-11; glossary updated
+**PR-4 — the vocabulary (US-UX07)** ✅
+- [x] S-11; glossary updated; US-UX05's verb amended in place
+- [x] `SPEC.md` Features-by-Phase box ticked
 
 **All PRs:** `pnpm --filter api-turistear test` green · scope-boundary files unedited ·
 frontend PRs additionally `tsc -b`, `pnpm lint:app`, `pnpm build:app`.
@@ -267,6 +268,11 @@ frontend PRs additionally `tsc -b`, `pnpm lint:app`, `pnpm build:app`.
   that would answer it: `SELECT agent_id, COUNT(*) FROM folios GROUP BY 1 ORDER BY 2 DESC LIMIT 5`
   against the live org. If the top seller is near it, D4's local-search premise expires and the
   fallback the admin already has becomes the answer.
+- **Reportes still says «Folios», and deliberately.** There, «Ventas» already names the MONEY
+  (`sales_total`) while «Folios» names the count (`folios_sold`) — as a column, a sort key and an
+  inline metric. Renaming the count would put two «Ventas» in one five-column table, which is worse
+  than the inconsistency. Fixing it properly means renaming the money to «Importe» across US-A17/A18,
+  which is a copy decision about an accounting report rather than about this feature's screens.
 - **Does the affiliate manager read this list as a seller or as an admin?** Today they get the
   seller's surface with an operator byline. If they turn out to reconcile rather than sell, the
   operator facet (D14) is not an enhancement but a missing half.

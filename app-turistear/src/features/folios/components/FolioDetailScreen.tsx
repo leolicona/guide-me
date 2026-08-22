@@ -246,7 +246,9 @@ export function FolioDetailScreen({ surface }: FolioDetailScreenProps) {
           startIcon={<ArrowBackRounded />}
           sx={{ mb: 2 }}
         >
-          {isAdmin ? 'Folios' : 'Historial'}
+          {/* US-UX07 — one word. The two back buttons used to say «Folios» and «Historial», and
+              the screens they return to are both titled «Ventas». */}
+          Ventas
         </Button>
 
         {isLoading && (
@@ -254,7 +256,7 @@ export function FolioDetailScreen({ surface }: FolioDetailScreenProps) {
             <CircularProgress />
           </Box>
         )}
-        {isError && <Alert severity="error">No se pudo cargar este folio. Inténtalo de nuevo.</Alert>}
+        {isError && <Alert severity="error">No se pudo cargar esta venta. Inténtalo de nuevo.</Alert>}
 
         {folio && (
           <Stack spacing={3}>
@@ -458,7 +460,7 @@ export function FolioDetailScreen({ surface }: FolioDetailScreenProps) {
                         ))}
                         {/* US-A22 — cancel THIS activity alone. Only where the gesture is honest:
                             an active paid folio, a line still ahead of its departure, and never
-                            the last live line — cancelling everything is `Cancelar folio`, whose
+                            the last live line — cancelling everything is `Cancelar venta`, whose
                             sheet quotes the whole. Apartados keep their own verbs (F3). */}
                         {canCancelLine(line) && (
                           <Button
@@ -552,7 +554,7 @@ export function FolioDetailScreen({ surface }: FolioDetailScreenProps) {
             )}
 
             {cancel.isError && (
-              <Alert severity="error">No se pudo cancelar este folio. Inténtalo de nuevo.</Alert>
+              <Alert severity="error">No se pudo cancelar esta venta. Inténtalo de nuevo.</Alert>
             )}
 
             {/* One action block, not floating verbs (design review, Should Fix 2): the booking
@@ -573,7 +575,7 @@ export function FolioDetailScreen({ surface }: FolioDetailScreenProps) {
                     size="large"
                     onClick={() => setConfirmOpen(true)}
                   >
-                    Cancelar folio
+                    Cancelar venta
                   </Button>
                 )}
               </Stack>
@@ -592,8 +594,8 @@ export function FolioDetailScreen({ surface }: FolioDetailScreenProps) {
         <ConfirmSheet
           open={confirmOpen}
           onClose={closeDialog}
-          title="¿Cancelar este folio?"
-          description="Esto libera todos los lugares de cada servicio en el folio y no se puede deshacer. Los boletos de acceso del cliente dejarán de ser válidos."
+          title="¿Cancelar esta venta?"
+          description="Esto libera todos los lugares de cada servicio en la venta y no se puede deshacer. Los boletos de acceso del cliente dejarán de ser válidos."
           detail={
             <>
               {/* US-A69 — the money, before committing. Computed server-side by the same function
@@ -618,10 +620,10 @@ export function FolioDetailScreen({ surface }: FolioDetailScreenProps) {
               />
             </>
           }
-          confirmLabel="Cancelar folio"
+          confirmLabel="Cancelar venta"
           onConfirm={handleCancel}
           busy={cancel.isPending}
-          cancelLabel="Conservar folio"
+          cancelLabel="Conservar venta"
         />
 
         {/* US-A22 — the LINE cancel confirmation, same canonical overlay. The money it states is
@@ -631,7 +633,7 @@ export function FolioDetailScreen({ surface }: FolioDetailScreenProps) {
           open={!!lineTarget}
           onClose={closeLineDialog}
           title={`¿Cancelar ${lineTarget?.service_name ?? 'esta actividad'}?`}
-          description="Esto libera los lugares de esta actividad y no se puede deshacer. El resto del folio sigue activo y sus boletos siguen siendo válidos."
+          description="Esto libera los lugares de esta actividad y no se puede deshacer. El resto de la venta sigue activo y sus boletos siguen siendo válidos."
           detail={
             <>
               {lineQuote && lineQuote.line_refund != null && (
