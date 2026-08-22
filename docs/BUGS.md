@@ -6,6 +6,60 @@ Tracks confirmed bugs, root causes, and fixes. Each entry is immutable once clos
 
 ---
 
+## BUG-035 — The Seller's Card Paints a Waiting Customer Green — ✅ FIXED
+
+**Found:** 2026-08-22, in the `/design-review` pass over the unified folio surfaces
+(`.design/folio-surface-parity/DESIGN_REVIEW.md`, Must Fix 1). Found by LOOKING at the running app
+with the seeded database, not by reasoning about the code.
+
+**Affected:** `app-turistear/src/features/folios/folioCardState.ts` (`folioAttention`) — the seller
+surface of the shared `FolioCard`.
+
+### Symptom
+
+A folio whose customer has an OPEN petition — they asked to cancel or to reschedule from their
+portal — renders on the seller's list with a **green** rail (`rgb(21,128,61)` = "nothing needs a
+human"), the neutral verb *Enviar mensaje*, and **no text anywhere naming the request**. The admin's
+card for the same folio says *Revisar solicitud* on an amber rail.
+
+Measured on the seeded board: *Lucía Ortega* and *Carlos Peña*, both with a live petition.
+
+### Cause
+
+`folioAttention` derives the rail from `folioAction`, and `folioAction` is **surface-filtered**: the
+three admin verbs are skipped for a seller, so a folio with `cancellation_request: 'pending'` falls
+through to `'message'` → `rail: 'success'`.
+
+Hiding the admin **verb** therefore also downgraded the **state**. Line-autonomy D14 tied the two
+together on purpose — *"derived FROM `folioAction`'s pending-work ladder, so the rail's colour and
+the button's verb can never disagree"* — which is right on one surface and wrong across two.
+
+### Impact
+
+US-AG50 promised the seller exactly this, in these words: *"I want my list to show the state my own
+sale is actually in — … that the customer asked to cancel — because today those states live only on
+admin screens I cannot open, **and my card shows a sale that looks fine**."* It looks fine. The
+seller is the person the customer calls to ask what happened to their request.
+
+The other two admin-only states do NOT have this problem, because their words carry them: an
+unverified transfer reads *«$1,800.00 por verificar»* and an owed refund reads *«Reembolsar
+$1,500.00»*. Only the petition was mute.
+
+### Fix — 2026-08-22
+
+`folio-surface-parity.spec.md` **D17**. `folioAttention` no longer takes a surface at all: it asks
+the FULL ladder, because *"does this folio need a human?"* is a fact about the folio. The verb stays
+capability-filtered, and the card gained an icon-paired line — *«El cliente pidió un cambio»*,
+kind-agnostic because the list row carries no `kind` — rendered only where the button is not already
+naming the work, so the admin never reads the same fact twice.
+
+**Why the unit tests missed it:** `folioCardState.test.ts`'s D14 block called `folioAttention`
+without a surface, which is the admin path. The seller path had no unit coverage and the defect
+lived exactly there. The regression tests now assert the *invariance* — the same folio yields the
+same rail for both audiences — rather than one audience's value.
+
+---
+
 ## BUG-034 — A Cancelled Sale Tells the Seller Nothing About the Money — ✅ FIXED
 
 **Found:** 2026-08-22, comparing `/history/:id` against `/folios/:id` while writing

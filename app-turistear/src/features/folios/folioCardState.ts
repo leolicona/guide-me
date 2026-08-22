@@ -193,24 +193,36 @@ export type AttentionLevel = 'ok' | 'work' | 'urgent'
 /**
  * The rail's meaning changes with line autonomy (D14): a mixed folio has no single honest money
  * colour, but it has a single honest answer to "does this need me?" — which is the question the
- * seller is actually asking at the list. Derived FROM `folioAction`'s pending-work ladder, so the
- * rail's colour and the button's verb can never disagree (the US-A84 property, one level up).
+ * seller is actually asking at the list.
  *
  *   urgent (red)   — money owed back, an overdue hold, or a hold expiring now
  *   work   (amber) — any pending job the ladder would surface (verify, request, deliver, remind)
  *   ok     (green) — nothing needs a human
  *
- * Always icon-paired at the render (DESIGN_TOKENS §3): the rail colour anchors to the marks and
- * chips that carry the same fact in words.
+ * BUG-035 / folio-surface-parity D17 — computed SURFACE-BLIND, and that is the whole point. It used
+ * to derive from `folioAction(folio, opts)`, which is capability-FILTERED, so hiding an admin verb
+ * also downgraded the state: a folio whose customer had asked to cancel rendered GREEN on the
+ * seller's list — "nothing needs a human" — about a customer waiting for an answer.
+ *
+ * The two questions are different and only one of them is about the reader:
+ *   the rail   — does this folio need a human?   (a fact about the FOLIO)
+ *   the button — may I be that human?            (a fact about the AUDIENCE)
+ *
+ * So D14's "colour and verb can never disagree" is amended: it holds within a surface, and cannot
+ * hold across two. A seller now legitimately sees an amber rail above a neutral verb — with the
+ * card's own line naming the work, because a colour is never allowed to carry state alone
+ * (DESIGN_TOKENS §3).
  */
 export function folioAttention(
   folio: Parameters<typeof folioAction>[0] & { overdue?: boolean },
-  opts: { urgent: boolean; surface?: 'admin' | 'seller' },
+  opts: { urgent: boolean },
 ): { level: AttentionLevel; rail: RailTone } {
   if (folio.refund_status === 'pending' || folio.overdue === true || opts.urgent) {
     return { level: 'urgent', rail: 'error' }
   }
-  if (folioAction(folio, opts) !== 'message') {
+  // The FULL ladder — `admin` here means "ask about every kind of work", not "assume an admin is
+  // reading". A seller passing their own surface is what produced BUG-035.
+  if (folioAction(folio, { ...opts, surface: 'admin' }) !== 'message') {
     return { level: 'work', rail: 'warning' }
   }
   return { level: 'ok', rail: 'success' }
