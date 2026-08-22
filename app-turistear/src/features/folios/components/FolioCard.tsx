@@ -224,10 +224,16 @@ export function FolioCard({
   const isBooking = folio.status === 'booking'
   const urgent = isBooking && isUrgentBooking(folio.booking_expires_at)
   const action = folioAction(folio, { urgent, surface })
-  // D14 (line-autonomy) — the rail is the ATTENTION semaphore now, derived from the same
-  // pending-work ladder the button reads, so colour and verb can never disagree. The money
-  // reading below keeps its own semantics untouched.
-  const { rail } = folioAttention(folio, { urgent, surface })
+  // D14 (line-autonomy) — the rail is the ATTENTION semaphore. BUG-035 / parity D17: it is
+  // computed WITHOUT the surface, because "does this folio need a human?" is a fact about the
+  // folio; only the button below filters by who is reading. The money reading keeps its own
+  // semantics untouched.
+  const { rail } = folioAttention(folio, { urgent })
+  // The petition is the one state whose words the seller never got: an unverified transfer already
+  // reads «por verificar» on the money line and an owed refund reads «Reembolsar», but a customer
+  // waiting on an answer had no text at all once its admin verb was filtered away. Rendered only
+  // where the button is NOT already naming it, so the admin never reads the same fact twice.
+  const petitionMark = folio.cancellation_request === 'pending' && action !== 'request'
   const timeChip = folioTimeChip(folio, nowSeconds)
   // D14 — a MIXED folio names its lines: one mark per line, icon-paired, only when the states
   // actually differ (a uniform folio stays quiet).
@@ -285,6 +291,26 @@ export function FolioCard({
           {reading.kind === 'unverified' && folio.payment_reference && (
             <Typography variant="caption" color="text.secondary" noWrap sx={{ display: 'block' }}>
               Ref. {folio.payment_reference}
+            </Typography>
+          )}
+          {/* BUG-035 — the request, in words, on the surface whose button cannot name it.
+              Icon-paired functional colour (DESIGN_TOKENS §3): the amber rail beside it must never
+              be the only thing saying this sale needs someone. */}
+          {petitionMark && (
+            <Typography
+              variant="caption"
+              noWrap
+              sx={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 0.5,
+                mt: 0.5,
+                color: 'warning.main',
+                fontWeight: 600,
+              }}
+            >
+              <EventBusyRounded sx={{ fontSize: 14 }} />
+              El cliente pidió un cambio
             </Typography>
           )}
           {/* The time channel (D1). One chip, whichever clock this folio is running against: the

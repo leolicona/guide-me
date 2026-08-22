@@ -240,6 +240,13 @@ export function FolioWorkActions({
           already appear there as their `cancelled`/`rescheduled` events, and REJECTED ones
           interleave as derived rows — one Historial, not two. */}
 
+      {/* Every overlay below is an ADMIN authorization, and they used to render on BOTH surfaces —
+          closed and `aria-hidden`, so nothing leaked, but four `keepMounted` drawers sat in the
+          seller's DOM on a screen with no way to open any of them (design review, Should Fix 3).
+          BUG-033 is exactly about what extra keepMounted drawers do to the a11y tree, so the
+          cheapest fix is to not mount what this audience can never press. */}
+      {isAdmin && (
+        <>
       <ConfirmSheet
         open={confirming === 'verify'}
         onClose={() => setConfirming(null)}
@@ -357,6 +364,8 @@ export function FolioWorkActions({
           />
         </Stack>
       </FormSheet>
+        </>
+      )}
     </>
   )
 }

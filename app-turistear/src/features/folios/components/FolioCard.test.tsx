@@ -245,3 +245,25 @@ describe('US-A85 — a departed folio says its seats were wasted', () => {
     expect(screen.queryByText('Parcialmente usado')).not.toBeInTheDocument()
   })
 })
+
+describe('BUG-035 — the request is named in words on the surface whose button cannot', () => {
+  const waiting = () => aFolio({ cancellation_request: 'pending' })
+
+  it("the seller's card says the customer asked for a change", () => {
+    renderWithProviders(
+      <FolioCard folio={waiting()} to="/history/f1" byline={null} soldAt="hoy 14:32" surface="seller" />,
+    )
+    expect(screen.getByText('El cliente pidió un cambio')).toBeInTheDocument()
+    // …and still offers no admin verb.
+    expect(screen.queryByRole('link', { name: /Revisar solicitud/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: /Revisar solicitud/ })).toBeNull()
+  })
+
+  it("the admin's card does NOT repeat it — its button already names the work", () => {
+    renderWithProviders(
+      <FolioCard folio={waiting()} to="/folios/f1" byline="Ana Ramírez" soldAt="hoy 14:32" surface="admin" />,
+    )
+    expect(screen.getByRole('link', { name: /Revisar solicitud/ })).toBeInTheDocument()
+    expect(screen.queryByText('El cliente pidió un cambio')).toBeNull()
+  })
+})

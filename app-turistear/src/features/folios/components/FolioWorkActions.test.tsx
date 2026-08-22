@@ -250,3 +250,29 @@ describe('US-A93 — the seller may press only the rung that is theirs', () => {
     expect(screen.queryByRole('button', { name: /Confirmar reembolso/ })).toBeNull()
   })
 })
+
+describe('Design review, Should Fix 3 — the seller mounts no admin overlay', () => {
+  // The sheets render through a PORTAL, so they are in `document.body`, never in the render
+  // container — asserting on the container passes for both audiences and proves nothing. The
+  // admin control below is what caught that.
+  const drawers = () => document.querySelectorAll('.MuiDrawer-root')
+
+  it("the four authorization sheets are absent from the seller's DOM", () => {
+    renderWork(
+      folio({ status: 'paid', portal_link: 'https://x/portal/abc' }),
+      () => {},
+      'seller',
+    )
+    // They used to render for both audiences: closed and aria-hidden, so nothing leaked, but four
+    // keepMounted drawers sat on a screen with no way to open any of them — and BUG-033 is about
+    // what extra keepMounted drawers do to the accessibility tree.
+    expect(drawers()).toHaveLength(0)
+    expect(screen.queryByText('¿Verificar el pago?')).toBeNull()
+    expect(screen.queryByText('¿Aprobar la cancelación?')).toBeNull()
+  })
+
+  it('the admin still has them mounted, ready to open', () => {
+    renderWork(folio({ payment_verification: 'pending' }))
+    expect(drawers().length).toBeGreaterThan(0)
+  })
+})
