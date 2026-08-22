@@ -71,8 +71,12 @@ service still never uses slots/schedules.
   many* rooms of a type are sold per night, never *which* physical room a guest occupies. Key
   assignment at check-in happens outside Turistear Ya! (the property's PMS, front-desk board, or paper).
   "Which room was sold?" is by-design out of scope, not a bug.
-- **Per-night manual discount** on a stay (the US-AG06 minimum-price floor is per-ticket, not
-  per-night). Stays sell at the computed total; discounting stays is deferred.
+- ~~**Per-night manual discount** on a stay (the US-AG06 minimum-price floor is per-ticket, not
+  per-night). Stays sell at the computed total; discounting stays is deferred.~~ — **superseded by
+  US-AG57** (`docs/pos/discount-min-price.spec.md`): a stay is discountable by editing its
+  **whole-line total**, bounded by a per-unidad **percentage** ceiling. The reasoning above still
+  holds for the shape that was rejected — a *per-night* floor is what the seasonal/weekend/
+  extra-person precedence makes untenable; a percentage of the quoted total is not.
 - **Seasonal minimum-stay** and **season-varying extra-person fee** (D3/D5).
 - **Per-room guest allocation** at sale time (D12 chose the even-split fast path; revisit only if
   agents report material `extra_person_fee` disputes).
@@ -508,7 +512,11 @@ Existing `VALIDATION_ERROR` / `NOT_FOUND` / `FORBIDDEN` cover the rest.
   services — the allow-list stays **service-level** (enabling a property enables its types).
 - Commission (US-A12, D13): **type override ?? service base**, affiliate rate wins; `percent` on
   the stay amount; **`fixed` × quantity** (per room-stay). Lodging stays **exempt from the fixed ≤
-  `minimum_price` cap** (no per-ticket floor — types price per night).
+  `minimum_price` cap** (no per-ticket floor — types price per night). *(**Amended by US-AG57**,
+  `docs/pos/discount-min-price.spec.md` D10: the exemption was granted because there was no floor,
+  and stay discounts create one. The authoring-time cap still cannot apply — the floor is a percent
+  of a total that does not exist until dates, rooms and guests are known — so a fixed commission is
+  instead **clamped to the discounted `line_total` at confirm**.)*
 
 ---
 
