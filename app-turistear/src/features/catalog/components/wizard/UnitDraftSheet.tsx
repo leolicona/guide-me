@@ -54,6 +54,7 @@ const EMPTY: UnitFormData = {
   amenities: [],
   commission_type: 'inherit', // default: inherit the service's base commission
   commission_value: null,
+  max_discount_pct: 0, // US-A92 — no discount until the admin says otherwise
 }
 
 // A 48px tappable disclosure header (chevron + label + count badge when populated).

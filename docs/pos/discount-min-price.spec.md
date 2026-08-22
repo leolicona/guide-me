@@ -2,7 +2,7 @@
 
 > Process: `docs/PROCESS.md`.
 >
-> **Status: SPEC.** Supersedes `docs/lodging/accommodation-stays.spec.md` § *Out of scope*
+> **Status: BUILT.** Supersedes `docs/lodging/accommodation-stays.spec.md` § *Out of scope*
 > ("Per-night manual discount on a stay … discounting stays is deferred") and its § 5 commission
 > exemption ("Lodging stays exempt from the fixed ≤ `minimum_price` cap — no per-ticket floor"),
 > whose stated reason this feature removes. Tours are **not** in scope: their controlled discount
@@ -66,7 +66,8 @@ reconstruct. The floor here is a **percentage of whatever the one engine quoted*
 | **D7** | With `min_total === total` the line renders as text, with no control. | A field that can only ever reject the agent's input is noise on a counter. It also makes the scope boundary mechanical: feature off ⇒ `StayCartLine` is the component it is today. |
 | **D8** | The confirm writes the resolved floor into `folio_lines.minimum_price`, replacing the hardcoded `0`. | The column exists, is `NOT NULL`, and is already snapshotted for tours. The unit's percent can be edited after the sale; without the snapshot nobody could reconstruct what the line was actually validated against — the reason tours snapshot theirs. |
 | **D9** | A stay line's discount counts **once**: `base_price − unit_price`, not `× quantity`. | `discountTotal` reduces `(l.basePrice − l.unitPrice) * l.quantity` over every line. For a slot line those are per-spot and `quantity` is spots, so the multiplication is right. For a stay line they are whole-line totals and `quantity` is **rooms** — a $150 discount on a two-room stay would be persisted and shown to the org as $300. |
-| **D10** | A **fixed** commission on a stay line is clamped to that line's `line_total`, at confirm. | `accommodation-stays.spec.md` § 5 exempts lodging from the `fixed ≤ minimum_price` cap *because lodging had no floor*; this feature removes that reason. Authoring-time validation cannot replace it — the floor is a percentage of a total that does not exist until the dates, rooms and guests are known — so the clamp goes where the number is finally known. |
+| **D10** | A **fixed** commission on a stay line is clamped to that line's `line_total`, at confirm. | `accommodation-stays.spec.md` § 5 exempts lodging from the `fixed ≤ minimum_price` cap *because lodging had no floor*; this feature removes that reason. Authoring-time validation cannot replace it — the floor is a percentage of a total that does not exist until the dates, rooms and guests are known — so the clamp goes where the number is finally known. A **slot** line is deliberately left alone: its authoring guard already pins `fixed ≤ minimum_price ≤ unit_price`, so the clamp would be a mathematical no-op that quietly claimed the tour path was in scope. |
+| **D11** *(added during the build)* | `max_discount_pct` is `.optional()` in the frontend form schema, not `.default(0)`. | `.default()` splits zod's input and output types, and RHF's `Resolver<TFieldValues>` then stops typechecking in both unit-form hosts. Absent still means "no discount" — the same thing migration `0066` says about every pre-existing row — resolved at the two places that serialise (`UnitFormSheet.toInput`, `useCreateLodgingFull`). It also leaves `schemas.test.ts` passing unedited. |
 
 ## Data Model
 
@@ -272,15 +273,28 @@ Then `404`, and org B's stored value is unchanged.
 
 ## Definition of Done
 
-- [ ] Migration `0066_unit_max_discount.sql` + `maxDiscountPct` on `accommodationUnitTypes`
-- [ ] `max_discount_pct` accepted, validated `[0, 100]`, persisted and returned on unit-type create/update
-- [ ] `min_total` on the POS lodging availability payload
-- [ ] `unit_price` optional on `stayLineSchema`; floor, ceiling, snapshot (D8), `discount_total` (D9) and commission clamp (D10) in the confirm handler
-- [ ] Scenarios S-1 – S-13 covered, in `api-turistear/test/pos/stay-discount.test.ts`
-- [ ] Cross-org isolation tests (S-14, S-15) using `seedTwoOrgs`
-- [ ] Frontend: `UnitFields`, `posCart`, `StayCartLine`, `LodgingStaySheet`, `posService`
-- [ ] `docs/lodging/accommodation-stays.spec.md`: the deferred-discount line and the § 5 commission exemption annotated as superseded here — not deleted
-- [ ] `SPEC.md`: US-A92, US-AG57, the Features-by-Phase line, glossary term *Descuento máximo (stay)*
+- [x] Migration `0066_unit_max_discount.sql` + `maxDiscountPct` on `accommodationUnitTypes`
+- [x] `max_discount_pct` accepted, validated `[0, 100]`, persisted and returned on unit-type create/update
+- [x] `min_total` on the POS lodging availability payload
+- [x] `unit_price` optional on `stayLineSchema`; floor, ceiling, snapshot (D8), `discount_total` (D9) and commission clamp (D10) in the confirm handler
+- [x] Scenarios S-1 – S-13 covered, in `api-turistear/test/pos/stay-discount.test.ts` — 19 tests, incl. `stayFloor` unit cases and S-11b (a fixed commission that fits is untouched)
+- [x] Cross-org isolation tests (S-14, S-15) using `seedTwoOrgs`
+- [x] Frontend: `UnitFields`, `posCart`, `StayCartLine`, `LodgingStaySheet`, `posService`, plus `schemas.ts` / both unit-form hosts / `useCreateLodgingFull`
+- [x] `docs/lodging/accommodation-stays.spec.md`: the deferred-discount line and the § 5 commission exemption annotated as superseded here — not deleted
+- [x] `SPEC.md`: US-A92, US-AG57, the Features-by-Phase line, glossary term *Descuento máximo (stay)*
+
+**Verification.** API 970 green (was 960); frontend 595 green (was 587); `build:api`, `build:app`
+clean; `lint:app` 0 errors. The three defect fixes were mutation-tested: reverting D8, D9 and D10
+in `pos/handler.ts` fails S-4, S-8, S-9, S-10 and S-11, so those scenarios *detect* the defects
+rather than describe them.
+
+**Scope-boundary deviation, recorded rather than quietly absorbed.** The boundary named
+`test/lodging/` and `test/pos/pos-controlled-discount.test.ts` as passing unedited, and both do.
+But `src/store/posCart.test.ts` **was** edited: `StayCartLine` gained two required fields, so the
+test's `stayLine()` factory and one `addStayLine` call had to seed them. Both edits give the new
+fields the undiscounted values (`min_total === quoted_total === total`), so no existing assertion
+changed meaning. `src/features/catalog/schemas.test.ts` passes unedited only because
+`max_discount_pct` is `.optional()` rather than required — see D11.
 
 ## Deferred — and why each is safe to defer
 

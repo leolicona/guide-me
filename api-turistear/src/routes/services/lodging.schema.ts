@@ -45,6 +45,9 @@ export const createUnitTypeSchema = z
     // lodging has no service price floor and a fixed commission counts per stay line (spec §"Commission").
     commission_type: z.enum(['percent', 'fixed']).nullable().optional(),
     commission_value: money.nullable().optional(),
+    // US-A92 — how far an agent may discount a stay of this type, as a whole percent of the
+    // quoted total. 0 (the default) = no discount, which is what every pre-0066 row carries.
+    max_discount_pct: z.number().int().min(0).max(100).optional(),
   })
   .refine((v) => v.max_capacity >= v.base_occupancy, {
     message: 'max_capacity must be ≥ base_occupancy',

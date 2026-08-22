@@ -132,6 +132,19 @@ export const quoteStay = (
   }
 }
 
+/**
+ * US-A92/US-AG57 (docs/pos/discount-min-price.spec.md, D3) — how low an agent may take a stay:
+ * a percent OF THE QUOTED TOTAL, so seasons, weekend rates, room count and the extra-person
+ * surcharge are already inside the number and never re-derived.
+ *
+ * Rounds UP: the floor protects margin, so a sub-centavo remainder falls toward the operator, and
+ * the boundary case is predictable without knowing which centavo the quote landed on.
+ * `pct = 0` returns the total itself — the whole feature off, which is what every unit type
+ * carries until an admin says otherwise.
+ */
+export const stayFloor = (total: number, maxDiscountPct: number): number =>
+  Math.ceil((total * (100 - maxDiscountPct)) / 100)
+
 // --- Availability (per-night counts, D10) ---
 
 export interface QuantityRange {

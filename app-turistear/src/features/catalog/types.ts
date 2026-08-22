@@ -134,6 +134,8 @@ export interface AccommodationUnitType {
   /** Per-extra-person-per-night surcharge above base occupancy (minor units). */
   extra_person_fee: number
   min_nights: number
+  /** US-A92 — discount ceiling as a whole percent of the quoted stay total (0 = no discount). */
+  max_discount_pct: number
   /** 'HH:MM'. */
   checkin_time: string
   /** 'HH:MM'. */

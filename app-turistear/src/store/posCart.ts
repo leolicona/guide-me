@@ -52,6 +52,15 @@ export interface StayCartLine {
   nights: number
   /** Stay total in minor units (server is authoritative). */
   total: number
+  /**
+   * US-AG57 — the quote this line was born with, kept so the cart can show what was given away
+   * (`quoted_total − total`) after the agent edits the total. Never changes: a stay line cannot be
+   * edited in place (D5), so a re-quote is a different line with a different `id`.
+   */
+  quoted_total: number
+  /** The lowest total the confirm will accept, from the server (D6). `=== quoted_total` ⇒ no
+   * discount is allowed, and the line renders as text (D7). */
+  min_total: number
   /** Per-night rate breakdown, summed across rooms (display only). */
   per_night: StayNight[]
 }
@@ -75,6 +84,8 @@ export interface AddStayInput {
   quantity: number
   nights: number
   total: number
+  /** The floor the server resolved for this quote (US-AG57 D6). `=== total` ⇒ no discount. */
+  min_total: number
   per_night: StayNight[]
 }
 
@@ -101,6 +112,8 @@ interface PosCartState {
   // All slot-line mutations key on `lineKey(line)` (slot id, + zone id on a zoned service).
   updateQuantity: (key: string, quantity: number) => void
   setUnitPrice: (key: string, unitPrice: number) => void
+  /** US-AG57 — the agent's discounted total for a stay line, clamped to [min_total, quoted_total]. */
+  setStayTotal: (id: string, total: number) => void
   addExtra: (key: string, extra: PosExtra) => void
   updateExtraQuantity: (key: string, extraId: string, quantity: number) => void
   removeExtra: (key: string, extraId: string) => void
@@ -151,7 +164,12 @@ export const usePosCart = create<PosCartState>((set) => ({
 
   addStayLine: (input) =>
     set((state) => ({
-      lines: [...state.lines, { kind: 'stay', id: crypto.randomUUID(), ...input }],
+      lines: [
+        // `quoted_total` is seeded from the quote and never moves; `total` is what the agent may
+        // then take down to `min_total`.
+        ...state.lines,
+        { kind: 'stay', id: crypto.randomUUID(), ...input, quoted_total: input.total },
+      ],
     })),
 
   updateQuantity: (key, quantity) =>
@@ -182,6 +200,19 @@ export const usePosCart = create<PosCartState>((set) => ({
                 l.service.base_price,
               ),
             }
+          : l,
+      ),
+    })),
+
+  // US-AG57 — the stay equivalent, bounded by the server's own floor rather than by a percent
+  // recomputed here. Nothing invalidates it: `updateQuantity` skips stay lines and there is no
+  // `updateStay`, so changing dates, guests or rooms means removing the line and re-adding it
+  // from LodgingStaySheet — a new `id`, a fresh quote, no stale override to carry (D5).
+  setStayTotal: (id, total) =>
+    set((state) => ({
+      lines: state.lines.map((l) =>
+        l.kind === 'stay' && l.id === id
+          ? { ...l, total: clamp(Math.round(total), l.min_total, l.quoted_total) }
           : l,
       ),
     })),
@@ -299,6 +330,8 @@ export const toConfirmPayload = (state: PosCartState): ConfirmSaleInput => ({
           check_out: l.check_out,
           guests: l.guests,
           quantity: l.quantity,
+          // Sent only when discounted, so an ordinary stay sale is byte-identical on the wire.
+          ...(l.total !== l.quoted_total ? { unit_price: l.total } : {}),
         },
   ),
 })

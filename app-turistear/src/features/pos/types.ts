@@ -91,6 +91,13 @@ export interface LodgingAvailabilityUnitType {
   quantity: number
   /** Stay total (minor units) — rooms × nights × nightly rate + extra-person surcharge (D12). */
   total: number
+  /**
+   * US-AG57 (D6) — the lowest total the confirm will accept, in pesos, resolved server-side from
+   * the unidad's `max_discount_pct`. Handed over rather than derived here so the field the agent
+   * sees and the bound the server enforces cannot drift. `min_total === total` ⇒ no discount is
+   * allowed, and the cart renders the total as text rather than a field (D7).
+   */
+  min_total: number
   per_night: StayNight[]
 }
 

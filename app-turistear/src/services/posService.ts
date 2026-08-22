@@ -35,6 +35,11 @@ export interface ConfirmStayLineInput {
   check_out: string
   guests: number
   quantity: number
+  /**
+   * US-AG57 — the agent's discounted total for the WHOLE line. Sent ONLY when it differs from the
+   * quote, so an undiscounted sale puts the exact same bytes on the wire as before this feature.
+   */
+  unit_price?: number
 }
 
 /** A cart line is either a tour slot or a lodging stay. */

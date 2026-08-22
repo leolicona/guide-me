@@ -195,6 +195,7 @@ export function LodgingStaySheet({
       quantity: rooms,
       nights: quoted.nights,
       total: quoted.total,
+      min_total: quoted.min_total,
       per_night: quoted.per_night,
     })
     setRange(emptyRange)
