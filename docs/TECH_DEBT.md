@@ -2,6 +2,32 @@
 
 This document tracks known technical debt, deferred tasks, and architectural improvements that are planned for future phases.
 
+## 30. Heading Levels Are Fixed at the Default, Not Yet Swept Per Screen — ⚠️ OPEN
+
+**Context:** MUI maps `subtitle1`/`subtitle2` to `<h6>`, so for as long as the app has existed every
+card title, row label and price rendered at subtitle size was silently a heading. The folio detail's
+outline read `h1 → h6 → h3 → h6`, and a screen-reader user navigating by heading landed on
+«$2,400.00» (`.design/folio-surface-parity/DESIGN_REVIEW.md`, Must Fix 2).
+
+**What was fixed:** the DEFAULT — `theme.ts` now maps both variants to `<p>`, so nothing becomes a
+heading by accident — plus the screens the design review actually covered: `SectionCard` titles
+(`h2`), `FolioWorkActions` rungs (`h2`), the folio card's row title (`h2`), the folio detail's own
+section headings, and the sheet hosts' titles (`h2` inside their dialog).
+
+**What is left:** the other ~20 `subtitle1`/`subtitle2` call sites — the catalog wizard steps,
+`AmenityPicker`, `UnitRow`, `BookingActions`, `RescheduleSheet`, `FolioStateSheet` and friends.
+Nearly all of them are labels and row titles, which are **more** correct as `<p>` than as the `<h6>`
+they used to be; but any that were genuinely a section's only heading now have none, and that has
+not been verified screen by screen.
+
+**Cost of leaving it:** a handful of regions may have no heading at all rather than a wrong one.
+Neither state is navigable, so nothing got worse; it simply is not finished.
+
+**What closing it looks like:** adopt `expectHeadingOutline()` (`test/axe.ts`, one line per screen)
+in each screen's test and fix what it reports. The helper exists precisely so the sweep is cheap.
+
+---
+
 ## 29. The Affiliate's Shift-Operator Filter Exists Server-Side and Is Unreachable — ⚠️ OPEN
 
 **Context:** `listAgentFolios` accepts `?operator=<id>` and scopes the read to that shift operator

@@ -89,6 +89,19 @@ export const theme = createTheme({
     ...(Array(16).fill(SHADOW_OVERLAY_MD) as string[]), // higher — dialogs / overlays
   ] as Shadows,
   components: {
+    // A heading is document STRUCTURE, not a size. MUI maps `subtitle1`/`subtitle2` to `<h6>` by
+    // default, so every card title, every line label and every price rendered at subtitle size was
+    // silently a heading: the folio detail's outline read `h1 → h6 → h3 → h6`, and a screen-reader
+    // user navigating by heading landed on «$2,400.00» (design review, Must Fix 2).
+    //
+    // Mapped to `<p>` here rather than fixed at 30-odd call sites, because the defect is the
+    // DEFAULT: nothing about "subtitle" implies a section. Anything that IS a heading says so with
+    // `component` — `SectionCard` titles are `h2`, the work card's rungs `h3`.
+    MuiTypography: {
+      defaultProps: {
+        variantMapping: { subtitle1: 'p', subtitle2: 'p' },
+      },
+    },
     MuiButton: {
       defaultProps: { disableElevation: true },
       styleOverrides: {

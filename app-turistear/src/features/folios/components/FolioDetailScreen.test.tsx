@@ -3,6 +3,7 @@ import { http, HttpResponse } from 'msw'
 import { Route, Routes } from 'react-router-dom'
 import { server } from '../../../test/server'
 import { renderWithProviders, screen } from '../../../test/renderWithProviders'
+import { expectHeadingOutline, expectNoA11yViolations } from '../../../test/axe'
 import { FolioDetailScreen } from './FolioDetailScreen'
 
 // US-A93 (docs/oversight/folio-surface-parity.spec.md D7/D8/D13) — ONE detail screen, two
@@ -171,5 +172,31 @@ describe('US-A93 — the verbs are what differ', () => {
     renderDetail('admin')
     // Present — «mi QR no funciona» reaches the admin — but not in the way of the money.
     expect(await screen.findByRole('button', { name: 'Ver' })).toBeInTheDocument()
+  })
+})
+
+// Design review, Must Fix 2 — the document OUTLINE. The detail read `h1 → h6 → h3 → h6`, because
+// MUI maps `subtitle1`/`subtitle2` to `<h6>` and `SectionCard` let the type scale pick its title's
+// tag. A screen-reader user navigating by heading landed on «$2,400.00».
+describe('US-A93 — the heading outline is navigable', () => {
+  it.each(SURFACES)('%s: one h1, and no level is skipped on the way down', async (surface) => {
+    withDetail()
+    const { container } = renderDetail(surface)
+    await screen.findAllByText('Tour Isla Mujeres')
+
+    expectHeadingOutline('María Fernández')
+    await expectNoA11yViolations(container)
+  })
+
+  it('money and row labels are NOT headings', async () => {
+    withDetail()
+    renderDetail('admin')
+    await screen.findAllByText('Tour Isla Mujeres')
+
+    const texts = [...document.querySelectorAll('h1,h2,h3,h4,h5,h6')].map((h) =>
+      (h.textContent ?? '').trim(),
+    )
+    expect(texts).not.toContain('$2,400.00')
+    expect(texts).not.toContain('Total')
   })
 })

@@ -255,7 +255,10 @@ export function FolioCard({
           (component="span" here, stopPropagation there). As siblings both are real focus stops. */}
       <CardActionArea component={RouterLink} to={to}>
         <CardContent>
-          <Typography variant="subtitle1" sx={{ fontWeight: 600 }} noWrap>
+          {/* The row's name is the list item's heading — `h2` under the page's «Ventas» `h1`, so
+              a screen reader can jump card to card. It used to be an `<h6>` by accident of the
+              variant mapping, alongside the price beside it. */}
+          <Typography variant="subtitle1" component="h2" sx={{ fontWeight: 600 }} noWrap>
             {title}
           </Typography>
           {/* The mask's bullets get their OWN tracking. Manrope gives `•` enough side bearing that
