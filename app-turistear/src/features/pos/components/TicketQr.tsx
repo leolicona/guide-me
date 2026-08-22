@@ -37,7 +37,17 @@ export function TicketQr({ line }: TicketQrProps) {
                 }}
               >
                 {/* US-T07 (D9) — the URL form: a tourist's camera lands on /t/<token>. */}
-                <QRCodeSVG value={ticketPageUrl(line.qr_token)} size={176} level="M" />
+                {/* `qrcode.react` renders `role="img"` with no accessible name, which axe reports
+                    as a serious violation — found when US-A93 put this card on a screen the a11y
+                    suite actually runs against. The code itself is unusable by a screen reader;
+                    what it needs is to be NAMED, since the passes and the departure beside it are
+                    already text. */}
+                <QRCodeSVG
+                  value={ticketPageUrl(line.qr_token)}
+                  size={176}
+                  level="M"
+                  aria-label={`Código QR del boleto — ${line.service_name}`}
+                />
               </Box>
               <Chip
                 size="small"

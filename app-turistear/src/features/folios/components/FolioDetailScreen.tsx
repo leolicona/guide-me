@@ -492,7 +492,11 @@ export function FolioDetailScreen({ surface }: FolioDetailScreenProps) {
                     </Stack>
                   )}
                   <Stack direction="row" sx={{ justifyContent: 'space-between', alignItems: 'baseline' }}>
-                    <Typography variant="h6">Total</Typography>
+                    {/* A row LABEL, not a section. Left as a heading it put «Total» and the
+                        figure beside it into the document outline. */}
+                    <Typography variant="h6" component="p">
+                      Total
+                    </Typography>
                     <MoneyText cents={folio.total} variant="h4" srLabel="Total" />
                   </Stack>
                   <Stack direction="row" sx={{ justifyContent: 'space-between' }}>
@@ -529,7 +533,11 @@ export function FolioDetailScreen({ surface }: FolioDetailScreenProps) {
                   direction="row"
                   sx={{ alignItems: 'center', justifyContent: 'space-between' }}
                 >
-                  <Typography variant="h6">Boletos de acceso</Typography>
+                  {/* A real section heading, so it says so: `h2`, the same level `SectionCard`
+                      gives every other block on this page. */}
+                  <Typography variant="h6" component="h2">
+                    Boletos de acceso
+                  </Typography>
                   <Button
                     size="small"
                     onClick={() => setQrOpen((v) => !v)}

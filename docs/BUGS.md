@@ -6,6 +6,32 @@ Tracks confirmed bugs, root causes, and fixes. Each entry is immutable once clos
 
 ---
 
+## BUG-036 — The App Test Suite Flakes Under Parallel Load — ⚠️ OPEN
+
+**Found:** 2026-08-22, while verifying the heading-outline fix. Two full-suite runs failed on
+**different** tests each time, always with `Test timed out in 5000ms` — and one of them
+(*"applies a facet in place instead of navigating away"*) is in a file that run did not touch.
+
+**Not caused by that change.** The same symptom reproduces on a clean checkout carrying none of it
+(`2336a90`): two files failed there too, again a different pair. `vitest run --no-file-parallelism`
+passes **38 files / 643 tests** every time.
+
+**Suspected cause:** jsdom + MSW + TanStack Query under `vitest`'s default file parallelism on a
+loaded machine. Each test's `findBy*` waits against the 5 s default; when several heavy files render
+concurrently the first paint can cross it. Nothing in the failures suggests a wrong assertion — they
+time out waiting for a render that eventually happens.
+
+**Impact:** CI's `verify` job can fail on an innocent PR, and a flaky suite is one that stops being
+read. It also masks real regressions: two red tests you have learned to re-run are two tests you no
+longer trust.
+
+**What to try, cheapest first:** raise `testTimeout` for the render-heavy files; cap
+`poolOptions.threads.maxThreads` in the app's vitest config; or split the folio screen suites, which
+are the slowest (`FolioDetailScreen.test.tsx` alone runs ~16 s). Measure before choosing — this
+entry records the symptom, not a diagnosis.
+
+---
+
 ## BUG-035 — The Seller's Card Paints a Waiting Customer Green — ✅ FIXED
 
 **Found:** 2026-08-22, in the `/design-review` pass over the unified folio surfaces

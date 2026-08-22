@@ -41,6 +41,9 @@ const DATE_FMT: Intl.DateTimeFormatOptions = {
   minute: '2-digit',
 }
 
+// Each rung's title is the heading of the card it owns — `h2`, the level `SectionCard` gives its
+// own titles, because these cards have no `title` prop and this line is it. (Design review, Must
+// Fix 2: as an accidental `<h6>` it sat two levels under a page `<h1>` with nothing in between.)
 export function FolioWorkActions({
   folio,
   onConfirmRefund,
@@ -110,7 +113,7 @@ export function FolioWorkActions({
           which makes any payment verification below moot (D12, one layer down from the card). */}
       {rung === 'petition' && pending && (
         <SectionCard>
-          <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 0.5 }}>
+          <Typography variant="subtitle1" component="h2" sx={{ fontWeight: 600, mb: 0.5 }}>
             {pendingIsReschedule ? 'El cliente pidió reagendar' : 'El cliente pidió cancelar'}
           </Typography>
           <Typography variant="body2" color="text.secondary">
@@ -156,7 +159,7 @@ export function FolioWorkActions({
           still says the unverified money exists. */}
       {rung === 'verification' && (
         <SectionCard>
-          <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 0.5 }}>
+          <Typography variant="subtitle1" component="h2" sx={{ fontWeight: 600, mb: 0.5 }}>
             Pago por verificar
           </Typography>
           <Typography variant="body2" color="text.secondary">
@@ -217,7 +220,7 @@ export function FolioWorkActions({
         <SectionCard>
           <Stack spacing={1.5}>
             <Stack direction="row" sx={{ alignItems: 'center', justifyContent: 'space-between' }}>
-              <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
+              <Typography variant="subtitle1" component="h2" sx={{ fontWeight: 700 }}>
                 Entregar boletos
               </Typography>
               <DeliveryBadge folio={folio} />

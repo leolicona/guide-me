@@ -34,8 +34,11 @@ export function SectionCard({ title, action, padded = true, children, sx, ...res
               ...(padded ? {} : { px: 3, pt: 3 }),
             }}
           >
+            {/* `component` because a card title is the section's HEADING and the variant is only
+                its size. The type scale picked the tag before, so a `variant="h3"` title landed as
+                an `<h3>` under a page `<h1>` — two levels skipped, in every screen at once. */}
             {typeof title === 'string' ? (
-              <Typography variant="h3" sx={{ fontWeight: 600 }}>
+              <Typography variant="h3" component="h2" sx={{ fontWeight: 600 }}>
                 {title}
               </Typography>
             ) : (

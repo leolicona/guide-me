@@ -54,8 +54,10 @@ export function FormSheet({
       onClose={onClose}
       title={title}
       maxHeight={maxHeight}
+      // The sheet is its own context, so its title is an `h2` inside it — not an `<h6>` the
+      // page's outline has to absorb (design review, Must Fix 2).
       header={
-        <Typography variant="h6" sx={{ px: 2, pb: 1 }}>
+        <Typography variant="h6" component="h2" sx={{ px: 2, pb: 1 }}>
           {title}
         </Typography>
       }
