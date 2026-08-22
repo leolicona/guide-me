@@ -30,17 +30,18 @@ import {
   usePosCart,
   toConfirmPayload,
   cartLineTotal,
+  cartExtrasTotal,
   cartSubtotal,
   cartDiscountTotal,
   cartTotal,
   lineKey,
-  type SlotCartLine,
 } from '../store/posCart'
+
 import { StayCartLine } from '../features/pos/components/StayCartLine'
 import { ServiceError } from '../services/authService'
 import { formatMoney, amountToCents, centsToAmount } from '../features/catalog/types'
 import { ROUTES } from '../config/routes'
-import { SectionCard, MoneyText, InfoPopover } from '../components'
+import { SectionCard, MoneyText, EditableMoney, InfoPopover } from '../components'
 import { isSendablePhone } from '../features/pos/phone'
 
 // customer_email is mandatory at POS — it's the only delivery channel for the ticket + QR
@@ -78,62 +79,6 @@ function errorMessage(error: unknown): string {
   return 'No se pudo completar la venta. Por favor, inténtalo de nuevo.'
 }
 
-// The discount lives here now (US: moved out of the Bottom Sheet, which only secures
-// inventory). Edits are kept local so typing isn't fought by the store's clamp; on blur the
-// price commits and snaps back into [minimum, base]. The store remains authoritative.
-function LinePriceField({ line }: { line: SlotCartLine }) {
-  const setUnitPrice = usePosCart((s) => s.setUnitPrice)
-  const [value, setValue] = useState(String(centsToAmount(line.unit_price)))
-
-  const min = line.service.minimum_price
-  const base = line.service.base_price
-  const cents = value === '' ? NaN : amountToCents(Number(value))
-  const belowMin = cents < min
-  const aboveBase = cents > base
-  const invalid = Number.isNaN(cents) || belowMin || aboveBase
-
-  const commit = () => {
-    const clamped = Number.isNaN(cents)
-      ? line.unit_price
-      : Math.min(Math.max(cents, min), base)
-    setUnitPrice(lineKey(line), clamped)
-    setValue(String(centsToAmount(clamped)))
-  }
-
-  return (
-    <TextField
-      label="Precio unitario"
-      placeholder="0.00"
-      type="number"
-      size="small"
-      value={value}
-      onChange={(e) => setValue(e.target.value)}
-      onBlur={commit}
-      error={value !== '' && invalid}
-      helperText={
-        belowMin
-          ? `Mínimo ${formatMoney(min)}`
-          : aboveBase
-            ? `Máximo ${formatMoney(base)}`
-            : `Mín ${formatMoney(min)} · base ${formatMoney(base)}`
-      }
-      slotProps={{
-        inputLabel: { shrink: true },
-        input: {
-          startAdornment: <InputAdornment position="start">$</InputAdornment>,
-        },
-        htmlInput: {
-          min: centsToAmount(min),
-          max: centsToAmount(base),
-          step: 0.01,
-          inputMode: 'decimal',
-        },
-      }}
-      sx={{ mt: 1.5, width: 180 }}
-    />
-  )
-}
-
 export default function PosCheckoutPage() {
   const lines = usePosCart((s) => s.lines)
   const customerName = usePosCart((s) => s.customerName)
@@ -143,6 +88,7 @@ export default function PosCheckoutPage() {
   const setCustomer = usePosCart((s) => s.setCustomer)
   const setPaymentMethod = usePosCart((s) => s.setPaymentMethod)
   const updateQuantity = usePosCart((s) => s.updateQuantity)
+  const setUnitPrice = usePosCart((s) => s.setUnitPrice)
   const removeLine = usePosCart((s) => s.removeLine)
   const clear = usePosCart((s) => s.clear)
 
@@ -288,12 +234,39 @@ export default function PosCheckoutPage() {
                                 + {e.quantity}× {e.extra.name} ({formatMoney(e.extra.price)})
                               </Typography>
                             ))}
-                            <LinePriceField line={line} />
+                            {/* The line total lives here ONLY when it differs from the unit price
+                                the agent edits — i.e. more than one spot, or extras. Written as the
+                                arithmetic rather than a bare figure, so the number on the right is
+                                never a second money read competing with the editable one. */}
+                            {cartLineTotal(line) !== line.unit_price && (
+                              <Typography
+                                variant="caption"
+                                color="text.secondary"
+                                className="numeric"
+                                sx={{ display: 'block' }}
+                              >
+                                {line.quantity} × {formatMoney(line.unit_price)}
+                                {cartExtrasTotal(line) > 0
+                                  ? ` + ${formatMoney(cartExtrasTotal(line))}`
+                                  : ''}{' '}
+                                = {formatMoney(cartLineTotal(line))}
+                              </Typography>
+                            )}
                           </Box>
                           <Stack spacing={0.5} sx={{ alignItems: 'flex-end' }}>
-                            <Typography variant="subtitle2">
-                              {formatMoney(cartLineTotal(line))}
-                            </Typography>
+                            {/* US-AG06 — the discount is entered on the figure itself, through the
+                                same primitive the stay line uses. A service whose minimum equals
+                                its base has nothing to negotiate, and EditableMoney renders it
+                                borderless: the border IS the affordance. */}
+                            <EditableMoney
+                              cents={line.unit_price}
+                              min={line.service.minimum_price}
+                              max={line.service.base_price}
+                              onCommit={(cents) => setUnitPrice(lineKey(line), cents)}
+                              label="Precio unitario"
+                              maxLabel="base"
+                              srLabel="Precio unitario"
+                            />
                             <Stack direction="row" spacing={0.5} sx={{ alignItems: 'center' }}>
                               <IconButton
                                 size="small"

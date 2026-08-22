@@ -297,10 +297,17 @@ export const cartLineTotal = (line: CartLine): number =>
 export const cartSubtotal = (lines: CartLine[]): number =>
   lines.reduce((sum, l) => sum + cartLineTotal(l), 0)
 
+// US-AG57 — a stay counts too. This returned 0 for every stay line, so the checkout's «Descuento»
+// row disagreed with the `discount_total` the server persists (the confirm handler's D9). A slot
+// line's base/unit are per SPOT, so × quantity is right there; a stay's are whole-line totals and
+// `quantity` is ROOMS, so it is counted ONCE — the same asymmetry, on the same two numbers.
 export const cartDiscountTotal = (lines: CartLine[]): number =>
   lines.reduce(
     (sum, l) =>
-      sum + (l.kind === 'slot' ? (l.service.base_price - l.unit_price) * l.quantity : 0),
+      sum +
+      (l.kind === 'slot'
+        ? (l.service.base_price - l.unit_price) * l.quantity
+        : l.quoted_total - l.total),
     0,
   )
 

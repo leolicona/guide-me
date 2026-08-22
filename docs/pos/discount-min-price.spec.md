@@ -68,6 +68,8 @@ reconstruct. The floor here is a **percentage of whatever the one engine quoted*
 | **D9** | A stay line's discount counts **once**: `base_price − unit_price`, not `× quantity`. | `discountTotal` reduces `(l.basePrice − l.unitPrice) * l.quantity` over every line. For a slot line those are per-spot and `quantity` is spots, so the multiplication is right. For a stay line they are whole-line totals and `quantity` is **rooms** — a $150 discount on a two-room stay would be persisted and shown to the org as $300. |
 | **D10** | A **fixed** commission on a stay line is clamped to that line's `line_total`, at confirm. | `accommodation-stays.spec.md` § 5 exempts lodging from the `fixed ≤ minimum_price` cap *because lodging had no floor*; this feature removes that reason. Authoring-time validation cannot replace it — the floor is a percentage of a total that does not exist until the dates, rooms and guests are known — so the clamp goes where the number is finally known. A **slot** line is deliberately left alone: its authoring guard already pins `fixed ≤ minimum_price ≤ unit_price`, so the clamp would be a mathematical no-op that quietly claimed the tour path was in scope. |
 | **D11** *(added during the build)* | `max_discount_pct` is `.optional()` in the frontend form schema, not `.default(0)`. | `.default()` splits zod's input and output types, and RHF's `Resolver<TFieldValues>` then stops typechecking in both unit-form hosts. Absent still means "no discount" — the same thing migration `0066` says about every pre-existing row — resolved at the two places that serialise (`UnitFormSheet.toInput`, `useCreateLodgingFull`). It also leaves `schemas.test.ts` passing unedited. |
+| **D12** *(added after use — supersedes this spec's own Frontend note)* | The money figure and the discount field are **one element**: `components/EditableMoney.tsx`. It renders `formatCents` in tabular Manrope 700 at rest, drops to the raw major-unit number on focus, and clamps into `[min, max]` on blur. All three POS price surfaces use it — the cart's tour line, the cart's stay line, and `ExpressSalePanel`. | Shipping the stay field as a `TextField` *beside* a `MoneyText` left the most expensive figure in the cart with no money read at all, and made three renderers of one concept where there had already been two. A single primitive also makes D7 fall out for free: with `min >= max` it renders the `MoneyText`, so the border — and nothing else — is what says *this can be negotiated*. |
+| **D13** *(added after use)* | «Cobrar» is **not** gated on line validity, in any surface. | `EditableMoney` clamps before it calls its owner, so an out-of-band price cannot reach the store. A gate would defend against a state no code path can produce. |
 
 ## Data Model
 
@@ -166,18 +168,23 @@ Design system: `.design/design-system/DESIGN_TOKENS.md`.
   Helper text names the consequence: *«0 % = sin descuento»*.
 - **`store/posCart.ts`** — `AddStayInput` and `StayCartLine` gain `min_total`; a new
   `setStayTotal(id, total)` writes `total`. No invalidation logic (D5).
-- **`features/pos/components/StayCartLine.tsx`** — when `min_total < total_quoted` the total
-  becomes an editable field shaped like the tour line's: `MoneyText` → `TextField`, `$` adornment,
-  `error` + helper *«Mínimo $X»* live while typing, snapping into range on blur. When
-  `min_total === total_quoted` the component renders exactly what it renders today (D7).
+- **`features/pos/components/StayCartLine.tsx`** — when `min_total < quoted_total` the total
+  becomes editable. When they are equal the component renders exactly what it renders today (D7).
+  *(**Revised by D12** — the field is the shared `EditableMoney`, not a `TextField` beside a
+  `MoneyText`.)*
 - **`features/pos/components/LodgingStaySheet.tsx`** — passes `quoted.min_total` through to
   `addStayLine`. It is the only builder of a stay line, so both catalog entry paths (range-first
   US-AG36 and type-first US-AG37) are covered by this one call site.
 - **`services/posService.ts`** — sends `unit_price` on a stay line only when it differs from the
   quote, keeping the payload byte-identical for an undiscounted sale.
 
-The «Confirmar venta» button follows the existing invalid-line rule; a below-floor stay line
-disables it the same way a below-minimum tour line does.
+**«Cobrar» is not gated on line validity, deliberately (D13).** An earlier draft of this section
+promised that a below-floor stay line would disable the button "the same way a below-minimum tour
+line does". Neither half was true: `canSubmit` reads name, phone, email, reference and the amount
+state, and no line at all — for tours either. The gate is also unnecessary. `EditableMoney` clamps
+on blur before calling its owner, so no surface can put an out-of-band price into the store; the
+error state exists to explain *why the number moved*, not to guard a submit. Recorded rather than
+deleted, so a later reader knows it was examined and found redundant, not skipped.
 
 ## Scenarios
 
@@ -282,6 +289,17 @@ Then `404`, and org B's stored value is unchanged.
 - [x] Frontend: `UnitFields`, `posCart`, `StayCartLine`, `LodgingStaySheet`, `posService`, plus `schemas.ts` / both unit-form hosts / `useCreateLodgingFull`
 - [x] `docs/lodging/accommodation-stays.spec.md`: the deferred-discount line and the § 5 commission exemption annotated as superseded here — not deleted
 - [x] `SPEC.md`: US-A92, US-AG57, the Features-by-Phase line, glossary term *Descuento máximo (stay)*
+
+**Follow-up shipped separately (D12/D13).** `components/EditableMoney.tsx` — the shared
+editable-money primitive — plus the migration of all three POS price surfaces onto it, the
+`cartDiscountTotal` fix below, and the tour line total moving into the meta as `2 × $200.00 =
+$400.00`. Reported from use: the stay's total had become a raw `1200` in a bordered box, with no
+money read anywhere on the line.
+
+**Bug found and fixed in that follow-up.** `cartDiscountTotal` (`store/posCart.ts`) returned `0`
+for every stay line, so the checkout's «Descuento» row disagreed with the `discount_total` the
+server persists under D9 — the client simply never looked at stays. `posCart.test.ts` had *pinned*
+that zero as intended behaviour; the assertion is rewritten, not deleted.
 
 **Verification.** API 970 green (was 960); frontend 595 green (was 587); `build:api`, `build:app`
 clean; `lint:app` 0 errors. The three defect fixes were mutation-tested: reverting D8, D9 and D10
