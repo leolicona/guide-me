@@ -425,3 +425,59 @@ describe('US-AG47 — the 60-second void', () => {
     expect(foreign.status).toBe(404)
   })
 })
+
+// ---------------------------------------------------------------------------
+// US-AG56 / BUG-031 (D13) — the ⚡ flag uses the same PER-SLOT sellability test
+// Spec: docs/pos/default-filtered-catalog.spec.md (Scenario 17).
+//
+// `express_eligible` was a Σ of effective remaining over today, so a single departure
+// stranded at `booked > capacity` (Soft Cap turned off after selling into the margin)
+// could drag the sum to zero and hide the ⚡ on a service with seats this afternoon.
+// ---------------------------------------------------------------------------
+describe('US-AG56 — express eligibility is per slot, not a sum over today', () => {
+  // The shared seeder pins '10:00' and a 12/12 capacity; eligibility needs two departures
+  // TODAY with distinct times and capacities, both beyond the frozen 12:00Z cutoff.
+  const seedTodaySlot = async (
+    organizationId: string,
+    serviceId: string,
+    startTime: string,
+    capacity: number,
+    booked: number,
+  ): Promise<void> => {
+    const ts = Math.floor(Date.now() / 1000)
+    await env.DB.prepare(
+      `INSERT INTO slots (id, organization_id, service_id, schedule_id, date, start_time, capacity, booked, status, created_at, updated_at)
+       VALUES (?, ?, ?, NULL, ?, ?, ?, ?, 'active', ?, ?)`,
+    )
+      .bind(crypto.randomUUID(), organizationId, serviceId, todayStr(), startTime, capacity, booked, ts, ts)
+      .run()
+  }
+
+  it('Scenario 17 — a stranded negative departure does not hide the ⚡', async () => {
+    const { organizationId } = await seedUser({ email: AGENT_EMAIL, role: 'agent' })
+    const serviceId = await seedService(organizationId)
+    // 43 seats sold under a since-removed 10% margin → effective (40 - 43) = -3.
+    await seedTodaySlot(organizationId, serviceId, '16:00', 40, 43)
+    // …and a later departure today with two seats left.
+    await seedTodaySlot(organizationId, serviceId, '18:00', 12, 10)
+
+    const res = await SELF.fetch(`${base}/services?today=${todayStr()}`, { headers: auth(AGENT_EMAIL) })
+    const body = (await res.json()) as { services: { id: string; express_eligible: boolean }[] }
+    const card = body.services.find((s) => s.id === serviceId)
+
+    // The old Σ read -3 + 2 = -1 and withheld the button from a service that can sell at 18:00.
+    expect(card?.express_eligible).toBe(true)
+  })
+
+  it('a service whose only departures today are genuinely full stays ineligible', async () => {
+    const { organizationId } = await seedUser({ email: AGENT_EMAIL, role: 'agent' })
+    const serviceId = await seedService(organizationId)
+    await seedTodaySlot(organizationId, serviceId, '16:00', 12, 12)
+    await seedTodaySlot(organizationId, serviceId, '18:00', 12, 12)
+
+    const res = await SELF.fetch(`${base}/services?today=${todayStr()}`, { headers: auth(AGENT_EMAIL) })
+    const body = (await res.json()) as { services: { id: string; express_eligible: boolean }[] }
+    // The fix widens nothing: per-slot is stricter here than the sum would have been, not looser.
+    expect(body.services.find((s) => s.id === serviceId)?.express_eligible).toBe(false)
+  })
+})

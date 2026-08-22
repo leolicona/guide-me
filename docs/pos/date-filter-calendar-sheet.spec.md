@@ -1,5 +1,13 @@
 # Feature: POS Date Filter — Quick-Day Strip + Calendar Bottom Sheet
 
+> **Status: BUILT (US-AG35), AMENDED 2026-08-21 (BUG-032).** The amendment closes this spec's own
+> `[~]` DoD deviation — *"tours evaluate availability over the whole selected range, not the start
+> date only; confirm which reading is intended"*. The whole range is the intended reading, and it
+> had shipped on the **catalog** side only: the service detail kept reading `selection.from` alone,
+> so a range whose first day a service does not run opened on *No hay horarios disponibles* under a
+> card advertising a departure. Both sides now resolve the window through one function. No contract
+> changes — the endpoints already accepted `from`/`to`.
+
 ## Context
 
 US-AG30 (`docs/pos/default-filtered-catalog.spec.md`) gave the `/pos` catalog a
@@ -99,18 +107,34 @@ remaining** (`(capacity − booked) + flexible margin`, US-A36) is `> 0`:
 ### Catalog / detail reads — unchanged
 
 `GET /api/pos/services` (US-AG30) and `GET /api/pos/services/:id` keep their contracts.
-The picked day still flows through `selectedDate` → `?date=` / `from`/`to` exactly as
-US-AG30 specifies.
+The picked day still flows through the selection → `?date=` / `from`/`to` exactly as
+US-AG30 specifies. *(BUG-032: both endpoints already honoured a `from`/`to` **range**; only the
+detail's caller was passing `from` twice. The fix is entirely client-side.)*
 
 ---
 
 ## Frontend
 
-### Global state — unchanged
+### Global state
 
-Still the single `selectedDate: string | null` from `store/posFilters.ts` (US-AG30):
-`null` = the "Hoy" anchor (rolling 3-day window); a concrete `YYYY-MM-DD` = that single
-day. The **visible month** in the sheet is **local** component state (resets on close).
+`store/posFilters.ts` (US-AG30) widens from `selectedDate: string | null` to
+`selection: DateSelection | null`, where `DateSelection = { from: string; to?: string }` — a range
+needs two ends, and a single-day pick is the degenerate range that omits `to`. `null` stays "no
+explicit pick" = the contextual week. The **visible month** in the sheet is **local** component
+state (resets on close).
+
+> **Amended by BUG-032 (2026-08-21).** Widening the store was not enough: a `from`-only reader
+> still type-checks and still looks right. Every POS surface now resolves the selection through
+> **one** function rather than re-deriving it — `posWindow(selection, today)` in
+> `features/pos/dates.ts`, with `eachDay(from, to)` giving the slot matrix its day axis:
+>
+> ```ts
+> posWindow(sel, today) = sel ? { from: sel.from, to: sel.to ?? sel.from } : defaultWindow(today)
+> ```
+>
+> The catalog (`PosCatalogPage`), the fast-sale Bottom Sheet (`ServiceSheet`) and the full-page
+> detail (`PosServicePage`) all call it, so they cannot drift apart again. ⚡ Venta Express is the
+> single deliberate exception: it is pinned to **today** whatever the filter says (US-AG45 D5).
 
 ### Inline Filter Strip (`PosCatalogPage`)
 
@@ -221,7 +245,7 @@ light up a day for `org_a`.
       `[firstOfMonth, lastOfMonth]` range itself (no caller-controlled width); never
       returns days `< today`; malformed `month` → `400`. *(+ optional `categories` filter — Open decision 2 alternative, scopes the dots to the active category chips.)*
 - [x] Inline filter strip renders horizontally scrollable category chips, a visual divider, and dynamic week-based context pills (`ESTA SEMANA` / `ESTE FIN` / `SIG. SEMANA`) plus a calendar button. State supports date ranges.
-- [~] Calendar supports range selection for lodging. **Deviation:** Tours evaluate availability over the **whole selected range** `[from, to]` (per SPEC.md §Inventory "availability window" / US-AG30), **not** the start date only (Option 3). Confirm which reading is intended.
+- [x] Calendar supports range selection for lodging. Tours evaluate availability over the **whole selected range** `[from, to]` (per SPEC.md §Inventory "availability window" / US-AG30), **not** the start date only. *(Was `[~]` pending confirmation. **Confirmed and completed by BUG-032, 2026-08-21:** the whole range is the intended reading, and it now holds on **both** sides of the drill-in — the catalog list and the service detail resolve the same window through `posWindow`. Until then the detail read the start date only, which is exactly the bug.)*
 - [x] `PosDatePickerSheet`: Bottom Sheet with a month grid of square day chips, month
       navigation, availability marks from `usePosAvailableDays`, past/unavailable days
       disabled, and a `Hoy` shortcut. Picking a day/range sets the selection and closes.

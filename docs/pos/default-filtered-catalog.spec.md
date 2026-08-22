@@ -1,5 +1,13 @@
 # Feature: Default-Filtered POS Catalog & Lightweight Availability Query
 
+> **Status: BUILT (US-AG30), AMENDED 2026-08-21 (US-AG56 / BUG-031).** The amendment corrects a
+> false premise in § API surface — *"effective remaining is always ≥ 0"* — that made
+> `Σ effective_remaining > 0` stand in for *"any slot is sellable"*, and promotes `next_slot_date`
+> from a lightweight hint to a contract that also carries the **time**. Decisions **D7–D14**;
+> scenarios **S12–S17**; closes this spec's Open decision **2**. Nothing in US-AG30's original
+> scope is superseded — the window, the filters and the payload's shape all stand.
+
+
 ## Context
 
 Today the POS catalog (`GET /api/pos/services`) returns, per active service, a
@@ -79,8 +87,32 @@ persisted.
 A service's **`has_availability`** is `true` ⇔ it has ≥ 1 **active** slot whose
 `date` is inside the window **and** whose **effective remaining** is > 0, where
 effective remaining = `(capacity − booked) + (isFlexible ? floor(capacity × flex_capacity_pct / 100) : 0)`
-(US-A36). Effective remaining is always ≥ 0, so `Σ effective_remaining over window slots > 0`
-is an exact, single-query test for "any slot in window is sellable."
+(US-A36).
+
+> **Amended by BUG-031 / US-AG56 (2026-08-21).** This paragraph used to continue:
+> *"Effective remaining is always ≥ 0, so `Σ effective_remaining over window slots > 0` is an
+> exact, single-query test for 'any slot in window is sellable.'"* **The premise is false.**
+> `updateService` turns Soft Cap off without validating against seats already sold under the old
+> margin, so a slot can sit at `booked > capacity` with `flex_capacity_pct = 0` and contribute a
+> **negative** term — silently cancelling out a sibling that *is* sellable. A `Σ > 0` test answers
+> *"is the fleet net-positive"*, not *"is any one of them sellable"*, and those diverge exactly
+> when a per-slot value goes negative. The test is now **per slot**, matching `listAvailabilityDays`
+> (US-AG35), which had been right all along — the two were never made to agree in a test.
+
+**The test is per slot, and it also produces the departure** (D7–D9 below). One aggregate answers
+both questions, so the two fields can never disagree:
+
+```sql
+MIN(date || 'T' || start_time)            -- the existing lexicographic departure key
+WHERE status = 'active'
+  AND date BETWEEN :windowFrom AND :windowTo
+  AND (date || 'T' || start_time) > :salesCutoff
+  AND ((capacity - booked)
+       + CASE WHEN is_flexible THEN (capacity * flex_capacity_pct) / 100 ELSE 0 END) > 0
+GROUP BY service_id
+```
+
+`has_availability` ≡ `next_slot_date IS NOT NULL`. There is no second query and no Σ.
 
 **Response shape** — `available_spots` is **removed**; `has_availability` replaces it.
 
@@ -97,16 +129,18 @@ is an exact, single-query test for "any slot in window is sellable."
       "flex_capacity_pct": 0,
       "category": "tours",
       "has_availability": true,
-      "next_slot_date": "2026-06-20"
+      "next_slot_date": "2026-06-20",
+      "next_slot_time": "15:00"
     }
   ]
 }
 ```
 
-- `next_slot_date` is **retained** — it is the cheap `min(slots.date)` over the same
-  windowed slots (or `null` when the service has no slot in the window). It is still a
-  useful, lightweight UI hint ("Próximo: …") and adds no slot-level payload. *(Open
-  decision 2 — drop it for strict "boolean only," or keep it.)*
+- `next_slot_date` / **`next_slot_time`** (new, US-AG56) name the **next departure that
+  actually has room** inside the window — `null` together when there is none. Ordering is by the
+  **(date, time) pair**, never by date then time: a service full at Tuesday 09:00, open at
+  Tuesday 15:00 and open again Wednesday 08:00 answers **Tuesday 15:00**.
+  *(Open decision 2 is **closed**: retained, and promoted from "hint" to contract — see D7.)*
 - The order (active services by name), org scoping, and the `is_flexible` /
   `flex_capacity_pct` / `category` fields are unchanged from US-A36/US-A37.
 
@@ -190,6 +224,55 @@ const { data: service } = usePosService(id, range)
 So an agent who filtered the catalog to a date drills into a detail that already
 shows that day's slots — the day context is inherited, no re-selection.
 
+> **Amended by BUG-032 (2026-08-21).** The snippet above is US-AG30's single-day world. US-AG35
+> made the selection a **range** (`{ from, to? }`), and this reader — the sheet's twin included —
+> kept taking `selection.from` alone, so a 21–23 Aug filter opened the detail on the 21st and
+> called the 22nd's departure nonexistent. Both detail hosts now resolve the window with
+> `posWindow(selection, today)` from `features/pos/dates.ts` — the same call the catalog list
+> makes. What this section asserts is unchanged and now actually true: **the day context is
+> inherited, no re-selection.** All of it, not its first day.
+
+---
+
+### Catalog card — the «Próximo» block (US-AG56, amendment)
+
+`PosCatalogPage` already renders a right-aligned footer block labelled **PRÓXIMO** beside the
+`MoneyText` price, gated on `item_type === 'tour' && next_slot_date`. It gains the departure time
+as a **second line under the date**:
+
+```
+DESDE                    PRÓXIMO
+$1,200                 VIE 27 JUN
+                           15:00
+```
+
+- The time renders as the stored **naive `HH:MM`**, unformatted. `SlotPicker` already prints
+  `slot.start_time` raw, so the card and the sheet the agent taps into next speak the same
+  string — and no `Date` is constructed, which is what closes the whole class of BUG-007-style
+  timezone faults at the render layer.
+- Tabular lining figures (the `.numeric` utility) so times align down a scrolled list.
+- Type-safety: `PosUnitTypeCard` gains `next_slot_time: null` beside its existing
+  `next_slot_date: null`, keeping the `PosCatalogItem` discriminated union exhaustive. Lodging
+  cards render no «Próximo» block (unchanged — a stay has no departure time).
+- **D12's loss is visible here:** with *Ocultar agotados* off, a sold-out tour card now shows the
+  **Agotado** chip and **no** «Próximo» block at all, where it previously showed a date the agent
+  could not sell.
+
+Typography, colour and spacing come from the existing block — this amendment re-decides none of
+them (`PROCESS.md` § The design system has exactly one source).
+
+### `ServiceSheet` anchor — unchanged code, corrected behaviour
+
+`ServiceSheet.tsx` keeps `const start = anchor ?? nextSlotDate ?? today` **verbatim**. But
+`nextSlotDate` now names a departure with room, so the sheet opens on a day the agent can
+actually sell instead of on a sold-out one. Two consequences worth recording, since neither is
+visible in the diff:
+
+- A service the catalog reports as available opens the sheet on its **real** next departure.
+- A **sold-out** service (reachable only with *Ocultar agotados* off) now passes `null` and the
+  sheet falls back to **today**. Accepted: the sheet's own matrix still renders the service's
+  operating days, so the agent can still read the schedule — they simply start from today.
+
 ---
 
 ## Scenarios
@@ -228,6 +311,56 @@ has a flexible margin > 0
 **Given** an active service with no active slot inside the window
 **When** the catalog is read
 **Then** `has_availability` is `false` and `next_slot_date` is `null`.
+
+### US-AG56 / BUG-031 — The next departure that actually has room (API)
+
+> Scenarios S12–S17 are the regression surface for BUG-031. S14 in particular would have
+> **passed while the bug was present** had it been written as "a sold-out service reads
+> unavailable" (Scenario 5 above) — the defect needs a sold-out slot standing *in front of* an
+> available one, which no pre-existing scenario arranged.
+
+#### Scenario 12 — A sold-out earlier time does not win the day
+**Given** an active service with two in-window departures on the same date — `09:00` with
+effective remaining `0`, and `15:00` with effective remaining `3`
+**When** `GET /api/pos/services` is read
+**Then** `next_slot_date` is that date and **`next_slot_time` is `"15:00"`**; `has_availability`
+is `true`.
+
+#### Scenario 13 — A fully sold-out day yields to the next day
+**Given** every departure on `today` is sold out and `today + 1` has one departure at `08:00`
+with room
+**When** the catalog is read
+**Then** `next_slot_date` is `today + 1` and `next_slot_time` is `"08:00"` — the ordering is over
+the **(date, time) pair**, so no sold-out earlier date can claim the answer (D8).
+
+#### Scenario 14 — A negative slot cannot suppress a sellable sibling *(BUG-031 (b))*
+**Given** a service whose Tuesday departure sits at `capacity 40 / booked 43` with
+`is_flexible = false` (Soft Cap was turned off after the 43 seats were sold — effective
+remaining `−3`), and whose Wednesday departure has `2` seats free
+**When** the catalog is read
+**Then** `has_availability` is `true` and the next departure is **Wednesday's** — the old
+`Σ = −3 + 2 = −1` reported `Agotado` here, contradicting the calendar dots for the same day.
+
+#### Scenario 15 — Soft Cap margin alone is enough to be the next departure
+**Given** a Soft Cap service whose only in-window departure is full on raw capacity but has a
+flexible margin > 0
+**When** the catalog is read
+**Then** that departure's date **and time** are returned (effective remaining > 0, US-A36) —
+the same arithmetic Scenario 4 asserts for `has_availability`, now also selecting the departure.
+
+#### Scenario 16 — A departure past the sales cutoff is never the answer
+**Given** a service whose earliest in-window departure has passed the org's sales cutoff (US-A47)
+but still has seats, and a later one that has not
+**When** the catalog is read
+**Then** the **later** departure's date and time are returned — the cutoff predicate is unchanged
+by this amendment and still runs before the remaining-spots test.
+
+#### Scenario 17 — Express eligibility uses the same per-slot test *(D13)*
+**Given** a non-zoned service with a sold-out morning departure **today** at `capacity 40 /
+booked 43, is_flexible = false` and an afternoon departure today with seats
+**When** the catalog is read
+**Then** `express_eligible` is `true` — the ⚡ renders, because *some* departure today is
+sellable. The old Σ over today reported `false`.
 
 ### US-AG30 — Filters & state inheritance (frontend)
 
@@ -289,6 +422,50 @@ never set `has_availability` or seed a chip for `org_a`.
       (B4 via `seedTwoOrgs`). Scenarios 7–10 are frontend behaviours.
 - [x] SPEC.md updated (US-AG30, Phase-2 entry, business rule, glossary) — done.
 - [x] `pnpm --filter api-turistear test` green (317); `pnpm build:app` clean (`tsc -b` + vite).
+
+### Amendment DoD — US-AG56 / BUG-031 (2026-08-21)
+
+- [x] `listPosServices` computes `MIN(date || 'T' || start_time)` over slots filtered by the
+      **per-slot** effective-remaining predicate; the `Σ available_spots` column is **deleted**
+      (D8, D9).
+- [x] `has_availability` is derived as `next_slot_date !== null` — no second query (D9).
+- [x] `express_eligible` uses the same per-slot `EXISTS` over today; its Σ is deleted (D13).
+- [x] Payload carries `next_slot_time: string | null`, `null` exactly when `next_slot_date` is.
+- [x] `PosTourCard.next_slot_time` added; `PosUnitTypeCard.next_slot_time: null` keeps the union
+      exhaustive.
+- [x] `PosCatalogPage` «Próximo» block renders date over time, raw `HH:MM`, tabular figures.
+- [x] `ServiceSheet.tsx` **not modified** — the corrected anchor is a behaviour change with an
+      empty diff, recorded in § Frontend rather than in code.
+- [x] Scenarios 12–17 covered in `test/pos/pos-catalog-availability.test.ts`; Scenario 17 in
+      `test/pos/express-sale.test.ts`.
+- [x] The false premise in § API surface is annotated, not silently deleted (`PROCESS.md`
+      § Amending a spec).
+- [x] `SPEC.md`: US-AG56 story + Features-by-Phase line amended + glossary term.
+- [ ] `BUGS.md`: BUG-031 flipped to ✅ FIXED with the merged PR number.
+- [x] `TECH_DEBT.md`: the `updateService` negative-remaining hole filed (D14).
+- [x] `pnpm --filter api-turistear test` green (**951**, up from 942); `pnpm build:app` clean
+      (`tsc -b` + vite). Scenarios 1–11 pass **unedited** — the mechanical proof that US-AG30's
+      contract survived. Scenarios 12–14 and the D12 loss were re-run against the restored defect
+      and **fail**, so they detect the bug rather than merely describing it.
+
+---
+
+## Decisions — US-AG56 / BUG-031 amendment (2026-08-21)
+
+Numbered from **D7** so they do not collide with the six *Open decisions* below, which this
+amendment closes #2 of. Every row is a decision the interview resolved, with the reason that made
+it the answer rather than the alternative.
+
+| # | Decision | Why |
+|---|---|---|
+| **D7** | `next_slot_date` is promoted from *"lightweight UI hint"* to **contract**: the next departure with room, inside the window. | A field the agent quotes to a customer is not a hint. Its "hint" status is precisely why no scenario ever asserted it and why BUG-031 survived two features. |
+| **D8** | Ordering is `MIN(date \|\| 'T' \|\| start_time)` — the **(date, time) pair**, not `MIN(date)` then the earliest time of that date. | `MIN(date)` picks the right day and then cannot name a time on it; the pair is the only ordering under which "Tuesday 09:00 sold out → Tuesday 15:00" beats "Wednesday 08:00". The key already exists — `sellableSlotSql` compares departures this way for the sales cutoff. |
+| **D9** | `has_availability` ≡ `next_slot_date IS NOT NULL`. The `Σ effective_remaining` query is **deleted**, not fixed. | Two fields answering one question is how they came to disagree. Deriving one from the other makes the contradiction unrepresentable rather than merely untested. Also aligns the card with `listAvailabilityDays` (US-AG35), which was already per-slot. |
+| **D10** | Availability means **≥ 1 effective spot**, including the Soft Cap margin — **not** the party size. | The card has no party size; the group is chosen inside the sheet (US-AG32). A card that hides 09:00 because a hypothetical party of 4 would not fit tells a worse lie than one that shows it and lets the sheet filter. Identical threshold to the calendar dots, which is the point of D9. |
+| **D11** | "Next available" stays **bounded by the selected window** and never escapes it to find a truly-next departure. | Escaping the window would make `next_slot_date` non-null while `has_availability` is false — reopening D9's contradiction from the other side. Worth stating because the label «Próximo» reads absolute and is not. Note the real default window is `today … coming Sunday` (`defaultWindow`, US-AG55 D15 — formerly `contextPills`), 1–7 days wide, not the 3 days this spec's § API surface still describes — `AVAILABILITY_WINDOW_DAYS` is a server-side fallback the shipped client never triggers. |
+| **D12** | A sold-out service loses its «Próximo» block entirely (both fields `null`) rather than gaining a second `next_operating_date` field. | **Named loss.** The card's job is to sell; *Agotado* beside a date the agent cannot sell is the exact confusion being removed. The service's real schedule is one tap away in the sheet, which still renders non-operating and sold-out days per US-AG33. |
+| **D13** | `express_eligible` takes the same per-slot `EXISTS` over today. | It carried the identical Σ defect. Leaving it would keep two contradictory definitions of *sellable* in one handler — the condition that produced this bug. |
+| **D14** | `updateService` is **not** hardened here against stranding a slot at negative effective remaining. | Separate defect, separate blast radius (it also leaves the slot unsellable-but-scheduled), and the read path must be correct however the write path is later fixed. Deferring is safe because the read no longer *sums*, so a negative slot can only fail to advertise itself — it can no longer suppress a sibling. Filed in `TECH_DEBT.md`. |
 
 ---
 

@@ -6,6 +6,171 @@ Tracks confirmed bugs, root causes, and fixes. Each entry is immutable once clos
 
 ---
 
+## BUG-032 — The POS Detail Answers for the First Day of a Range and Calls the Rest Nonexistent — ✅ FIXED
+
+**Found:** 2026-08-21, reported from the floor: filter `/pos` to **21–23 Aug**, open the card for
+«Taller del alfarero» that reads **«Próximo: Sáb 22»**, and the sheet says *No hay horarios
+disponibles para este servicio*.
+
+**Affected component:** `app-turistear/src/features/pos/components/ServiceSheet.tsx` and
+`app-turistear/src/pages/PosServicePage.tsx` (frontend only — the API was correct throughout).
+
+**Severity:** High — the service looks unsellable. An agent with a customer in front of them reads
+the empty state as *this tour has no departures* and quotes something else, or nothing.
+
+### Symptom
+
+The catalog card and the detail that opens from it disagree about the same service, in the same
+session, one tap apart. The card names a departure; the detail denies every departure exists.
+
+Any range whose **first day** the service does not run reproduces it. A range whose first day it
+does run hides the defect — the sheet shows that day's times and silently omits the rest.
+
+### Root cause
+
+`store/posFilters.ts` holds the agent's pick as `DateSelection = { from, to? }`. The catalog reads
+it whole (`selection ?? defaultWindow(today)`, then `to ?? from`) and asks the API for
+`?from=2026-08-21&to=2026-08-23`; `next_slot_date` comes back as **the 22nd**, correctly.
+
+The detail read only `from`:
+
+```ts
+const anchor = usePosFilters((s) => s.selection?.from ?? null)
+const days = anchor ? [anchor] : [start, addDays(start, 1), addDays(start, 2)]
+const range = { from: days[0], to: days[days.length - 1] }   // → { from: 21, to: 21 }
+```
+
+So it asked for `?from=2026-08-21&to=2026-08-21`. The server obeyed
+(`gte(slots.date, from)` + `lte(slots.date, to)`, `handler.ts` § `getPosService`), returned zero
+slots, and `ServiceSelectionPanel` rendered its empty state. Every layer behaved as written.
+
+`anchor ? [anchor]` is US-AG33 code, from when a selection **was** a single day. US-AG35 added
+ranges to the store, to the catalog and to the endpoint — and the detail was never revisited. Its
+own comment still read *"An explicit date stays a single day"*, which is why nobody caught it by
+reading: the code matched a promise the product had stopped making.
+
+The same divergence had a quieter second face. With **no** pick the catalog lists the contextual
+week (today → Sunday) while the sheet opened a rolling 3-day window — so a Monday agent browsing
+the week could not see Thursday's departure in a detail whose card advertised it.
+
+### Fix (#TBD)
+
+One function resolves the window, and every POS surface calls it —
+`posWindow(selection, today)` in `features/pos/dates.ts`, with `eachDay(from, to)` spelling out the
+day axis the slot matrix renders. The catalog's expression is now the definition rather than one of
+three copies: a range keeps its `to`, a single-day pick collapses to that day, no pick means
+`defaultWindow(today)`. ⚡ Express is untouched — it is pinned to today by US-AG45 D5, whatever the
+catalog is filtered to.
+
+The card's `next_slot_date` therefore stops being a hint the sheet had to be handed: computed over
+the window the sheet now reads, it is by construction the first departure the sheet renders, so
+`ServiceSheet`'s `nextSlotDate` prop and the catalog state carrying it are gone.
+
+Pinned by `src/features/pos/components/ServiceSheet.test.tsx` — the reported scenario as a whole
+(21–23 Aug, a service that runs only on the 22nd), which fails on the old code with the exact
+string from the report — plus `posWindow` / `eachDay` in `src/features/pos/dates.test.ts`.
+
+**Resolves the open question in `docs/pos/date-filter-calendar-sheet.spec.md`'s DoD** — *"tours
+evaluate availability over the whole selected range, not the start date only — confirm which
+reading is intended"*. The whole range was the intended reading; it had been implemented on one
+side of the drill-in only, and a half-applied answer is what this bug is.
+
+---
+
+## BUG-031 — The POS Catalog Advertises a Departure That Is Already Sold Out — ⚠️ OPEN
+
+**Found:** 2026-08-21, adding the departure **time** beside the date on the POS service card (the
+question "which time do we show?" had no correct answer, because the date it would sit beside was
+not the next *sellable* departure).
+
+**Affected component:** `api-turistear/src/routes/pos/handler.ts` (`listPosServices`) and its
+contract in `docs/pos/default-filtered-catalog.spec.md` § API surface.
+
+**Severity:** Medium — the catalog makes a factual claim about inventory that the sale then
+refuses, on the screen an agent uses to quote a customer standing in front of them.
+
+### Symptom
+
+Two distinct wrong answers from the same aggregate.
+
+**(a) `next_slot_date` names a sold-out departure.** A service whose Tuesday 09:00 is full and
+whose Tuesday 15:00 has room advertises **Tuesday** — correct by luck. A service whose *only*
+Tuesday departure is full and which has room on Wednesday still advertises **Tuesday**. The agent
+quotes a date they cannot sell.
+
+**(b) `has_availability` reads `Agotado` on a service that has seats.** With the numbers below the
+card says sold out while the calendar Bottom Sheet lights the same day up.
+
+### Root cause
+
+Both live in one aggregate (`handler.ts:274–302`), whose `WHERE` filters on `status = 'active'`,
+the availability window, and the sales cutoff (`sellableSlotSql`) — **and on nothing about
+remaining spots**:
+
+```ts
+availableSpots: sql`sum((capacity - booked) + CASE WHEN is_flexible …)`,
+nextSlotDate:   sql`min(${slots.date})`,     // ← no remaining > 0 predicate
+```
+
+`min(date)` therefore ranges over every *scheduled* slot, sold out or not — defect (a). It is also
+`min(date)` rather than `min(date, start_time)`, so it could not name a time even if it wanted to.
+
+Defect (b) is subtler, and the spec states the false premise out loud:
+
+> *"Effective remaining is always ≥ 0, so `Σ effective_remaining over window slots > 0` is an
+> exact, single-query test for 'any slot in window is sellable.'"*
+> — `default-filtered-catalog.spec.md` § API surface
+
+**Effective remaining is not always ≥ 0.** `updateService` (`routes/services/handler.ts:267–269`)
+turns Soft Cap off — writing `flex_capacity_pct: 0` — **without validating against seats already
+sold under the old margin**:
+
+| Step | capacity | booked | flex % | effective |
+|---|---|---|---|---|
+| Soft Cap on, margin 10% → ceiling 44 | 40 | — | 10 | — |
+| 43 sold on Tuesday (legal) | 40 | 43 | 10 | `−3 + 4 = 1` |
+| Admin turns Soft Cap **off** | 40 | 43 | **0** | **`−3`** |
+
+With 2 seats free on Wednesday the window sums to `−3 + 2 = −1`, so `has_availability` is `false`
+— while `listAvailabilityDays`, which applies the same arithmetic **per slot**, lights Wednesday
+up. One screen, two contradictory answers, from data an admin can produce in three clicks.
+
+A negative slot cannot be *made* sellable by the sum, but it can silently **cancel out** a sibling
+that is. A `Σ > 0` test answers "is the fleet net-positive", not "is any one of them sellable" —
+and those diverge exactly when a per-slot value goes negative.
+
+### Why it survived
+
+`has_availability` and the calendar dots were built in different features (US-AG30 and US-AG35)
+and never had to agree in a test. `next_slot_date` was carried as a "cheap `min(date)` … useful,
+lightweight UI hint" (the spec's own Open decision 2) — hint-shaped things do not attract
+assertions, and no scenario in the spec ever placed a sold-out slot **before** an available one.
+
+### Fix
+
+Not yet merged — see `docs/pos/default-filtered-catalog.spec.md` (amended) and **US-AG56**. One
+aggregate replaces two, carrying the per-slot predicate `listAvailabilityDays` already uses, so
+card, calendar and Express share a single definition of *sellable*:
+
+```
+MIN(date || 'T' || start_time)            -- the existing lexicographic departure key
+WHERE status='active' AND date BETWEEN :from AND :to
+  AND (date || 'T' || start_time) > :cutoff
+  AND ((capacity - booked)
+       + CASE WHEN is_flexible THEN (capacity * flex_pct)/100 ELSE 0 END) > 0
+GROUP BY service_id
+```
+
+`has_availability` becomes `next_departure IS NOT NULL` — the two fields can no longer disagree,
+because there is only one of them. `express_eligible` takes the same `EXISTS` over today.
+
+**Deliberately not fixed here:** `updateService` still lets an admin strand a slot at negative
+effective remaining. That is a separate defect with a separate blast radius (it also makes the
+slot unsellable-but-scheduled), and the read path must be correct regardless of how the write path
+gets fixed. Filed as `TECH_DEBT.md` rather than widened into this change.
+
+---
+
 ## BUG-030 — Cancelling an Unverified-Transfer Folio Mints a Refund PIN for Money Never Confirmed — ✅ FIXED
 
 **Found:** 2026-08-07, designing the folio detail's blocking-first action ladder (the question "should

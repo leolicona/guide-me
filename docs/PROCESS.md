@@ -65,13 +65,13 @@ cd .claude/worktrees/<name>
 | **Commits** | Conventional Commits with the **domain** as scope: `feat(cancellation):` · `fix(bookings):` · `docs(spec):` · `test(paid-ledger):` |
 | **PR** | Base **`develop`**, title mirroring the lead commit. Squash-merged, so the PR title becomes the commit on `develop` — write it as the sentence you want in the history |
 | **CI** | The `verify` job must pass before merge |
-| **Release** | A PR **`develop` → `main`**, titled `release: <what> → prod`. Nothing deploys from a laptop (`docs/ci-cd.md`) |
+| **Release** | A PR **`develop` → `main`**, titled `release: <what> → prod`. **Merged with a merge commit, never squashed** (see the third rule below). Nothing deploys from a laptop (`docs/ci-cd.md`) |
 
 Why worktrees rather than switching branches in place: the dev servers bind **fixed ports by
 design** (BUG-008) and each checkout carries its own local D1. Switching branches under a running
 server is how you end up debugging yesterday's schema.
 
-**Two rules that exist because breaking them has already cost us:**
+**Three rules that exist because breaking them has already cost us:**
 
 - **Never bare `git stash` / `git stash pop`.** The stash stack is shared across every worktree, so
   a pop can take work that belongs to another session. Prefer a temporary WIP commit; if you must
@@ -79,6 +79,36 @@ server is how you end up debugging yesterday's schema.
 - **A feature's `SPEC.md` registration ships inside that feature's PR.** The apartado-stages entry
   was written in a worktree, the branch was merged from elsewhere without it, and the index silently
   lost a shipped feature. "I'll add it after merging" is how the index rots.
+
+- **Squash `feature → develop`. Merge-commit `release → main`.** The two directions want opposite
+  things. A feature is one unit of work, so squashing it into a single titled commit is exactly
+  right. A release is not a change to `main` — it is `main` *catching up to* `develop`, and squashing
+  it throws away the ancestry that says so. Releases #84 and #99 were both squashed, and the cost
+  landed on #108: `main` held commit `a043028` whose tree was byte-identical to `develop@56f5e53`,
+  yet with no ancestry link the merge-base fell back two releases to #84. Git replayed all of
+  #85–#98 as a rival change and reported **11 phantom conflicts** in files where `main` had nothing
+  `develop` lacked. On GitHub choose **"Create a merge commit"** for a release PR — not
+  "Squash and merge".
+
+  If a release was already squashed and the next release PR opens in conflict, do **not** resolve
+  the files by hand — you would be re-resolving content that already agrees. Confirm `main` holds
+  nothing new, then record it with an empty merge:
+
+  ```bash
+  # 1. Prove main's content is already in develop — both must print the same tree
+  git rev-parse origin/main^{tree}
+  git rev-parse <the-develop-commit-that-was-released>^{tree}
+
+  # 2. Record main as merged, keeping develop's tree untouched
+  git checkout develop && git pull --ff-only
+  git merge -s ours origin/main -m "chore(release): record release #NN as merged into develop"
+  git diff origin/develop   # MUST be empty before pushing
+  git push origin develop
+  ```
+
+  This one goes straight to `develop` rather than through a PR: a PR into `develop` is
+  squash-merged, and squashing a merge commit drops its second parent — which is the whole point
+  of the commit, so the conflicts would come straight back.
 
 Delete the worktree when its PR merges: `git worktree remove .claude/worktrees/<name>`.
 

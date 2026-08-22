@@ -199,13 +199,20 @@ const extraReadColumns = {
   price: serviceExtras.price,
 } as const
 
-// US-AG03 / US-AG10 / US-AG30 / US-AG35 — POS catalog: active services with a LIGHTWEIGHT,
-// windowed availability flag (no slot details, no spot count). `has_availability` is
-// true when the service has ≥ 1 active slot with effective remaining > 0 inside the
-// availability window; `next_slot_date` = earliest active slot date in that window
-// (or null). The window is the SEMANTIC DATE RANGE the agent selected — `from`/`to`
-// (US-AG35's context pills or a calendar range) — or a single `date` (legacy single-day
-// pick), or a rolling 3-day span (today … today + 2) by default (US-AG30).
+// US-AG03 / US-AG10 / US-AG30 / US-AG35 / US-AG56 — POS catalog: active services with a
+// LIGHTWEIGHT, windowed availability answer (no slot details, no spot count).
+//
+// ONE aggregate answers both questions (BUG-031, D8/D9): the next departure with ROOM, as the
+// minimum of the `(date, start_time)` pair over slots that are active, in-window, past neither
+// the sales cutoff nor sold out. `has_availability` is then simply "that row exists" — it is not
+// computed separately, so the flag and the departure cannot disagree. It previously was, and did:
+// a `Σ effective_remaining > 0` over the window could read Agotado while the calendar Bottom
+// Sheet lit the same day up (see `slotHasRoomSql`).
+//
+// The window is the SEMANTIC DATE RANGE the agent selected — `from`/`to` (a US-AG35 calendar
+// range, or the `defaultWindow` default of today … coming Sunday) — or a single `date` (legacy
+// single-day pick). `AVAILABILITY_WINDOW_DAYS` below is only a fallback for a caller that sends
+// neither; the shipped client always sends `from`/`to`, so it never fires.
 export const listPosServices = async (c: PosContext) => {
   const agent = c.get('user')
   const db = getDb(c.env)
@@ -274,13 +281,7 @@ export const listPosServices = async (c: PosContext) => {
   const availabilityRows = await db
     .select({
       serviceId: slots.serviceId,
-      availableSpots: sql<number>`sum(
-        (${slots.capacity} - ${slots.booked})
-        + (CASE WHEN ${services.isFlexible}
-                THEN (${slots.capacity} * ${services.flexCapacityPct}) / 100
-                ELSE 0 END)
-      )`,
-      nextSlotDate: sql<string>`min(${slots.date})`,
+      nextDeparture: nextDepartureSql(),
     })
     .from(slots)
     .innerJoin(services, eq(slots.serviceId, services.id))
@@ -292,12 +293,21 @@ export const listPosServices = async (c: PosContext) => {
         gte(slots.date, windowFrom),
         lte(slots.date, windowTo),
         sellableSlotSql(sellableThreshold),
+        // BUG-031 (a) — and it must have a seat left. Without this the MIN below ranged over
+        // every SCHEDULED departure, so a sold-out morning claimed the answer.
+        slotHasRoomSql(),
       ),
     )
     .groupBy(slots.serviceId)
 
+  // One aggregate, two fields: the departure is the answer, and `has_availability` is merely
+  // whether there is one (D9). A service with no qualifying slot has no row at all, so both
+  // read null/false from the same absence — they cannot contradict each other.
   const availability = new Map(
-    availabilityRows.map((r) => [r.serviceId, r]),
+    availabilityRows.flatMap((r) => {
+      const [date, time] = (r.nextDeparture ?? '').split('T')
+      return date && time ? [[r.serviceId, { date, time }] as const] : []
+    }),
   )
 
   // US-AG45 (D4) — Express eligibility is TODAY-anchored regardless of the catalog's selected
@@ -305,15 +315,7 @@ export const listPosServices = async (c: PosContext) => {
   // Saturday must not light it up for Saturday). Same effective-remaining + cutoff math as the
   // window query, collapsed to one day and a membership set.
   const todayRows = await db
-    .select({
-      serviceId: slots.serviceId,
-      availableSpots: sql<number>`sum(
-        (${slots.capacity} - ${slots.booked})
-        + (CASE WHEN ${services.isFlexible}
-                THEN (${slots.capacity} * ${services.flexCapacityPct}) / 100
-                ELSE 0 END)
-      )`,
-    })
+    .select({ serviceId: slots.serviceId })
     .from(slots)
     .innerJoin(services, eq(slots.serviceId, services.id))
     .where(
@@ -322,12 +324,15 @@ export const listPosServices = async (c: PosContext) => {
         eq(slots.status, 'active'),
         eq(slots.date, today),
         sellableSlotSql(sellableThreshold),
+        // BUG-031 (D13) — the same PER-SLOT test. This was a Σ over today, so one departure
+        // stranded at `booked > capacity` could hide the ⚡ on a service with seats this
+        // afternoon. Membership now means "some departure today is sellable", which is what
+        // Express actually needs.
+        slotHasRoomSql(),
       ),
     )
     .groupBy(slots.serviceId)
-  const sellableToday = new Set(
-    todayRows.filter((r) => Number(r.availableSpots) > 0).map((r) => r.serviceId),
-  )
+  const sellableToday = new Set(todayRows.map((r) => r.serviceId))
 
   // Lodging (spec §4.3, D14 — FLATTENED catalog): the parent lodging service is never a card;
   // it contributes one `unit_type` card per active type, each with its exact nightly rate,
@@ -362,9 +367,14 @@ export const listPosServices = async (c: PosContext) => {
         // US-A37 — primary category (or null for a pre-migration service); drives the POS
         // filter chips, which the client derives from the present, non-null categories.
         category: s.category,
-        // US-AG30 — lightweight boolean (no count): ≥ 1 in-window slot is sellable.
-        has_availability: a ? Number(a.availableSpots) > 0 : false,
-        next_slot_date: a ? a.nextSlotDate : null,
+        // US-AG30 / BUG-031 D9 — derived, never computed separately: there is availability
+        // exactly when there is a next departure. One fact, so no second field to disagree.
+        has_availability: a !== undefined,
+        // US-AG56 — the next departure that actually HAS ROOM, bounded to the window (D11).
+        // Both null together on a sold-out service: the card drops its «Próximo» block rather
+        // than naming a date nobody can sell (D12, a named loss).
+        next_slot_date: a?.date ?? null,
+        next_slot_time: a?.time ?? null,
         // US-AG45 (D4) — the ⚡ renders only where Express can work: slot-based (this branch),
         // non-zoned, with a sellable departure TODAY. The server re-enforces at confirm
         // (EXPRESS_NOT_ELIGIBLE); this flag only decides whether the button exists.
@@ -394,7 +404,9 @@ export const listPosServices = async (c: PosContext) => {
       has_availability: t.hasAvailability,
       // Drives the "Quedan N" low-inventory badge.
       remaining: t.remaining,
+      // A stay has no departure time; both null keep the client's discriminated union exhaustive.
       next_slot_date: null,
+      next_slot_time: null,
     }
   })
 
@@ -450,13 +462,11 @@ export const listAvailabilityDays = async (c: PosContext) => {
         sellableSlotSql(sellableThreshold),
         // US-A37 — scope the dots to the agent's selected category filter (when any).
         ...(categories ? [inArray(services.category, categories)] : []),
-        // US-A36 — effective remaining > 0 per slot: raw remaining plus the flexible margin
-        // (floor(capacity × pct / 100)) for a Soft Cap service. Grouping by date then yields
-        // exactly the days with at least one sellable slot.
-        sql`((${slots.capacity} - ${slots.booked})
-             + (CASE WHEN ${services.isFlexible}
-                     THEN (${slots.capacity} * ${services.flexCapacityPct}) / 100
-                     ELSE 0 END)) > 0`,
+        // US-A36 — effective remaining > 0 per slot. Grouping by date then yields exactly the
+        // days with at least one sellable slot. This read was ALREADY correct; BUG-031 was the
+        // catalog drifting away from it. Now literally the same predicate, so they cannot drift
+        // again without a compiler error.
+        slotHasRoomSql(),
       ),
     )
     .groupBy(slots.date)
@@ -717,6 +727,32 @@ const salesThresholdStr = (nowSec: number, cutoffOffsetMin: number, tz: string):
 // fixed-width minute string, lexicographically comparable to the org-local threshold string.
 const sellableSlotSql = (thresholdStr: string) =>
   sql`(${slots.date} || 'T' || ${slots.startTime}) > ${thresholdStr}`
+
+// US-A36 / BUG-031 — the PER-SLOT "has room" test: raw remaining plus the flexible margin
+// (floor(capacity × pct / 100)) for a Soft Cap service. This is the single definition of
+// *sellable inventory*, shared by the catalog flag, the catalog's next departure, the Express
+// eligibility set and the calendar dots — four readers that used to carry three copies of it.
+//
+// It is deliberately PER SLOT and never summed. `default-filtered-catalog.spec.md` used to
+// justify a `Σ … > 0` over the window on the premise that effective remaining is always ≥ 0;
+// it is not. `updateService` clears `flex_capacity_pct` without validating against seats already
+// sold under the old margin, so a departure can sit at `booked > capacity` and contribute a
+// NEGATIVE term — cancelling out a sibling that genuinely has seats. The sum answers "is the
+// fleet net-positive", which is a different question from "can I sell anything", and the two
+// diverge exactly when one slot goes negative (BUG-031 (b)).
+const slotHasRoomSql = () =>
+  sql`((${slots.capacity} - ${slots.booked})
+       + (CASE WHEN ${services.isFlexible}
+               THEN (${slots.capacity} * ${services.flexCapacityPct}) / 100
+               ELSE 0 END)) > 0`
+
+// BUG-031 (a) — the next departure is the MINIMUM OF THE (date, time) PAIR, not `min(date)`.
+// `min(date)` names the earliest day and then cannot name a time on it, and picks a sold-out
+// morning over an available afternoon of the same day. `date || 'T' || time` is fixed-width, so
+// it sorts lexicographically as a real departure ordering — the same key `sellableSlotSql`
+// already compares against the sales cutoff. Returned as one string and split at read.
+const nextDepartureSql = () =>
+  sql<string | null>`min(${slots.date} || 'T' || ${slots.startTime})`
 
 // JS form for the write guard (confirmSale / reactivate): sellable ⟺ slot start > threshold.
 const isSlotSellable = (

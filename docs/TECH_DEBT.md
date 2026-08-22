@@ -2,7 +2,75 @@
 
 This document tracks known technical debt, deferred tasks, and architectural improvements that are planned for future phases.
 
-## 26. `contextPills` Carries Copy the UI Never Renders (`PILL_LABELS`)
+## 28. Two Units of One Property May Share a Name — ⚠️ OPEN
+
+**Context:** `migrations/0035_create_accommodation_units.sql` declares `name text NOT NULL` with no
+UNIQUE, and `routes/services/lodging.handler.ts:194` inserts without checking, so one property can
+hold two active units called «Cabaña Río». Because the POS catalog is flattened — one card per unit
+(US-AG37) — the duplicate reaches the seller as two visually identical cards with no way to tell
+which inventory each draws from.
+
+**Why it is not fixed in the US-A91 PR:** that PR closes both **reachable** frontend doors — the
+wizard's attach mode feeds its guard from `useUnits(propertyId)` (D11) and the detail page's
+`UnitFormSheet` shares `UnitFields` — so no UI path creates a duplicate any more. The server-side
+constraint is a different unit of work: it needs a migration, a decision about duplicates that may
+already exist in the live org (`prod` has a real tenant), and a `DUPLICATE_UNIT_NAME` error
+contract. Bolting that onto a frontend-only PR would break its scope boundary.
+
+**What is still wrong:** a direct API call, a seed script, or a future non-UI writer can still
+create the collision, and nothing in the database prevents it.
+
+**Fix when picked up:** a partial UNIQUE index over `(service_id, lower(name))` limited to
+`status = 'active'` (deactivated units must be free to keep their names — folio history reads
+them), a backfill that renames any existing collision deterministically, and `409
+DUPLICATE_UNIT_NAME` declared in the spec's error table before it exists in code.
+**Reference:** `docs/lodging/unit-authoring-entry.spec.md` § Deferred.
+
+## 27. `updateService` Can Strand a Slot at Negative Effective Remaining — ⚠️ OPEN
+
+**Context:** `routes/services/handler.ts:267–269` writes `flexCapacityPct: input.is_flexible ?
+(input.flex_capacity_pct ?? 0) : 0` with **no validation against seats already sold**. A Soft Cap
+service at `capacity 40 / flex 10 %` legally reaches `booked = 43`; turning Soft Cap off then
+leaves that departure at an effective remaining of `(40 − 43) + 0 = −3`. The same hole exists for
+*lowering* the percentage rather than clearing it.
+
+**Why it is not fixed in the US-AG56 PR:** that PR fixes the **read** (BUG-031), and the read must
+be correct however the write is later hardened. Deferring is safe *for the catalog* because the
+read no longer sums: a negative slot can now only fail to advertise itself, where before it could
+**suppress a sellable sibling** and make the card contradict the calendar.
+
+**What is still wrong:** the stranded departure is scheduled but unsellable — it renders in the
+service sheet, and every per-slot availability path correctly refuses it, with nothing anywhere
+telling the admin they created it. The customers holding those 43 seats are unaffected; only new
+sales into that departure are impossible.
+
+**Fix when picked up:** refuse the update (`409`) when any future slot of the service would land
+below zero under the new capacity mode, naming the departures — the same shape as the zone
+operations, which already reconcile every future slot in one statement
+(`routes/services/zones.reconcile.ts`). An admin who genuinely wants the reduction should cancel
+or move the excess bookings first, which is a decision only they can make.
+
+**Found:** 2026-08-21, while establishing the root cause of BUG-031.
+
+---
+
+## 26. `contextPills` Carries Copy the UI Never Renders (`PILL_LABELS`) — ✅ CLOSED (2026-08-21)
+
+**Closed:** the copy became **live** rather than being deleted — which is the escape clause this
+entry named. `defaultWindowLabel(today)` renders «Esta semana» / «Fin de semana» / «Hoy» on the
+`/pos` calendar chip (`filter-strip-reset.spec.md` D14), so the strip states how much of the week it
+is listing instead of hiding a 7× swing behind one word. `contextPills`, `PILL_LABELS`,
+`ContextPillKey`, `ContextPill` and the never-read second pill are **deleted**; what survives is
+`defaultWindow(today)` — the one range the function always served — plus the labeller.
+
+The deferral reason resolved itself: this change *is* the PR where rewriting `dates.test.ts` is the
+point. The old suite's concrete expected values for index `0` are ported verbatim to
+`defaultWindow`, so the collapse carries its own equivalence proof (spec S-13) rather than leaning
+on a boundary it had to edit.
+
+<details>
+<summary>Original entry (for history)</summary>
+
 
 **Context:** `features/pos/dates.ts:90` defines `PILL_LABELS` (`ESTA SEMANA` / `ESTE FIN` /
 `SIG. SEMANA`) and `contextPills` returns a `label` on every pill. Those labels were specified by
@@ -24,6 +92,8 @@ proves US-AG55 changed no ranges. Doing it in the same PR would blur the two.
 - **What:** collapse `contextPills` to the single default range it actually serves, drop
   `PILL_LABELS` and `ContextPillKey`, and rewrite `dates.test.ts` around the surviving contract.
 - **Reference:** `docs/pos/filter-strip-reset.spec.md` (D12, Deferred table).
+
+</details>
 
 
 ## 25. `folios.status` (+ its sibling roll-ups) Survive as Reconciled Columns — ✅ CLOSED (2026-08-12)
