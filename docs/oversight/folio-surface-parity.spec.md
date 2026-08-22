@@ -90,6 +90,7 @@ does not — so the admin taking the *"my QR doesn't scan"* call cannot see what
 | **D11** | **`?date=` on the seller endpoint is replaced by `from`/`to`** — the admin endpoint's own parameter names, through the same `dateRangeFilter` helper — with no deprecation window. *(The URL the user sees keeps its Spanish `?desde=&hasta=`; that is the app's address bar, not the API.)* | It has **no call sites** — `MyFolioFilters.date` is dead code (`services/posService.ts:189`). Keeping a parameter alive out of habit is how a second date semantics survives; this one also matches UTC days, the defect US-A83 D9 named. |
 | **D12** | **The seller's list query and the delivery-badge count share one cache key.** | `usePendingDeliveryCount` keys on `{status:'paid'}` while the list keys on `{}`; once the list reads unfiltered, they are the same read and the badge stops firing a second request. Consistency comes free with correctness here. |
 | **D13** | **What stays different is named, and only three things are on the list:** the **verbs** (capability), the **byline** (audience — agent vs shift operator, US-A82 D13), and the **nav badge** (the work each role can do). | A parity spec that does not enumerate the permitted differences invites the next reader to erase them. |
+| **D16** | **The two frontend detail types collapse into one**: `Folio` is now an alias of `FolioDetail`, `FolioLine` of `FolioDetailLine`, `PosCancellationQuote` of `CancellationQuote`. | Deferred out of PR-1 as a cleanup; PR-3 proved it was not one. The shared screen's `data?.folio` is a union of the two, and every field access failed to compile — `agent` missing on one side, `payment_method` optional on one and required on the other. Two hand-maintained declarations of one server payload is the same defect as two serializers, one layer up: it is what let the seller's screen fall behind, because the fields the admin read did not exist over here. |
 | **D15** | **The list ROW is serialized once too** — `serializeFolioListRow` in `utils/folioListRows.ts`, called by both list handlers — and the two rows are byte-identical, `agent` included. | Found while building PR-2: the seller's row omitted `refund_status`, `refund_amount`, `credit_amount` and `payment_reference`, which the **shared `FolioCard` reads to choose its money reading**. So a cancelled sale on the seller's list rendered a degraded figure for exactly the reason its detail rendered `Pagado $3,000` — one payload, written twice. Sending `agent` to a surface that does not display it is the cheaper half of the trade: identical rows cannot drift, and which name is *shown* is already a client decision (D13). |
 | **D14** | **The affiliate manager rides the seller surface unchanged**; the server's `?operator=` filter stays unexposed. | Out of scope, and it is a fourth axis the admin does not have — a facet section of its own, deserving its own story rather than a rider on this one (`TECH_DEBT.md`). |
 
@@ -231,10 +232,12 @@ Then `404`, and seller B's sales never appear in A's list.
 - [x] One row serializer, both lists (D15)
 - [x] S-4…S-9, S-14 covered; `FolioListScreen.test.tsx` parameterized by surface (D10)
 
-**PR-3 — the shared detail (US-A93)**
-- [ ] `FolioDetailScreen` + `FolioWorkActions surface`; hand-rolled delivery card deleted
-- [ ] `SectionCard` on both; QR section on the admin, collapsed
-- [ ] S-10 covered
+**PR-3 — the shared detail (US-A93)** ✅
+- [x] `FolioDetailScreen` + `FolioWorkActions surface`; hand-rolled delivery card deleted
+- [x] `SectionCard` on both; QR section on the admin, collapsed
+- [x] **One frontend detail type**: `Folio` = `FolioDetail`, `FolioLine` = `FolioDetailLine`,
+      `PosCancellationQuote` = `CancellationQuote` (the D6 cleanup PR-1 deferred)
+- [x] S-10 covered (`FolioDetailScreen.test.tsx`, `FolioWorkActions.test.tsx` by surface)
 
 **PR-4 — the vocabulary (US-UX07)**
 - [ ] S-11; glossary updated
