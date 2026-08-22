@@ -47,7 +47,10 @@ const SALIDA_DATETIME = new Intl.DateTimeFormat('es-MX', {
 const SALIDA_DATE = new Intl.DateTimeFormat('es-MX', {
   day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC',
 })
-function salidaLabel(date: string, time?: string | null): string {
+/** Exported for the ticket card, which used to print the raw ISO pair two lines below this very
+ *  sentence — «2026-09-07 · 08:00» under «Salida: 7 sep 2026, 8:00 a.m.» (design review, Should
+ *  Fix 4). One departure, one way of saying it. */
+export function salidaLabel(date: string, time?: string | null): string {
   return time
     ? SALIDA_DATETIME.format(new Date(`${date}T${time}:00Z`))
     : SALIDA_DATE.format(new Date(`${date}T00:00:00Z`))

@@ -287,11 +287,25 @@ export function FolioDetailScreen({ surface }: FolioDetailScreenProps) {
               {folio.customer_phone && (
                 <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
                   <PhoneRounded sx={{ fontSize: 16, color: 'text.secondary' }} />
+                  {/* A 48px target, not a 20px line of text: this is the "call the customer"
+                      affordance on a phone held one-handed at a counter — the reach law's exact
+                      case, and it measured 103×20 (design review, Should Fix 5). The negative
+                      inset keeps the number optically aligned with the icon beside it while the
+                      tappable box grows around it. */}
                   <Typography
                     variant="body2"
                     component="a"
                     href={`tel:${folio.customer_phone}`}
-                    sx={{ color: 'text.primary', textDecoration: 'none' }}
+                    sx={{
+                      color: 'text.primary',
+                      textDecoration: 'none',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      minHeight: 48,
+                      py: 1,
+                      mx: -1,
+                      px: 1,
+                    }}
                   >
                     {folio.customer_phone}
                   </Typography>
@@ -527,7 +541,11 @@ export function FolioDetailScreen({ surface }: FolioDetailScreenProps) {
                 that reaches the admin, and until now they could not see what the customer was
                 holding; the payload has carried the lines all along. Collapsed for them, open for
                 the seller, who is the one showing it across a counter. */}
-            {folio.status === 'paid' && (
+            {/* Could-improve 8 — and only where there is a ticket to show. A paid folio sold
+                before the QR feature has no token on any line, and the section rendered a card
+                whose entire content was «No hay boleto disponible para esta línea» — expanded by
+                default, on the seller's screen. */}
+            {folio.status === 'paid' && folio.lines.some((l) => l.qr_token) && (
               <Box>
                 <Stack
                   direction="row"
