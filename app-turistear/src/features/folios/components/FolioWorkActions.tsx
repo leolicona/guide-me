@@ -44,11 +44,17 @@ const DATE_FMT: Intl.DateTimeFormatOptions = {
 export function FolioWorkActions({
   folio,
   onConfirmRefund,
+  surface = 'admin',
 }: {
   folio: FolioDetail
   /** Opens the page's refund FormSheet (PIN / override) — the sheet stays with the page because
    *  its success path opens the receipt composer, which is page-level navigation. */
   onConfirmRefund: () => void
+  /** US-AG58/US-A93 (folio-surface-parity D7) — which rungs this audience may PRESS. Three of the
+   *  four are admin verbs: approving a petition, verifying a transfer and confirming a refund are
+   *  authorizations the seller does not hold (US-A84 D15). The seller keeps delivery, which is
+   *  their job, so the ladder collapses to its last rung rather than becoming a second component. */
+  surface?: 'admin' | 'seller'
 }) {
   const formatDate = useOrgDateFormatter(DATE_FMT)
   const verify = useVerifyPayment()
@@ -86,11 +92,12 @@ export function FolioWorkActions({
   // The ladder, structural: the first true rung is the ONLY one that renders. Resolved petitions
   // no longer render here — the timeline carries them (approved ones as their events, rejected
   // ones as derived rows) — so a folio with only history renders nothing.
-  const rung = pending
+  const isAdmin = surface === 'admin'
+  const rung = pending && isAdmin
     ? 'petition'
-    : awaitingVerification
+    : awaitingVerification && isAdmin
       ? 'verification'
-      : refundPending
+      : refundPending && isAdmin
         ? 'refund'
         : deliverable
           ? 'delivery'
@@ -215,11 +222,13 @@ export function FolioWorkActions({
               </Typography>
               <DeliveryBadge folio={folio} />
             </Stack>
+            {/* The send goes through THIS audience's endpoint — the admin's `ticket-delivery` or
+                the POS one — so `tickets_sent_at` is stamped by whoever actually sent it. */}
             <TicketWhatsAppButton
               folio={folio}
-              surface="admin"
+              surface={surface}
               variant="primary"
-              agentName={folio.agent.name}
+              agentName={folio.agent?.name}
             />
             {/* The "Pendiente de enviar" chip above already states this fact — a second amber
                 line saying it again is noise (design review, Should Fix 1). */}

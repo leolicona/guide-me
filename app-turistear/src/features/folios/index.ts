@@ -18,3 +18,5 @@ export { FolioTimeline } from './components/FolioTimeline'
 export { FolioMoneyOutcome } from './components/FolioMoneyOutcome'
 // US-AG58 — the one sales list, rendered by both `/folios` and `/history`.
 export { FolioListScreen } from './components/FolioListScreen'
+// US-A93 — the one folio detail, rendered by both `/folios/:id` and `/history/:id`.
+export { FolioDetailScreen } from './components/FolioDetailScreen'

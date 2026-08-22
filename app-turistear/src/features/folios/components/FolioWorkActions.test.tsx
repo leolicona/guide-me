@@ -1,4 +1,6 @@
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { http, HttpResponse } from 'msw'
+import { server } from '../../../test/server'
 import { renderWithProviders, screen } from '../../../test/renderWithProviders'
 import userEvent from '@testing-library/user-event'
 import { FolioWorkActions } from './FolioWorkActions'
@@ -22,12 +24,24 @@ const req = (over: Partial<FolioCancellationRequest>): FolioCancellationRequest 
 })
 
 const folio = (over: Partial<FolioDetail> = {}): FolioDetail =>
-  ({ id: 'f1', status: 'paid', payment_verification: 'not_required', ...over }) as FolioDetail
+  ({
+    id: 'f1',
+    status: 'paid',
+    payment_verification: 'not_required',
+    agent: { id: 'a1', name: 'Ana' },
+    ...over,
+  }) as FolioDetail
 
 // The refund sheet lives with the page (its success path opens the receipt composer); the card
 // only signals. Tests that don't press the button share this no-op.
-const renderWork = (f: FolioDetail, onConfirmRefund: () => void = () => {}) =>
-  renderWithProviders(<FolioWorkActions folio={f} onConfirmRefund={onConfirmRefund} />)
+const renderWork = (
+  f: FolioDetail,
+  onConfirmRefund: () => void = () => {},
+  surface: 'admin' | 'seller' = 'admin',
+) =>
+  renderWithProviders(
+    <FolioWorkActions folio={f} onConfirmRefund={onConfirmRefund} surface={surface} />,
+  )
 
 describe('US-A84 — the folio detail carries its own work', () => {
   it('shows a live request ONCE — as work, not also as history', () => {
@@ -177,5 +191,62 @@ describe('D21 — the unified pending-action card renders exactly one rung', () 
     )
     expect(screen.getByText('Pago por verificar')).toBeInTheDocument()
     expect(screen.queryByText('Entregar boletos')).toBeNull()
+  })
+})
+
+// US-A93 (folio-surface-parity D7) — the ladder is one component for both audiences; `surface`
+// decides which rungs may be PRESSED. Three of the four are authorizations the seller does not
+// hold, so for them the ladder collapses to delivery rather than becoming a second component.
+describe('US-A93 — the seller may press only the rung that is theirs', () => {
+  // The delivery rung's send button reads the session and the org to compose its message.
+  beforeEach(() => {
+    server.use(
+      http.get('/api/auth/me', () =>
+        HttpResponse.json({ user: { id: 'u1', name: 'Ana', email: 'ana@x.com', role: 'agent' } }),
+      ),
+      http.get('/api/organizations/me', () =>
+        HttpResponse.json({
+          organization: { id: 'o1', name: 'Turistear Ya!', timezone: 'America/Cancun' },
+        }),
+      ),
+    )
+  })
+
+  const ADMIN_RUNGS: [string, Partial<FolioDetail>, string][] = [
+    ['a live petition', { folio_requests: [req({})] }, 'El cliente pidió cancelar'],
+    ['an unverified transfer', { payment_verification: 'pending' }, 'Pago por verificar'],
+    ['an owed refund', { status: 'cancelled', refund_status: 'pending' }, 'Confirmar reembolso'],
+  ]
+
+  it.each(ADMIN_RUNGS)('%s renders for the admin and NOT for the seller', (_what, over, label) => {
+    const f = folio(over)
+    const admin = renderWork(f)
+    expect(screen.getAllByText(label).length).toBeGreaterThan(0)
+    admin.unmount()
+
+    renderWork(f, () => {}, 'seller')
+    // Nothing at all: with no rung they may press, and no delivery to offer, the card is absent.
+    expect(screen.queryByText(label)).toBeNull()
+  })
+
+  it('delivery IS the seller\'s rung, and it renders for them', () => {
+    renderWork(
+      folio({ status: 'paid', portal_link: 'https://x/portal/abc' }),
+      () => {},
+      'seller',
+    )
+    expect(screen.getByText('Entregar boletos')).toBeInTheDocument()
+  })
+
+  it("an admin rung does not HIDE the seller's delivery — it is simply not their rung", () => {
+    // A cancelled folio owing a refund AND deliverable is contrived, but it pins the ordering: the
+    // seller's ladder must not go blank because a rung above theirs is true.
+    renderWork(
+      folio({ status: 'paid', refund_status: 'pending', portal_link: 'https://x/portal/abc' }),
+      () => {},
+      'seller',
+    )
+    expect(screen.getByText('Entregar boletos')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Confirmar reembolso/ })).toBeNull()
   })
 })

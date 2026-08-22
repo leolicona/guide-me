@@ -6,6 +6,7 @@ import type {
   PosCatalogItem,
   PosServiceDetail,
 } from '../features/pos/types'
+import type { CancellationQuote } from '../features/organization/types'
 import type { FolioEvent } from '../features/folios/types'
 
 // US-AG03 / AG04 / AG05 / AG06 / AG08 — agent-facing POS. All endpoints require
@@ -154,22 +155,10 @@ export const voidExpressSale = async (id: string): Promise<VoidExpressResult> =>
 // What cancelling this folio RIGHT NOW would cost. The server computes it with the same function
 // the cancel endpoint uses, so the figure shown before confirming is the figure that gets written.
 // `null` once the folio is cancelled — there is nothing left to quote.
-export interface PosCancellationQuote {
-  refund: number
-  retention: number
-  kept_commission: number
-  reversed_commission: number
-  /** US-AG54 — per-line ladder readings incl. the single-line SUBSET refund, server-computed. */
-  lines?: Array<{
-    line_id: string
-    hours_out: number | null
-    refund_pct: number
-    retention: number
-    redeemed: boolean
-    line_refund?: number | null
-    line_reversed_commission?: number | null
-  }>
-}
+// US-A93 (folio-surface-parity D6) — the SAME object the admin's detail receives: both endpoints
+// serialize it with `serializeQuote`. It is an alias rather than a second declaration, because a
+// parallel shape is exactly what let the two surfaces drift in the first place.
+export type PosCancellationQuote = CancellationQuote
 
 // US-AG08 / AG21 — read back one of the caller agent's own folios (receipt + history detail).
 // Returns the quote alongside the folio so the cancel dialog can state the refund instead of
