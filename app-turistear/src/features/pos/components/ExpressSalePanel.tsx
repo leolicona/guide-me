@@ -6,7 +6,6 @@ import {
   Stack,
   IconButton,
   TextField,
-  InputAdornment,
   ButtonBase,
   Chip,
   Alert,
@@ -25,7 +24,8 @@ import { isSendablePhone } from '../phone'
 import { ticketWhatsAppUrl, DEFAULT_TICKET_TEMPLATE } from '../delivery'
 import { voidExpressSale } from '../../../services/posService'
 import { ServiceError } from '../../../services/authService'
-import { formatMoney, amountToCents, centsToAmount } from '../../catalog/types'
+import { EditableMoney } from '../../../components'
+import { formatMoney } from '../../catalog/types'
 import { useMyOrganization } from '../../organization'
 import { useMe } from '../../auth/hooks/useMe'
 import { useMarkTicketsSent } from '../../bookings/hooks/useBookingActions'
@@ -89,7 +89,9 @@ export function ExpressSalePanel({ service, today }: ExpressSalePanelProps) {
 
   const [seats, setSeats] = useState(1)
   const [clampMsg, setClampMsg] = useState<string | null>(null)
-  const [priceInput, setPriceInput] = useState(() => String(centsToAmount(service.base_price)))
+  // US-AG57 — the price is held as CENTS now; EditableMoney owns the keystrokes and hands back
+  // a value already clamped into [minimum_price, base_price].
+  const [priceCents, setPriceCents] = useState(service.base_price)
   const [phone, setPhone] = useState('')
   // D21 — one replay key per SALE ATTEMPT: minted when the form resets, so a double-tap or a
   // retry of the same sale re-sends the same key and can never sell twice.
@@ -132,17 +134,10 @@ export function ExpressSalePanel({ service, today }: ExpressSalePanelProps) {
     return true
   })
 
-  const priceCents = priceInput.trim() === '' ? NaN : amountToCents(Number(priceInput))
+  // Invariant, not a check: EditableMoney cannot commit outside the band. Kept so `canSubmit`
+  // still names the condition it depends on rather than assuming it.
   const priceValid =
-    !Number.isNaN(priceCents) &&
-    priceCents >= service.minimum_price &&
-    priceCents <= service.base_price
-  const commitPrice = () => {
-    const clamped = Number.isNaN(priceCents)
-      ? service.base_price
-      : Math.min(Math.max(priceCents, service.minimum_price), service.base_price)
-    setPriceInput(String(centsToAmount(clamped)))
-  }
+    priceCents >= service.minimum_price && priceCents <= service.base_price
   const phoneValid = isSendablePhone(phone)
   const total = priceValid ? priceCents * seats : 0
   const canCobrar =
@@ -182,7 +177,7 @@ export function ExpressSalePanel({ service, today }: ExpressSalePanelProps) {
           // D20 — reset for the next customer: service + departure HELD.
           setSeats(1)
           setClampMsg(null)
-          setPriceInput(String(centsToAmount(service.base_price)))
+          setPriceCents(service.base_price)
           setPhone('')
           setIdemKey(crypto.randomUUID())
           refreshAvailability()
@@ -355,27 +350,17 @@ export function ExpressSalePanel({ service, today }: ExpressSalePanelProps) {
             )}
           </Box>
 
-          {/* Price — per unit, clamped to the admin's floor and base (no surge, D9/Q9). */}
-          <TextField
+          {/* Price — per unit, clamped to the admin's floor and base (no surge, D9/Q9). The same
+              primitive the cart's tour and stay lines use: the figure reads as money and accepts
+              a new one, and a service with no margin renders it borderless. */}
+          <EditableMoney
+            cents={priceCents}
+            min={service.minimum_price}
+            max={service.base_price}
+            onCommit={setPriceCents}
             label="Precio unitario"
-            type="number"
-            size="small"
-            value={priceInput}
-            onChange={(e) => setPriceInput(e.target.value)}
-            onBlur={commitPrice}
-            error={priceInput !== '' && !priceValid}
-            helperText={`Mín ${formatMoney(service.minimum_price)} · base ${formatMoney(service.base_price)}`}
-            slotProps={{
-              inputLabel: { shrink: true },
-              input: { startAdornment: <InputAdornment position="start">$</InputAdornment> },
-              htmlInput: {
-                min: centsToAmount(service.minimum_price),
-                max: centsToAmount(service.base_price),
-                step: 0.01,
-                inputMode: 'decimal',
-              },
-            }}
-            sx={{ width: 200 }}
+            maxLabel="base"
+            srLabel="Precio unitario"
           />
 
           {/* Phone — the ONE identity field (D17/D18): the fallback-delivery handle and the

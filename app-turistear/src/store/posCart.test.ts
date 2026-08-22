@@ -139,8 +139,22 @@ describe('money selectors', () => {
       expect(cartDiscountTotal([slotLine({ unit_price: 50_000 })])).toBe(0)
     })
 
-    it('ignores stay lines — lodging has no per-night discounting (US-AG38 D12)', () => {
+    it('is zero for an undiscounted stay — its total still equals the quote', () => {
       expect(cartDiscountTotal([stayLine()])).toBe(0)
+    })
+
+    // Was asserted as an unconditional 0 until US-AG57 made stays discountable. The row this
+    // feeds («Descuento» in the checkout summary) then disagreed with the discount_total the
+    // server persists — the client simply did not look at stay lines.
+    it('counts a discounted stay ONCE, not per room', () => {
+      const discounted = stayLine({ quantity: 2, quoted_total: 400_000, total: 385_000 })
+      expect(cartDiscountTotal([discounted])).toBe(15_000)
+    })
+
+    it('adds a tour and a stay discount together', () => {
+      const tour = slotLine({ quantity: 4, unit_price: 45_000 }) // $50 off × 4
+      const stay = stayLine({ quoted_total: 300_000, total: 280_000 })
+      expect(cartDiscountTotal([tour, stay])).toBe(40_000)
     })
   })
 
