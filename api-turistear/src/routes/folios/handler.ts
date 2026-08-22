@@ -48,6 +48,7 @@ import {
   readListCancellationRequests,
   readListLines,
   readListPortalLinks,
+  serializeFolioListRow,
 } from '../../utils/folioListRows'
 import {
   DEFAULT_WINDOW_DAYS,
@@ -264,59 +265,15 @@ export const listFolios = async (c: FoliosContext) => {
     // US-A83 D6 — a cap that does not announce itself reports "these are the matches" when it
     // means "these are the first 50".
     truncated,
-    folios: page.map((r) => ({
-      id: r.id,
-      agent: { id: r.agentId, name: r.agentName },
-      customer_name: r.customerName,
-      customer_phone: r.customerPhone,
-      status: r.status,
-      total: r.total,
-      amount_paid: r.amountPaid,
-      pending_balance: r.total - r.amountPaid,
-      created_at: Math.floor(r.createdAt.getTime() / 1000),
-      cancelled_at: tsOrNull(r.cancelledAt),
-      booking_expires_at: r.bookingExpiresAt ?? null, // derived: epoch seconds already
-      reminder_status: r.reminderStatus,
-      reminder_sent_at: tsOrNull(r.reminderSentAt),
-      reminder_sent_by: r.reminderSentBy,
-      // US-AG41/US-A67 — payment method + reference + the verification gate (the "Por verificar"
-      // queue reads these; the delivery axis is blocked while pending).
-      payment_method: r.paymentMethod,
-      payment_reference: r.paymentReference,
-      payment_verification: r.paymentVerification,
-      // Delivery axis (whatsapp-qr-delivery) — a paid folio is deliverable ONLY once its money has
-      // cleared (cash, or the electronic payment verified). Pending electronic → not yet.
-      deliverable: r.status === 'paid' && r.paymentVerification !== 'pending',
-      tickets_sent_at: tsOrNull(r.ticketsSentAt),
-      tickets_viewed_at: tsOrNull(r.ticketsViewedAt),
-      // US-A68 — the affiliate shift operator who took the sale (null ⇒ sold directly).
-      operator_name: r.operatorName ?? null,
-      // US-A78 — 'pending' = cancelled, money owed, nobody confirmed the hand-back.
-      refund_status: r.refundStatus,
-      refund_amount: r.refundAmount,
-      // US-A87 — what a closed apartado left the customer, and until when.
-      credit_amount: r.creditAmount,
-      credit_expires_at: tsOrNull(r.creditExpiresAt),
-      // US-A82 — what was sold (card title + the WhatsApp {itinerary}), the link the ticket send
-      // needs, and the sale mode a null customer_name must never be used to infer.
-      sale_mode: r.saleMode,
-      portal_link: portalLinkByFolio.get(r.id) ?? null,
-      lines: linesByFolio.get(r.id) ?? [],
-      // US-A85 (D7) — the worst of the lines, so a folio with one wasted seat never reads as
-      // consumed. Derived; refused from any request body.
-      fulfillment: folioFulfillment(
-        (linesByFolio.get(r.id) ?? []).map((l) => l.fulfillment),
-      ),
-      // US-A84 rule 6 — 'pending' ⇒ a customer is waiting on an answer (the card's first verb);
-      // 'resolved' ⇒ requests exist but none live (the `Con solicitud` facet); null ⇒ none.
-      cancellation_request: requestByFolio.get(r.id) ?? null,
-      // US-A84 — the same predicate `?overdue=true` applies, surfaced per row so the card's time
-      // chip does not have to re-derive the deadline against a clock the client owns.
-      overdue:
-        r.status === 'booking' &&
-        r.bookingExpiresAt != null &&
-        r.bookingExpiresAt * 1000 < now.getTime(),
-    })),
+    // US-AG58 (folio-surface-parity D1/D13) — ONE row serializer, shared with the seller's list.
+    folios: page.map((r) =>
+      serializeFolioListRow(r, {
+        linesByFolio,
+        portalLinkByFolio,
+        requestByFolio,
+        nowMs: now.getTime(),
+      }),
+    ),
   })
 }
 

@@ -11,7 +11,7 @@
 import { and, asc, eq, sql, type SQL } from 'drizzle-orm'
 import type { Db } from '../db/client'
 import { folioRequests, folioAccessTokens, folioLines, folios } from '../db/schema'
-import { lineFulfillment, type Fulfillment } from './folioFulfillment'
+import { folioFulfillment, lineFulfillment, type Fulfillment } from './folioFulfillment'
 
 /** The lean line shape the card and `renderItinerary()` share (spec D14). */
 export interface FolioListLine {
@@ -169,4 +169,105 @@ export const readListCancellationRequests = async (
     else if (!byFolio.has(r.folioId)) byFolio.set(r.folioId, 'resolved')
   }
   return byFolio
+}
+
+// --- The list ROW, serialized once for both audiences -----------------------
+//
+// docs/oversight/folio-surface-parity.spec.md D1/D13 (US-AG58). The admin list and the seller's own
+// list built this object separately, and the seller's was missing five fields — including
+// `refund_status`, `refund_amount` and `credit_amount`, which the shared `FolioCard` reads to pick
+// its money reading. So a cancelled sale on the seller's list rendered a degraded figure for the
+// same reason its detail rendered `Pagado $3,000` (BUG-034): one payload, written twice.
+//
+// The row is IDENTICAL on both surfaces, `agent` included: what differs between the audiences is
+// which verbs the card offers and whom the byline names — decided by the client from `surface`,
+// never by the server sending less. Capability, never information.
+
+/** The columns both list queries select. Structural, so neither route has to name the other's type. */
+export interface FolioListRow {
+  id: string
+  agentId: string
+  agentName: string | null
+  customerName: string | null
+  customerPhone: string | null
+  status: 'paid' | 'booking' | 'cancelled'
+  total: number
+  amountPaid: number
+  createdAt: Date
+  cancelledAt: Date | null
+  bookingExpiresAt: number | null
+  reminderStatus: string
+  reminderSentAt: Date | null
+  reminderSentBy: string | null
+  ticketsSentAt: Date | null
+  ticketsViewedAt: Date | null
+  paymentMethod: string
+  paymentReference: string | null
+  paymentVerification: string
+  operatorName: string | null
+  refundStatus: 'none' | 'pending' | 'refunded'
+  refundAmount: number | null
+  creditAmount: number | null
+  creditExpiresAt: Date | null
+  saleMode: string | null
+}
+
+export interface FolioListDecorations {
+  linesByFolio: Map<string, FolioListLine[]>
+  portalLinkByFolio: Map<string, string>
+  requestByFolio: Map<string, CancellationRequestMark>
+  nowMs: number
+}
+
+const ts = (d: Date | null) => (d ? Math.floor(d.getTime() / 1000) : null)
+
+export const serializeFolioListRow = (r: FolioListRow, deco: FolioListDecorations) => {
+  const lines = deco.linesByFolio.get(r.id) ?? []
+  return {
+    id: r.id,
+    agent: { id: r.agentId, name: r.agentName },
+    customer_name: r.customerName,
+    customer_phone: r.customerPhone,
+    status: r.status,
+    total: r.total,
+    amount_paid: r.amountPaid,
+    pending_balance: r.total - r.amountPaid,
+    created_at: Math.floor(r.createdAt.getTime() / 1000),
+    cancelled_at: ts(r.cancelledAt),
+    booking_expires_at: r.bookingExpiresAt ?? null, // derived: epoch seconds already
+    reminder_status: r.reminderStatus,
+    reminder_sent_at: ts(r.reminderSentAt),
+    reminder_sent_by: r.reminderSentBy,
+    // US-AG41/US-A67 — method + reference + the verification gate. Delivery is blocked while pending.
+    payment_method: r.paymentMethod,
+    payment_reference: r.paymentReference,
+    payment_verification: r.paymentVerification,
+    // Delivery axis (whatsapp-qr-delivery) — deliverable ONLY once the money cleared.
+    deliverable: r.status === 'paid' && r.paymentVerification !== 'pending',
+    tickets_sent_at: ts(r.ticketsSentAt),
+    tickets_viewed_at: ts(r.ticketsViewedAt),
+    // US-A68 — the affiliate shift operator who took the sale (null ⇒ sold directly).
+    operator_name: r.operatorName ?? null,
+    // US-A78 — 'pending' = cancelled, money owed, nobody confirmed the hand-back.
+    refund_status: r.refundStatus,
+    refund_amount: r.refundAmount,
+    // US-A87 — what a closed apartado left the customer, and until when.
+    credit_amount: r.creditAmount,
+    credit_expires_at: ts(r.creditExpiresAt),
+    // US-A82 — what was sold, the link the ticket send needs, and the sale mode a null
+    // customer_name must never be used to infer.
+    sale_mode: r.saleMode,
+    portal_link: deco.portalLinkByFolio.get(r.id) ?? null,
+    lines,
+    // US-A85 (D7) — the worst of the lines, so a folio with one wasted seat never reads as consumed.
+    fulfillment: folioFulfillment(lines.map((l) => l.fulfillment)),
+    // US-A84 rule 6 — 'pending' ⇒ a customer is waiting on an answer; 'resolved' ⇒ requests exist
+    // but none live; null ⇒ none.
+    cancellation_request: deco.requestByFolio.get(r.id) ?? null,
+    // US-A84 — surfaced per row so the card's time chip need not re-derive the deadline.
+    overdue:
+      r.status === 'booking' &&
+      r.bookingExpiresAt != null &&
+      r.bookingExpiresAt * 1000 < deco.nowMs,
+  }
 }

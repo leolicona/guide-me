@@ -196,15 +196,44 @@ describe('US-AG20 — agent folio history list', () => {
     expect(bogus.json.folios).toHaveLength(2)
   })
 
-  it('Scenario 4 — date filter (created_at UTC calendar day)', async () => {
+  // US-AG58 (folio-surface-parity D11) — `?date=` (a UTC calendar day) is replaced by the
+  // inclusive ORG-LOCAL `?from=&to=` range the admin list already takes, through the same helper.
+  // Seeded orgs are `timezone = 'UTC'` (test/helpers/tenancy.ts), so this asserts the range's
+  // BOUNDS; the zone's effect is pinned where a real zone is set — folio-list-search.test.ts S-9.
+  it('Scenario 4 — an inclusive org-local range over created_at', async () => {
     const { userId: agentId, organizationId } = await seedUser({ email: AGENT_EMAIL, role: 'agent' })
     const ts0605 = Math.floor(Date.parse('2026-06-05T12:00:00Z') / 1000)
     const ts0606 = Math.floor(Date.parse('2026-06-06T12:00:00Z') / 1000)
-    await seedFolio({ organizationId, agentId, createdAt: ts0605 })
+    const ts0607 = Math.floor(Date.parse('2026-06-07T12:00:00Z') / 1000)
+    const before = await seedFolio({ organizationId, agentId, createdAt: ts0605 })
     const target = await seedFolio({ organizationId, agentId, createdAt: ts0606 })
+    const after = await seedFolio({ organizationId, agentId, createdAt: ts0607 })
 
-    const { json } = await listFolios(AGENT_EMAIL, '?date=2026-06-06')
-    expect(json.folios.map((f: any) => f.id)).toEqual([target.folioId])
+    const oneDay = await listFolios(AGENT_EMAIL, '?from=2026-06-06&to=2026-06-06')
+    expect(oneDay.json.folios.map((f: any) => f.id)).toEqual([target.folioId])
+
+    // Both ends are INCLUDED — an exclusive `to` is the classic off-by-one on a date filter.
+    const span = await listFolios(AGENT_EMAIL, '?from=2026-06-05&to=2026-06-06')
+    expect(span.json.folios.map((f: any) => f.id).sort()).toEqual(
+      [before.folioId, target.folioId].sort(),
+    )
+    expect(span.json.folios.map((f: any) => f.id)).not.toContain(after.folioId)
+  })
+
+  it("Scenario 4b — the list is the seller's WHOLE history, and says when it capped", async () => {
+    // D4/D5 — no window: a sale far older than the admin's 30-day window is still returned, which
+    // is what lets the client search and facet the payload locally without lying about scope.
+    const { userId: agentId, organizationId } = await seedUser({ email: AGENT_EMAIL, role: 'agent' })
+    const ancient = await seedFolio({
+      organizationId,
+      agentId,
+      createdAt: Math.floor(Date.now() / 1000) - 400 * 86_400,
+    })
+
+    const { json } = await listFolios(AGENT_EMAIL)
+    expect(json.folios.map((f: any) => f.id)).toContain(ancient.folioId)
+    // Nothing was dropped, so it must not claim otherwise.
+    expect(json.truncated).toBe(false)
   })
 
   it('Scenario 5 — empty history → 200 with []', async () => {
