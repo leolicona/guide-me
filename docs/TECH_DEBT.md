@@ -2,6 +2,27 @@
 
 This document tracks known technical debt, deferred tasks, and architectural improvements that are planned for future phases.
 
+## 29. The Affiliate's Shift-Operator Filter Exists Server-Side and Is Unreachable — ⚠️ OPEN
+
+**Context:** `listAgentFolios` accepts `?operator=<id>` and scopes the read to that shift operator
+(`routes/pos/handler.ts:3830`), added with US-AF13 so a hotel manager could reconcile by turn. No
+UI has ever sent it: `FolioHistoryPage` reads `operator_name` only to render the card's byline. The
+manager's only tool for *"what did the night shift sell"* is reading names down the list.
+
+**Why it is not fixed in the folio-surface-parity PRs:** it is a **fourth facet axis**, wanted by one
+role, on a screen those PRs are already rewriting for three (`folio-surface-parity.spec.md` D14).
+Adding a section to `FolioStateSheet` that renders for one surface only would be the first
+audience-specific *filter*, which is exactly the kind of divergence that spec exists to remove — so
+it needs its own story and its own decision about whether the admin gets a people axis too.
+
+**Cost of leaving it:** a shipped server capability stays dead, and the affiliate manager keeps
+scrolling. Nothing is incorrect; something is merely unreachable.
+
+**What closing it looks like:** one `US-AF*` story, a facet section fed by the affiliate's operator
+list, and the same `?operator=` the server already honours.
+
+---
+
 ## 28. Two Units of One Property May Share a Name — ⚠️ OPEN
 
 **Context:** `migrations/0035_create_accommodation_units.sql` declares `name text NOT NULL` with no
