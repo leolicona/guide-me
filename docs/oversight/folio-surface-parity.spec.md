@@ -87,9 +87,10 @@ does not — so the admin taking the *"my QR doesn't scan"* call cannot see what
 | **D8** | **The access QR is information, not capability: the admin gets the same section, collapsed by default.** | *"My QR doesn't work"* reaches the admin, and today they cannot see what the customer is holding. The admin payload already carries the lines; collapsing it keeps the admin's daily reading — money and pending work — undisturbed. |
 | **D9** | **The UI says «Venta» everywhere** — nav, both titles, both back buttons, both empty states. **«Folio» stays** the domain term, the printed ID and the glossary entry. Routes (`/folios`, `/history`) are unchanged. | *Ventas* is already the nav label for both roles and the title of both lists; the two dissenting strings are back buttons. A URL is not copy, and renaming routes would break links already in the wild (US-A84 D17 is still redirecting the last set). |
 | **D10** | **Tests are parameterized by surface** (`describe.each(['admin','seller'])`) over what must be identical; what differs by capability gets its own assertions. | The invariant belongs in the file that would break it. This is the mechanism that makes the next divergence fail CI instead of surviving three releases. |
-| **D11** | **`?date=` on the seller endpoint is replaced by `desde`/`hasta`, with no deprecation window.** | It has **no call sites** — `MyFolioFilters.date` is dead code (`services/posService.ts:189`). Keeping a parameter alive out of habit is how a second date semantics survives; this one also matches UTC days, the defect US-A83 D9 named. |
+| **D11** | **`?date=` on the seller endpoint is replaced by `from`/`to`** — the admin endpoint's own parameter names, through the same `dateRangeFilter` helper — with no deprecation window. *(The URL the user sees keeps its Spanish `?desde=&hasta=`; that is the app's address bar, not the API.)* | It has **no call sites** — `MyFolioFilters.date` is dead code (`services/posService.ts:189`). Keeping a parameter alive out of habit is how a second date semantics survives; this one also matches UTC days, the defect US-A83 D9 named. |
 | **D12** | **The seller's list query and the delivery-badge count share one cache key.** | `usePendingDeliveryCount` keys on `{status:'paid'}` while the list keys on `{}`; once the list reads unfiltered, they are the same read and the badge stops firing a second request. Consistency comes free with correctness here. |
 | **D13** | **What stays different is named, and only three things are on the list:** the **verbs** (capability), the **byline** (audience — agent vs shift operator, US-A82 D13), and the **nav badge** (the work each role can do). | A parity spec that does not enumerate the permitted differences invites the next reader to erase them. |
+| **D15** | **The list ROW is serialized once too** — `serializeFolioListRow` in `utils/folioListRows.ts`, called by both list handlers — and the two rows are byte-identical, `agent` included. | Found while building PR-2: the seller's row omitted `refund_status`, `refund_amount`, `credit_amount` and `payment_reference`, which the **shared `FolioCard` reads to choose its money reading**. So a cancelled sale on the seller's list rendered a degraded figure for exactly the reason its detail rendered `Pagado $3,000` — one payload, written twice. Sending `agent` to a surface that does not display it is the cheaper half of the trade: identical rows cannot drift, and which name is *shown* is already a client decision (D13). |
 | **D14** | **The affiliate manager rides the seller surface unchanged**; the server's `?operator=` filter stays unexposed. | Out of scope, and it is a fourth axis the admin does not have — a facet section of its own, deserving its own story rather than a rider on this one (`TECH_DEBT.md`). |
 
 ## Data Model
@@ -113,8 +114,9 @@ already read by `routes/folios/handler.ts:280-330`.
 
 ### `GET /api/pos/folios` — the seller's own sales
 
-`?status=` (unchanged) · `?desde=&hasta=` (**replaces** `?date=`, org-local days) · `?operator=`
-(unchanged, still unexposed by the UI). Response gains `truncated: boolean`.
+`?status=` (unchanged) · `?from=&to=` (**replaces** `?date=`; an inclusive **org-local** range, the
+admin endpoint's parameters and helper) · `?operator=` (unchanged, still unexposed by the UI).
+Response gains `truncated: boolean`, and every row is now `serializeFolioListRow`'s (D15).
 
 ### `GET /api/pos/folios/:id` — the seller's own folio
 
@@ -180,6 +182,11 @@ Then it appears with no second request — the payload is their whole history (D
 Given a seller with more than 500 folios
 Then the list renders 500 and states that it is showing the most recent ones.
 
+**S-14 — The two list rows are the same row**
+Given one folio
+When the seller's list and the admin's list are read
+Then its row is **deep-equal** on both — `agent` included — because one function serializes it.
+
 **S-9 — The seller still cannot act beyond their capability**
 Given a folio awaiting payment verification
 Then the seller's screen offers no *Verificar*, no *Confirmar reembolso*, no *Revisar solicitud* —
@@ -218,10 +225,11 @@ Then `404`, and seller B's sales never appear in A's list.
 - [x] S-1…S-3, S-12, S-13 covered (`test/folios/folio-surface-parity.test.ts`)
 - [x] `BUGS.md` BUG-034 closed
 
-**PR-2 — the shared list (US-AG58)**
-- [ ] `FolioListScreen` + two wrappers; `ToggleButtonGroup` deleted
-- [ ] `?desde/&hasta` replaces `?date=`; `truncated` + `LIMIT 500`
-- [ ] S-4…S-9 covered; `FoliosListPage.test.tsx` parameterized by surface (D10)
+**PR-2 — the shared list (US-AG58)** ✅
+- [x] `FolioListScreen` + two wrappers; `ToggleButtonGroup` deleted
+- [x] `?from=&to=` replaces `?date=`; `truncated` + `LIMIT 500`
+- [x] One row serializer, both lists (D15)
+- [x] S-4…S-9, S-14 covered; `FolioListScreen.test.tsx` parameterized by surface (D10)
 
 **PR-3 — the shared detail (US-A93)**
 - [ ] `FolioDetailScreen` + `FolioWorkActions surface`; hand-rolled delivery card deleted

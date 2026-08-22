@@ -250,3 +250,40 @@ describe('Multitenancy and ownership — parity never widens who may read', () =
     expect(own.status).toBe(200)
   })
 })
+
+describe('US-AG58 — the two LIST rows are the same row', () => {
+  it('S-4 — the same folio serializes identically on both lists', async () => {
+    const stage = await seedStage()
+    const folioId = await createPaidSale(AGENT_EMAIL, stage.slotId)
+
+    const sellerList = await SELF.fetch(`${POS}/folios`, { headers: auth(AGENT_EMAIL) })
+    const adminList = await SELF.fetch(FOLIOS, { headers: auth(ADMIN_EMAIL) })
+    const seller = (await sellerList.json()) as any
+    const admin = (await adminList.json()) as any
+
+    const mine = seller.folios.find((f: any) => f.id === folioId)
+    const theirs = admin.folios.find((f: any) => f.id === folioId)
+    expect(mine).toBeDefined()
+    expect(theirs).toBeDefined()
+    // Identical — `agent` included. What differs between the audiences is which verbs the card
+    // offers and whom the byline names, both decided client-side from `surface` (D13).
+    expect(mine).toEqual(theirs)
+    // The three the seller's row used to omit, which the shared FolioCard reads to pick its money
+    // reading — their absence is why a cancelled sale rendered a degraded figure.
+    for (const key of ['refund_status', 'refund_amount', 'credit_amount', 'payment_reference']) {
+      expect(mine, `seller row is missing ${key}`).toHaveProperty(key)
+    }
+  })
+
+  it('S-8 — a capped list says so', async () => {
+    const stage = await seedStage()
+    await createPaidSale(AGENT_EMAIL, stage.slotId)
+    const { json } = await (async () => {
+      const res = await SELF.fetch(`${POS}/folios`, { headers: auth(AGENT_EMAIL) })
+      return { json: (await res.json()) as any }
+    })()
+    // Below the cap: it must not claim otherwise. The cap itself is pinned in
+    // test/pos/agent-folio-history.test.ts, where seeding 500 rows is cheap (no lines).
+    expect(json.truncated).toBe(false)
+  })
+})

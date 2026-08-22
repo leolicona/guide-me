@@ -191,19 +191,34 @@ export const getFolio = async (
 
 export interface MyFolioFilters {
   status?: FolioStatus
-  date?: string
+  /** US-AG58 (D11) — the inclusive ORG-LOCAL range the admin list already takes. Replaces the
+   *  dead `date` param, which compared a UTC calendar day. */
+  from?: string
+  to?: string
+}
+
+/** US-AG58 (D4/D5) — the seller's list is their WHOLE history, so the client can search and facet
+ *  it locally and still answer about everything. `truncated` is the safety cap announcing itself:
+ *  a cap that stays quiet reports "these are your sales" when it means "these are your 500 most
+ *  recent". Same shape as the admin's `FolioListPage`; `window_days` is null because this read has
+ *  no window to state. */
+export interface MyFolioListPage {
+  folios: FolioHistoryItem[]
+  window_days: null
+  truncated: boolean
 }
 
 // US-AG20 — the caller agent's own folio history. Server scopes to the caller (no agent_id).
 export const listMyFolios = async (
   filters: MyFolioFilters = {},
-): Promise<FolioHistoryItem[]> => {
+): Promise<MyFolioListPage> => {
   const params = new URLSearchParams()
   if (filters.status) params.set('status', filters.status)
-  if (filters.date) params.set('date', filters.date)
+  if (filters.from) params.set('from', filters.from)
+  if (filters.to) params.set('to', filters.to)
   const qs = params.toString()
-  const res = await request<{ folios: FolioHistoryItem[] }>(
+  const res = await request<{ folios: FolioHistoryItem[]; truncated?: boolean }>(
     `/api/pos/folios${qs ? `?${qs}` : ''}`,
   )
-  return res.folios
+  return { folios: res.folios, window_days: null, truncated: res.truncated ?? false }
 }
