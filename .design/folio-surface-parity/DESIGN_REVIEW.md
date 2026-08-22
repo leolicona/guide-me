@@ -33,8 +33,9 @@ Build reviewed: `feat/venta-vocabulary` (PRs #126–#128 merged, #129 open), see
 | 1 — seller's card silent about a petition | **fixed** — BUG-035, spec D17 (this PR) |
 | 3 — admin overlays mounted on the seller surface | **fixed** (this PR) |
 | 2 — heading order `H1 → H6 → H3` | **fixed** — theme default + the reviewed screens; app-wide sweep is TECH_DEBT #30 |
-| 4, 5, 6 — ISO date · 20 px phone target · empty `Historial` card | open — folio-detail polish, its own PR |
-| 7, 8, 9 | open — could-improve, unscheduled |
+| 4, 5, 6 — ISO date · 20 px phone target · empty `Historial` card | **fixed** (folio-detail polish PR) |
+| 7, 8 — QR block has no container · renders with no ticket | **8 fixed** with the polish PR; 7 open |
+| 9 — long titles truncate at 375 px | open — could-improve, unscheduled |
 
 ## Summary
 

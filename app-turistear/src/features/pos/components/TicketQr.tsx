@@ -1,5 +1,6 @@
 import { Box, Card, CardContent, Typography, Stack, Chip } from '@mui/material'
 import { QRCodeSVG } from 'qrcode.react'
+import { folioLineMeta, salidaLabel } from '../../folios/folioLineLabel'
 import { ticketPageUrl } from '../delivery'
 import type { FolioLine } from '../types'
 
@@ -20,7 +21,11 @@ export function TicketQr({ line }: TicketQrProps) {
           <Box>
             <Typography variant="subtitle1">{line.service_name}</Typography>
             <Typography variant="caption" color="text.secondary">
-              {line.slot_date} · {line.slot_start_time}
+              {/* The same sentence the line above it uses. A raw `2026-09-07 · 08:00` is the one
+                  date on these screens the reader has to decode (design review, Should Fix 4). */}
+              {line.slot_date
+                ? salidaLabel(line.slot_date, line.slot_start_time)
+                : folioLineMeta(line)}
             </Typography>
           </Box>
 
