@@ -9,7 +9,6 @@ import {
   Fade,
   Stack,
   Divider,
-  Chip,
   TextField,
   Dialog,
   DialogTitle,
@@ -22,23 +21,12 @@ import LockRounded from '@mui/icons-material/Lock'
 import { useDrop, useResolveDispute, useReviewDrop } from '../features/cash/hooks'
 import { useOrgDateFormatter } from '../features/organization'
 import { AckChip } from '../features/cash/components/AckChip'
+import { DropStatusChip } from '../features/cash/components/DropStatusChip'
 import { SOURCE_LABEL } from '../features/cash/components/ackPresentation'
-import type { DropStatus, ReviewDropInput } from '../features/cash/types'
+import type { ReviewDropInput } from '../features/cash/types'
 import { formatMoney, amountToCents } from '../features/catalog/types'
 import { ROUTES } from '../config/routes'
 import { SectionCard, MoneyText, StatusChip, InfoPopover } from '../components'
-
-const DROP_COLOR: Record<DropStatus, 'warning' | 'success' | 'error'> = {
-  pending: 'warning',
-  confirmed: 'success',
-  rejected: 'error',
-}
-
-const DROP_LABEL: Record<DropStatus, string> = {
-  pending: 'Pendiente',
-  confirmed: 'Confirmado',
-  rejected: 'Rechazado',
-}
 
 const DATE_FMT: Intl.DateTimeFormatOptions = {
   year: 'numeric',
@@ -108,8 +96,18 @@ export default function CashDropDetailPage() {
 
         {drop && (
           <Stack spacing={3}>
-            <Stack direction="row" sx={{ justifyContent: 'space-between', alignItems: 'center' }}>
-              <Box sx={{ minWidth: 0 }}>
+            <Stack
+              direction="row"
+              // Two medium icon-paired chips beside an h2 figure do not fit 375px — wrap them under
+              // the money rather than let either shrink.
+              sx={{
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                flexWrap: 'wrap',
+                rowGap: 1,
+              }}
+            >
+              <Box sx={{ minWidth: 0, flex: '1 1 12rem' }}>
                 <MoneyText cents={drop.amount} variant="h2" srLabel="Monto de la entrega" />
                 <Typography variant="caption" color="textSecondary" sx={{ display: 'block' }}>
                   {drop.agent?.name} · {SOURCE_LABEL[drop.source]} · {formatDate(drop.created_at)}
@@ -117,7 +115,7 @@ export default function CashDropDetailPage() {
               </Box>
               <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
                 <AckChip state={drop.acknowledgment} size="medium" />
-                <Chip color={DROP_COLOR[drop.status]} label={DROP_LABEL[drop.status]} />
+                <DropStatusChip status={drop.status} size="medium" />
               </Stack>
             </Stack>
 

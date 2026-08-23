@@ -38,6 +38,7 @@ import {
   useRegisterPayout,
 } from '../features/cash/hooks'
 import { AckChip } from '../features/cash/components/AckChip'
+import { DropStatusChip } from '../features/cash/components/DropStatusChip'
 import { TuCajaSection } from '../features/cash/components/TuCajaSection'
 import { useOrgDateFormatter } from '../features/organization'
 import { SOURCE_LABEL } from '../features/cash/components/ackPresentation'
@@ -47,18 +48,6 @@ import { formatMoney, amountToCents, centsToAmount } from '../features/catalog/t
 import { ROUTES } from '../config/routes'
 import { MoneyText, StatusChip, InfoPopover } from '../components'
 import { FilterStrip } from '../features/filters'
-
-const DROP_COLOR: Record<DropStatus, 'warning' | 'success' | 'error'> = {
-  pending: 'warning',
-  confirmed: 'success',
-  rejected: 'error',
-}
-
-const DROP_LABEL: Record<DropStatus, string> = {
-  pending: 'Pendiente',
-  confirmed: 'Confirmado',
-  rejected: 'Rechazado',
-}
 
 const DATE_FMT: Intl.DateTimeFormatOptions = {
   month: 'short',
@@ -551,8 +540,19 @@ function DropsTab() {
                 to={ROUTES.CASH_DROP_DETAIL.replace(':id', drop.id)}
               >
                 <CardContent>
-                  <Stack direction="row" sx={{ justifyContent: 'space-between', alignItems: 'center' }}>
-                    <Box sx={{ minWidth: 0 }}>
+                  <Stack
+                    direction="row"
+                    // Same reason as the seller's Entregas row: an icon-paired chip is wider than
+                    // the bare colour pill it replaces, so the chip group wraps to its own line
+                    // rather than shredding the agent's name at 375px.
+                    sx={{
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      flexWrap: 'wrap',
+                      rowGap: 1,
+                    }}
+                  >
+                    <Box sx={{ minWidth: 0, flex: '1 1 12rem' }}>
                       <Typography variant="subtitle1">{formatMoney(drop.amount)}</Typography>
                       <Typography variant="caption" color="textSecondary">
                         {drop.agent?.name} · {SOURCE_LABEL[drop.source]} · {formatDate(drop.created_at)}
@@ -560,7 +560,7 @@ function DropsTab() {
                     </Box>
                     <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
                       <AckChip state={drop.acknowledgment} />
-                      <Chip size="small" color={DROP_COLOR[drop.status]} label={DROP_LABEL[drop.status]} />
+                      <DropStatusChip status={drop.status} />
                     </Stack>
                   </Stack>
                   {drop.note && (
