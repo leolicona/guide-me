@@ -40,11 +40,18 @@ function BreakdownRow({
 export function CashBoxCard({
   balance,
   onRegisterDrop,
+  onRegisterPayout,
   showExpenses = true,
 }: {
   balance: AgentBalance
   onRegisterDrop: () => void
-  // Affiliates have no expenses (affiliate-portal D4) — drop the always-zero line for them.
+  // US-A34 — only a self-authorizing caller (the admin) can clear their own negative balance, and
+  // the endpoint is admin-guarded. Absent ⇒ no payout verb, which is every other surface.
+  // Passing it is what used to require a whole second card (caja-surface-parity D8).
+  onRegisterPayout?: () => void
+  // Neither an affiliate nor an admin may record an expense — `/me/expenses` is `agent`-only, so
+  // both get 403. Callers derive this from ONE flag (D6); defaulting it true is what left the
+  // admin reading a `Gastos −$0.00` row for a capability the API denies them.
   showExpenses?: boolean
 }) {
   const [open, setOpen] = useState(false)
@@ -115,7 +122,18 @@ export function CashBoxCard({
             opened a dialog whose «Todo» and «Entregar» were both disabled and whose helper read
             «Disponible para entregar: $0.00» (design review, Should Fix 9). The admin's own caja
             reuses this card and sat in exactly that state. */}
-        {available > 0 ? (
+        {negative && onRegisterPayout ? (
+          <Button
+            variant="contained"
+            size="large"
+            fullWidth
+            disableElevation
+            onClick={onRegisterPayout}
+            sx={{ mt: 2 }}
+          >
+            Registrar pago
+          </Button>
+        ) : available > 0 ? (
           <Button
             variant="contained"
             size="large"
