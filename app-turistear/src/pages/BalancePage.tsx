@@ -10,7 +10,6 @@ import {
   Fade,
   Stack,
   Divider,
-  Chip,
   IconButton,
   TextField,
   Dialog,
@@ -30,25 +29,14 @@ import {
 import { PendingAcknowledgments } from '../features/cash/components/PendingAcknowledgments'
 import { useOrgDateFormatter } from '../features/organization'
 import { AckChip } from '../features/cash/components/AckChip'
+import { DropStatusChip } from '../features/cash/components/DropStatusChip'
 import { CashBoxCard } from '../features/cash/components/CashBoxCard'
 import { SalesSummaryCard } from '../features/cash/components/SalesSummaryCard'
 import { CommissionsCard } from '../features/cash/components/CommissionsCard'
-import type { DropStatus } from '../features/cash/types'
+
 import { ServiceError } from '../services/authService'
 import { formatMoney, amountToCents, centsToAmount } from '../features/catalog/types'
 import { useCurrentUser } from '../features/auth/CurrentUserContext'
-
-const DROP_COLOR: Record<DropStatus, 'warning' | 'success' | 'error'> = {
-  pending: 'warning',
-  confirmed: 'success',
-  rejected: 'error',
-}
-
-const DROP_LABEL: Record<DropStatus, string> = {
-  pending: 'Pendiente',
-  confirmed: 'Confirmado',
-  rejected: 'Rechazado',
-}
 
 const DATE_FMT: Intl.DateTimeFormatOptions = {
   month: 'short',
@@ -264,9 +252,19 @@ export default function BalancePage() {
                       <Stack
                         key={drop.id}
                         direction="row"
-                        sx={{ justifyContent: 'space-between', alignItems: 'center', py: 1 }}
+                        sx={{
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          // An icon-paired chip is wider than the bare colour pill it replaces, and
+                          // two of them beside a note squeezed the left column into three wrapped
+                          // lines at 375px. Let the chip group drop to its own line instead of
+                          // shredding the text it describes.
+                          flexWrap: 'wrap',
+                          rowGap: 1,
+                          py: 1,
+                        }}
                       >
-                        <Box sx={{ minWidth: 0 }}>
+                        <Box sx={{ minWidth: 0, flex: '1 1 12rem' }}>
                           <Typography variant="body2">
                             {formatMoney(drop.amount)}
                             {drop.source === 'admin' ? ' · Cobro directo' : ''}
@@ -299,7 +297,7 @@ export default function BalancePage() {
                         </Box>
                         <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
                           <AckChip state={drop.acknowledgment} />
-                          <Chip size="small" color={DROP_COLOR[drop.status]} label={DROP_LABEL[drop.status]} />
+                          <DropStatusChip status={drop.status} />
                           {drop.status === 'pending' && (
                             <Button
                               size="small"

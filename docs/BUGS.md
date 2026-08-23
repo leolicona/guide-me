@@ -6,6 +6,64 @@ Tracks confirmed bugs, root causes, and fixes. Each entry is immutable once clos
 
 ---
 
+## BUG-039 — The Caja's State Pills Are Colour Alone, in Three Hand-Written Copies — ✅ FIXED
+
+**Found:** 2026-08-22, in the `/design-review` pass over `/balance`
+(`.design/balance/DESIGN_REVIEW.md`, Must Fix 3 + Should Fix 12).
+
+**Affected:** `pages/BalancePage.tsx` · `pages/CashBalancesPage.tsx` · `pages/CashDropDetailPage.tsx`
+· `features/cash/components/AckChip.tsx` — the seller's, the affiliate's and the admin's caja alike.
+
+### Symptom
+
+Every state pill in the caja measured `icon: false`: `Pendiente` (bg `#B45309`), `Rechazado`
+(`#B91C1C`), `Confirmado` (`#15803D`), `Por firmar` (amber outline). Raw MUI `Chip color=…` — a
+coloured pill with no glyph, so **state was carried by colour alone**, which the design system calls
+non-negotiable (`CLAUDE.md`: *"always icon-paired — state is never colour-alone"*). The same defect
+BUG-035 was, on the surfaces that fix never reached.
+
+Worse in combination: a drop confirmed by the admin but still awaiting the agent's signature rendered
+an amber `Por firmar` **beside** a green `Confirmado` — two pills, two tones, two weights, one object.
+The review read it as contradictory.
+
+### Cause
+
+`DROP_COLOR` / `DROP_LABEL` existed in **three byte-identical copies**, one per page, each feeding a
+raw `Chip`. `StatusChip` — the primitive whose entire job is icon-paired functional colour, with a
+test that fails if a preset ships without an icon — was never reached from here.
+
+One presentation written three times is the epic's own thesis: it does not stay in agreement, and no
+single edit can fix it.
+
+### Fix — 2026-08-22
+
+- New `features/cash/components/DropStatusChip.tsx` — the one map, on `StatusChip`, icon-paired
+  (`ScheduleRounded` / `CheckCircleRounded` / `DoNotDisturbOnRounded`). All three copies deleted.
+- `AckChip` moved onto `StatusChip` too, with an icon per state.
+- **`pending` acknowledgment is now NEUTRAL.** It is the one actionable ack state, and it already
+  shouts once — correctly — at the top of the page, where `PendingAcknowledgments` renders it as a
+  warning AlertCard with the Firmar / Disputar buttons. The row keeps the fact, not the alarm; one
+  obligation, one call to action.
+- An icon-paired chip is wider than the bare pill it replaces, and two of them squeezed the row text
+  into three wrapped lines at 375px. The three drop rows now `flexWrap` their chip group onto its own
+  line instead of shredding the text it describes.
+
+**Verified on the running app**, seller and admin: every state chip reports `icon: true`, `Pendiente`
+`#FEF3C7`/`#92400E`, `Rechazado` `#FEE2E2`/`#991B1B`, `Confirmado` `#DCFCE7`/`#166534`, `Por firmar`
+neutral `#F1F5F9`/`#475569`. Screenshots `review-drop-chips-after-mobile-375.png`,
+`review-cash-admin-drops-chips-after-mobile-375.png`, `review-cash-drop-detail-chips-after-mobile-375.png`.
+
+**Pinned by** `features/cash/components/DropStatusChip.test.tsx` — every drop status and every
+acknowledgment state must render `.MuiChip-icon`, `not_required` must render nothing, `pending` must
+stay neutral and a dispute must stay red.
+
+**Noted, not fixed:** the drop detail's «Confirmar recibo» is a green filled button and «Rechazar» a
+red outlined one — functional colour spent on an *action*, which the design system reserves for teal.
+Out of this PR's scope (a different screen and a different rule); it needs its own look at the
+review/reject pair.
+
+---
+
 ## BUG-038 — Every Muted Label Renders at Full Ink; Warning and Error Text Lost Their Colour — ✅ FIXED
 
 **Found:** 2026-08-22, in the `/design-review` pass over `/balance`
