@@ -39,7 +39,7 @@ import {
 } from '../features/cash/hooks'
 import { AckChip } from '../features/cash/components/AckChip'
 import { DropStatusChip } from '../features/cash/components/DropStatusChip'
-import { TuCajaSection } from '../features/cash/components/TuCajaSection'
+import { BalanceScreen } from '../features/cash/components/BalanceScreen'
 import { useOrgDateFormatter } from '../features/organization'
 import { SOURCE_LABEL } from '../features/cash/components/ackPresentation'
 import { METHOD_LABEL } from '../features/cash/components/paymentPresentation'
@@ -636,9 +636,12 @@ export default function CashBalancesPage() {
         </Tabs>
 
         {section === 0 ? (
-          // US-A35 — the admin's own drawer, self-authorized moves.
-          <Box {...panelA11y('caja', 0)}>
-            <TuCajaSection />
+          // US-A35 — the admin's own drawer, self-authorized moves. The SAME component the agent
+          // and the affiliate read at /balance: `surface="admin"` gates the verbs, never the
+          // numbers (caja-surface-parity D1/D4). `TuCajaSection` is gone — once the badge and the
+          // shift caption moved into BalanceScreen (D5), it had no content left to hold.
+          <Box {...panelA11y('caja', 0)} sx={{ mb: 4 }}>
+            <BalanceScreen surface="admin" />
           </Box>
         ) : (
           <Box {...panelA11y('caja', 1)}>

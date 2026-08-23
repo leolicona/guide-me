@@ -17,8 +17,18 @@ export const anAgentBalance = (over: Record<string, unknown> = {}) => ({
   drops: [],
   pending_acknowledgments: [],
   pending_acknowledgments_count: 0,
-  sales: { cash: 250_000, electronic: 0 },
-  commissions: { cash: 25_000, electronic: 0 },
+  // The full SalesBreakdown / CommissionBreakdown the API returns — `total`, the per-method map
+  // and the counts. The short version here used to omit them, which is a fixture no API test would
+  // produce (docs/TESTING.md § The known gap).
+  sales: {
+    total: 250_000,
+    cash: 250_000,
+    electronic: 0,
+    by_method: { card: 0, transfer: 0, link: 0 },
+    cash_count: 2,
+    electronic_count: 0,
+  },
+  commissions: { total: 25_000, cash: 25_000, electronic: 0 },
   ...over,
 })
 
