@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest'
 import { http, HttpResponse } from 'msw'
 import { server } from '../../../test/server'
 import { anAgentBalance, aBalanceRow } from '../../../test/handlers/cash'
-import { renderWithProviders, screen, waitFor } from '../../../test/renderWithProviders'
+import { renderWithProviders, screen, waitFor, userEvent, within } from '../../../test/renderWithProviders'
 import { expectHeadingOutline } from '../../../test/axe'
 import { CurrentUserProvider } from '../../auth/CurrentUserContext'
 import type { UserPayload, UserRole } from '../../auth/types'
@@ -144,6 +144,58 @@ describe.each(['self', 'admin'] as const)('BalanceScreen — %s', (surface) => {
       await screen.findByRole('heading', { level: 2, name: 'La empresa te debe' }),
     ).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Entregar efectivo' })).not.toBeInTheDocument()
+  })
+})
+
+// ── US-UX08 — the money forms are sheets ──────────────────────────────────────────────────────
+//
+// Sheets PORTAL to document.body, so `container.querySelectorAll` finds nothing and an assertion
+// written that way passes for both surfaces while proving neither. Query `document`.
+
+describe.each(['self', 'admin'] as const)('BalanceScreen — the hand-in is a sheet (%s)', (surface) => {
+  it('opens a BottomSheet, not a centred Dialog, and carries the Nota field', async () => {
+    withBalance({ balance: 200_000 })
+    const user = userEvent.setup({ delay: null })
+    renderScreen(surface)
+
+    await user.click(await screen.findByRole('button', { name: 'Entregar efectivo' }))
+
+    // The sheet is a SwipeableDrawer; a MUI Dialog is what this replaces.
+    expect(document.querySelector('.MuiDrawer-root')).toBeInTheDocument()
+    expect(document.querySelector('.MuiDialog-root')).not.toBeInTheDocument()
+
+    // Scoped INSIDE the open sheet. A MUI Drawer keeps its children mounted while closed, so a
+    // document-wide query would find these fields without the sheet ever having opened.
+    const sheet = within(document.querySelector('.MuiDrawer-root') as HTMLElement)
+    // S-8 — «Nota (opcional)» used to exist only on the seller's copy of this dialog, so an admin
+    // could not annotate their own hand-in while every agent could.
+    expect(sheet.getByLabelText(/Nota \(opcional\)/)).toBeInTheDocument()
+    expect(sheet.getByRole('button', { name: 'Entregar' })).toBeInTheDocument()
+  })
+})
+
+describe('BalanceScreen — the payout is a confirmation, not a form', () => {
+  it('opens a ConfirmSheet stating the amount owed', async () => {
+    withBalance({ balance: -50_000 })
+    const user = userEvent.setup({ delay: null })
+    renderScreen('admin')
+
+    await user.click(await screen.findByRole('button', { name: 'Registrar pago' }))
+
+    expect(document.querySelector('.MuiDrawer-root')).toBeInTheDocument()
+    expect(document.querySelector('.MuiDialog-root')).not.toBeInTheDocument()
+    expect(await screen.findByText('¿Registrar el pago?')).toBeInTheDocument()
+
+    // A confirmation, not a form: the figure is STATED, and the only controls are confirm/cancel.
+    // (Scoped to this sheet — the hand-in FormSheet stays mounted-but-closed beside it, so a
+    // document-wide «no Monto field» assertion would fail for the wrong reason.)
+    const sheets = [...document.querySelectorAll('.MuiDrawer-root')]
+    const payoutSheet = sheets.find((el) => el.textContent?.includes('¿Registrar el pago?'))
+    const sheet = within(payoutSheet as HTMLElement)
+    expect(sheet.queryByRole('textbox')).not.toBeInTheDocument()
+    expect(sheet.queryByRole('spinbutton')).not.toBeInTheDocument()
+    expect(sheet.getByLabelText(/La empresa te debe/)).toBeInTheDocument()
+    expect(sheet.getByRole('button', { name: 'Registrar pago' })).toBeInTheDocument()
   })
 })
 

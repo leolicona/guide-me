@@ -10,10 +10,6 @@ import {
   Divider,
   IconButton,
   TextField,
-  Dialog,
-  DialogTitle,
-  DialogContent,
-  DialogActions,
 } from '@mui/material'
 import AddRounded from '@mui/icons-material/AddRounded'
 import DeleteOutlineRounded from '@mui/icons-material/DeleteOutlineRounded'
@@ -34,7 +30,15 @@ import { DropStatusChip } from './DropStatusChip'
 import { CashBoxCard } from './CashBoxCard'
 import { SalesSummaryCard } from './SalesSummaryCard'
 import { CommissionsCard } from './CommissionsCard'
-import { SectionCard, MoneyText, StatusChip, InfoPopover, AlertCard } from '../../../components'
+import {
+  SectionCard,
+  MoneyText,
+  StatusChip,
+  InfoPopover,
+  AlertCard,
+  FormSheet,
+  ConfirmSheet,
+} from '../../../components'
 
 import { ServiceError } from '../../../services/authService'
 import { formatMoney, amountToCents, centsToAmount } from '../../catalog/types'
@@ -403,10 +407,31 @@ export function BalanceScreen({ surface }: { surface: CajaSurface }) {
           </Stack>
         )}
 
-        {/* Hand-in dialog */}
-        <Dialog open={dropOpen} onClose={() => setDropOpen(false)} fullWidth maxWidth="xs">
-          <DialogTitle>Entregar efectivo</DialogTitle>
-          <DialogContent>
+        {/* US-UX08 — a FormSheet, not a centred Dialog. The design system says so in as many
+            words, and «reach & repetition» is why: at 375px the dialog floated 311×436 in
+            mid-screen while the sheet anchors its submit where a thumb already is. */}
+        <FormSheet
+          open={dropOpen}
+          onClose={() => setDropOpen(false)}
+          title="Entregar efectivo"
+          submitLabel={createDrop.isPending ? 'Enviando…' : 'Entregar'}
+          onSubmit={(e) => {
+            e.preventDefault()
+            handleCreateDrop()
+          }}
+          busy={createDrop.isPending}
+          disabled={dropInvalid}
+          error={
+            createDrop.isError ? (
+              <Alert severity="error">
+                {createDrop.error instanceof ServiceError &&
+                createDrop.error.code === 'DROP_EXCEEDS_BALANCE'
+                  ? 'La entrega supera el efectivo disponible. Ajusta el monto.'
+                  : 'No se pudo registrar la entrega. Inténtalo de nuevo.'}
+              </Alert>
+            ) : undefined
+          }
+        >
             {/* The one place the two surfaces MAY read differently, because they behave
                 differently (US-A34): an admin's hand-in is self-authorized and lands confirmed. */}
             {isAdmin ? (
@@ -455,50 +480,25 @@ export function BalanceScreen({ surface }: { surface: CajaSurface }) {
                 onChange={(e) => setDropNote(e.target.value)}
               />
             </Stack>
-            {createDrop.isError && (
-              <Alert severity="error" sx={{ mt: 2 }}>
-                {createDrop.error instanceof ServiceError &&
-                createDrop.error.code === 'DROP_EXCEEDS_BALANCE'
-                  ? 'La entrega supera el efectivo disponible. Ajusta el monto.'
-                  : 'No se pudo registrar la entrega. Inténtalo de nuevo.'}
-              </Alert>
-            )}
-          </DialogContent>
-          <DialogActions>
-            <Button onClick={() => setDropOpen(false)}>Cancelar</Button>
-            <Button
-              variant="contained"
-              disableElevation
-              onClick={handleCreateDrop}
-              disabled={createDrop.isPending || dropInvalid}
-            >
-              {createDrop.isPending ? 'Enviando…' : 'Entregar'}
-            </Button>
-          </DialogActions>
-        </Dialog>
+        </FormSheet>
 
         {/* Payout — clears the admin's own negative balance, confirmed immediately (US-A34).
             `surface="self"` never opens it: the endpoint is admin-guarded (D13). */}
         {isAdmin && balance && (
-          <Dialog open={payoutOpen} onClose={() => setPayoutOpen(false)} fullWidth maxWidth="xs">
-            <DialogTitle>Registrar pago</DialogTitle>
-            <DialogContent>
+          <ConfirmSheet
+            open={payoutOpen}
+            onClose={() => setPayoutOpen(false)}
+            title="¿Registrar el pago?"
+            description="La empresa te paga este saldo. Se confirma al instante y tu caja queda en cero — no hay estado pendiente ni firma."
+            detail={
               <Stack spacing={1.5}>
-                <Stack
-                  direction="row"
-                  sx={{ justifyContent: 'space-between', alignItems: 'baseline' }}
-                >
-                  <Typography variant="body2" color="textSecondary">
-                    La empresa te debe
-                  </Typography>
-                  <MoneyText
-                    cents={balance.balance}
-                    absolute
-                    semantic="negative"
-                    variant="h6"
-                    srLabel="La empresa te debe"
-                  />
-                </Stack>
+                <MoneyText
+                  cents={balance.balance}
+                  absolute
+                  semantic="negative"
+                  variant="h2"
+                  srLabel="La empresa te debe"
+                />
                 <StatusChip
                   tone="neutral"
                   icon={<BoltRounded />}
@@ -506,24 +506,17 @@ export function BalanceScreen({ surface }: { surface: CajaSurface }) {
                   sx={{ alignSelf: 'flex-start' }}
                 />
               </Stack>
-              {payout.isError && (
-                <Alert severity="error" sx={{ mt: 2 }}>
-                  No se pudo registrar el pago. Inténtalo de nuevo.
-                </Alert>
-              )}
-            </DialogContent>
-            <DialogActions>
-              <Button onClick={() => setPayoutOpen(false)}>Cancelar</Button>
-              <Button
-                variant="contained"
-                disableElevation
-                onClick={handlePayout}
-                disabled={payout.isPending}
-              >
-                {payout.isPending ? 'Enviando…' : 'Registrar pago'}
-              </Button>
-            </DialogActions>
-          </Dialog>
+            }
+            confirmLabel="Registrar pago"
+            confirmColor="primary"
+            onConfirm={handlePayout}
+            busy={payout.isPending}
+            error={
+              payout.isError ? (
+                <Alert severity="error">No se pudo registrar el pago. Inténtalo de nuevo.</Alert>
+              ) : undefined
+            }
+          />
         )}
     </>
   )
