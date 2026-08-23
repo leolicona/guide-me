@@ -60,6 +60,22 @@ const DATE_FMT: Intl.DateTimeFormatOptions = {
 // — which live on already-confirmed drops — surface in one tap.
 type DropFilter = DropStatus | 'all' | 'disputed'
 
+// A tabbed region takes its name from the tab that opened it. Without this wiring the panels were
+// anonymous: the KPI figures «$2,684.00», «1» and «0» were the ONLY headings on the screen, and
+// once they stopped being headings (they are values, not sections) the Equipo panel had no name at
+// all. `role="tabpanel"` + `aria-labelledby` is the name, and it costs no visible duplication of a
+// label the tab already shows.
+const tabA11y = (group: string, index: number) => ({
+  id: `${group}-tab-${index}`,
+  'aria-controls': `${group}-panel-${index}`,
+})
+
+const panelA11y = (group: string, index: number) => ({
+  role: 'tabpanel',
+  id: `${group}-panel-${index}`,
+  'aria-labelledby': `${group}-tab-${index}`,
+})
+
 function KpiStat({
   label,
   value,
@@ -74,8 +90,12 @@ function KpiStat({
       <Typography variant="caption" color="textSecondary" noWrap>
         {label}
       </Typography>
+      {/* `component` because a KPI figure is a VALUE, not a section. The type scale used to pick
+          the tag, so «$2,684.00», «1» and «0» were the only headings on this screen and the
+          outline read h1 → h6 → h6 → h6 (design review, Must Fix 5). */}
       <Typography
         variant="h6"
+        component="p"
         sx={{ fontWeight: 600, color: accent ? `${accent}.main` : 'text.primary' }}
       >
         {value}
@@ -130,7 +150,9 @@ function BreakdownRow({
       <Typography variant="body2" color="textSecondary">
         {label}
       </Typography>
-      <Typography variant="body2">
+      {/* A signed figure cannot be a bare MoneyText, so it takes the `.numeric` utility — the
+          design system's other route to tabular figures — and the column still aligns. */}
+      <Typography variant="body2" className="numeric">
         {sign === '−' && value > 0 ? '−' : ''}
         {sign === '+' && value > 0 ? '+' : ''}
         {formatMoney(value)}
@@ -602,8 +624,9 @@ export default function CashBalancesPage() {
         </Typography>
 
         <Tabs value={section} onChange={(_, v) => setSection(v)} sx={{ mb: 3 }}>
-          <Tab label="Mi caja" />
+          <Tab label="Mi caja" {...tabA11y('caja', 0)} />
           <Tab
+            {...tabA11y('caja', 1)}
             label={
               <Badge color="warning" badgeContent={pendingCount ?? 0} sx={pendingBadgeSx}>
                 Equipo
@@ -614,12 +637,15 @@ export default function CashBalancesPage() {
 
         {section === 0 ? (
           // US-A35 — the admin's own drawer, self-authorized moves.
-          <TuCajaSection />
+          <Box {...panelA11y('caja', 0)}>
+            <TuCajaSection />
+          </Box>
         ) : (
-          <>
+          <Box {...panelA11y('caja', 1)}>
             <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ mb: 3 }}>
-              <Tab label="Saldos" />
+              <Tab label="Saldos" {...tabA11y('equipo', 0)} />
               <Tab
+                {...tabA11y('equipo', 1)}
                 label={
                   <Badge color="warning" badgeContent={pendingCount ?? 0} sx={pendingBadgeSx}>
                     Entregas
@@ -628,8 +654,10 @@ export default function CashBalancesPage() {
               />
             </Tabs>
 
-            {tab === 0 ? <BalancesTab /> : <DropsTab />}
-          </>
+            <Box {...panelA11y('equipo', tab)}>
+              {tab === 0 ? <BalancesTab /> : <DropsTab />}
+            </Box>
+          </Box>
         )}
       </Box>
     </Fade>

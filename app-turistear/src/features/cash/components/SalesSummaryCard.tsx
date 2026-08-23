@@ -16,7 +16,7 @@ export function SalesSummaryCard({ sales }: { sales: SalesBreakdown }) {
 
   return (
     <SectionCard>
-        <Typography variant="overline" color="textSecondary">
+        <Typography variant="overline" component="h2" color="textSecondary">
           Ventas del turno
         </Typography>
         <Stack direction="row" spacing={1} sx={{ alignItems: 'baseline' }}>
@@ -49,13 +49,18 @@ export function SalesSummaryCard({ sales }: { sales: SalesBreakdown }) {
             <Typography variant="caption" color="textSecondary">
               Efectivo · {sales.cash_count}
             </Typography>
-            <Typography sx={{ fontWeight: 500 }}>{formatMoney(sales.cash)}</Typography>
+            <MoneyText cents={sales.cash} variant="body1" srLabel="Efectivo" sx={{ display: 'block' }} />
           </Box>
           <Box sx={{ flex: 1 }}>
             <Typography variant="caption" color="textSecondary">
               Electrónico · {sales.electronic_count}
             </Typography>
-            <Typography sx={{ fontWeight: 500 }}>{formatMoney(sales.electronic)}</Typography>
+            <MoneyText
+              cents={sales.electronic}
+              variant="body1"
+              srLabel="Electrónico"
+              sx={{ display: 'block' }}
+            />
           </Box>
         </Stack>
 

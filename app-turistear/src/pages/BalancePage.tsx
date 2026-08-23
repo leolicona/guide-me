@@ -3,8 +3,6 @@ import {
   Box,
   Typography,
   Button,
-  Card,
-  CardContent,
   CircularProgress,
   Alert,
   Fade,
@@ -33,6 +31,7 @@ import { DropStatusChip } from '../features/cash/components/DropStatusChip'
 import { CashBoxCard } from '../features/cash/components/CashBoxCard'
 import { SalesSummaryCard } from '../features/cash/components/SalesSummaryCard'
 import { CommissionsCard } from '../features/cash/components/CommissionsCard'
+import { SectionCard, MoneyText } from '../components'
 
 import { ServiceError } from '../services/authService'
 import { formatMoney, amountToCents, centsToAmount } from '../features/catalog/types'
@@ -150,36 +149,36 @@ export default function BalancePage() {
 
             {/* Expenses (US-AG13) — agents only; an affiliate has no expenses (D4). */}
             {!isAffiliate && (
-            <Card variant="outlined">
-              <CardContent>
-                <Typography variant="h6" sx={{ mb: 2 }}>
-                  Gastos
-                </Typography>
-
-                <Stack direction="row" spacing={1} sx={{ mb: 2 }}>
+            <SectionCard title="Gastos">
+                {/* Full-size fields, not `size="small"`: this is the one form a seller fills
+                    standing up in the sun, and every other input in the product is 48px. The
+                    amount and its verb share a row so the description gets the full width. */}
+                <Stack spacing={1.5} sx={{ mb: 2 }}>
                   <TextField
                     label="Descripción"
-                    size="small"
                     fullWidth
                     value={description}
                     onChange={(e) => setDescription(e.target.value)}
                   />
-                  <TextField
-                    label="Monto"
-                    size="small"
-                    type="number"
-                    sx={{ width: 130 }}
-                    value={expenseAmount}
-                    onChange={(e) => setExpenseAmount(e.target.value)}
-                  />
-                  <IconButton
-                    color="primary"
-                    aria-label="Agregar gasto"
-                    onClick={handleAddExpense}
-                    disabled={addExpense.isPending || !description.trim() || !expenseAmount}
-                  >
-                    <AddRounded />
-                  </IconButton>
+                  <Stack direction="row" spacing={1} sx={{ alignItems: 'flex-start' }}>
+                    <TextField
+                      label="Monto"
+                      type="number"
+                      sx={{ flex: 1 }}
+                      value={expenseAmount}
+                      onChange={(e) => setExpenseAmount(e.target.value)}
+                    />
+                    {/* Was a bare `+` icon button, 34px and wordless. The verb is the label. */}
+                    <Button
+                      variant="outlined"
+                      startIcon={<AddRounded />}
+                      onClick={handleAddExpense}
+                      disabled={addExpense.isPending || !description.trim() || !expenseAmount}
+                      sx={{ flexShrink: 0 }}
+                    >
+                      Agregar
+                    </Button>
+                  </Stack>
                 </Stack>
 
                 {addExpense.isError && (
@@ -201,22 +200,23 @@ export default function BalancePage() {
                         sx={{ justifyContent: 'space-between', alignItems: 'center', py: 1 }}
                       >
                         <Box sx={{ minWidth: 0 }}>
-                          <Typography variant="body2" noWrap>
-                            {ex.description}
-                          </Typography>
+                          {/* Not `noWrap`: the amount beside it is now a full MoneyText, and a
+                              clipped «Estacionamiento en el mue…» is worse than a second line. */}
+                          <Typography variant="body2">{ex.description}</Typography>
                           <Typography variant="caption" color="textSecondary">
                             {formatDate(ex.created_at)}
                           </Typography>
                         </Box>
-                        <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
-                          <Typography variant="body2">{formatMoney(ex.amount)}</Typography>
+                        <Stack direction="row" spacing={1} sx={{ alignItems: 'center', flexShrink: 0 }}>
+                          <MoneyText cents={ex.amount} variant="body1" srLabel={ex.description} />
                           <IconButton
-                            size="small"
-                            aria-label="Eliminar gasto"
+                            aria-label={`Eliminar gasto: ${ex.description}`}
                             onClick={() => deleteExpense.mutate(ex.id)}
                             disabled={deleteExpense.isPending}
+                            // 48px, like every other target in the product — this one measured 30.
+                            sx={{ width: 48, height: 48 }}
                           >
-                            <DeleteOutlineRounded fontSize="small" />
+                            <DeleteOutlineRounded />
                           </IconButton>
                         </Stack>
                       </Stack>
@@ -232,16 +232,11 @@ export default function BalancePage() {
                       : 'No se pudo eliminar el gasto. Inténtalo de nuevo.'}
                   </Alert>
                 )}
-              </CardContent>
-            </Card>
+            </SectionCard>
             )}
 
             {/* Recent hand-ins (US-AG14) */}
-            <Card variant="outlined">
-              <CardContent>
-                <Typography variant="h6" sx={{ mb: 2 }}>
-                  Entregas
-                </Typography>
+            <SectionCard title="Entregas">
                 {balance.drops.length === 0 ? (
                   <Typography color="textSecondary" variant="body2">
                     Aún no hay entregas de efectivo.
@@ -265,8 +260,12 @@ export default function BalancePage() {
                         }}
                       >
                         <Box sx={{ minWidth: 0, flex: '1 1 12rem' }}>
-                          <Typography variant="body2">
-                            {formatMoney(drop.amount)}
+                          <Typography variant="body2" component="div">
+                            <MoneyText
+                              cents={drop.amount}
+                              variant="body1"
+                              srLabel={drop.source === 'admin' ? 'Cobro directo' : 'Entrega'}
+                            />
                             {drop.source === 'admin' ? ' · Cobro directo' : ''}
                           </Typography>
                           <Typography variant="caption" color="textSecondary">
@@ -313,8 +312,7 @@ export default function BalancePage() {
                     ))}
                   </Stack>
                 )}
-              </CardContent>
-            </Card>
+            </SectionCard>
           </Stack>
         )}
 

@@ -1,6 +1,5 @@
 import { Stack, Typography } from '@mui/material'
 import type { CommissionBreakdown } from '../types'
-import { formatMoney } from '../../catalog/types'
 import { SectionCard, MoneyText } from '../../../components'
 
 /**
@@ -11,7 +10,7 @@ import { SectionCard, MoneyText } from '../../../components'
 export function CommissionsCard({ commissions }: { commissions: CommissionBreakdown }) {
   return (
     <SectionCard>
-        <Typography variant="overline" color="textSecondary">
+        <Typography variant="overline" component="h2" color="textSecondary">
           Comisiones ganadas
         </Typography>
         {/* Earnings, not a deduction — shown in success green (positive semantic). */}
@@ -28,13 +27,17 @@ export function CommissionsCard({ commissions }: { commissions: CommissionBreakd
             <Typography variant="body2" color="textSecondary">
               De ventas en efectivo
             </Typography>
-            <Typography variant="body2">{formatMoney(commissions.cash)}</Typography>
+            <MoneyText cents={commissions.cash} variant="body2" srLabel="De ventas en efectivo" />
           </Stack>
           <Stack direction="row" sx={{ justifyContent: 'space-between' }}>
             <Typography variant="body2" color="textSecondary">
               De ventas electrónicas
             </Typography>
-            <Typography variant="body2">{formatMoney(commissions.electronic)}</Typography>
+            <MoneyText
+              cents={commissions.electronic}
+              variant="body2"
+              srLabel="De ventas electrónicas"
+            />
           </Stack>
         </Stack>
 

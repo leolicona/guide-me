@@ -45,7 +45,7 @@ export function PendingAcknowledgments({ items }: { items: PendingAck[] }) {
 
   return (
     <Box>
-      <Typography variant="h6" sx={{ mb: 0.5 }}>
+      <Typography variant="h6" component="h2" sx={{ mb: 0.5 }}>
         Pendientes de firma
       </Typography>
       <Typography variant="body2" color="textSecondary" sx={{ mb: 2 }}>

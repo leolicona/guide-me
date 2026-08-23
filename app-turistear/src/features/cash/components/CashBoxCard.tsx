@@ -21,7 +21,9 @@ function BreakdownRow({
       <Typography variant="body2" color="textSecondary">
         {label}
       </Typography>
-      <Typography variant="body2">
+      {/* A signed figure cannot be a bare MoneyText, so it takes the `.numeric` utility — the
+          design system's other route to tabular figures — and the column still aligns. */}
+      <Typography variant="body2" className="numeric">
         {sign === '−' && value > 0 ? '−' : ''}
         {sign === '+' && value > 0 ? '+' : ''}
         {formatMoney(value)}
@@ -47,10 +49,15 @@ export function CashBoxCard({
 }) {
   const [open, setOpen] = useState(false)
   const negative = balance.balance < 0
+  // What can actually be handed in right now: cash held minus what is already pledged to a drop
+  // awaiting confirmation. Mirrors the caller's own cap and the API's.
+  const available = balance.balance - balance.pending_drops_total
 
   return (
     <SectionCard>
-        <Typography variant="overline" color="textSecondary">
+        {/* A real heading, still shaped like an overline: this card is the page's most important
+            region and contributed nothing to the heading outline (design review, Must Fix 5). */}
+        <Typography variant="overline" component="h2" color="textSecondary">
           {negative ? 'La empresa te debe' : 'Efectivo por entregar'}
         </Typography>
         {/* Money reads first — the dominant figure. Neutral ink when it's cash the seller owes;
@@ -103,16 +110,27 @@ export function CashBoxCard({
           </Stack>
         </Collapse>
 
-        <Button
-          variant="contained"
-          size="large"
-          fullWidth
-          disableElevation
-          onClick={onRegisterDrop}
-          sx={{ mt: 2 }}
-        >
-          Entregar efectivo
-        </Button>
+        {/* The page's single teal accent must not lead to a dead end. With nothing available to
+            hand in — a zero balance, or every peso already pledged to a pending drop — the CTA
+            opened a dialog whose «Todo» and «Entregar» were both disabled and whose helper read
+            «Disponible para entregar: $0.00» (design review, Should Fix 9). The admin's own caja
+            reuses this card and sat in exactly that state. */}
+        {available > 0 ? (
+          <Button
+            variant="contained"
+            size="large"
+            fullWidth
+            disableElevation
+            onClick={onRegisterDrop}
+            sx={{ mt: 2 }}
+          >
+            Entregar efectivo
+          </Button>
+        ) : (
+          <Typography variant="body2" color="textSecondary" sx={{ mt: 2 }}>
+            Nada por entregar por ahora.
+          </Typography>
+        )}
     </SectionCard>
   )
 }
