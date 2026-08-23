@@ -6,6 +6,63 @@ Tracks confirmed bugs, root causes, and fixes. Each entry is immutable once clos
 
 ---
 
+## BUG-037 — Nothing in the App Shows Keyboard Focus — ✅ FIXED
+
+**Found:** 2026-08-22, in the `/design-review` pass over `/balance`
+(`.design/balance/DESIGN_REVIEW.md`, Must Fix 1). Found by pressing Tab in the running app.
+
+**Affected:** `app-turistear/src/config/theme.ts` — every control in the product.
+
+### Symptom
+
+Tab into the primary nav. The focused link carries `Mui-focusVisible`, `:focus-visible` matches, and
+it computes `outline: 0px none` · `box-shadow: none` · `background: rgba(0,0,0,0)` — **byte-identical
+to its unfocused neighbour.** Same result forcing `.Mui-focusVisible` onto the contained CTA
+(«Entregar efectivo») and a text button («Disputar»): no outline, no shadow, no background change.
+
+A keyboard-only user cannot tell where they are, on any screen, in any role. WCAG 2.4.7 (AA).
+
+### Cause
+
+`DESIGN_TOKENS.md §4` has always defined the ring — `--shadow-focus: 0 0 0 3px rgba(15,118,110,0.28)`,
+annotated *"keyboard focus-visible ring, non-text controls"* — and `tokens.css:54` has always emitted
+it. Exactly **one** component in `src/` ever applied it: `components/ListRow.tsx:59`. `theme.ts` had no
+`focusVisible` rule at all, so every Button, IconButton, Tab, ListItemButton and nav link fell back to
+MUI's default focus shadow — which the theme itself removes twice over: `disableElevation: true` in
+`MuiButton.defaultProps`, and `boxShadow: 'none'` in its `styleOverrides.root`.
+
+The token was never wrong. It was never wired.
+
+### Fix — 2026-08-22
+
+`MuiButtonBase.styleOverrides.root['&.Mui-focusVisible'] = { boxShadow: SHADOW_FOCUS }`, so every
+control inherits the ring from one place, `:focus-visible` only (a mouse press stays silent).
+
+`MuiButton` has to **restate** it: `disableElevation` emits its own
+`.css-…-MuiButton-root.Mui-focusVisible { box-shadow: none }` at the same specificity and later in the
+sheet, so the ButtonBase rule loses there — and the one control a keyboard user most needs to find is
+the primary CTA. Restated inside `MuiButton`'s own overrides, which land last, without giving elevation
+back.
+
+Text inputs are deliberately untouched: `DESIGN_TOKENS.md §4` gives them `--color-focus-tint` instead
+(*"bg only, no border/outline/box-shadow"*), and that one measured correct all along —
+`rgba(15,118,110,0.08)`, exactly the token.
+
+**Verified on the running app** (the only place the defect was visible): after the change, a real Tab
+press lands a ring of `rgba(15,118,110,0.28) 0px 0px 0px 3px` on the nav link, the account avatar, the
+contained CTA, the text button and the icon button alike — see
+`.design/balance/screenshots/review-focus-ring-after-mobile-375.png`. Buttons transition `box-shadow`,
+so a computed read in the same tick as the class change returns the t=0 value; the settled value is the
+ring.
+
+**Pinned by** `src/config/theme.test.ts`. jsdom cannot answer *"is focus visible"* — `:focus-visible`
+and `var()` inside `box-shadow` are both out of its reach — so the test asserts the rules exist and
+still point at the token. It cannot prove the ring renders; it does stop it from being deleted again,
+which is the failure that actually happened. Confirmed non-vacuous: removing the `MuiButton` rule fails
+it.
+
+---
+
 ## BUG-036 — The App Test Suite Flakes Under Parallel Load — ✅ FIXED
 
 **Found:** 2026-08-22, while verifying the heading-outline fix. Two full-suite runs failed on

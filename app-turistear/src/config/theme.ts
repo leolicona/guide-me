@@ -36,6 +36,10 @@ const WARNING = '#B45309' // caution / nearing expiry — white-on 5.02:1
 const ERROR = '#B91C1C' // urgency / dispute / cancel — white-on 6.47:1
 const INFO = '#0369A1' // rare neutral notice (NOT the teal brand)
 
+// Keyboard focus ring — the ONE place a ring is allowed (DESIGN_TOKENS.md §4). Non-text controls
+// only; inputs use a background tint instead (`--color-focus-tint`, see MuiOutlinedInput below).
+const SHADOW_FOCUS = 'var(--shadow-focus, 0 0 0 3px rgba(15, 118, 110, 0.28))'
+
 // Elevation — overlays only
 const SHADOW_OVERLAY_SM = '0 4px 12px rgba(15,23,42,0.08), 0 1px 2px rgba(15,23,42,0.04)' // menus/popovers
 const SHADOW_OVERLAY_MD = '0 12px 32px rgba(15,23,42,0.14)' // dialogs
@@ -102,6 +106,22 @@ export const theme = createTheme({
         variantMapping: { subtitle1: 'p', subtitle2: 'p' },
       },
     },
+    // Keyboard focus. `--shadow-focus` (DESIGN_TOKENS.md §4) has existed since the token set
+    // shipped, and exactly one component ever applied it (`ListRow`): measured on the running app,
+    // a Tab-focused nav link carried `Mui-focusVisible` and `:focus-visible`, and still computed
+    // `outline: 0px none / box-shadow: none / transparent` — identical to its unfocused neighbour
+    // (design review of /balance, Must Fix 1). A keyboard user had no idea where they were.
+    //
+    // Applied at BUTTON BASE so every IconButton, Tab, ListItemButton and nav link inherits it from
+    // one place. `:focus-visible` only, so a mouse press stays silent. `MuiButton` restates it —
+    // see the note there; `disableElevation` emits a competing rule this one cannot outrank.
+    MuiButtonBase: {
+      styleOverrides: {
+        root: {
+          '&.Mui-focusVisible': { boxShadow: SHADOW_FOCUS },
+        },
+      },
+    },
     MuiButton: {
       defaultProps: { disableElevation: true },
       styleOverrides: {
@@ -111,6 +131,11 @@ export const theme = createTheme({
           fontWeight: 600,
           minHeight: 48, // touch comfort / reach
           boxShadow: 'none',
+          // `disableElevation` emits its own `&.Mui-focusVisible { box-shadow: none }` at the SAME
+          // specificity as the MuiButtonBase rule above and later in the sheet, so it wins there.
+          // Restated here — inside MuiButton's own overrides, which land last — so the CTA keeps a
+          // focus ring without giving elevation back.
+          '&.Mui-focusVisible': { boxShadow: SHADOW_FOCUS },
           // Contained-primary hover is handled by palette.primary.dark (TEAL_HOVER). Pressed
           // feedback on the primary action — the one confident teal CTA per screen.
           '&.MuiButton-containedPrimary:active': { backgroundColor: TEAL_ACTIVE },
