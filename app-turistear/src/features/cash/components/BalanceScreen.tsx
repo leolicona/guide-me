@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Link as RouterLink } from 'react-router-dom'
 import {
   Box,
   Typography,
@@ -24,6 +25,7 @@ import {
   useCreateDrop,
   useCancelDrop,
   useRegisterPayout,
+  usePendingDropCount,
 } from '../hooks'
 import { PendingAcknowledgments } from './PendingAcknowledgments'
 import { useOrgDateFormatter } from '../../organization'
@@ -32,11 +34,12 @@ import { DropStatusChip } from './DropStatusChip'
 import { CashBoxCard } from './CashBoxCard'
 import { SalesSummaryCard } from './SalesSummaryCard'
 import { CommissionsCard } from './CommissionsCard'
-import { SectionCard, MoneyText, StatusChip, InfoPopover } from '../../../components'
+import { SectionCard, MoneyText, StatusChip, InfoPopover, AlertCard } from '../../../components'
 
 import { ServiceError } from '../../../services/authService'
 import { formatMoney, amountToCents, centsToAmount } from '../../catalog/types'
 import { useCurrentUser } from '../../auth/CurrentUserContext'
+import { ROUTES } from '../../../config/routes'
 
 const DATE_FMT: Intl.DateTimeFormatOptions = {
   month: 'short',
@@ -58,9 +61,13 @@ export type CajaSurface = 'self' | 'admin'
  * negative-balance card carried a poorer breakdown than the seller's, and their reconciliation
  * offered a `Gastos` row for a capability the API answers 403 to.
  *
- * `surface` decides THREE things and nothing else (D4): which verbs render, whether a move is
- * self-authorized, and whether expenses exist. **Never which numbers are shown** — that rule is
- * what the two screens broke, and the parity test asserts the difference set is exactly this.
+ * `surface` decides FOUR things and nothing else (D4, extended once by D17): which verbs render,
+ * whether a move is self-authorized, whether expenses exist, and whether the TEAM's pending work is
+ * surfaced. **Never which of your own numbers are shown** — that rule is what the two screens
+ * broke, and the parity test asserts the difference set is exactly this list.
+ *
+ * The fourth item was added deliberately and written down. A rule you quietly extend is a rule you
+ * have stopped enforcing.
  */
 export function BalanceScreen({ surface }: { surface: CajaSurface }) {
   const formatDate = useOrgDateFormatter(DATE_FMT) // US-A66 — org-local audit timestamps
@@ -76,6 +83,10 @@ export function BalanceScreen({ surface }: { surface: CajaSurface }) {
   const createDrop = useCreateDrop()
   const cancelDrop = useCancelDrop()
   const payout = useRegisterPayout()
+  // D17 — the FOURTH thing `surface` gates: whether the TEAM's pending work is surfaced. Written
+  // into the list in D4's comment above, not smuggled in: a rule you quietly extend is a rule you
+  // have stopped enforcing.
+  const { data: teamPending = 0 } = usePendingDropCount(isAdmin)
 
   const [description, setDescription] = useState('')
   const [expenseAmount, setExpenseAmount] = useState('')
@@ -155,6 +166,24 @@ export function BalanceScreen({ surface }: { surface: CajaSurface }) {
                 in view so it can't be missed, but never a modal. An admin owes no signature:
                 their own moves are self-authorized, so the endpoint never mints one for them. */}
             {!isAdmin && <PendingAcknowledgments items={balance.pending_acknowledgments} />}
+
+            {/* D17 — once «Caja» means MY caja for the admin too, their oversight work needs a
+                door, and their own screen is where they already are. */}
+            {isAdmin && teamPending > 0 && (
+              <AlertCard
+                tone="warning"
+                title={
+                  teamPending === 1
+                    ? 'Una entrega del equipo espera tu confirmación'
+                    : `${teamPending} entregas del equipo esperan tu confirmación`
+                }
+                actions={
+                  <Button component={RouterLink} to={ROUTES.CASH} size="small" variant="contained">
+                    Ver caja del equipo
+                  </Button>
+                }
+              />
+            )}
 
             {/* D5 — self-authorization is STATED, not implied. A screen that looks identical to
                 the seller's while behaving differently is worse than two screens; this badge is

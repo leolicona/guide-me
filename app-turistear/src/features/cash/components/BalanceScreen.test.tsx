@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { http, HttpResponse } from 'msw'
 import { server } from '../../../test/server'
-import { anAgentBalance } from '../../../test/handlers/cash'
+import { anAgentBalance, aBalanceRow } from '../../../test/handlers/cash'
 import { renderWithProviders, screen, waitFor } from '../../../test/renderWithProviders'
 import { expectHeadingOutline } from '../../../test/axe'
 import { CurrentUserProvider } from '../../auth/CurrentUserContext'
@@ -36,6 +36,15 @@ beforeEach(() => {
     ),
   )
 })
+
+// The oversight block's count is DERIVED from the team's balances (`usePendingDropCount` sums
+// `pending_drops_count` over `/api/cash/balances`) — there is no count endpoint to stub.
+const withTeamPending = (count: number) =>
+  server.use(
+    http.get('/api/cash/balances', () =>
+      HttpResponse.json({ balances: [aBalanceRow({ pending_drops_count: count })] }),
+    ),
+  )
 
 const withBalance = (over: Record<string, unknown> = {}) =>
   server.use(
@@ -217,6 +226,38 @@ describe('BalanceScreen — the capability line', () => {
     renderScreen('admin')
     await screen.findByRole('heading', { level: 2, name: 'Efectivo por entregar' })
     expect(screen.queryByText('Pendientes de firma')).not.toBeInTheDocument()
+  })
+
+  // S-21 / D17 — the FOURTH gate, and the one deliberately added to D4's list of three. Once
+  // «Caja» means MY caja for the admin too, their oversight work needs a door, and their own
+  // screen is where they already are.
+  it('shows the team’s pending work to the admin, and to nobody else', async () => {
+    withTeamPending(3)
+    withBalance()
+    const self = renderScreen('self')
+    await screen.findByRole('heading', { level: 2, name: 'Efectivo por entregar' })
+    expect(screen.queryByText(/esperan tu confirmación/)).not.toBeInTheDocument()
+    self.unmount()
+
+    withTeamPending(3)
+    withBalance()
+    renderScreen('admin')
+    expect(
+      await screen.findByText('3 entregas del equipo esperan tu confirmación'),
+    ).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Ver caja del equipo' })).toHaveAttribute(
+      'href',
+      '/cash',
+    )
+  })
+
+  // Nothing waiting is not a thing to announce.
+  it('hides that block when the team owes the admin nothing', async () => {
+    withTeamPending(0)
+    withBalance()
+    renderScreen('admin')
+    await screen.findByRole('heading', { level: 2, name: 'Efectivo por entregar' })
+    expect(screen.queryByText(/confirmación/)).not.toBeInTheDocument()
   })
 
   // An admin's own drop is born `confirmed`, so there is never a pending one to cancel.
