@@ -103,11 +103,11 @@ export function AccountMenu({ variant, open, onClose, anchorEl }: AccountMenuPro
           <Typography variant="subtitle2" noWrap sx={{ fontWeight: 600 }}>
             {operator ? operator.name : user.name}
           </Typography>
-          <Typography variant="caption" color="text.secondary" noWrap component="div">
+          <Typography variant="caption" color="textSecondary" noWrap component="div">
             {operator ? `Operador · ${user.name}` : roleLabel(user.role)}
           </Typography>
           {!operator && (
-            <Typography variant="caption" color="text.secondary" noWrap component="div">
+            <Typography variant="caption" color="textSecondary" noWrap component="div">
               {user.email}
             </Typography>
           )}
@@ -151,7 +151,7 @@ export function AccountMenu({ variant, open, onClose, anchorEl }: AccountMenuPro
         <>
           <Typography
             variant="overline"
-            color="text.secondary"
+            color="textSecondary"
             sx={{ px: 2, pt: 1.25, display: 'block', letterSpacing: 0.6 }}
           >
             Gestión

@@ -24,11 +24,11 @@ export function AgentRow({ agent, onEdit, onDeactivate, onReactivate }: AgentRow
       inactive={suspended}
       meta={
         <>
-          <Typography variant="body2" color="text.secondary" noWrap>
+          <Typography variant="body2" color="textSecondary" noWrap>
             {agent.email}
           </Typography>
           {agent.phone && (
-            <Typography variant="body2" color="text.secondary" noWrap>
+            <Typography variant="body2" color="textSecondary" noWrap>
               {agent.phone}
             </Typography>
           )}

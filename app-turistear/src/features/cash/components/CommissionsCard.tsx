@@ -11,7 +11,7 @@ import { SectionCard, MoneyText } from '../../../components'
 export function CommissionsCard({ commissions }: { commissions: CommissionBreakdown }) {
   return (
     <SectionCard>
-        <Typography variant="overline" color="text.secondary">
+        <Typography variant="overline" color="textSecondary">
           Comisiones ganadas
         </Typography>
         {/* Earnings, not a deduction — shown in success green (positive semantic). */}
@@ -25,13 +25,13 @@ export function CommissionsCard({ commissions }: { commissions: CommissionBreakd
 
         <Stack spacing={0.5} sx={{ mt: 1.5 }}>
           <Stack direction="row" sx={{ justifyContent: 'space-between' }}>
-            <Typography variant="body2" color="text.secondary">
+            <Typography variant="body2" color="textSecondary">
               De ventas en efectivo
             </Typography>
             <Typography variant="body2">{formatMoney(commissions.cash)}</Typography>
           </Stack>
           <Stack direction="row" sx={{ justifyContent: 'space-between' }}>
-            <Typography variant="body2" color="text.secondary">
+            <Typography variant="body2" color="textSecondary">
               De ventas electrónicas
             </Typography>
             <Typography variant="body2">{formatMoney(commissions.electronic)}</Typography>
@@ -39,7 +39,7 @@ export function CommissionsCard({ commissions }: { commissions: CommissionBreakd
         </Stack>
 
         {commissions.electronic > 0 && (
-          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1.5 }}>
+          <Typography variant="caption" color="textSecondary" sx={{ display: 'block', mt: 1.5 }}>
             Tus comisiones ya están descontadas de tu caja. Las de ventas electrónicas reducen
             tu deuda de efectivo — son ganancia directa.
           </Typography>

@@ -54,7 +54,7 @@ export function BlockoutsField({ value, onChange, disabled }: BlockoutsFieldProp
   return (
     <Stack spacing={1.5}>
       {value.length === 0 && (
-        <Typography variant="body2" color="text.secondary">
+        <Typography variant="body2" color="textSecondary">
           Sin bloqueos
         </Typography>
       )}
@@ -78,7 +78,7 @@ export function BlockoutsField({ value, onChange, disabled }: BlockoutsFieldProp
               {b.quantity > 1 ? ` · ${b.quantity} hab.` : ''}
             </Typography>
             {b.reason && (
-              <Typography variant="caption" color="text.secondary" noWrap>
+              <Typography variant="caption" color="textSecondary" noWrap>
                 {b.reason}
               </Typography>
             )}

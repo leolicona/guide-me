@@ -16,12 +16,12 @@ export function SalesSummaryCard({ sales }: { sales: SalesBreakdown }) {
 
   return (
     <SectionCard>
-        <Typography variant="overline" color="text.secondary">
+        <Typography variant="overline" color="textSecondary">
           Ventas del turno
         </Typography>
         <Stack direction="row" spacing={1} sx={{ alignItems: 'baseline' }}>
           <MoneyText cents={sales.total} variant="h2" srLabel="Ventas del turno" />
-          <Typography variant="body2" color="text.secondary">
+          <Typography variant="body2" color="textSecondary">
             {count === 1 ? '1 venta' : `${count} ventas`}
           </Typography>
         </Stack>
@@ -46,13 +46,13 @@ export function SalesSummaryCard({ sales }: { sales: SalesBreakdown }) {
 
         <Stack direction="row" spacing={3} sx={{ mt: 2 }}>
           <Box sx={{ flex: 1 }}>
-            <Typography variant="caption" color="text.secondary">
+            <Typography variant="caption" color="textSecondary">
               Efectivo · {sales.cash_count}
             </Typography>
             <Typography sx={{ fontWeight: 500 }}>{formatMoney(sales.cash)}</Typography>
           </Box>
           <Box sx={{ flex: 1 }}>
-            <Typography variant="caption" color="text.secondary">
+            <Typography variant="caption" color="textSecondary">
               Electrónico · {sales.electronic_count}
             </Typography>
             <Typography sx={{ fontWeight: 500 }}>{formatMoney(sales.electronic)}</Typography>
@@ -71,7 +71,7 @@ export function SalesSummaryCard({ sales }: { sales: SalesBreakdown }) {
                 />
               ))}
             </Stack>
-            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
+            <Typography variant="caption" color="textSecondary" sx={{ display: 'block', mt: 1 }}>
               Lo electrónico no entra a tu caja — lo cobra la empresa.
             </Typography>
           </>

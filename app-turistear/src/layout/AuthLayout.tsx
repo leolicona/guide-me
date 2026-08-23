@@ -36,7 +36,7 @@ export function AuthLayout({ children, title, footer }: AuthLayoutProps) {
                 Turistear Ya!
               </Typography>
               {title && (
-                <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+                <Typography variant="body2" color="textSecondary" sx={{ mt: 1 }}>
                   {title}
                 </Typography>
               )}

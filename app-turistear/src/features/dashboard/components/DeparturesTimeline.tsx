@@ -102,7 +102,7 @@ function TimelineRow({ item, past }: { item: TimelineItem; past: boolean }) {
         {' · '}
         {item.service_name}
       </Typography>
-      <Typography variant="body2" color="text.secondary" className="numeric" sx={{ mt: 0.5 }}>
+      <Typography variant="body2" color="textSecondary" className="numeric" sx={{ mt: 0.5 }}>
         <RowDetail item={item} past={past} />
       </Typography>
     </Box>
@@ -151,13 +151,13 @@ function PastSummary({
           transition: 'transform 150ms',
         }}
       />
-      <Typography variant="body2" color="text.secondary" className="numeric">
+      <Typography variant="body2" color="textSecondary" className="numeric">
         {items.length === 1 ? '1 ya salió' : `${items.length} ya salieron`}
       </Typography>
       {/* `vendidos > 0`, not `known.length > 0`: departures that sold nothing produce a truthful
           but useless «0 de 0 asistieron». Nothing was sold, so there is no attendance to report. */}
       {vendidos > 0 && (
-        <Typography variant="body2" color="text.secondary" className="numeric">
+        <Typography variant="body2" color="textSecondary" className="numeric">
           · {asistieron} de {vendidos} asistieron
         </Typography>
       )}
@@ -211,12 +211,12 @@ export function DeparturesTimeline({
     <SectionCard title="Ocupación" padded={false}>
       {items.length === 0 ? (
         <Box sx={{ px: 3, pb: 3 }}>
-          <Typography color="text.secondary">
+          <Typography color="textSecondary">
             {loading ? 'Cargando…' : 'Sin servicios este día.'}
           </Typography>
           {!loading && (
             // D6 — the named exclusion: lodging has no departures, so it does not appear here yet.
-            <Typography variant="caption" color="text.secondary">
+            <Typography variant="caption" color="textSecondary">
               Solo servicios con horario; hospedaje aún no aparece aquí.
             </Typography>
           )}
@@ -239,7 +239,7 @@ export function DeparturesTimeline({
               <TimelineRow key={i.slot_id} item={i} past={false} />
             ))}
             {isToday && upcoming.length === 0 && (
-              <Typography variant="body2" color="text.secondary" sx={{ py: 1.5 }}>
+              <Typography variant="body2" color="textSecondary" sx={{ py: 1.5 }}>
                 Ya no queda ningún servicio por salir hoy.
               </Typography>
             )}

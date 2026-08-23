@@ -116,7 +116,7 @@ export function FolioWorkActions({
           <Typography variant="subtitle1" component="h2" sx={{ fontWeight: 600, mb: 0.5 }}>
             {pendingIsReschedule ? 'El cliente pidió reagendar' : 'El cliente pidió cancelar'}
           </Typography>
-          <Typography variant="body2" color="text.secondary">
+          <Typography variant="body2" color="textSecondary">
             {formatDate(pending.created_at)}
             {pending.reason ? ` — ${pending.reason}` : ''}
           </Typography>
@@ -162,7 +162,7 @@ export function FolioWorkActions({
           <Typography variant="subtitle1" component="h2" sx={{ fontWeight: 600, mb: 0.5 }}>
             Pago por verificar
           </Typography>
-          <Typography variant="body2" color="text.secondary">
+          <Typography variant="body2" color="textSecondary">
             Transferencia
             {folio.payment_reference ? ` · Ref. ${folio.payment_reference}` : ''}
           </Typography>
@@ -317,7 +317,7 @@ export function FolioWorkActions({
         }}
       >
         <Stack spacing={2} sx={{ px: 2, pb: 2 }}>
-          <Typography variant="body2" color="text.secondary">
+          <Typography variant="body2" color="textSecondary">
             La reserva sigue activa y nada cambia en la venta. Explica el motivo — el cliente lo
             verá en su portal.
           </Typography>
@@ -353,7 +353,7 @@ export function FolioWorkActions({
         }}
       >
         <Stack spacing={2} sx={{ px: 2, pb: 2 }}>
-          <Typography variant="body2" color="text.secondary">
+          <Typography variant="body2" color="textSecondary">
             La venta se cancelará: se liberan los lugares y se descuenta la comisión del vendedor.
           </Typography>
           <TextField

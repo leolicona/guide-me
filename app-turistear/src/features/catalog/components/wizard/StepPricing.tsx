@@ -61,7 +61,7 @@ export function StepPricing() {
       </Stack>
 
       <Box>
-        <Typography variant="subtitle2" color="text.secondary" sx={{ mb: 1 }}>
+        <Typography variant="subtitle2" color="textSecondary" sx={{ mb: 1 }}>
           Comisión del vendedor
         </Typography>
         <Stack direction="row" spacing={2} sx={{ alignItems: 'flex-start' }}>

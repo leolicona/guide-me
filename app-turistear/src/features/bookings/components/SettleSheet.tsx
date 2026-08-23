@@ -83,14 +83,14 @@ export function SettleSheet({
     >
       <Stack spacing={2}>
         <Stack spacing={0.25}>
-          <Typography variant="body2" color="text.secondary">
+          <Typography variant="body2" color="textSecondary">
             Saldo por cobrar
           </Typography>
           <MoneyText cents={balance} srLabel="Saldo por cobrar" />
         </Stack>
 
         <Stack spacing={0.75}>
-          <Typography variant="body2" color="text.secondary">
+          <Typography variant="body2" color="textSecondary">
             ¿Cómo se cobró el saldo?
           </Typography>
           {/* D1 — only Efectivo + Transferencia for now (card/link hidden), like checkout. */}

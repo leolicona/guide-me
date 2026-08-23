@@ -163,7 +163,7 @@ export default function ScannerPage() {
         {!settled && !scan.isPending && (
           <Typography
             variant="body2"
-            color="text.secondary"
+            color="textSecondary"
             sx={{ mt: 2, textAlign: 'center' }}
           >
             Apunta la cámara al código QR del cliente.

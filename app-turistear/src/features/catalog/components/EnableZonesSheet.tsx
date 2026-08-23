@@ -101,7 +101,7 @@ export function EnableZonesSheet({ serviceId, isFlexible, open, onClose }: Enabl
       }
     >
       <Stack spacing={2}>
-        <Typography variant="body2" color="text.secondary">
+        <Typography variant="body2" color="textSecondary">
           Divide los asientos de cada salida en zonas físicas (p. ej. Piso alto / Piso bajo). Los
           agentes venderán una zona específica.
         </Typography>
@@ -142,7 +142,7 @@ export function EnableZonesSheet({ serviceId, isFlexible, open, onClose }: Enabl
           >
             Agregar zona
           </Button>
-          <Typography variant="body2" color="text.secondary" className="numeric">
+          <Typography variant="body2" color="textSecondary" className="numeric">
             Total: {total} asientos
           </Typography>
         </Box>

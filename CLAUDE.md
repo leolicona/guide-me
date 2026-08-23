@@ -104,7 +104,7 @@ Every new tenant-scoped route MUST include cross-org isolation tests using the `
 ## Frontend Stack & Architecture
 
 - **Framework & Build**: React 18, TypeScript, Vite with CRXJS.
-- **UI Library**: MUI (Material UI) v6 — component library and theming.
+- **UI Library**: MUI (Material UI) **v9** — component library and theming. *(The version matters: v9 resolves `Typography`'s `color` prop through palette VARIANTS — `textSecondary`, `warning` — not dotted paths. `color="text.secondary"` is silently dropped; BUG-038.)*
 - **Data Fetching (Network)**: TanStack Query (React Query) for efficient caching and backend calls.
 - **State Management**: Zustand for lightweight global state.
 - **Forms**: React Hook Form and Zod (sharing validation schemas with the backend).

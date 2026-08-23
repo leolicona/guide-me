@@ -62,7 +62,7 @@ export default function CatalogListPage() {
 
         {services &&
           (services.length === 0 ? (
-            <Typography color="text.secondary">
+            <Typography color="textSecondary">
               Aún no hay servicios — agrega el primero.
             </Typography>
           ) : (

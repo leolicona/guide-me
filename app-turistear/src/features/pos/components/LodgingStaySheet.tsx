@@ -65,7 +65,7 @@ function StepperRow({
           {label}
         </Typography>
         {atMax && hint && (
-          <Typography variant="caption" color="text.secondary">
+          <Typography variant="caption" color="textSecondary">
             {hint}
           </Typography>
         )}
@@ -211,7 +211,7 @@ export function LodgingStaySheet({
         <Box sx={{ px: 2, pb: 1 }}>
           <Typography variant="h6">{target?.name}</Typography>
           {target?.propertyName && (
-            <Typography variant="body2" color="text.secondary">
+            <Typography variant="body2" color="textSecondary">
               {target.propertyName}
             </Typography>
           )}
@@ -292,7 +292,7 @@ export function LodgingStaySheet({
           <>
             <Divider sx={{ my: 2 }} />
             <Stack direction="row" sx={{ alignItems: 'center', justifyContent: 'space-between' }}>
-              <Typography variant="caption" color="text.secondary">
+              <Typography variant="caption" color="textSecondary">
                 {quoted.nights} {quoted.nights === 1 ? 'noche' : 'noches'} · hasta{' '}
                 {quoted.max_capacity * rooms} personas
               </Typography>
@@ -321,7 +321,7 @@ export function LodgingStaySheet({
           </>
         )}
         {rangeComplete && !quoted && !quoteLoading && (
-          <Typography color="text.secondary" variant="body2" sx={{ mt: 2 }}>
+          <Typography color="textSecondary" variant="body2" sx={{ mt: 2 }}>
             No hay disponibilidad para esa combinación. Ajusta las fechas, el número de
             huéspedes o las habitaciones.
           </Typography>

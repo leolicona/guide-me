@@ -144,7 +144,7 @@ export default function BalancePage() {
             {/* US-AG29 — three blocks sharing one shift timeline: the physical cash box
                 (the actionable accent), the sales split, and the earned commissions. */}
             <Box>
-              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+              <Typography variant="caption" color="textSecondary" sx={{ display: 'block', mb: 1 }}>
                 {balance.last_drop
                   ? `Desde tu última entrega · ${formatDate(balance.last_drop.created_at)}`
                   : 'Toda tu actividad'}
@@ -201,7 +201,7 @@ export default function BalancePage() {
                 )}
 
                 {balance.expenses.length === 0 ? (
-                  <Typography color="text.secondary" variant="body2">
+                  <Typography color="textSecondary" variant="body2">
                     No hay gastos registrados.
                   </Typography>
                 ) : (
@@ -216,7 +216,7 @@ export default function BalancePage() {
                           <Typography variant="body2" noWrap>
                             {ex.description}
                           </Typography>
-                          <Typography variant="caption" color="text.secondary">
+                          <Typography variant="caption" color="textSecondary">
                             {formatDate(ex.created_at)}
                           </Typography>
                         </Box>
@@ -255,7 +255,7 @@ export default function BalancePage() {
                   Entregas
                 </Typography>
                 {balance.drops.length === 0 ? (
-                  <Typography color="text.secondary" variant="body2">
+                  <Typography color="textSecondary" variant="body2">
                     Aún no hay entregas de efectivo.
                   </Typography>
                 ) : (
@@ -271,12 +271,12 @@ export default function BalancePage() {
                             {formatMoney(drop.amount)}
                             {drop.source === 'admin' ? ' · Cobro directo' : ''}
                           </Typography>
-                          <Typography variant="caption" color="text.secondary">
+                          <Typography variant="caption" color="textSecondary">
                             {formatDate(drop.created_at)}
                             {drop.note ? ` · ${drop.note}` : ''}
                           </Typography>
                           {drop.amount_requested != null && (
-                            <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+                            <Typography variant="caption" color="textSecondary" sx={{ display: 'block' }}>
                               Reportaste {formatMoney(drop.amount_requested)} · registrado{' '}
                               {formatMoney(drop.amount)}
                             </Typography>
@@ -292,7 +292,7 @@ export default function BalancePage() {
                             </Typography>
                           )}
                           {drop.acknowledgment === 'resolved' && drop.review_note && (
-                            <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+                            <Typography variant="caption" color="textSecondary" sx={{ display: 'block' }}>
                               {drop.review_note}
                             </Typography>
                           )}
@@ -324,7 +324,7 @@ export default function BalancePage() {
         <Dialog open={dropOpen} onClose={() => setDropOpen(false)} fullWidth maxWidth="xs">
           <DialogTitle>Entregar efectivo</DialogTitle>
           <DialogContent>
-            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            <Typography variant="body2" color="textSecondary" sx={{ mb: 2 }}>
               Registra el efectivo que vas a entregar al administrador. Permanecerá pendiente hasta que confirmen de recibido — solo entonces se descontará de tu saldo.
             </Typography>
             <Stack spacing={2}>

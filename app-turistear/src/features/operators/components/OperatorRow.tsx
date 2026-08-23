@@ -50,7 +50,7 @@ export function OperatorRow({ operator, onReset, onRemove }: OperatorRowProps) {
       inactive={removed}
       meta={
         <Stack direction="row" spacing={1.5} sx={{ mt: 0.5, alignItems: 'center' }}>
-          <Typography variant="body2" color="text.secondary">
+          <Typography variant="body2" color="textSecondary">
             {operator.phone}
           </Typography>
           {chip}

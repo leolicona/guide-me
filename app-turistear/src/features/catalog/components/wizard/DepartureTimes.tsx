@@ -25,7 +25,7 @@ export function DepartureTimes({ times, onChange }: DepartureTimesProps) {
 
   return (
     <Box>
-      <Typography variant="subtitle2" color="text.secondary" sx={{ mb: 1 }}>
+      <Typography variant="subtitle2" color="textSecondary" sx={{ mb: 1 }}>
         Horarios de salida
       </Typography>
       <Stack direction="row" spacing={1.5} sx={{ alignItems: 'flex-start' }}>
@@ -72,7 +72,7 @@ export function DepartureTimes({ times, onChange }: DepartureTimesProps) {
           ))}
         </Stack>
       ) : (
-        <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
+        <Typography variant="caption" color="textSecondary" sx={{ mt: 1, display: 'block' }}>
           Agrega al menos un horario (p. ej. 09:00 y 12:00).
         </Typography>
       )}

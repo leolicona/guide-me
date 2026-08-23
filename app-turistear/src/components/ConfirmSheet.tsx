@@ -84,7 +84,7 @@ export function ConfirmSheet({
     >
       <Box sx={{ px: 2, pb: 1 }}>
         {description && (
-          <Typography variant="body2" color="text.secondary">
+          <Typography variant="body2" color="textSecondary">
             {description}
           </Typography>
         )}

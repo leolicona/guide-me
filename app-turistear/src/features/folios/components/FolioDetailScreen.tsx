@@ -330,7 +330,7 @@ export function FolioDetailScreen({ surface }: FolioDetailScreenProps) {
               {folio.customer_email && (
                 <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
                   <MailOutlineRounded sx={{ fontSize: 16, color: 'text.secondary' }} />
-                  <Typography variant="body2" color="text.primary">
+                  <Typography variant="body2" color="textPrimary">
                     {folio.customer_email}
                   </Typography>
                 </Stack>
@@ -394,7 +394,7 @@ export function FolioDetailScreen({ surface }: FolioDetailScreenProps) {
                     customer), caption-weight so the lines and the Total keep the hierarchy —
                     money reads first. The Historial's `confirmed_sale` row carries the same fact
                     as narrative; this is the at-a-glance read. */}
-                <Typography variant="caption" color="text.secondary">
+                <Typography variant="caption" color="textSecondary">
                   Vendido por {folio.agent.name}
                   {/* US-A68 — the affiliate shift operator who took the sale, when applicable. */}
                   {folio.operator_name ? ` (op. ${folio.operator_name})` : ''} ·{' '}
@@ -424,7 +424,7 @@ export function FolioDetailScreen({ surface }: FolioDetailScreenProps) {
                             <FolioStatusChip status={line.money_state} />
                           )}
                         </Stack>
-                        <Typography variant="caption" color="text.secondary">
+                        <Typography variant="caption" color="textSecondary">
                           {folioLineMeta(line)} · {formatMoney(line.unit_price)}
                         </Typography>
                         {note && (
@@ -466,7 +466,7 @@ export function FolioDetailScreen({ surface }: FolioDetailScreenProps) {
                           <Typography
                             key={e.id}
                             variant="caption"
-                            color="text.secondary"
+                            color="textSecondary"
                             sx={{ display: 'block' }}
                           >
                             + {e.quantity}× {e.name} ({formatMoney(e.price)})
@@ -496,12 +496,12 @@ export function FolioDetailScreen({ surface }: FolioDetailScreenProps) {
                 <Divider sx={{ my: 2 }} />
                 <Stack spacing={1}>
                   <Stack direction="row" sx={{ justifyContent: 'space-between' }}>
-                    <Typography color="text.secondary">Subtotal</Typography>
+                    <Typography color="textSecondary">Subtotal</Typography>
                     <Typography>{formatMoney(folio.subtotal)}</Typography>
                   </Stack>
                   {folio.discount_total > 0 && (
                     <Stack direction="row" sx={{ justifyContent: 'space-between' }}>
-                      <Typography color="text.secondary">Descuento</Typography>
+                      <Typography color="textSecondary">Descuento</Typography>
                       <Typography>−{formatMoney(folio.discount_total)}</Typography>
                     </Stack>
                   )}
@@ -514,14 +514,14 @@ export function FolioDetailScreen({ surface }: FolioDetailScreenProps) {
                     <MoneyText cents={folio.total} variant="h4" srLabel="Total" />
                   </Stack>
                   <Stack direction="row" sx={{ justifyContent: 'space-between' }}>
-                    <Typography color="text.secondary">
+                    <Typography color="textSecondary">
                       {isBooking ? 'Anticipo' : 'Pagado'}
                     </Typography>
                     <Typography className="numeric">{formatMoney(folio.amount_paid)}</Typography>
                   </Stack>
                   {isBooking && (
                     <Stack direction="row" sx={{ justifyContent: 'space-between' }}>
-                      <Typography color="text.secondary">Saldo pendiente</Typography>
+                      <Typography color="textSecondary">Saldo pendiente</Typography>
                       {/* Owed by the customer — neutral ink, not teal. */}
                       <Typography className="numeric">
                         {formatMoney(folio.pending_balance ?? folio.total - folio.amount_paid)}
@@ -566,7 +566,7 @@ export function FolioDetailScreen({ surface }: FolioDetailScreenProps) {
                   </Button>
                 </Stack>
                 <Collapse in={qrOpen} unmountOnExit>
-                  <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                  <Typography variant="body2" color="textSecondary" sx={{ mb: 2 }}>
                     Un QR por servicio. El cliente lo presenta a la entrada; un agente lo escanea
                     para canjear un pase.
                   </Typography>
@@ -665,13 +665,13 @@ export function FolioDetailScreen({ surface }: FolioDetailScreenProps) {
               {lineQuote && lineQuote.line_refund != null && (
                 <Stack spacing={0.5} sx={{ mb: 1 }}>
                   <Stack direction="row" sx={{ justifyContent: 'space-between' }}>
-                    <Typography color="text.secondary">Se devuelve al cliente</Typography>
+                    <Typography color="textSecondary">Se devuelve al cliente</Typography>
                     <Typography className="numeric" sx={{ fontWeight: 600 }}>
                       {formatMoney(lineQuote.line_refund)}
                     </Typography>
                   </Stack>
                   <Stack direction="row" sx={{ justifyContent: 'space-between' }}>
-                    <Typography color="text.secondary">La empresa retiene</Typography>
+                    <Typography color="textSecondary">La empresa retiene</Typography>
                     <Typography className="numeric">
                       {formatMoney(
                         Math.max(0, (lineTarget?.allocated ?? 0) - lineQuote.line_refund),
@@ -679,7 +679,7 @@ export function FolioDetailScreen({ surface }: FolioDetailScreenProps) {
                     </Typography>
                   </Stack>
                   {lineQuote.redeemed && (
-                    <Typography variant="caption" color="text.secondary">
+                    <Typography variant="caption" color="textSecondary">
                       Esta actividad ya fue usada — retiene su total sin importar la política.
                     </Typography>
                   )}
@@ -719,7 +719,7 @@ export function FolioDetailScreen({ surface }: FolioDetailScreenProps) {
           }
         >
           <Stack spacing={2}>
-            <Typography variant="body2" color="text.secondary">
+            <Typography variant="body2" color="textSecondary">
               Captura el PIN que el cliente ve en su portal — es su comprobante de que recibió
               el efectivo. Esto no mueve ningún monto: solo registra que el reembolso se entregó.
             </Typography>
@@ -781,7 +781,7 @@ function RefundQuote({ quote, folio }: { quote: CancellationQuote; folio?: Folio
   return (
     <Box sx={{ border: 1, borderColor: 'grey.200', borderRadius: 2, p: 2, bgcolor: 'grey.50' }}>
       <Stack direction="row" sx={{ justifyContent: 'space-between', alignItems: 'baseline' }}>
-        <Typography variant="body2" color="text.secondary">
+        <Typography variant="body2" color="textSecondary">
           Se devuelve al cliente
         </Typography>
         <MoneyText cents={refund} variant="h6" srLabel="Se devuelve al cliente" />
@@ -792,10 +792,10 @@ function RefundQuote({ quote, folio }: { quote: CancellationQuote; folio?: Folio
           direction="row"
           sx={{ justifyContent: 'space-between', alignItems: 'baseline', mt: 0.5 }}
         >
-          <Typography variant="caption" color="text.secondary">
+          <Typography variant="caption" color="textSecondary">
             La empresa retiene
           </Typography>
-          <Typography variant="caption" color="text.secondary" className="numeric">
+          <Typography variant="caption" color="textSecondary" className="numeric">
             {formatMoney(retention)}
           </Typography>
         </Stack>
@@ -806,10 +806,10 @@ function RefundQuote({ quote, folio }: { quote: CancellationQuote; folio?: Folio
           direction="row"
           sx={{ justifyContent: 'space-between', alignItems: 'baseline', mt: 0.5 }}
         >
-          <Typography variant="caption" color="text.secondary">
+          <Typography variant="caption" color="textSecondary">
             {reversedCommission > 0 ? 'El agente pierde de comisión' : 'El agente conserva su comisión'}
           </Typography>
-          <Typography variant="caption" color="text.secondary" className="numeric">
+          <Typography variant="caption" color="textSecondary" className="numeric">
             {formatMoney(reversedCommission > 0 ? reversedCommission : keptCommission)}
           </Typography>
         </Stack>
@@ -825,7 +825,7 @@ function RefundQuote({ quote, folio }: { quote: CancellationQuote; folio?: Folio
                 direction="row"
                 sx={{ justifyContent: 'space-between', alignItems: 'baseline', gap: 2 }}
               >
-                <Typography variant="caption" color="text.secondary" sx={{ minWidth: 0 }} noWrap>
+                <Typography variant="caption" color="textSecondary" sx={{ minWidth: 0 }} noWrap>
                   {lineName(l.line_id)}
                   {l.redeemed
                     ? ' · ya utilizado'
@@ -833,7 +833,7 @@ function RefundQuote({ quote, folio }: { quote: CancellationQuote; folio?: Folio
                       ? ` · faltan ${l.hours_out} h`
                       : ' · ya salió'}
                 </Typography>
-                <Typography variant="caption" color="text.secondary" className="numeric">
+                <Typography variant="caption" color="textSecondary" className="numeric">
                   {l.refund_pct}%
                 </Typography>
               </Stack>

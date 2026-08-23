@@ -20,7 +20,7 @@ export function TicketQr({ line }: TicketQrProps) {
         <Stack spacing={2} sx={{ alignItems: 'center', textAlign: 'center' }}>
           <Box>
             <Typography variant="subtitle1">{line.service_name}</Typography>
-            <Typography variant="caption" color="text.secondary">
+            <Typography variant="caption" color="textSecondary">
               {/* The same sentence the line above it uses. A raw `2026-09-07 · 08:00` is the one
                   date on these screens the reader has to decode (design review, Should Fix 4). */}
               {line.slot_date
@@ -61,7 +61,7 @@ export function TicketQr({ line }: TicketQrProps) {
               />
             </>
           ) : (
-            <Typography variant="body2" color="text.secondary">
+            <Typography variant="body2" color="textSecondary">
               No hay boleto disponible para esta línea.
             </Typography>
           )}

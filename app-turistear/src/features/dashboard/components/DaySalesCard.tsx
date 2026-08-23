@@ -10,7 +10,7 @@ export function DaySalesCard({ sales }: { sales: DashboardSales | undefined }) {
   return (
     <SectionCard title="Cobrado hoy">
       <MoneyText cents={sales?.collected_cents ?? 0} signed srLabel="Cobrado hoy" />
-      <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+      <Typography variant="body2" color="textSecondary" sx={{ mt: 0.5 }}>
         {sales ? `${sales.folios_created} ventas creadas hoy` : 'Cargando…'}
       </Typography>
       {sales !== undefined && sales.per_seller.length > 0 && (
@@ -24,7 +24,7 @@ export function DaySalesCard({ sales }: { sales: DashboardSales | undefined }) {
               <Typography sx={{ fontWeight: 600, minWidth: 0 }} noWrap>
                 {s.name}
                 {s.operator_name && (
-                  <Typography component="span" variant="body2" color="text.secondary">
+                  <Typography component="span" variant="body2" color="textSecondary">
                     {' '}
                     — {s.operator_name}
                   </Typography>

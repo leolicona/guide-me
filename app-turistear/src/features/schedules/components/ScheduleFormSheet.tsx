@@ -99,7 +99,7 @@ export function ScheduleFormSheet({
     >
       <Stack spacing={2.5}>
         <div>
-          <Typography variant="overline" color="text.secondary">
+          <Typography variant="overline" color="textSecondary">
             Repetir los
           </Typography>
           <Controller

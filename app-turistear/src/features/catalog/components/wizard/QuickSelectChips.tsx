@@ -23,7 +23,7 @@ export function QuickSelectChips({
 
   return (
     <Box>
-      <Typography variant="caption" color="text.secondary">
+      <Typography variant="caption" color="textSecondary">
         Selección rápida
       </Typography>
       <Stack

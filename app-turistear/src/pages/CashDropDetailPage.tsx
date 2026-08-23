@@ -111,7 +111,7 @@ export default function CashDropDetailPage() {
             <Stack direction="row" sx={{ justifyContent: 'space-between', alignItems: 'center' }}>
               <Box sx={{ minWidth: 0 }}>
                 <MoneyText cents={drop.amount} variant="h2" srLabel="Monto de la entrega" />
-                <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+                <Typography variant="caption" color="textSecondary" sx={{ display: 'block' }}>
                   {drop.agent?.name} · {SOURCE_LABEL[drop.source]} · {formatDate(drop.created_at)}
                 </Typography>
               </Box>
@@ -124,13 +124,13 @@ export default function CashDropDetailPage() {
             <SectionCard>
                 <Stack spacing={1}>
                   <Stack direction="row" sx={{ justifyContent: 'space-between' }}>
-                    <Typography color="text.secondary">Saldo del agente al entregar</Typography>
+                    <Typography color="textSecondary">Saldo del agente al entregar</Typography>
                     <Typography className="numeric">{formatMoney(drop.balance_before)}</Typography>
                   </Stack>
                   {drop.amount_requested != null && (
                     <Stack direction="row" sx={{ justifyContent: 'space-between' }}>
-                      <Typography color="text.secondary">Monto solicitado por el agente</Typography>
-                      <Typography sx={{ textDecoration: 'line-through' }} color="text.secondary">
+                      <Typography color="textSecondary">Monto solicitado por el agente</Typography>
+                      <Typography sx={{ textDecoration: 'line-through' }} color="textSecondary">
                         {formatMoney(drop.amount_requested)}
                       </Typography>
                     </Stack>
@@ -138,7 +138,7 @@ export default function CashDropDetailPage() {
                   {drop.note && (
                     <>
                       <Divider sx={{ my: 1 }} />
-                      <Typography variant="body2" color="text.secondary">
+                      <Typography variant="body2" color="textSecondary">
                         Nota del agente
                       </Typography>
                       <Typography variant="body2">{drop.note}</Typography>

@@ -37,7 +37,7 @@ import { StatusChip } from '../components'
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
 const SectionTitle = ({ children }: { children: React.ReactNode }) => (
-  <Typography variant="overline" color="text.secondary" sx={{ letterSpacing: 0.6 }}>
+  <Typography variant="overline" color="textSecondary" sx={{ letterSpacing: 0.6 }}>
     {children}
   </Typography>
 )
@@ -46,7 +46,7 @@ const SectionTitle = ({ children }: { children: React.ReactNode }) => (
 // emails and names must stay fully readable.
 const InfoLine = ({ label, value }: { label: string; value: string }) => (
   <Box>
-    <Typography variant="body2" color="text.secondary">
+    <Typography variant="body2" color="textSecondary">
       {label}
     </Typography>
     <Typography sx={{ fontWeight: 500, overflowWrap: 'anywhere' }}>{value}</Typography>
@@ -219,7 +219,7 @@ function AffiliateView({ affiliate }: { affiliate: AffiliateDetail }) {
               <Box sx={{ mt: 1.5 }}>
                 {affiliate.commissions.length === 0 ? (
                   <Stack spacing={1} sx={{ alignItems: 'flex-start' }}>
-                    <Typography variant="body2" color="text.secondary">
+                    <Typography variant="body2" color="textSecondary">
                       Sin servicios habilitados.
                     </Typography>
                     <Button
@@ -242,7 +242,7 @@ function AffiliateView({ affiliate }: { affiliate: AffiliateDetail }) {
                         <Typography sx={{ minWidth: 0, overflowWrap: 'anywhere' }}>
                           {c.service_name}
                           {c.service_status === 'inactive' && (
-                            <Typography component="span" variant="body2" color="text.secondary">
+                            <Typography component="span" variant="body2" color="textSecondary">
                               {' '}
                               · inactivo
                             </Typography>
@@ -250,7 +250,7 @@ function AffiliateView({ affiliate }: { affiliate: AffiliateDetail }) {
                         </Typography>
                         <Typography
                           className="numeric"
-                          color="text.secondary"
+                          color="textSecondary"
                           sx={{ flexShrink: 0 }}
                         >
                           {c.commission_type === 'fixed'
@@ -272,7 +272,7 @@ function AffiliateView({ affiliate }: { affiliate: AffiliateDetail }) {
               <SectionTitle>Usuarios e invitaciones</SectionTitle>
               <Stack spacing={1} sx={{ mt: 2 }}>
                 {affiliate.users.length === 0 && affiliate.pending_invites.length === 0 && (
-                  <Typography variant="body2" color="text.secondary">
+                  <Typography variant="body2" color="textSecondary">
                     Aún no hay gerente. Invítalo con su correo.
                   </Typography>
                 )}
@@ -289,7 +289,7 @@ function AffiliateView({ affiliate }: { affiliate: AffiliateDetail }) {
                       </Typography>
                       <Typography
                         variant="body2"
-                        color="text.secondary"
+                        color="textSecondary"
                         sx={{ overflowWrap: 'anywhere' }}
                       >
                         {u.email}
@@ -306,7 +306,7 @@ function AffiliateView({ affiliate }: { affiliate: AffiliateDetail }) {
                   >
                     <Typography
                       variant="body2"
-                      color="text.secondary"
+                      color="textSecondary"
                       sx={{ minWidth: 0, overflowWrap: 'anywhere' }}
                     >
                       {inv.identity}
@@ -322,7 +322,7 @@ function AffiliateView({ affiliate }: { affiliate: AffiliateDetail }) {
                   is filled (a user or a pending invite), the invite input is replaced by a hint:
                   extra sellers are added by the manager as PIN operators, not as more logins. */}
               {affiliate.users.length > 0 || affiliate.pending_invites.length > 0 ? (
-                <Typography variant="body2" color="text.secondary">
+                <Typography variant="body2" color="textSecondary">
                   Esta empresa ya tiene un gerente. Los cajeros o vendedores adicionales los agrega el
                   propio gerente como <strong>operadores</strong> (con PIN) desde su panel.
                 </Typography>

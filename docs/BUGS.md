@@ -6,6 +6,67 @@ Tracks confirmed bugs, root causes, and fixes. Each entry is immutable once clos
 
 ---
 
+## BUG-038 — Every Muted Label Renders at Full Ink; Warning and Error Text Lost Their Colour — ✅ FIXED
+
+**Found:** 2026-08-22, in the `/design-review` pass over `/balance`
+(`.design/balance/DESIGN_REVIEW.md`, Must Fix 2). Found by measuring computed colours in the running
+app; invisible in every diff, and invisible to the test suite by construction.
+
+**Affected:** 267 `Typography` call sites across 82 files — i.e. most screens in the product.
+
+### Symptom
+
+`<Typography color="text.secondary">` renders at `#0F172A` — **`text.primary`**. On `/balance` the
+three card labels («Efectivo por entregar», «Ventas del turno», «Comisiones ganadas») measured
+`rgb(15,23,42)`, the same ink as the money beside them, and the generated emotion rule
+`.css-ip2lr-MuiTypography-root` carried **no `color` declaration at all**. Across the whole page,
+exactly three leaf elements rendered `#475569`, and all three were MUI-internal input labels: **zero**
+of our own call sites took effect.
+
+The same defect ate FUNCTIONAL colour, which is worse. `color="warning.main"` on «$200.00 entregado,
+pendiente de confirmación» rendered ink, not amber — 7 sites, including the scanner's error text
+(`ScanResult`), the outbox's failure caption (`OutboxPage`), the operator access error and the
+receipt's success line. Meaning-carrying colour, silently absent.
+
+### Impact
+
+The design's whole *"money reads first"* mechanism depends on the label **receding**. With every label
+at full ink, hierarchy came from size and weight alone — on a screen whose first law is *legible in
+sunlight*. And a warning that renders as body text is a warning nobody sees.
+
+### Cause
+
+The MUI v6 → v9 upgrade. v9's `Typography` resolves `color` through palette-derived **variants** named
+`textPrimary | textSecondary | textDisabled` (and bare `warning | error | success | …` for
+`palette.<key>.main`) — see `@mui/material/Typography/Typography.js:62–74`. A **dotted path** matches
+no variant and is dropped: no error, no warning, no `color` in the generated class.
+
+Nothing caught it. `tsc` is happy (`color` is typed `string`), and the test suite queries by role and
+accessible name, never by colour (`docs/TESTING.md` D5) — so 82 files changed meaning and every test
+stayed green. `CLAUDE.md` still described the stack as MUI v6 while `package.json` pinned `^9.0.1`.
+
+### Fix — 2026-08-22
+
+- `color="text.secondary"` → `color="textSecondary"` (266 sites), `text.primary` → `textPrimary` (1).
+- `color="<palette>.main"` → `color="<palette>"` (7 sites) — v9's variant form for the same value.
+- The 2 non-`Typography` sites (`Box`, `SettingsPage`) moved to `sx={{ color: 'text.secondary' }}`,
+  which never had this failure mode.
+
+**Verified on the running app:** `/balance` went from 3 leaf elements rendering `#475569` (all MUI
+internals) to **23**, and «$200.00 entregado, pendiente de confirmación» from `rgb(15,23,42)` to
+`rgb(180,83,9)` — the WARNING token. The `AlertCard` amber-on-amber was untouched and still measures
+≈7:1.
+
+**Guarded by** a `no-restricted-syntax` ESLint rule in `app-turistear/eslint.config.js`: a dotted
+palette path in the `color` **prop** is now an error, with the fix in the message. `lint:app` is in
+CI's `verify` job, so this cannot come back the way it arrived — silently, during an upgrade. The
+`sx={{ color: 'text.secondary' }}` object form still works and is deliberately not restricted.
+
+**Found by the guard, not by the grep:** the 7 functional-colour sites. The search that found the
+muted labels looked for `text.` only; the lint rule looks for the shape of the mistake.
+
+---
+
 ## BUG-037 — Nothing in the App Shows Keyboard Focus — ✅ FIXED
 
 **Found:** 2026-08-22, in the `/design-review` pass over `/balance`

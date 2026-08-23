@@ -268,7 +268,7 @@ export function FolioListScreen({ surface }: FolioListScreenProps) {
         {fallbackLoading && folios?.length === 0 && (
           <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center', py: 4 }}>
             <CircularProgress size={20} />
-            <Typography color="text.secondary">Buscando en todo el historial…</Typography>
+            <Typography color="textSecondary">Buscando en todo el historial…</Typography>
           </Stack>
         )}
 
@@ -285,7 +285,7 @@ export function FolioListScreen({ surface }: FolioListScreenProps) {
           <Stack spacing={1} sx={{ py: 4 }}>
             {/* D15 — an empty list must NAME every filter that emptied it, or the user removes the
                 wrong one, and a list emptied by a stale query reads as "there are no sales". */}
-            <Typography color="text.secondary">
+            <Typography color="textSecondary">
               {activeFilterLabels.length > 0
                 ? `Sin resultados para ${activeFilterLabels.join(' · ')}.`
                 : 'No hay ventas para mostrar.'}
@@ -348,7 +348,7 @@ export function FolioListScreen({ surface }: FolioListScreenProps) {
         {!isAdmin && data?.truncated && folios && folios.length > 0 && (
           <Typography
             variant="caption"
-            color="text.secondary"
+            color="textSecondary"
             sx={{ display: 'block', textAlign: 'center', mt: 3 }}
           >
             Se muestran tus 500 ventas más recientes.
@@ -358,7 +358,7 @@ export function FolioListScreen({ surface }: FolioListScreenProps) {
         {folios && folios.length > 0 && !usingFallback && !hasRange && data?.window_days != null && (
           <Typography
             variant="caption"
-            color="text.secondary"
+            color="textSecondary"
             sx={{ display: 'block', textAlign: 'center', mt: 3 }}
           >
             Últimos {data.window_days} días, más todo lo que tiene trabajo pendiente.

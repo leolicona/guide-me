@@ -192,7 +192,7 @@ export default function PosCheckoutPage() {
         </Typography>
 
         {lines.length === 0 ? (
-          <Typography color="text.secondary">
+          <Typography color="textSecondary">
             Tu carrito está vacío.{' '}
             <RouterLink to={ROUTES.POS}>Explora los servicios</RouterLink> para iniciar una venta.
           </Typography>
@@ -220,7 +220,7 @@ export default function PosCheckoutPage() {
                         >
                           <Box sx={{ minWidth: 0 }}>
                             <Typography variant="subtitle2">{line.service.name}</Typography>
-                            <Typography variant="caption" color="text.secondary">
+                            <Typography variant="caption" color="textSecondary">
                               {line.slot.date} · {line.slot.start_time}
                               {line.zone ? ` · ${line.zone.name}` : ''}
                             </Typography>
@@ -228,7 +228,7 @@ export default function PosCheckoutPage() {
                               <Typography
                                 key={e.extra.id}
                                 variant="caption"
-                                color="text.secondary"
+                                color="textSecondary"
                                 sx={{ display: 'block' }}
                               >
                                 + {e.quantity}× {e.extra.name} ({formatMoney(e.extra.price)})
@@ -241,7 +241,7 @@ export default function PosCheckoutPage() {
                             {cartLineTotal(line) !== line.unit_price && (
                               <Typography
                                 variant="caption"
-                                color="text.secondary"
+                                color="textSecondary"
                                 className="numeric"
                                 sx={{ display: 'block' }}
                               >
@@ -443,12 +443,12 @@ export default function PosCheckoutPage() {
             <SectionCard>
                 <Stack spacing={1}>
                   <Stack direction="row" sx={{ justifyContent: 'space-between' }}>
-                    <Typography color="text.secondary">Subtotal</Typography>
+                    <Typography color="textSecondary">Subtotal</Typography>
                     <Typography className="numeric">{formatMoney(cartSubtotal(lines))}</Typography>
                   </Stack>
                   {cartDiscountTotal(lines) > 0 && (
                     <Stack direction="row" sx={{ justifyContent: 'space-between' }}>
-                      <Typography color="text.secondary">Descuento</Typography>
+                      <Typography color="textSecondary">Descuento</Typography>
                       <Typography className="numeric">−{formatMoney(cartDiscountTotal(lines))}</Typography>
                     </Stack>
                   )}
@@ -534,7 +534,7 @@ export default function PosCheckoutPage() {
               {(!nameValid || !phoneValid) && (
                 <Typography
                   variant="caption"
-                  color="text.secondary"
+                  color="textSecondary"
                   sx={{ display: 'block', textAlign: 'center', mt: 1 }}
                 >
                   Captura nombre y teléfono del cliente para enviar los boletos y cobrar.

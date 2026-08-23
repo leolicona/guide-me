@@ -73,12 +73,12 @@ function OutboxItem({ row }: { row: OutboxRow }) {
           )}
         </Stack>
 
-        <Typography variant="body2" color="text.secondary">
+        <Typography variant="body2" color="textSecondary">
           {composerText(row)}
         </Typography>
 
         {row.status === 'failed' && row.last_error && (
-          <Typography variant="caption" color="error.main">
+          <Typography variant="caption" color="error">
             {row.last_error}
           </Typography>
         )}
@@ -96,7 +96,7 @@ function OutboxItem({ row }: { row: OutboxRow }) {
         ) : (
           // An email row drains itself; a human marking one sent would be asserting something they
           // did not do (D21). Stated rather than silently rendering a dead button.
-          <Typography variant="caption" color="text.secondary">
+          <Typography variant="caption" color="textSecondary">
             Este correo se envía solo.
           </Typography>
         )}
@@ -117,7 +117,7 @@ export default function OutboxPage() {
       <Typography variant="h5" sx={{ fontWeight: 700, mb: 0.5 }}>
         Mensajes por enviar
       </Typography>
-      <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+      <Typography variant="body2" color="textSecondary" sx={{ mb: 3 }}>
         Lo que el reloj generó y nadie ha mandado todavía. Los mensajes que salen de una acción —
         verificar un pago, confirmar un reembolso — se envían solos con esa acción y nunca llegan
         aquí.
@@ -131,7 +131,7 @@ export default function OutboxPage() {
 
       {!pending.isLoading && rows.length === 0 && (
         <SectionCard>
-          <Typography color="text.secondary">
+          <Typography color="textSecondary">
             Nada pendiente. Cada mensaje salió con la acción que lo produjo.
           </Typography>
         </SectionCard>

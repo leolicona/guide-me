@@ -135,7 +135,7 @@ export default function CatalogDetailPage() {
                       />
                     </Stack>
                     {service.description && (
-                      <Typography color="text.secondary" sx={{ mt: 1 }}>
+                      <Typography color="textSecondary" sx={{ mt: 1 }}>
                         {service.description}
                       </Typography>
                     )}
@@ -144,7 +144,7 @@ export default function CatalogDetailPage() {
                         zeros, so only the commission is meaningful here. */}
                     {(pricesAtServiceLevel(service.category) ||
                       service.commission_value > 0) && (
-                    <Typography variant="body2" color="text.secondary" className="numeric" sx={{ mt: 1.5 }}>
+                    <Typography variant="body2" color="textSecondary" className="numeric" sx={{ mt: 1.5 }}>
                       {pricesAtServiceLevel(service.category) && (
                         <>
                           {formatMoney(service.base_price)} · mín{' '}

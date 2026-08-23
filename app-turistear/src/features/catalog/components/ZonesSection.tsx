@@ -28,7 +28,7 @@ export function ZonesSection({ service }: ZonesSectionProps) {
     return (
       <SectionCard title="Zonas">
         <Stack spacing={2} sx={{ alignItems: 'flex-start' }}>
-          <Typography color="text.secondary">
+          <Typography color="textSecondary">
             Divide los asientos de cada salida en zonas físicas (p. ej. Piso alto / Piso bajo) para
             vender y controlar cada área por separado.
           </Typography>
@@ -73,7 +73,7 @@ export function ZonesSection({ service }: ZonesSectionProps) {
           >
             <Box sx={{ minWidth: 0 }}>
               <Typography sx={{ fontWeight: 600, overflowWrap: 'anywhere' }}>{zone.name}</Typography>
-              <Typography variant="body2" color="text.secondary">
+              <Typography variant="body2" color="textSecondary">
                 {zone.capacity === 1 ? '1 asiento' : `${zone.capacity} asientos`}
               </Typography>
             </Box>
