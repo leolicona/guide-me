@@ -2,7 +2,8 @@
 
 > **Spec:** `docs/cash-drops/caja-surface-parity.spec.md` — decisions cited as D1…D18, scenarios as S-1…S-21.
 > **Stack (App):** React 18 · MUI **v9** · TanStack Query · vitest + jsdom + MSW + RTL
-> **Shape:** four PRs, **frontend only** — no migration, no endpoint, no server file touched.
+> **Shape:** five PRs. Four are frontend; **PR-4 is the one server change** — a `.limit()` on two
+> existing reads plus an additive flag (D12′). No migration, no new endpoint, no new error code.
 > Worktrees from `origin/develop`, one per PR (`docs/PROCESS.md` § Local workflow).
 
 **Standing gates, every PR:**
@@ -35,7 +36,9 @@ PR-3  the team        /balance admits the admin · nav collapses to one «Caja»
                       TuCajaSection deleted · /cash restructured by job, no tabs ·
                       /cash/entregas · inline Confirmar · the oversight block
                       [US-A98 · D2′, D14–D18 · S-15…S-21]
-PR-4  the sheets      four MUI Dialogs → FormSheet / ConfirmSheet
+PR-4  the read        drops capped at 50 (+drops_truncated); listDrops at 500 (+truncated)
+                      [D12′ · the ONLY server change in this epic]
+PR-5  the sheets      four MUI Dialogs → FormSheet / ConfirmSheet
                       [US-UX08 · D10 · S-8, S-9, S-10]
 ```
 
@@ -180,7 +183,24 @@ violation.
 
 ---
 
-## PR-4 — the sheets *(US-UX08, D10)*
+## PR-4 — the bounded read *(D12′ — the only server change)*
+
+`getMyBalance` returns the agent's **entire** hand-in history: no `LIMIT`, no `since`, while the
+`expenses` read three lines above it *is* shift-scoped. Measured: **386 B per drop row**, 54 % of a
+2,128 B payload at three drops, re-fetched on every mount and window focus.
+
+1. `routes/cash/handler.ts` — `.limit(DROPS_PAGE + 1)` on the `getMyBalance` drops query
+   (`DROPS_PAGE = 50`), slice to 50, and add `drops_truncated: boolean` to the response.
+2. Same shape on `listDrops` (`LIMIT 500 + 1` → `truncated`), matching the seller folio list.
+3. `features/cash/types.ts` — the flag, and fix the lying comment: `drops` is **not** "recent".
+4. The UI **says when it capped**. A silent truncation reads as "everything is here" when it is not
+   (`folio-surface-parity` learned this once already).
+5. API tests: seed 60 drops → 50 rows + `drops_truncated: true`; seed 3 → 3 rows + `false`.
+   `test/cash/*.test.ts` must still pass **unedited** — its orgs are far below both caps.
+
+---
+
+## PR-5 — the sheets *(US-UX08, D10)*
 
 Four `MuiDialog`s, all inside the merged component after PR-2:
 

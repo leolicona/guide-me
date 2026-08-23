@@ -87,7 +87,11 @@ ships, not after.
 ## Scope boundary
 
 - **No migration, no new column, no new endpoint, no new error code.** Every field this feature
-  renders is already in `GET /api/cash/me` and already read by one of the two screens.
+  renders is already in `GET /api/cash/me` and already read by one of the two screens — with one
+  additive exception, `drops_truncated` (D12′), which is a boolean the response gains.
+- **One bounded read is the only server change** (D12′: a `.limit()` on two existing queries plus
+  that flag). Everything else in this feature is frontend. `api-turistear/test/cash/*.test.ts`
+  still passes unedited — the seeded orgs are far below either cap.
 - **Server authorization is untouched.** Every per-route role in `routes/cash/index.ts` stands as
   written — `agent` for expenses, `selfActor` for `/me` and `/me/drops`, `agentOrAffiliate` for
   cancel/acknowledge/dispute, `admin` for the review surface. **No role gains a capability.** The
@@ -121,7 +125,8 @@ ships, not after.
 | **D9** | **Sales and commissions render unconditionally on both surfaces.** The admin's `total !== 0` condition is withdrawn. | Finding 6. A zero shift is information — *«no he vendido nada hoy»* — and the seller has always been shown it. Two screens of different length for the same state is precisely the drift this spec exists to end. |
 | **D10** | **All four money dialogs become `FormSheet` / `ConfirmSheet`.** | Finding 7 and `CLAUDE.md`'s explicit rule. The hand-in and the dispute are entity editing; the payout is a confirmation with an amount. Doing it during the merge costs one rewrite instead of two. |
 | **D11** | **The parity guard is a parameterized screen test, not a convention.** One `describe.each(['self','admin'])` asserting the invariants, plus `expectHeadingOutline('Caja')` per surface. | The folio epic's deep-equal payload test is what made parity structural there. There is no payload to compare here — both surfaces already call the same endpoint — so the honest equivalent is asserting that everything except the three D4 capabilities renders identically. |
-| **D12** | **No `LIMIT`, no window, no new query.** The screen keeps reading `GET /api/cash/me` exactly as both screens do today. | The payload is already shift-scoped by the settlement watermark (`deriveBalance`), so it is bounded by construction. Adding a cap would be inventing a problem. |
+| **D12 (withdrawn)** | ~~No `LIMIT`, no window, no new query — the payload is bounded by construction.~~ | **Wrong, and measured wrong.** The settlement watermark bounds the balance *derivation* and the `expenses` read (`gt(agentExpenses.createdAt, derived.since)`), but `drops` has **neither a `LIMIT` nor a `since`**: `getMyBalance` returns the agent's **entire hand-in history** on every read. The frontend type calls it *«recent drops»*; it is not. Replaced by D12′. |
+| **D12′** | **`drops` is capped at 50, newest first, with a `drops_truncated` flag.** The admin's `listDrops` gets `LIMIT 500 + truncated`, matching `folio-surface-parity.spec.md`'s seller list. | Measured on the running app: **386 bytes per drop row**, 54 % of today's 2,128-byte payload at three drops. A seller handing in daily reaches **~96 KB/year of drops alone**, ~193 KB at 500, and it never stops growing — re-fetched on **every mount and every window focus** (`useMyBalance` sets no `staleTime`, and `queryClient.ts` is a bare `new QueryClient()`). 50 covers weeks of a rolling audit list; the flag is what stops a cap from silently reading as «everything». |
 | **D13** | **The admin's «Registrar pago» stays admin-only and self-targeted** (`POST /api/cash/payouts` with `agent_id = own userId`). | It is the existing US-A34 behaviour and the endpoint is `admin`-guarded. The merge must not make it reachable from `surface="self"`, where it would 403. |
 | **D14** | **`/cash` is organized by JOB, not by object, and has no tabs at all.** In order: **Necesitan tu confirmación** → **En disputa** → **Efectivo en la calle** (the people list) → a link to the history. The first two render only when non-empty. | Finding 8. The admin arrives with a job, not with an object; three levels of tabs existed to reconcile «my drawer / their balances / the events», and D2′ deletes the first of those three. What remains — people and events — stops needing a tab because the events that need a human are **the top of the page** and the rest is history (D15). |
 | **D15** | **The drop history moves to its own route, `/cash/entregas`,** with the existing multi-select `FilterStrip` and its state in the URL. | Confirmed and rejected drops are **audit**, not daily work: they were sharing a tab with the pending ones and dragging a four-value exclusive filter (whose fourth value clips at 375px) onto the main screen. A separate route is also what makes «Ver historial de entregas →» an honest link instead of a tab-in-disguise. |
@@ -358,7 +363,12 @@ Then every rendered amount carries `.numeric`, on both surfaces.
 - [ ] The oversight block on the admin's `/balance` (D17)
 - [ ] S-15…S-21 covered
 
-**PR 4 — sheets**
+**PR 4 — the bounded read** *(D12′)*
+- [ ] `getMyBalance`: `drops` capped at 50 + `drops_truncated`; `listDrops` at 500 + `truncated`
+- [ ] The caps stated in the UI when they bite — never a silent truncation
+- [ ] API tests for both caps and both flags; `test/cash/*.test.ts` unedited
+
+**PR 5 — sheets**
 - [ ] Four dialogs → `FormSheet` / `ConfirmSheet` (D10); the seller's Nota reaches both (S-8)
 - [ ] S-8, S-9, S-10 covered
 
@@ -372,6 +382,7 @@ Then every rendered amount carries `.numeric`, on both surfaces.
 |---|---|
 | The drop detail's «Confirmar recibo» (green filled) and «Rechazar» (red outlined) — functional colour spent on an **action**, which the system reserves for teal | A different screen (`CashDropDetailPage`) and a different rule. Noted in BUG-039; it needs its own decision about how a destructive/confirming pair should read, which will apply to more than the caja. |
 | The admin's caja is absent from *Equipo* and from the *«Efectivo en la calle»* KPI | Arguably correct — that list is other people — but it means no single view shows all the company's cash. A product question, not a parity defect; and after D2′ the admin's own figure is one tap away on their own screen. |
+| A `staleTime` on `useMyBalance` (today it re-fetches on every mount and window focus) | A caching policy is app-wide — `queryClient.ts` carries no defaults at all — and picking one for the caja alone would hide the question rather than answer it. D12′ removes the size problem; the frequency one wants its own look at every screen. |
 | A *Caja del equipo* summary on the **Hoy** dashboard | D17 gives the oversight work a door from the screen the admin is already on. Whether *Hoy* should carry a second one is a question about that dashboard's composition, and it wants the D17 link to be observed in use first. |
 | `/balance` at 1280 px is one 680 px column | Deliberate (mobile-first) and shared with every other screen. A desktop pass is its own piece of work. |
 
@@ -403,6 +414,7 @@ this feature.
 | Question | The smallest change that answers it |
 |---|---|
 | Should the admin's own row appear in *Efectivo en la calle*, so one figure covers all the company's cash? | Add the caller's own row to `GET /api/cash/balances` behind a flag and read whether the total becomes more useful or merely larger. A reporting decision, so it wants a number before an opinion. |
+| Is 50 the right cap for a seller's Entregas, and 500 for the admin's history? | The same query the folio spec left open, one table over: `SELECT agent_id, COUNT(*) FROM cash_drops GROUP BY agent_id` in production. Until it runs, both numbers are honest guesses that say so on screen. |
 | Should *Necesitan tu confirmación* cap at N rows, with the rest behind *Ver todas*? | Seed an org with 30 pending hand-ins and read the screen. Until that org exists the cap is a guess, and a silent truncation reads as «covered everything» when it did not. |
 | Should an **admin** be able to record an expense at all? | Today `403`, and this spec mirrors that faithfully. If the answer is yes, the change is one role in `routes/cash/index.ts:66` plus flipping `canExpense` — the UI is already parameterized for it, which is the point of D6. |
 | Does the affiliate **manager** read as `self` here, or does an affiliate with shift operators want its own surface? | The same question `folio-surface-parity.spec.md` left open for the folio list. Answer both at once, or neither. |
