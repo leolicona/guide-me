@@ -1,8 +1,8 @@
-# Implementation Plan — Caja Surface Parity (US-A97, US-UX08)
+# Implementation Plan — Caja Surface Parity (US-A97, US-A98, US-UX08)
 
-> **Spec:** `docs/cash-drops/caja-surface-parity.spec.md` — decisions cited as D1…D13, scenarios as S-1…S-14.
+> **Spec:** `docs/cash-drops/caja-surface-parity.spec.md` — decisions cited as D1…D18, scenarios as S-1…S-21.
 > **Stack (App):** React 18 · MUI **v9** · TanStack Query · vitest + jsdom + MSW + RTL
-> **Shape:** three PRs, **frontend only** — no migration, no endpoint, no server file touched.
+> **Shape:** four PRs, **frontend only** — no migration, no endpoint, no server file touched.
 > Worktrees from `origin/develop`, one per PR (`docs/PROCESS.md` § Local workflow).
 
 **Standing gates, every PR:**
@@ -30,13 +30,18 @@ PR-1  the spec        this document + SPEC.md registration
                       [no code]
 PR-2  the screen      BalanceScreen(surface) · CashBoxCard negative branch · canExpense ·
                       admin gets Entregas · sales/commissions unconditional
-                      [US-A97 · D1–D9, D11–D13 · S-1…S-7, S-11…S-14]
-PR-3  the sheets      four MUI Dialogs → FormSheet / ConfirmSheet
+                      [US-A97 · D1, D3–D9, D11–D13 · S-1…S-7, S-11…S-14]
+PR-3  the team        /balance admits the admin · nav collapses to one «Caja» ·
+                      TuCajaSection deleted · /cash restructured by job, no tabs ·
+                      /cash/entregas · inline Confirmar · the oversight block
+                      [US-A98 · D2′, D14–D18 · S-15…S-21]
+PR-4  the sheets      four MUI Dialogs → FormSheet / ConfirmSheet
                       [US-UX08 · D10 · S-8, S-9, S-10]
 ```
 
-PR-2 before PR-3: the sheets are rewritten **once**, inside the merged component, instead of twice
-in two doomed copies.
+Order matters twice. **PR-2 before PR-3**: the admin cannot be routed to `/balance` until the
+component behind it serves them. **PR-3 before PR-4**: the sheets are then rewritten **once**,
+inside the merged component, instead of twice in two doomed copies.
 
 ---
 
@@ -44,8 +49,8 @@ in two doomed copies.
 
 1. `docs/cash-drops/caja-surface-parity.spec.md` + this plan.
 2. `docs/SPEC.md`:
-   - **US-A97** under *Admin*, **US-UX08** under *Cross-cutting UX*.
-   - A *Features by Phase* line linking the spec (unchecked until PR-3 merges).
+   - **US-A97**, **US-A98** under *Admin*; **US-UX08** under *Cross-cutting UX*.
+   - A *Features by Phase* line linking the spec (unchecked until PR-4 merges).
    - Glossary: **Caja**, **Auto-confirmado**.
 3. Nothing else. The registration ships in the feature's own first PR, never "later"
    (`CLAUDE.md`, and how the index rotted before).
@@ -124,7 +129,58 @@ for S-2 (a `payouts` row, or an expense/commission that overshoots).
 
 ---
 
-## PR-3 — the sheets *(US-UX08, D10)*
+## PR-3 — the team's caja *(US-A98)*
+
+**1. Route the admin to their own caja** *(D2′)*
+- `App.tsx` — `RoleGuard role={['agent','affiliate','admin']}` on `ROUTES.BALANCE`.
+- `layout/AppLayout.tsx:56-57` — the two «Caja» entries become **one** pointing at
+  `ROUTES.BALANCE` for every role. The badge resolver (`:117-119`) keeps
+  `pendingDropCount` for an admin and `pendingAckCount` for the others: the number still means
+  *your* pending work, it just no longer names the route it came from.
+- `pages/BalancePage.tsx` — `surface={user.role === 'admin' ? 'admin' : 'self'}`.
+- **Delete `features/cash/components/TuCajaSection.tsx`.** Its chip + `InfoPopover` moved into
+  `BalanceScreen` in PR-2; nothing else in it has a successor.
+
+**2. The oversight block** *(D17)* — in `BalanceScreen`, `surface="admin"` only:
+`usePendingDropCount(true)` → an `AlertCard tone="warning"` reading *«N entregas del equipo esperan
+tu confirmación»* with a link to `/cash`. Renders only when `N > 0`. This is the **fourth** gate on
+the D4 list — add it to that list in the component's own comment, or the next reader will read a
+violation.
+
+**3. `/cash` → Caja del equipo** *(D14, D18)* — `pages/CashBalancesPage.tsx`
+- `h1` becomes *Caja del equipo*. **Both `Tabs` blocks and every `TabPanel` wrapper are deleted** —
+  including the `tabA11y` / `panelA11y` helpers BUG-040 added, which exist only to name tabs.
+- Order: `PendingConfirmationsBlock` → `DisputesBlock` → *Efectivo en la calle* + the `BalanceRow`
+  list → the history link. The first two render only when non-empty (S-17).
+- `KpiHeader` collapses: drop the *Por confirmar* and *En disputa* stats (they are now the blocks);
+  *Efectivo en la calle* becomes an `h2` + `MoneyText` above the list.
+- `BalanceRow` is untouched (scope boundary).
+
+**4. `/cash/entregas`** *(D15)* — `pages/CashDropsHistoryPage.tsx` *(new)* + `ROUTES.CASH_DROPS`
+- The old `DropsTab` body, minus its `ToggleButtonGroup`, plus the multi-select `FilterStrip` from
+  `features/filters` with state in the URL — the same grammar `/folios` uses.
+- Keep the `disputed` pseudo-filter (it queries by acknowledgment across statuses).
+
+**5. Inline confirm** *(D16)*
+- Each pending row: **[Confirmar]** → `ConfirmSheet` naming the amount and the person → the
+  existing `useReviewDrop` with `{ decision: 'confirmed' }` and **no `amount`**; **[Revisar]** →
+  `/cash/drops/:id`.
+- Assert the absent `amount` in the test (S-18): sending it turns a plain confirm into an
+  **adjusted** one, which by US-A28 owes the agent a signature. A default of `drop.amount` would
+  look harmless and silently mint acknowledgment obligations.
+
+**6. Tests** — `CashBalancesPage.test.tsx`
+- S-15 the hard one: `expect(screen.queryAllByRole('tab')).toHaveLength(0)` — the screen's whole
+  point.
+- S-16…S-21, plus `expectHeadingOutline('Caja del equipo')`.
+
+**7. In the browser** — confirm a hand-in inline as the admin and watch it leave the block; check
+`/cash/entregas` survives a round-trip through a drop detail with its facets intact; and read
+`/balance` as all three roles at 375 px.
+
+---
+
+## PR-4 — the sheets *(US-UX08, D10)*
 
 Four `MuiDialog`s, all inside the merged component after PR-2:
 
