@@ -15,6 +15,7 @@ import { buildFakeJwt } from '../helpers/jwt'
 
 const ADMIN_EMAIL = 'admin@empresa.com'
 const AGENT_EMAIL = 'agent@empresa.com'
+const AFFILIATE_EMAIL = 'hotel@empresa.com'
 
 const auth = (email: string) => ({ Cookie: `gm_access=${buildFakeJwt(email)}` })
 const CASH = 'http://api.local/api/cash'
@@ -205,5 +206,79 @@ describe('GET /api/cash/drops — the team’s history is capped at 500', () => 
     const { json } = await listDrops(ADMIN_EMAIL, '?status=pending')
     expect(json.drops).toHaveLength(3)
     expect(json.truncated).toBe(false)
+  })
+})
+
+// US-A99 — an admin records their OWN operating expenses. The `agent`-only guard on
+// `/me/expenses` was never a decision: the route was written for agents while the admin's caja was
+// a separate screen that never offered the card. The affiliate exclusion IS a decision
+// (affiliate-portal D4) and stays.
+describe('POST /api/cash/me/expenses — who may record one', () => {
+  const addExpense = async (email: string, body: unknown) => {
+    const res = await SELF.fetch(`${CASH}/me/expenses`, {
+      method: 'POST',
+      headers: { ...auth(email), 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    return { status: res.status, json: (await res.json()) as any }
+  }
+
+  it('lets an admin record one out of their own caja', async () => {
+    await seedOrgWithStaff()
+    const { status } = await addExpense(ADMIN_EMAIL, {
+      description: 'Gasolina de la camioneta',
+      amount: 25_000,
+    })
+    expect(status).toBe(201)
+
+    const { json } = await getMyBalance(ADMIN_EMAIL)
+    expect(json.balance.expenses).toHaveLength(1)
+    expect(json.balance.expense_total).toBe(25_000)
+    // The arithmetic already contemplated it: `deriveBalance` subtracts `expense_total` for any
+    // caller. Nothing about the engine had to change.
+    expect(json.balance.balance).toBe(-25_000)
+  })
+
+  it('scopes it to the caller — an admin’s expense never lands on an agent’s caja', async () => {
+    await seedOrgWithStaff()
+    await addExpense(ADMIN_EMAIL, { description: 'Gasolina', amount: 25_000 })
+
+    const { json } = await getMyBalance(AGENT_EMAIL)
+    expect(json.balance.expenses).toHaveLength(0)
+    expect(json.balance.expense_total).toBe(0)
+  })
+
+  it('still lets an agent record one', async () => {
+    await seedOrgWithStaff()
+    const { status } = await addExpense(AGENT_EMAIL, { description: 'Estacionamiento', amount: 6_000 })
+    expect(status).toBe(201)
+  })
+
+  // The one exclusion that IS a decision, and the reason this test is here rather than implied.
+  it('still denies an affiliate — that exclusion is a decision, not an oversight', async () => {
+    const { organizationId } = await seedOrgWithStaff()
+    await seedUser({ organizationId, email: AFFILIATE_EMAIL, role: 'affiliate' })
+
+    const { status } = await addExpense(AFFILIATE_EMAIL, {
+      description: 'Lo que sea',
+      amount: 10_000,
+    })
+    expect(status).toBe(403)
+  })
+
+  it('lets an admin delete their own', async () => {
+    await seedOrgWithStaff()
+    await addExpense(ADMIN_EMAIL, { description: 'Gasolina', amount: 25_000 })
+    const before = await getMyBalance(ADMIN_EMAIL)
+    const id = before.json.balance.expenses[0].id
+
+    const res = await SELF.fetch(`${CASH}/me/expenses/${id}`, {
+      method: 'DELETE',
+      headers: auth(ADMIN_EMAIL),
+    })
+    expect(res.status).toBe(200)
+
+    const after = await getMyBalance(ADMIN_EMAIL)
+    expect(after.json.balance.expenses).toHaveLength(0)
   })
 })

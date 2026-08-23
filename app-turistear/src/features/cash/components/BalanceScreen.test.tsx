@@ -202,8 +202,8 @@ describe('BalanceScreen — the payout is a confirmation, not a form', () => {
 // ── What may differ — and nothing else (S-12) ─────────────────────────────────────────────────
 
 describe('BalanceScreen — the capability line', () => {
-  // S-3 / S-5 — `/me/expenses` is `agent`-only. The row for a denied capability is the defect the
-  // affiliate was spared and the admin was not.
+  // S-3 / S-5 — the expense card follows the API guard exactly: `agentOrAdmin`. A row offered for
+  // a capability the server denies is the defect; so is a capability withheld for no reason.
   it('offers expenses to an agent — the card AND the breakdown row', async () => {
     withBalance()
     renderScreen('self', 'agent')
@@ -214,25 +214,24 @@ describe('BalanceScreen — the capability line', () => {
     expect(screen.getAllByText('Gastos')).toHaveLength(2)
   })
 
-  it('offers them to neither an affiliate nor an admin', async () => {
-    withBalance()
-    const affiliate = renderScreen('self', 'affiliate')
-    await screen.findByRole('heading', { level: 2, name: 'Entregas' })
-    expect(screen.queryByRole('heading', { level: 2, name: 'Gastos' })).not.toBeInTheDocument()
-    affiliate.unmount()
-
+  // US-A99 — the admin records their own, out of their own caja. The `agent`-only guard was never
+  // a decision: the route was written for agents while the admin's caja was a separate screen that
+  // never offered the card, and the omission surfaced only when the two screens became one.
+  it('offers them to an admin too', async () => {
     withBalance()
     renderScreen('admin')
-    await screen.findByRole('heading', { level: 2, name: 'Entregas' })
-    expect(screen.queryByRole('heading', { level: 2, name: 'Gastos' })).not.toBeInTheDocument()
+    expect(await screen.findByRole('heading', { level: 2, name: 'Gastos' })).toBeInTheDocument()
+    // Both halves: the card AND the reconciliation row — which is now TRUE rather than a row for
+    // a capability the server denies.
+    expect(screen.getAllByText('Gastos')).toHaveLength(2)
   })
 
-  // The breakdown row is the half that was invisible: the card was already hidden for an
-  // affiliate, but `showExpenses` defaulted true, so `Gastos −$0.00` stayed in the reconciliation.
-  it('drops the Gastos row from the breakdown too, not just the card', async () => {
+  // The affiliate exclusion IS a decision (affiliate-portal D4), and it stays.
+  it('offers them to no affiliate, on either half', async () => {
     withBalance({ expense_total: 0 })
-    renderScreen('admin')
-    await screen.findByRole('heading', { level: 2, name: 'Efectivo por entregar' })
+    renderScreen('self', 'affiliate')
+    await screen.findByRole('heading', { level: 2, name: 'Entregas' })
+    expect(screen.queryByRole('heading', { level: 2, name: 'Gastos' })).not.toBeInTheDocument()
     expect(screen.queryByText('Gastos')).not.toBeInTheDocument()
   })
 

@@ -77,10 +77,11 @@ export function BalanceScreen({ surface }: { surface: CajaSurface }) {
   const formatDate = useOrgDateFormatter(DATE_FMT) // US-A66 — org-local audit timestamps
   const user = useCurrentUser()
   const isAdmin = surface === 'admin'
-  // D6 — the ONLY place a role is named in this file. `/me/expenses` is `agent`-only
-  // (`routes/cash/index.ts`), so an affiliate AND an admin both get 403. A second role test
-  // anywhere below is precisely the bug that left the admin with an undeletable `Gastos` row.
-  const canExpense = surface === 'self' && user.role !== 'affiliate'
+  // D6 — the ONLY place a role is named in this file, and it mirrors the API guard exactly:
+  // `/me/expenses` is `agentOrAdmin`, so an affiliate gets 403 and nobody else does (US-A99).
+  // A second role test anywhere below is precisely the bug that left the admin reading a
+  // `Gastos −$0.00` row for a capability the server was denying them.
+  const canExpense = user.role !== 'affiliate'
   const { data: balance, isLoading, isError } = useMyBalance()
   const addExpense = useAddExpense()
   const deleteExpense = useDeleteExpense()
@@ -227,8 +228,8 @@ export function BalanceScreen({ surface }: { surface: CajaSurface }) {
               </Stack>
             </Box>
 
-            {/* Expenses (US-AG13) — agents only. Neither an affiliate nor an admin may record
-                one; `/me/expenses` answers both 403 (D6). */}
+            {/* Expenses (US-AG13, US-A99) — an agent or an admin, out of their own caja. An
+                affiliate may not: `/me/expenses` answers them 403 (affiliate-portal D4). */}
             {canExpense && (
             <SectionCard title="Gastos">
                 {/* Full-size fields, not `size="small"`: this is the one form a seller fills
