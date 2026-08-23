@@ -48,7 +48,7 @@ export function PendingAcknowledgments({ items }: { items: PendingAck[] }) {
       <Typography variant="h6" sx={{ mb: 0.5 }}>
         Pendientes de firma
       </Typography>
-      <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+      <Typography variant="body2" color="textSecondary" sx={{ mb: 2 }}>
         El administrador registró estos movimientos en tu saldo. Revísalos y firma de
         conformidad, o levanta una disputa si no estás de acuerdo.
       </Typography>
@@ -134,7 +134,7 @@ export function PendingAcknowledgments({ items }: { items: PendingAck[] }) {
       >
         <DialogTitle>Disputar movimiento</DialogTitle>
         <DialogContent>
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+          <Typography variant="body2" color="textSecondary" sx={{ mb: 2 }}>
             Tu saldo no cambia con la disputa — el administrador la revisará y, si procede,
             registrará la corrección. Explica por qué no estás de acuerdo.
           </Typography>

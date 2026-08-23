@@ -340,11 +340,11 @@ export function FolioTimeline({
           {row.primary}
         </Typography>
         {row.details?.map((detail) => (
-          <Typography key={detail} variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+          <Typography key={detail} variant="caption" color="textSecondary" sx={{ display: 'block' }}>
             {detail}
           </Typography>
         ))}
-        <Typography variant="caption" color="text.secondary">
+        <Typography variant="caption" color="textSecondary">
           {row.caption}
         </Typography>
       </Box>

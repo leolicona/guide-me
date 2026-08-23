@@ -36,7 +36,7 @@ export function StayCartLine({ line, onRemove }: StayCartLineProps) {
             {line.unit_type_name}
             {line.quantity > 1 ? ` × ${line.quantity}` : ''}
           </Typography>
-          <Typography variant="caption" color="text.secondary">
+          <Typography variant="caption" color="textSecondary">
             {/* Rooms live in the title ("× 2") — the meta stays dates · nights · guests. */}
             {dayLabel(line.check_in)} → {dayLabel(line.check_out)} · {line.nights}{' '}
             {line.nights === 1 ? 'noche' : 'noches'} · {line.guests}{' '}
@@ -79,10 +79,10 @@ export function StayCartLine({ line, onRemove }: StayCartLineProps) {
         <Stack spacing={0.25} sx={{ mt: 1, pl: 1 }}>
           {line.per_night.map((n) => (
             <Stack key={n.date} direction="row" sx={{ justifyContent: 'space-between' }}>
-              <Typography variant="caption" color="text.secondary">
+              <Typography variant="caption" color="textSecondary">
                 {dayLabel(n.date)}
               </Typography>
-              <Typography variant="caption" color="text.secondary" className="numeric">
+              <Typography variant="caption" color="textSecondary" className="numeric">
                 {formatMoney(n.rate)}
               </Typography>
             </Stack>

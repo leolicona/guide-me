@@ -41,7 +41,7 @@ export default function VerifyPage() {
       <AuthLayout title="Verificación de cuenta">
         <Box sx={{ textAlign: 'center', py: 4 }}>
           <CircularProgress sx={{ mb: 2 }} />
-          <Typography color="text.secondary">Verificando tu cuenta...</Typography>
+          <Typography color="textSecondary">Verificando tu cuenta...</Typography>
         </Box>
       </AuthLayout>
     );

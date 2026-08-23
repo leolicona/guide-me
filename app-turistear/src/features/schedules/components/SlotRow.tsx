@@ -45,7 +45,7 @@ export function SlotRow({
           <Typography sx={{ fontWeight: 500, fontVariantNumeric: 'tabular-nums' }}>
             {slot.start_time}
           </Typography>
-          <Typography variant="body2" color="text.secondary">
+          <Typography variant="body2" color="textSecondary">
             {slot.remaining} / {slot.capacity} disponibles
           </Typography>
           {slot.booked > 0 && (

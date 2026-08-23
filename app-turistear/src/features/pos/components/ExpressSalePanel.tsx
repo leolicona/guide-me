@@ -236,11 +236,11 @@ export function ExpressSalePanel({ service, today }: ExpressSalePanelProps) {
             {service.name}
           </Typography>
         </Stack>
-        <Typography variant="body2" color="text.secondary">
+        <Typography variant="body2" color="textSecondary">
           Venta Express · solo efectivo · hoy
         </Typography>
         {tally.count > 0 && (
-          <Typography variant="caption" color="text.secondary" className="numeric">
+          <Typography variant="caption" color="textSecondary" className="numeric">
             Esta sesión · {tally.count} {tally.count === 1 ? 'venta' : 'ventas'} ·{' '}
             {formatMoney(tally.cents)}
           </Typography>
@@ -259,7 +259,7 @@ export function ExpressSalePanel({ service, today }: ExpressSalePanelProps) {
                 Personas
               </Typography>
               {clampMsg && (
-                <Typography variant="caption" color="warning.main" sx={{ fontWeight: 600 }}>
+                <Typography variant="caption" color="warning" sx={{ fontWeight: 600 }}>
                   {clampMsg}
                 </Typography>
               )}
@@ -309,7 +309,7 @@ export function ExpressSalePanel({ service, today }: ExpressSalePanelProps) {
               Salidas de hoy
             </Typography>
             {todaySlots.length === 0 ? (
-              <Typography color="text.secondary" variant="body2">
+              <Typography color="textSecondary" variant="body2">
                 No hay salidas disponibles hoy.
               </Typography>
             ) : (

@@ -70,7 +70,7 @@ export default function AffiliatesListPage() {
 
         {affiliates &&
           (affiliates.length === 0 ? (
-            <Typography color="text.secondary">
+            <Typography color="textSecondary">
               Aún no hay afiliados — crea tu primer socio revendedor.
             </Typography>
           ) : (

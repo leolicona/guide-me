@@ -91,7 +91,7 @@ export function WizardChrome({
             Paso {step} de {totalSteps}
           </Typography>
           {stepTitle && (
-            <Typography variant="body2" color="text.secondary">
+            <Typography variant="body2" color="textSecondary">
               · {stepTitle}
             </Typography>
           )}

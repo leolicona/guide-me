@@ -67,7 +67,7 @@ export function ExtrasPanel({ serviceId }: ExtrasPanelProps) {
               <Chip size="small" variant="outlined" label="Eliminado" sx={{ ml: 1 }} />
             )}
           </Typography>
-          <Typography variant="body2" color="text.secondary">
+          <Typography variant="body2" color="textSecondary">
             {formatMoney(extra.price)}
           </Typography>
         </Box>
@@ -99,7 +99,7 @@ export function ExtrasPanel({ serviceId }: ExtrasPanelProps) {
     <>
       <Stack spacing={2} divider={<Divider flexItem />}>
         {extras.length === 0 ? (
-          <Typography color="text.secondary" variant="body2">
+          <Typography color="textSecondary" variant="body2">
             Aún no hay extras.
           </Typography>
         ) : (

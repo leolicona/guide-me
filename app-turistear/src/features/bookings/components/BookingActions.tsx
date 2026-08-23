@@ -90,7 +90,7 @@ function CancellationOutcome({
         direction="row"
         sx={{ justifyContent: 'space-between', alignItems: 'baseline', gap: 1 }}
       >
-        <Typography variant="body2" color="text.secondary">
+        <Typography variant="body2" color="textSecondary">
           Se devuelve al cliente
         </Typography>
         <MoneyText
@@ -106,7 +106,7 @@ function CancellationOutcome({
           direction="row"
           sx={{ justifyContent: 'space-between', alignItems: 'baseline', gap: 1, mt: 1 }}
         >
-          <Typography variant="body2" color="text.secondary">
+          <Typography variant="body2" color="textSecondary">
             Comisión que pierdes
           </Typography>
           <MoneyText
@@ -119,7 +119,7 @@ function CancellationOutcome({
       )}
 
       {quote.refund === 0 && (
-        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
+        <Typography variant="caption" color="textSecondary" sx={{ display: 'block', mt: 1 }}>
           Según la política de tu empresa, a esta distancia de la salida no corresponde reembolso.
         </Typography>
       )}
@@ -223,7 +223,7 @@ export function BookingActions({
                     <Typography variant="subtitle2" noWrap>
                       {line.service_name}
                     </Typography>
-                    <Typography variant="caption" color="text.secondary">
+                    <Typography variant="caption" color="textSecondary">
                       {line.slot_date ?? ''}
                       {lineDeadline(line.booking_expires_at)
                         ? ` · ${lineDeadline(line.booking_expires_at)}`
@@ -350,7 +350,7 @@ export function BookingActions({
                   direction="row"
                   sx={{ justifyContent: 'space-between', alignItems: 'baseline', gap: 1 }}
                 >
-                  <Typography variant="body2" color="text.secondary">
+                  <Typography variant="body2" color="textSecondary">
                     Se devuelve al cliente
                   </Typography>
                   <MoneyText
@@ -365,7 +365,7 @@ export function BookingActions({
                     direction="row"
                     sx={{ justifyContent: 'space-between', alignItems: 'baseline', gap: 1, mt: 1 }}
                   >
-                    <Typography variant="body2" color="text.secondary">
+                    <Typography variant="body2" color="textSecondary">
                       Comisión que pierdes
                     </Typography>
                     <MoneyText

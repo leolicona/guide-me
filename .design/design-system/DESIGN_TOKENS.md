@@ -4,7 +4,7 @@
 > `.design/design-system/DESIGN_BRIEF.md`. **Fresh synthesis** — this *replaces* the indigo
 > "Luminous SaaS" system in `docs/DESING.md` + `app-turistear/src/config/theme.ts`. Phase 6 ports
 > these values into `theme.ts` (MUI `createTheme`) and a CSS-variable layer; this file is the
-> source of truth. Stack is **MUI v6 CSS-in-JS** (`cssVariables: true`).
+> source of truth. Stack is **MUI v9 CSS-in-JS** (`cssVariables: true`).
 >
 > **Contrast:** every text/UI value below was computed for WCAG **AA**, biased to the high end for
 > daylight (see the ratio comments). Resting control borders are intentionally subtle; on inputs,

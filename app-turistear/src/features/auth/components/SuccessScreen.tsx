@@ -37,7 +37,7 @@ export function SuccessScreen({ icon, title, description, action }: SuccessScree
       <Typography variant="h6" sx={{ fontWeight: 600 }}>
         {title}
       </Typography>
-      <Typography variant="body2" color="text.secondary" sx={{ maxWidth: 320 }}>
+      <Typography variant="body2" color="textSecondary" sx={{ maxWidth: 320 }}>
         {description}
       </Typography>
       {action && (

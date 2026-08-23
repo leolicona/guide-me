@@ -69,7 +69,7 @@ export class AppErrorBoundary extends Component<
         <Typography variant="h6" component="h1">
           Algo salió mal
         </Typography>
-        <Typography color="text.secondary">
+        <Typography color="textSecondary">
           Ocurrió un error inesperado. Recarga la página para continuar.
         </Typography>
         <Button variant="contained" disableElevation onClick={() => window.location.reload()}>

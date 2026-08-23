@@ -82,7 +82,7 @@ function KpiStat({
 }) {
   return (
     <Box sx={{ flex: 1, minWidth: 0 }}>
-      <Typography variant="caption" color="text.secondary" noWrap>
+      <Typography variant="caption" color="textSecondary" noWrap>
         {label}
       </Typography>
       <Typography
@@ -138,7 +138,7 @@ function BreakdownRow({
 }) {
   return (
     <Stack direction="row" sx={{ justifyContent: 'space-between' }}>
-      <Typography variant="body2" color="text.secondary">
+      <Typography variant="body2" color="textSecondary">
         {label}
       </Typography>
       <Typography variant="body2">
@@ -186,7 +186,7 @@ function BalanceRow({
                 />
               )}
             </Stack>
-            <Typography variant="caption" color="text.secondary">
+            <Typography variant="caption" color="textSecondary">
               {negative
                 ? `La empresa debe ${isAffiliate ? 'al afiliado' : 'al agente'}`
                 : 'Tiene efectivo de la empresa'}
@@ -240,7 +240,7 @@ function BalanceRow({
           <Divider sx={{ my: 1.5 }} />
           {/* Shift-scoped breakdown (US-A19) — mirrors the agent's own /me view: a
               carry-forward line plus the components since their last confirmed drop. */}
-          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+          <Typography variant="caption" color="textSecondary" sx={{ display: 'block', mb: 1 }}>
             {row.last_drop
               ? `Desde la última entrega · ${formatDate(row.last_drop.created_at)}`
               : 'Toda la actividad'}
@@ -268,17 +268,17 @@ function BalanceRow({
           <Divider sx={{ my: 1.5 }} />
           <Stack spacing={0.5}>
             <Stack direction="row" sx={{ justifyContent: 'space-between' }}>
-              <Typography variant="body2" color="text.secondary">
+              <Typography variant="body2" color="textSecondary">
                 Ventas del turno · {row.sales.cash_count + row.sales.electronic_count}
               </Typography>
               <Typography variant="body2">{formatMoney(row.sales.total)}</Typography>
             </Stack>
             <Stack direction="row" sx={{ justifyContent: 'space-between' }}>
-              <Typography variant="caption" color="text.secondary">
+              <Typography variant="caption" color="textSecondary">
                 Efectivo {formatMoney(row.sales.cash)} · Electrónico{' '}
                 {formatMoney(row.sales.electronic)}
               </Typography>
-              <Typography variant="caption" color="text.secondary">
+              <Typography variant="caption" color="textSecondary">
                 Comisiones {formatMoney(row.commissions.total)}
                 {row.commissions.electronic > 0
                   ? ` (electrónicas ${formatMoney(row.commissions.electronic)})`
@@ -363,7 +363,7 @@ function BalancesTab() {
     return <Alert severity="error">No se pudieron cargar los saldos. Inténtalo de nuevo.</Alert>
   }
   if (!balances || balances.length === 0) {
-    return <Typography color="text.secondary">No hay agentes ni afiliados para mostrar.</Typography>
+    return <Typography color="textSecondary">No hay agentes ni afiliados para mostrar.</Typography>
   }
 
   return (
@@ -539,7 +539,7 @@ function DropsTab() {
       {isError && <Alert severity="error">No se pudieron cargar las entregas. Inténtalo de nuevo.</Alert>}
 
       {drops && drops.length === 0 && (
-        <Typography color="text.secondary">No hay entregas para mostrar.</Typography>
+        <Typography color="textSecondary">No hay entregas para mostrar.</Typography>
       )}
 
       {drops && drops.length > 0 && (
@@ -554,7 +554,7 @@ function DropsTab() {
                   <Stack direction="row" sx={{ justifyContent: 'space-between', alignItems: 'center' }}>
                     <Box sx={{ minWidth: 0 }}>
                       <Typography variant="subtitle1">{formatMoney(drop.amount)}</Typography>
-                      <Typography variant="caption" color="text.secondary">
+                      <Typography variant="caption" color="textSecondary">
                         {drop.agent?.name} · {SOURCE_LABEL[drop.source]} · {formatDate(drop.created_at)}
                       </Typography>
                     </Box>
@@ -564,7 +564,7 @@ function DropsTab() {
                     </Stack>
                   </Stack>
                   {drop.note && (
-                    <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+                    <Typography variant="body2" color="textSecondary" sx={{ mt: 1 }}>
                       {drop.note}
                     </Typography>
                   )}

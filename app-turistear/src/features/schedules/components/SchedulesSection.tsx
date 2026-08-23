@@ -58,7 +58,7 @@ const formatWeekdays = (weekdays: number[]): string =>
 const ZoneLabel = ({ children }: { children: React.ReactNode }) => (
   <Typography
     variant="overline"
-    color="text.secondary"
+    color="textSecondary"
     sx={{ letterSpacing: 0.6, display: 'block', mb: 1 }}
   >
     {children}
@@ -319,7 +319,7 @@ export function SchedulesSection({
                           </Typography>
                         </Stack>
                       ) : (
-                        <Typography variant="body2" color="text.secondary">
+                        <Typography variant="body2" color="textSecondary">
                           {s.capacity === 1 ? '1 lugar' : `${s.capacity} lugares`} por fecha ·{' '}
                           {s.start_date > todayISO
                             ? `del ${formatDate(s.start_date)} al ${formatDate(s.end_date)}`
@@ -370,7 +370,7 @@ export function SchedulesSection({
       )}
 
       {!oneOffsLoading && activeSchedules.length === 0 && oneOffs.length === 0 && (
-        <Typography color="text.secondary" variant="body2" sx={{ mb: 2 }}>
+        <Typography color="textSecondary" variant="body2" sx={{ mb: 2 }}>
           No hay fechas — agrega una fecha o un horario recurrente.
         </Typography>
       )}
@@ -424,7 +424,7 @@ export function SchedulesSection({
             <Alert severity="error">No se pudieron cargar las fechas. Inténtalo de nuevo.</Alert>
           )}
           {slots && slots.length === 0 && (
-            <Typography color="text.secondary" variant="body2">
+            <Typography color="textSecondary" variant="body2">
               No hay fechas en este rango — agrega una fecha o un horario recurrente.
             </Typography>
           )}

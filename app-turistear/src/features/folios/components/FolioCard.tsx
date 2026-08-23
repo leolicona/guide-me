@@ -63,7 +63,7 @@ const LINE_MARK: Record<
  *  The wording is also what gives the rail colour a text anchor, so state is never colour-alone. */
 function MoneyLine({ reading }: { reading: MoneyReading }) {
   const caption = (text: string) => (
-    <Typography variant="body2" color="text.secondary" component="span">
+    <Typography variant="body2" color="textSecondary" component="span">
       {text}
     </Typography>
   )
@@ -267,7 +267,7 @@ export function FolioCard({
               carries the label form so a screen reader hears one identity, not stray bullets. */}
           <Typography
             variant="caption"
-            color="text.secondary"
+            color="textSecondary"
             noWrap
             sx={{ display: 'block' }}
             aria-label={`${folioCustomerLabel(folio)}${restOfIdentity ? ` · ${restOfIdentity}` : ''}`}
@@ -292,7 +292,7 @@ export function FolioCard({
           {/* The reference is what an admin matches against the bank statement, so it belongs on
               the row that says the money has not landed — not one tap away. */}
           {reading.kind === 'unverified' && folio.payment_reference && (
-            <Typography variant="caption" color="text.secondary" noWrap sx={{ display: 'block' }}>
+            <Typography variant="caption" color="textSecondary" noWrap sx={{ display: 'block' }}>
               Ref. {folio.payment_reference}
             </Typography>
           )}

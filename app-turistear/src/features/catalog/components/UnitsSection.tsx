@@ -96,7 +96,7 @@ export function UnitsSection({ serviceId }: UnitsSectionProps) {
           ))}
         </Stack>
       ) : (
-        <Typography color="text.secondary">
+        <Typography color="textSecondary">
           Aún no hay unidades — agrega la primera para poder vender.
         </Typography>
       )}

@@ -93,7 +93,7 @@ export function TuCajaSection() {
         </InfoPopover>
       </Stack>
       {/* One shift timeline for all three blocks, mirroring the agent's Caja. */}
-      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+      <Typography variant="caption" color="textSecondary" sx={{ display: 'block', mb: 1 }}>
         {balance.last_drop
           ? `Desde tu última entrega · ${formatDate(balance.last_drop.created_at)}`
           : 'Toda tu actividad'}
@@ -102,7 +102,7 @@ export function TuCajaSection() {
       {negative ? (
         // The company owes the admin — offer a self-confirmed payout instead of a hand-in.
         <SectionCard>
-            <Typography variant="overline" color="text.secondary">
+            <Typography variant="overline" color="textSecondary">
               La empresa te debe
             </Typography>
             <MoneyText
@@ -115,13 +115,13 @@ export function TuCajaSection() {
             />
             <Stack spacing={1} sx={{ mt: 1.5 }}>
               <Stack direction="row" sx={{ justifyContent: 'space-between' }}>
-                <Typography variant="body2" color="text.secondary">
+                <Typography variant="body2" color="textSecondary">
                   Efectivo cobrado
                 </Typography>
                 <Typography variant="body2">{formatMoney(balance.cash_collected)}</Typography>
               </Stack>
               <Stack direction="row" sx={{ justifyContent: 'space-between' }}>
-                <Typography variant="body2" color="text.secondary">
+                <Typography variant="body2" color="textSecondary">
                   Comisión ganada
                 </Typography>
                 <Typography variant="body2">−{formatMoney(balance.commission_total)}</Typography>
@@ -214,7 +214,7 @@ export function TuCajaSection() {
               direction="row"
               sx={{ justifyContent: 'space-between', alignItems: 'baseline' }}
             >
-              <Typography variant="body2" color="text.secondary">
+              <Typography variant="body2" color="textSecondary">
                 La empresa te debe
               </Typography>
               <MoneyText

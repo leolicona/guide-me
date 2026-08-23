@@ -107,7 +107,7 @@ export default function OperatorAccessPage() {
         <Stack spacing={2} sx={{ alignItems: 'center', textAlign: 'center', maxWidth: 360 }}>
           <LockRounded sx={{ fontSize: 48, color: 'text.disabled' }} />
           <Typography variant="h6">Enlace no válido</Typography>
-          <Typography variant="body2" color="text.secondary">
+          <Typography variant="body2" color="textSecondary">
             Este enlace de acceso ya no funciona. Pídele a tu gerente que te reenvíe uno nuevo.
           </Typography>
         </Stack>
@@ -121,7 +121,7 @@ export default function OperatorAccessPage() {
               <Typography variant="h6" sx={{ fontWeight: 700 }}>
                 {access.hotel_name}
               </Typography>
-              <Typography variant="body2" color="text.secondary">
+              <Typography variant="body2" color="textSecondary">
                 Hola, {access.name}
               </Typography>
             </Stack>
@@ -132,7 +132,7 @@ export default function OperatorAccessPage() {
                 <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
                   Acceso bloqueado
                 </Typography>
-                <Typography variant="body2" color="text.secondary">
+                <Typography variant="body2" color="textSecondary">
                   Demasiados intentos. Pídele a tu gerente que restablezca tu PIN.
                 </Typography>
               </Stack>
@@ -152,7 +152,7 @@ export default function OperatorAccessPage() {
                   {busy ? (
                     <CircularProgress size={20} />
                   ) : error ? (
-                    <Typography variant="body2" color="error.main">
+                    <Typography variant="body2" color="error">
                       {error}
                     </Typography>
                   ) : null}

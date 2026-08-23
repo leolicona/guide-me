@@ -30,7 +30,7 @@ function LodgingSummary({ serviceId }: { serviceId: string }) {
   const active = (units ?? []).filter((u) => u.status === 'active')
   if (active.length === 0) {
     return (
-      <Typography variant="body2" color="text.secondary">
+      <Typography variant="body2" color="textSecondary">
         Sin unidades
       </Typography>
     )
@@ -40,7 +40,7 @@ function LodgingSummary({ serviceId }: { serviceId: string }) {
   const fromRate = Math.min(...active.map((u) => fromNightlyRate(u.base_rate, u.weekend_rate)))
 
   return (
-    <Typography variant="body2" color="text.secondary" className="numeric">
+    <Typography variant="body2" color="textSecondary" className="numeric">
       {active.length} unidad{active.length === 1 ? '' : 'es'} · {rooms} en total · desde{' '}
       {formatMoney(fromRate)}/noche
     </Typography>
@@ -58,7 +58,7 @@ function ZonesSummary({ serviceId }: { serviceId: string }) {
   const active = (zones ?? []).filter((z) => z.status === 'active')
   const seats = active.reduce((sum, z) => sum + z.capacity, 0)
   return (
-    <Typography variant="body2" color="text.secondary" className="numeric">
+    <Typography variant="body2" color="textSecondary" className="numeric">
       {active.length} zona{active.length === 1 ? '' : 's'} · {seats} asientos
     </Typography>
   )
@@ -90,13 +90,13 @@ export function ServiceRow({
       meta={
         slotBased ? (
           <>
-            <Typography variant="body2" color="text.secondary" className="numeric">
+            <Typography variant="body2" color="textSecondary" className="numeric">
               {formatMoney(service.base_price)} · mín {formatMoney(service.minimum_price)}
             </Typography>
             {service.zones_enabled ? (
               <ZonesSummary serviceId={service.id} />
             ) : (
-              <Typography variant="body2" color="text.secondary">
+              <Typography variant="body2" color="textSecondary">
                 Cap. {service.default_capacity}
                 {extrasCount > 0 ? ` · ${extrasCount} extra${extrasCount > 1 ? 's' : ''}` : ''}
               </Typography>

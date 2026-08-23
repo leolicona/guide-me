@@ -18,7 +18,7 @@ function BreakdownRow({
 }) {
   return (
     <Stack direction="row" sx={{ justifyContent: 'space-between' }}>
-      <Typography variant="body2" color="text.secondary">
+      <Typography variant="body2" color="textSecondary">
         {label}
       </Typography>
       <Typography variant="body2">
@@ -50,7 +50,7 @@ export function CashBoxCard({
 
   return (
     <SectionCard>
-        <Typography variant="overline" color="text.secondary">
+        <Typography variant="overline" color="textSecondary">
           {negative ? 'La empresa te debe' : 'Efectivo por entregar'}
         </Typography>
         {/* Money reads first — the dominant figure. Neutral ink when it's cash the seller owes;
@@ -64,7 +64,7 @@ export function CashBoxCard({
           sx={{ display: 'block', mt: 0.5 }}
         />
         {balance.pending_drops_total > 0 && (
-          <Typography variant="body2" color="warning.main" sx={{ mt: 0.5 }}>
+          <Typography variant="body2" color="warning" sx={{ mt: 0.5 }}>
             {formatMoney(balance.pending_drops_total)} entregado, pendiente de confirmación
           </Typography>
         )}

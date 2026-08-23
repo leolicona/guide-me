@@ -87,7 +87,7 @@ export function StepCommission({ units }: { units: UnitDraft[] }) {
           {...register('commission_value', { valueAsNumber: true })}
         />
       </Stack>
-      <Typography variant="caption" color="text.secondary">
+      <Typography variant="caption" color="textSecondary">
         Es la comisión base de la propiedad — puedes ajustar la de cada unidad al editarla.
       </Typography>
     </Stack>

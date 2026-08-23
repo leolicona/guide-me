@@ -32,7 +32,7 @@ export function PaymentBreakdown({ payments }: { payments: FolioPaymentEntry[] }
 
   return (
     <Stack spacing={1.25}>
-      <Typography variant="overline" color="text.secondary">
+      <Typography variant="overline" color="textSecondary">
         Desglose de pagos
       </Typography>
       {payments.map((p) => {
@@ -51,7 +51,7 @@ export function PaymentBreakdown({ payments }: { payments: FolioPaymentEntry[] }
                 <Typography variant="body2" sx={{ fontWeight: 600 }} noWrap>
                   {isRefund ? `Reversa · ${meta.label}` : meta.label}
                 </Typography>
-                <Typography variant="caption" color="text.secondary" noWrap>
+                <Typography variant="caption" color="textSecondary" noWrap>
                   {formatDate(p.collected_at)}
                   {p.operator_name ? ` · ${p.operator_name}` : ''}
                   {p.reference ? ` · Ref. ${p.reference}` : ''}

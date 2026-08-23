@@ -31,7 +31,7 @@ export function CommissionCatalogEditor({ services, value, onChange }: Props) {
 
   if (services.length === 0) {
     return (
-      <Typography color="text.secondary" sx={{ py: 2 }}>
+      <Typography color="textSecondary" sx={{ py: 2 }}>
         No hay servicios activos en el catálogo. Crea un servicio antes de configurar comisiones.
       </Typography>
     )
@@ -63,7 +63,7 @@ export function CommissionCatalogEditor({ services, value, onChange }: Props) {
                 <Typography variant="body1" noWrap sx={{ fontWeight: 500 }}>
                   {svc.name}
                 </Typography>
-                <Typography variant="caption" color="text.secondary">
+                <Typography variant="caption" color="textSecondary">
                   {categoryLabel(svc.category)}
                 </Typography>
               </Box>

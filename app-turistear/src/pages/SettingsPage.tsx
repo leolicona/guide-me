@@ -104,9 +104,9 @@ function OffsetField({
           <MenuItem value="before">Antes</MenuItem>
           <MenuItem value="after">Después</MenuItem>
         </TextField>
-        <Typography color="text.secondary">de la salida</Typography>
+        <Typography color="textSecondary">de la salida</Typography>
       </Stack>
-      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.75 }}>
+      <Typography variant="caption" color="textSecondary" sx={{ display: 'block', mt: 0.75 }}>
         {mag !== '' && invalid ? `Captura entre 0 y ${OFFSET_MAX} minutos.` : helper}
       </Typography>
     </Box>
@@ -291,7 +291,7 @@ export default function SettingsPage() {
         <Typography variant="h4" component="h1" sx={{ mb: 1 }}>
           Configuración
         </Typography>
-        <Typography color="text.secondary" sx={{ mb: 3 }}>
+        <Typography color="textSecondary" sx={{ mb: 3 }}>
           Política de ventas, apartados y preferencias del punto de venta.
         </Typography>
 
@@ -384,7 +384,7 @@ export default function SettingsPage() {
                                 reserva de último momento), el apartado se conserva hasta unos minutos
                                 antes de salir, para que el plazo <b>nunca quede en el pasado</b>.
                               </Box>
-                              <Box color="text.secondary">
+                              <Box sx={{ color: 'text.secondary' }}>
                                 Ejemplo con 24: un tour dentro de 3 días se paga a más tardar 24 h
                                 antes; un tour de mañana temprano se conserva casi hasta la salida.
                               </Box>
@@ -432,7 +432,7 @@ export default function SettingsPage() {
                                 anticipos. La misma salida se sigue vendiendo con{' '}
                                 <b>pago completo</b> hasta el «Cierre de ventas».
                               </Box>
-                              <Box color="text.secondary">
+                              <Box sx={{ color: 'text.secondary' }}>
                                 <b>0</b> desactiva la restricción, que es como funcionaba antes.
                               </Box>
                             </Stack>
@@ -564,7 +564,7 @@ export default function SettingsPage() {
                       </ToggleButton>
                     ))}
                   </ToggleButtonGroup>
-                  <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.75 }}>
+                  <Typography variant="caption" color="textSecondary" sx={{ display: 'block', mt: 0.75 }}>
                     {weekendDays.length === 0
                       ? 'Selecciona al menos un día.'
                       : 'Estos días usan la tarifa de fin de semana de cada unidad.'}
@@ -621,7 +621,7 @@ export default function SettingsPage() {
               <WhatsAppIcon color="primary" />
               <Typography variant="h6">Mensajes de WhatsApp</Typography>
             </Stack>
-            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            <Typography variant="body2" color="textSecondary" sx={{ mb: 2 }}>
               El texto que se abre en WhatsApp al enviar los boletos. Variables:{' '}
               {TEMPLATE_PLACEHOLDERS.join(' ')} — se reemplazan por los datos de la venta.
             </Typography>
@@ -684,7 +684,7 @@ export default function SettingsPage() {
                   <Typography variant="body1" sx={{ fontWeight: 500 }}>
                     Ocultar agotados
                   </Typography>
-                  <Typography variant="body2" color="text.secondary">
+                  <Typography variant="body2" color="textSecondary">
                     El catálogo de venta solo muestra servicios con disponibilidad.
                   </Typography>
                 </Box>
@@ -715,7 +715,7 @@ export default function SettingsPage() {
                   <Typography variant="body1" sx={{ fontWeight: 500 }}>
                     Referencia obligatoria en transferencias
                   </Typography>
-                  <Typography variant="body2" color="text.secondary">
+                  <Typography variant="body2" color="textSecondary">
                     Exigir el número de referencia al cobrar o liquidar por transferencia. Si lo
                     desactivas, el campo se vuelve opcional — el pago igual pasa por verificación
                     del administrador.
@@ -737,7 +737,7 @@ export default function SettingsPage() {
               <QrCodeScannerRounded color="primary" />
               <Typography variant="h6">Escáner de acceso</Typography>
             </Stack>
-            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            <Typography variant="body2" color="textSecondary" sx={{ mb: 2 }}>
               Cómo consume los pases un escaneo de QR.
             </Typography>
             <ToggleButtonGroup
@@ -754,7 +754,7 @@ export default function SettingsPage() {
               <ToggleButton value="per_pass">Un pase por escaneo</ToggleButton>
               <ToggleButton value="all_passes">Todos los pases a la vez</ToggleButton>
             </ToggleButtonGroup>
-            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
+            <Typography variant="caption" color="textSecondary" sx={{ display: 'block', mt: 1 }}>
               «Todos a la vez» agiliza el abordaje de grupos (una familia = un escaneo), a cambio
               de perder el conteo exacto de cuántos abordaron — y un escaneo no se puede deshacer.
             </Typography>

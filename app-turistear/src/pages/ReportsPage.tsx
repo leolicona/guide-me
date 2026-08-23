@@ -137,7 +137,7 @@ function MiniStat({ label, value, caption }: { label: string; value: string; cap
         {value}
       </Typography>
       {caption && (
-        <Typography variant="caption" color="text.secondary" noWrap sx={{ display: 'block' }}>
+        <Typography variant="caption" color="textSecondary" noWrap sx={{ display: 'block' }}>
           {caption}
         </Typography>
       )}
@@ -167,7 +167,7 @@ function SettlementHeader({ totals }: { totals: CommissionReport['totals'] }) {
         <Box sx={{ mt: 0.5 }}>
           <NetMoney value={totals.net_owed} variant="h4" />
         </Box>
-        <Typography variant="body2" color="text.secondary" sx={{ mt: 0.25 }}>
+        <Typography variant="body2" color="textSecondary" sx={{ mt: 0.25 }}>
           {settlementStatement(totals.net_owed)}
         </Typography>
 
@@ -218,7 +218,7 @@ function MetricsLine({ s, sortKey }: { s: CommissionReportRow; sortKey: ReportSo
 function BreakdownRow({ label, value, sign }: { label: string; value: number; sign?: '+' | '−' }) {
   return (
     <Stack direction="row" sx={{ justifyContent: 'space-between' }}>
-      <Typography variant="body2" color="text.secondary">
+      <Typography variant="body2" color="textSecondary">
         {label}
       </Typography>
       <Typography variant="body2" sx={{ fontVariantNumeric: 'tabular-nums' }}>
@@ -282,7 +282,7 @@ function SellerCard({ s, sortKey }: { s: CommissionReportRow; sortKey: ReportSor
                   />
                 )}
               </Stack>
-              <Typography variant="caption" color="text.secondary">
+              <Typography variant="caption" color="textSecondary">
                 {ROLE_LABEL[s.role]}
               </Typography>
               <MetricsLine s={s} sortKey={sortKey} />
@@ -383,7 +383,7 @@ function SellerRow({ s }: { s: CommissionReportRow }) {
               <Typography variant="body2" noWrap sx={{ fontWeight: 500 }}>
                 {s.name}
               </Typography>
-              <Typography variant="caption" color="text.secondary">
+              <Typography variant="caption" color="textSecondary">
                 {ROLE_LABEL[s.role]}
               </Typography>
             </Box>
@@ -483,7 +483,7 @@ function SellerTable({
         </Table>
       </TableContainer>
       <Box sx={{ px: 3, py: 1.5, borderTop: '1px solid', borderColor: 'divider' }}>
-        <Typography variant="caption" color="text.secondary">
+        <Typography variant="caption" color="textSecondary">
           Abre una fila para ver el desglose. Saldo = efectivo cobrado − comisión − entregas
           confirmadas + pagos. Positivo: el vendedor debe efectivo a la empresa; negativo: la
           empresa le debe.
@@ -568,7 +568,7 @@ export default function ReportsPage() {
         </Typography>
         <Typography
           variant="body2"
-          color="text.secondary"
+          color="textSecondary"
           sx={{ mb: 3, maxWidth: 560, textWrap: 'pretty' }}
         >
           Comisiones y liquidación por período. Las cifras son del rango seleccionado — distintas
@@ -684,7 +684,7 @@ export default function ReportsPage() {
         {report && sellers.length === 0 && !isLoading && (
           <Card variant="outlined">
             <CardContent sx={{ py: 6, textAlign: 'center' }}>
-              <Typography color="text.secondary">Sin ventas en este período.</Typography>
+              <Typography color="textSecondary">Sin ventas en este período.</Typography>
             </CardContent>
           </Card>
         )}

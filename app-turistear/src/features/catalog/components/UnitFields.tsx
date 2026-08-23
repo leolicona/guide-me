@@ -16,7 +16,7 @@ function GroupLabel({ children }: { children: string }) {
   return (
     <Typography
       variant="overline"
-      color="text.secondary"
+      color="textSecondary"
       sx={{ letterSpacing: '0.06em', fontWeight: 700, display: 'block', mt: 1 }}
     >
       {children}
@@ -206,7 +206,7 @@ export function UnitFields({ disabled, inheritedCommissionLabel }: UnitFieldsPro
         )}
       />
       {commissionType === 'inherit' ? (
-        <Typography variant="caption" color="text.secondary">
+        <Typography variant="caption" color="textSecondary">
           {inheritedCommissionLabel ?? 'Usa la comisión del servicio (la regla general).'}
         </Typography>
       ) : (

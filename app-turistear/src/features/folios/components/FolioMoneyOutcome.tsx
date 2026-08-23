@@ -48,7 +48,7 @@ export function FolioMoneyOutcome({ folio, formatDate }: FolioMoneyOutcomeProps)
           {refunded > 0 && (
             <Stack direction="row" sx={{ justifyContent: 'space-between' }}>
               <Box>
-                <Typography color="text.secondary">Se devuelve al cliente</Typography>
+                <Typography color="textSecondary">Se devuelve al cliente</Typography>
                 {/* Delivery state is icon-paired on the row (never colour-alone). */}
                 {folio.refund_status === 'refunded' ? (
                   <Typography
@@ -85,7 +85,7 @@ export function FolioMoneyOutcome({ folio, formatDate }: FolioMoneyOutcomeProps)
           )}
           {retained > 0 && (
             <Stack direction="row" sx={{ justifyContent: 'space-between' }}>
-              <Typography color="text.secondary">La empresa retiene</Typography>
+              <Typography color="textSecondary">La empresa retiene</Typography>
               <Typography className="numeric">{formatMoney(retained)}</Typography>
             </Stack>
           )}
@@ -99,13 +99,13 @@ export function FolioMoneyOutcome({ folio, formatDate }: FolioMoneyOutcomeProps)
       {credit > 0 && (
         <Stack direction="row" sx={{ justifyContent: 'space-between', alignItems: 'baseline' }}>
           <Box>
-            <Typography color="text.secondary">Saldo a favor del cliente</Typography>
+            <Typography color="textSecondary">Saldo a favor del cliente</Typography>
             {folio.credit_expires_at && (
-              <Typography variant="caption" color="text.secondary">
+              <Typography variant="caption" color="textSecondary">
                 Vigente hasta el {formatDate(folio.credit_expires_at)}
               </Typography>
             )}
-            <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+            <Typography variant="caption" color="textSecondary" sx={{ display: 'block' }}>
               Se aplica como descuento manual en una venta nueva
             </Typography>
           </Box>

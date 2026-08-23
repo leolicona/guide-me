@@ -32,14 +32,14 @@ function PropertySummary({ serviceId }: { serviceId: string }) {
   const active = (units ?? []).filter((u) => u.status === 'active')
   if (active.length === 0) {
     return (
-      <Typography variant="body2" color="text.secondary">
+      <Typography variant="body2" color="textSecondary">
         Sin unidades
       </Typography>
     )
   }
   const total = active.reduce((sum, u) => sum + u.inventory_count, 0)
   return (
-    <Typography variant="body2" color="text.secondary" className="numeric">
+    <Typography variant="body2" color="textSecondary" className="numeric">
       {active.length} unidad{active.length === 1 ? '' : 'es'} · {total} en total
     </Typography>
   )
@@ -101,7 +101,7 @@ export function PropertyPicker({ properties, value, onChange, error }: PropertyP
       <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
         ¿En qué lugar se renta?
       </Typography>
-      <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5, mb: 1.5 }}>
+      <Typography variant="body2" color="textSecondary" sx={{ mt: 0.5, mb: 1.5 }}>
         Elige la propiedad a la que pertenece, o crea una nueva.
       </Typography>
 
@@ -151,7 +151,7 @@ export function PropertyPicker({ properties, value, onChange, error }: PropertyP
           )
         })}
         {searchable && visible.length === 0 && (
-          <Typography variant="body2" color="text.secondary" sx={{ py: 2 }}>
+          <Typography variant="body2" color="textSecondary" sx={{ py: 2 }}>
             Ninguna propiedad coincide con «{query.trim()}».
           </Typography>
         )}
@@ -175,7 +175,7 @@ export function PropertyPicker({ properties, value, onChange, error }: PropertyP
             >
               Crear una propiedad nueva
             </Typography>
-            <Typography variant="body2" color="text.secondary">
+            <Typography variant="body2" color="textSecondary">
               Un hotel o conjunto que aún no está en tu catálogo.
             </Typography>
           </Box>

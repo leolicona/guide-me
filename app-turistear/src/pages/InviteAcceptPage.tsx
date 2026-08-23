@@ -28,7 +28,7 @@ export default function InviteAcceptPage() {
       <AuthLayout title="Aceptar invitación">
         <Box sx={{ textAlign: 'center', py: 4 }}>
           <CircularProgress sx={{ mb: 2 }} />
-          <Typography color="text.secondary">Cargando invitación...</Typography>
+          <Typography color="textSecondary">Cargando invitación...</Typography>
         </Box>
       </AuthLayout>
     );
@@ -52,7 +52,7 @@ export default function InviteAcceptPage() {
   return (
     <AuthLayout title="Aceptar invitación">
       <Paper variant="outlined" sx={{ p: 2, mb: 3, bgcolor: 'background.default' }}>
-        <Typography variant="body2" color="text.secondary">
+        <Typography variant="body2" color="textSecondary">
           {isAffiliate ? 'Vender los servicios de' : 'Unirse a la organización'}
         </Typography>
         <Typography variant="subtitle1" sx={{ fontWeight: 500 }} gutterBottom>
@@ -60,7 +60,7 @@ export default function InviteAcceptPage() {
         </Typography>
         {isAffiliate && company_name && (
           <>
-            <Typography variant="body2" color="text.secondary">
+            <Typography variant="body2" color="textSecondary">
               Como afiliado de
             </Typography>
             <Typography variant="subtitle1" sx={{ fontWeight: 500 }} gutterBottom>
@@ -68,7 +68,7 @@ export default function InviteAcceptPage() {
             </Typography>
           </>
         )}
-        <Typography variant="body2" color="text.secondary">
+        <Typography variant="body2" color="textSecondary">
           Correo electrónico
         </Typography>
         <Typography variant="subtitle1" sx={{ fontWeight: 500 }}>
