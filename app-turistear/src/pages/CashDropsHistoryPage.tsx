@@ -67,7 +67,8 @@ export default function CashDropsHistoryPage() {
   const toggle = (facet: Facet) =>
     setActive(active.includes(facet) ? active.filter((f) => f !== facet) : [...active, facet])
 
-  const { data: drops, isLoading, isError } = useDrops({ status: 'all' })
+  const { data: page, isLoading, isError } = useDrops({ status: 'all' })
+  const drops = page?.drops
 
   const shown = useMemo(
     () => (drops ?? []).filter((d) => active.length === 0 || active.some((f) => matches(d, f))),
@@ -131,6 +132,12 @@ export default function CashDropsHistoryPage() {
             {shown.map((drop) => (
               <DropCard key={drop.id} drop={drop} />
             ))}
+            {/* D12′ — say it, rather than imply a whole. The read is capped at 500. */}
+            {page?.truncated && (
+              <Typography variant="body2" color="textSecondary" sx={{ textAlign: 'center' }}>
+                Mostrando las 500 entregas más recientes.
+              </Typography>
+            )}
           </Stack>
         )}
 

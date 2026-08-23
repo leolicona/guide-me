@@ -392,6 +392,13 @@ export function BalanceScreen({ surface }: { surface: CajaSurface }) {
                     ))}
                   </Stack>
                 )}
+                {/* D12′ — this list is capped at 50. Say so: a silent truncation reads as
+                    «everything is here» when it is not. */}
+                {balance.drops_truncated && (
+                  <Typography variant="body2" color="textSecondary" sx={{ mt: 2 }}>
+                    Mostrando tus 50 entregas más recientes.
+                  </Typography>
+                )}
             </SectionCard>
           </Stack>
         )}

@@ -16,7 +16,8 @@ import type { CashDrop } from '../types'
  * a demand for attention that is not owed.
  */
 export function PendingConfirmations() {
-  const { data: drops, isError } = useDrops({ status: 'pending' })
+  const { data: page, isError } = useDrops({ status: 'pending' })
+  const drops = page?.drops
   const review = useReviewDrop()
   const [target, setTarget] = useState<CashDrop | null>(null)
 
