@@ -15,10 +15,6 @@ import {
   Chip,
   Badge,
   TextField,
-  Dialog,
-  DialogTitle,
-  DialogContent,
-  DialogActions,
 } from '@mui/material'
 import ExpandMoreRounded from '@mui/icons-material/ExpandMoreRounded'
 import ArrowForwardRounded from '@mui/icons-material/ArrowForwardRounded'
@@ -39,7 +35,7 @@ import { formatMoney, amountToCents, centsToAmount } from '../features/catalog/t
 import { DropCard } from '../features/cash/components/DropCard'
 import { PendingConfirmations } from '../features/cash/components/PendingConfirmations'
 import { ROUTES } from '../config/routes'
-import { MoneyText, StatusChip, InfoPopover } from '../components'
+import { MoneyText, StatusChip, InfoPopover, FormSheet } from '../components'
 
 const DATE_FMT: Intl.DateTimeFormatOptions = {
   month: 'short',
@@ -326,126 +322,116 @@ function TeamBalances() {
         ))}
       </Stack>
 
-      {/* US-A27 — direct collection dialog */}
-      <Dialog open={!!collectTarget} onClose={() => setCollectTarget(null)} fullWidth maxWidth="xs">
-        <DialogTitle>Registrar cobro directo</DialogTitle>
-        <DialogContent>
-          {/* Structured context: who + effect as icon-paired chips; the signature nuance
-              (rarely needed at the moment of collecting) sits one tap away in the popover. */}
-          <Stack
-            direction="row"
-            spacing={1}
-            useFlexGap
-            sx={{ alignItems: 'center', flexWrap: 'wrap', mb: 2 }}
-          >
-            <StatusChip
-              tone="neutral"
-              icon={<PersonRounded />}
-              label={collectTarget?.agent.name ?? ''}
-            />
-            <StatusChip
-              tone="neutral"
-              icon={<TrendingDownRounded />}
-              label="Reduce su saldo al instante"
-            />
-            <InfoPopover label="Sobre la firma de conformidad">
-              Se le pedirá al agente firmar de conformidad. Si no firma, el cobro se confirma
-              automáticamente.
-            </InfoPopover>
-          </Stack>
-          <Stack spacing={2}>
-            <TextField
-              label="Monto recibido"
-              type="number"
-              fullWidth
-              autoFocus
-              value={collectAmount}
-              onChange={(e) => setCollectAmount(e.target.value)}
-            />
-            <TextField
-              label="Nota (opcional)"
-              fullWidth
-              multiline
-              minRows={2}
-              value={collectNote}
-              onChange={(e) => setCollectNote(e.target.value)}
-            />
-          </Stack>
-          {collection.isError && (
-            <Alert severity="error" sx={{ mt: 2 }}>
-              No se pudo registrar el cobro. Inténtalo de nuevo.
-            </Alert>
-          )}
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setCollectTarget(null)}>Cancelar</Button>
-          <Button
-            variant="contained"
-            disableElevation
-            onClick={submitCollection}
-            disabled={collection.isPending || !collectAmount}
-          >
-            {collection.isPending ? 'Registrando…' : 'Registrar cobro'}
-          </Button>
-        </DialogActions>
-      </Dialog>
+      {/* US-A27 / US-UX08 — a money form, so a FormSheet. */}
+      <FormSheet
+        open={!!collectTarget}
+        onClose={() => setCollectTarget(null)}
+        title="Registrar cobro directo"
+        submitLabel={collection.isPending ? 'Registrando…' : 'Registrar cobro'}
+        onSubmit={(e) => {
+          e.preventDefault()
+          submitCollection()
+        }}
+        busy={collection.isPending}
+        disabled={!collectAmount}
+        error={
+          collection.isError ? (
+            <Alert severity="error">No se pudo registrar el cobro. Inténtalo de nuevo.</Alert>
+          ) : undefined
+        }
+      >
+        {/* Structured context: who + effect as icon-paired chips; the signature nuance
+            (rarely needed at the moment of collecting) sits one tap away in the popover. */}
+        <Stack
+          direction="row"
+          spacing={1}
+          useFlexGap
+          sx={{ alignItems: 'center', flexWrap: 'wrap', mb: 2 }}
+        >
+          <StatusChip
+            tone="neutral"
+            icon={<PersonRounded />}
+            label={collectTarget?.agent.name ?? ''}
+          />
+          <StatusChip
+            tone="neutral"
+            icon={<TrendingDownRounded />}
+            label="Reduce su saldo al instante"
+          />
+          <InfoPopover label="Sobre la firma de conformidad">
+            Se le pedirá al agente firmar de conformidad. Si no firma, el cobro se confirma
+            automáticamente.
+          </InfoPopover>
+        </Stack>
+        <Stack spacing={2}>
+          <TextField
+            label="Monto recibido"
+            type="number"
+            fullWidth
+            autoFocus
+            value={collectAmount}
+            onChange={(e) => setCollectAmount(e.target.value)}
+          />
+          <TextField
+            label="Nota (opcional)"
+            fullWidth
+            multiline
+            minRows={2}
+            value={collectNote}
+            onChange={(e) => setCollectNote(e.target.value)}
+          />
+        </Stack>
+      </FormSheet>
 
-      <Dialog open={!!target} onClose={() => setTarget(null)} fullWidth maxWidth="xs">
-        <DialogTitle>Registrar pago</DialogTitle>
-        <DialogContent>
-          <Stack
-            direction="row"
-            spacing={1}
-            useFlexGap
-            sx={{ alignItems: 'center', flexWrap: 'wrap', mb: 2 }}
-          >
-            <StatusChip
-              tone="neutral"
-              icon={<PersonRounded />}
-              label={target?.agent.name ?? ''}
-            />
-            <StatusChip
-              tone="neutral"
-              icon={<TrendingUpRounded />}
-              label="Sube su saldo hacia cero"
-            />
-          </Stack>
-          <Stack spacing={2}>
-            <TextField
-              label="Monto"
-              type="number"
-              fullWidth
-              autoFocus
-              value={amount}
-              onChange={(e) => setAmount(e.target.value)}
-            />
-            <TextField
-              label="Nota (opcional)"
-              fullWidth
-              multiline
-              minRows={2}
-              value={note}
-              onChange={(e) => setNote(e.target.value)}
-            />
-          </Stack>
-          {payout.isError && (
-            <Alert severity="error" sx={{ mt: 2 }}>
-              No se pudo registrar ese pago. Inténtalo de nuevo.
-            </Alert>
-          )}
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setTarget(null)}>Cancelar</Button>
-          <Button
-            variant="contained"
-            disableElevation
-            onClick={submitPayout}
-            disabled={payout.isPending || !amount}
-          >
-            {payout.isPending ? 'Registrando…' : 'Registrar pago'}
-          </Button>
-        </DialogActions>
-      </Dialog>
+      <FormSheet
+        open={!!target}
+        onClose={() => setTarget(null)}
+        title="Registrar pago"
+        submitLabel={payout.isPending ? 'Registrando…' : 'Registrar pago'}
+        onSubmit={(e) => {
+          e.preventDefault()
+          submitPayout()
+        }}
+        busy={payout.isPending}
+        disabled={!amount}
+        error={
+          payout.isError ? (
+            <Alert severity="error">No se pudo registrar ese pago. Inténtalo de nuevo.</Alert>
+          ) : undefined
+        }
+      >
+        <Stack
+          direction="row"
+          spacing={1}
+          useFlexGap
+          sx={{ alignItems: 'center', flexWrap: 'wrap', mb: 2 }}
+        >
+          <StatusChip tone="neutral" icon={<PersonRounded />} label={target?.agent.name ?? ''} />
+          <StatusChip
+            tone="neutral"
+            icon={<TrendingUpRounded />}
+            label="Sube su saldo hacia cero"
+          />
+        </Stack>
+        <Stack spacing={2}>
+          <TextField
+            label="Monto"
+            type="number"
+            fullWidth
+            autoFocus
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+          />
+          <TextField
+            label="Nota (opcional)"
+            fullWidth
+            multiline
+            minRows={2}
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+          />
+        </Stack>
+      </FormSheet>
     </>
   )
 }
