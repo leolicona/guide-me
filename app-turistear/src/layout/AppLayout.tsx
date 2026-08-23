@@ -53,8 +53,10 @@ const NAV_ITEMS: NavItem[] = [
   { label: 'Escáner', to: ROUTES.SCAN, icon: QrCodeScannerRounded, role: ['agent', 'admin'] },
   { label: 'Ventas', to: ROUTES.HISTORY, icon: ReceiptLongRounded, role: ['agent', 'affiliate'] },
   { label: 'Ventas', to: ROUTES.FOLIOS, icon: ReceiptLongRounded, role: 'admin' },
-  { label: 'Caja', to: ROUTES.BALANCE, icon: AccountBalanceWalletRounded, role: ['agent', 'affiliate'] },
-  { label: 'Caja', to: ROUTES.CASH, icon: AccountBalanceWalletRounded, role: 'admin' },
+  // ONE «Caja» for every role: your own cash drawer (caja-surface-parity D2′). The admin's
+  // oversight of the team's cajas is a different thing with a different name — «Caja del equipo»,
+  // reached from the block on their own screen, not from a nav entry that reuses the word.
+  { label: 'Caja', to: ROUTES.BALANCE, icon: AccountBalanceWalletRounded },
 ]
 
 const RAIL_WIDTH = 88
@@ -114,7 +116,9 @@ export function AppLayout() {
     false,
   )
   const badgeFor = (to: string) => {
-    if (to === ROUTES.BALANCE) return pendingAckCount
+    // The admin's pending caja work is confirming the TEAM's hand-ins; everyone else's is signing
+    // their own. Same entry, same meaning — «what is waiting for you» — different source.
+    if (to === ROUTES.BALANCE) return user.role === 'admin' ? pendingDropCount : pendingAckCount
     if (to === ROUTES.FOLIOS) return pendingCancellationCount + pendingVerificationCount
     if (to === ROUTES.CASH) return pendingDropCount
     if (to === ROUTES.HISTORY) return pendingDeliveryCount

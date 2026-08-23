@@ -45,6 +45,17 @@ export const aBalanceRow = (over: Record<string, unknown> = {}) => ({
   last_drop: null,
   pending_drops_total: 0,
   pending_drops_count: 0,
+  // Same omission `anAgentBalance` had: the row carries the shift buckets (US-AG29 parity), and
+  // `BalanceRow` reads them unconditionally, so a fixture without them renders nothing at all.
+  sales: {
+    total: 250_000,
+    cash: 250_000,
+    electronic: 0,
+    by_method: { card: 0, transfer: 0, link: 0 },
+    cash_count: 2,
+    electronic_count: 0,
+  },
+  commissions: { total: 25_000, cash: 25_000, electronic: 0 },
   ...over,
 })
 

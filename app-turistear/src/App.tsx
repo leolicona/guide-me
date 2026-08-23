@@ -37,6 +37,7 @@ const FolioDetailPage = lazy(() => import('./pages/FolioDetailPage'))
 const BalancePage = lazy(() => import('./pages/BalancePage'))
 const CashBalancesPage = lazy(() => import('./pages/CashBalancesPage'))
 const CashDropDetailPage = lazy(() => import('./pages/CashDropDetailPage'))
+const CashDropsHistoryPage = lazy(() => import('./pages/CashDropsHistoryPage'))
 const ReportsPage = lazy(() => import('./pages/ReportsPage'))
 const OperatorsPage = lazy(() => import('./pages/OperatorsPage'))
 const OperatorAccessPage = lazy(() => import('./pages/OperatorAccessPage'))
@@ -180,12 +181,14 @@ function App() {
               }
             />
 
-            {/* Agent + affiliate running balance — cash hand-ins (US-AG12/14, AF08). The
-                affiliate has no expenses (D4); the balance page simply shows none for that role. */}
+            {/* Everyone's own caja — agent, affiliate AND admin (caja-surface-parity D2′). One
+                screen, one route, one meaning of the word «Caja»; `surface` gates the verbs, and
+                every call this page makes is already authorized for all three roles (`selfActor`).
+                Neither an affiliate nor an admin has expenses — `/me/expenses` is `agent`-only. */}
             <Route
               path={ROUTES.BALANCE}
               element={
-                <RoleGuard role={['agent', 'affiliate']}>
+                <RoleGuard role={['agent', 'affiliate', 'admin']}>
                   <BalancePage />
                 </RoleGuard>
               }
@@ -231,12 +234,22 @@ function App() {
               }
             />
 
-            {/* Admin cash — outstanding balances, drops review, payouts (US-A19/A25) */}
+            {/* Caja del equipo — who holds company cash and what needs confirming (US-A19/A25).
+                Since US-A98 it holds no drawer of the admin's own: that is at /balance. */}
             <Route
               path={ROUTES.CASH}
               element={
                 <RoleGuard role="admin">
                   <CashBalancesPage />
+                </RoleGuard>
+              }
+            />
+            {/* The drop history — audit, not daily work, so it is a route rather than a tab (D15). */}
+            <Route
+              path={ROUTES.CASH_DROPS}
+              element={
+                <RoleGuard role="admin">
+                  <CashDropsHistoryPage />
                 </RoleGuard>
               }
             />
