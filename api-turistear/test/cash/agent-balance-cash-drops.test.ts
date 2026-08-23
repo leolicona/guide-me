@@ -1109,8 +1109,9 @@ describe('Agent Continuous Cash Balance with Cash Drops', () => {
   // -------------------------------------------------------------------------
   // Roles
   // -------------------------------------------------------------------------
-  // US-A34/A35 widen the self-scoped /me read and /me/drops (the admin's "Tu caja"); the
-  // admin↔agent boundary otherwise holds.
+  // US-A34/A35 widen the self-scoped /me read and /me/drops (the admin's "Tu caja"), and US-A99
+  // widens /me/expenses; the admin↔agent boundary otherwise holds — every admin-only route below
+  // is still closed to an agent.
   it('Scenario 15 — role boundaries (US-A35 opens /me read + self-drop to the admin)', async () => {
     const { organizationId, adminId, agentId } = await seedOrgWithStaff()
     const dropId = await seedDrop({ organizationId, agentId, amount: 100000 })
@@ -1123,11 +1124,14 @@ describe('Agent Continuous Cash Balance with Cash Drops', () => {
     expect((await getDrop(AGENT_EMAIL, dropId)).status).toBe(403)
     expect((await reviewDrop(AGENT_EMAIL, dropId, { decision: 'confirmed' })).status).toBe(403)
 
-    // admin → self surface: own balance read and the self-authorized drop are now permitted;
-    // expense logging stays agent-only.
+    // admin → self surface: own balance read, the self-authorized drop, and — since US-A99 —
+    // expense logging. This line asserted `403` from US-A35 until then, not because anyone had
+    // decided an admin may not spend money, but because that feature's scope boundary listed
+    // expenses among the "baselines — unchanged" it would not touch. A scope boundary states one
+    // feature's reach; it is not a permanent rule, and this is the story that decided the rule.
     expect((await getMyBalance(ADMIN_EMAIL)).status).toBe(200)
     expect((await createDrop(ADMIN_EMAIL, { amount: 100 })).status).toBe(201)
-    expect((await addExpense(ADMIN_EMAIL, { description: 'X', amount: 100 })).status).toBe(403)
+    expect((await addExpense(ADMIN_EMAIL, { description: 'X', amount: 100 })).status).toBe(201)
   })
 
   // -------------------------------------------------------------------------
