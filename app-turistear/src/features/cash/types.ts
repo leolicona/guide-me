@@ -122,7 +122,9 @@ export interface AgentBalance {
   balance: number // authoritative all-time figure (the physical cash held)
   last_drop: CashLastDrop | null // anchor; null when no confirmed drop exists yet
   expenses: CashExpense[] // the current-shift expenses
-  drops: CashDrop[] // recent drops, all statuses, for context
+  drops: CashDrop[] // the caller's hand-ins, all statuses, newest first — capped at 50 (D12′)
+  // True when `drops` is NOT the whole history. It used to be, unbounded, at 386 bytes a row.
+  drops_truncated: boolean
   pending_acknowledgments: PendingAck[] // admin money-moves awaiting my signature
   pending_acknowledgments_count: number
   sales: SalesBreakdown // US-AG29 — shift-scoped cash vs electronic split
@@ -163,6 +165,13 @@ export interface AddExpenseInput {
 export interface CreateDropInput {
   amount: number
   note?: string | null
+}
+
+// One page of the admin's drop list. `truncated` is how the screen says «this is not all of it»
+// instead of implying a whole (D12′).
+export interface DropsPage {
+  drops: CashDrop[]
+  truncated: boolean
 }
 
 export interface ReviewDropInput {

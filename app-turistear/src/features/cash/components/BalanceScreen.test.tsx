@@ -106,6 +106,21 @@ describe.each(['self', 'admin'] as const)('BalanceScreen — %s', (surface) => {
     expect(screen.getByRole('heading', { level: 2, name: 'Comisiones ganadas' })).toBeInTheDocument()
   })
 
+  // D12′ — the list is capped at 50 server-side. A silent truncation reads as «everything is
+  // here» when it is not, which is the lesson folio-surface-parity learned once already.
+  it('says when the hand-in list was capped', async () => {
+    withBalance({ drops: [aDropRow()], drops_truncated: true })
+    renderScreen(surface)
+    expect(await screen.findByText('Mostrando tus 50 entregas más recientes.')).toBeInTheDocument()
+  })
+
+  it('stays quiet when it was not', async () => {
+    withBalance({ drops: [aDropRow()], drops_truncated: false })
+    renderScreen(surface)
+    await screen.findByRole('heading', { level: 2, name: 'Entregas' })
+    expect(screen.queryByText(/entregas más recientes/)).not.toBeInTheDocument()
+  })
+
   // S-13 — the screen-level guard. Per-card assertions could not see a skipped level.
   it('keeps a navigable heading outline', async () => {
     withBalance()

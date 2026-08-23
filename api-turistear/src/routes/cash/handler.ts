@@ -52,6 +52,16 @@ const ackWindowSeconds = async (db: Db, org: string) => {
   return Number(row?.hours ?? 24) * 3600
 }
 
+// How much history each read ships (caja-surface-parity D12′). The balance payload used to carry
+// the agent's ENTIRE hand-in history — no LIMIT, no `since`, while the `expenses` read beside it is
+// shift-scoped — at a measured 386 bytes per row, re-fetched on every mount and window focus. The
+// admin's list matches the seller folio list's 500.
+//
+// Both fetch ONE extra row and slice it off: that is how the response can say it capped, and a
+// silent truncation reads as "everything is here" when it is not.
+const MY_DROPS_PAGE = 50
+const TEAM_DROPS_PAGE = 500
+
 // Effective acknowledgment view (US-AG27/AG28, D2). A `pending` obligation whose window has
 // elapsed (`now ≥ reviewed_at + window`) is PRESENTED as `auto_signed`, computed
 // deterministically from timestamps — so reads are consistent even before the opportunistic
@@ -562,11 +572,35 @@ export const getMyBalance = async (c: CashContext) => {
       and(eq(cashDrops.organizationId, org), eq(cashDrops.agentId, user.userId)),
     )
     .orderBy(desc(cashDrops.createdAt))
+    .limit(MY_DROPS_PAGE + 1)
 
-  const drops = dropRows.map((d) => serializeDrop(d, windowSeconds, now))
+  const dropsTruncated = dropRows.length > MY_DROPS_PAGE
+  const drops = dropRows
+    .slice(0, MY_DROPS_PAGE)
+    .map((d) => serializeDrop(d, windowSeconds, now))
+
   // The agent's outstanding signature obligations (US-AG27/AG28): drops whose EFFECTIVE
   // acknowledgment is still `pending` (post-sweep, never auto-signable yet, never disputed).
-  const pendingAcks = drops
+  //
+  // Queried SEPARATELY, not filtered out of `drops`. Deriving it from a capped list would drop a
+  // signature obligation off the 51st row — silently, and on the one thing in this payload that is
+  // an obligation rather than a record. Stored-`pending` is a tiny set by nature (it is what the
+  // agent has not answered yet), so it needs no cap of its own; the effective view still decides,
+  // because a window that has elapsed reads as `auto_signed` and owes nothing.
+  const ackRows = await db
+    .select(dropColumns)
+    .from(cashDrops)
+    .where(
+      and(
+        eq(cashDrops.organizationId, org),
+        eq(cashDrops.agentId, user.userId),
+        eq(cashDrops.acknowledgment, 'pending'),
+      ),
+    )
+    .orderBy(desc(cashDrops.createdAt))
+
+  const pendingAcks = ackRows
+    .map((d) => serializeDrop(d, windowSeconds, now))
     .filter((d) => d.acknowledgment === 'pending')
     .map((d) => ({
       id: d.id,
@@ -596,6 +630,8 @@ export const getMyBalance = async (c: CashContext) => {
         created_at: toSeconds(e.createdAt),
       })),
       drops,
+      // True when this payload does NOT carry the agent's whole history (D12′).
+      drops_truncated: dropsTruncated,
       pending_acknowledgments: pendingAcks,
       pending_acknowledgments_count: pendingAcks.length,
       // US-AG29 — shift-scoped cash-vs-electronic read model (display-only).
@@ -885,11 +921,14 @@ export const listDrops = async (c: CashContext) => {
     .innerJoin(users, eq(cashDrops.agentId, users.id))
     .where(and(...filters))
     .orderBy(desc(cashDrops.createdAt))
+    .limit(TEAM_DROPS_PAGE + 1)
 
   return c.json({
-    drops: rows.map((r) =>
-      serializeDrop(r, windowSeconds, now, { id: r.agentId, name: r.agentName }),
-    ),
+    drops: rows
+      .slice(0, TEAM_DROPS_PAGE)
+      .map((r) => serializeDrop(r, windowSeconds, now, { id: r.agentId, name: r.agentName })),
+    // Matches the seller folio list's contract: the caller can say so rather than imply a whole.
+    truncated: rows.length > TEAM_DROPS_PAGE,
   })
 }
 

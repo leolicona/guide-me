@@ -16,6 +16,7 @@ const aBalance = (over: Partial<AgentBalance> = {}): AgentBalance => ({
   last_drop: null,
   expenses: [],
   drops: [],
+  drops_truncated: false,
   pending_acknowledgments: [],
   pending_acknowledgments_count: 0,
   sales: aSales(),

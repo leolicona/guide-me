@@ -455,7 +455,8 @@ function TeamBalances() {
 // one-tap answer — resolving a dispute is a conversation. So: named, counted, and one tap from the
 // detail where it can be resolved. Renders nothing when there are none.
 function OpenDisputes() {
-  const { data: disputed } = useDrops({ status: 'all', ack: 'disputed' })
+  const { data: page } = useDrops({ status: 'all', ack: 'disputed' })
+  const disputed = page?.drops
   if (!disputed || disputed.length === 0) return null
 
   return (

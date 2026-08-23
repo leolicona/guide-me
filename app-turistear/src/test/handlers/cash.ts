@@ -15,6 +15,7 @@ export const anAgentBalance = (over: Record<string, unknown> = {}) => ({
   last_drop: null,
   expenses: [],
   drops: [],
+  drops_truncated: false,
   pending_acknowledgments: [],
   pending_acknowledgments_count: 0,
   // The full SalesBreakdown / CommissionBreakdown the API returns — `total`, the per-method map
