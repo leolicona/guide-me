@@ -6,6 +6,75 @@ Tracks confirmed bugs, root causes, and fixes. Each entry is immutable once clos
 
 ---
 
+## BUG-040 — The Caja's Money Is Not the Money Primitive, and Its Regions Have No Headings — ✅ FIXED
+
+**Found:** 2026-08-22, in the `/design-review` pass over `/balance`
+(`.design/balance/DESIGN_REVIEW.md`, Must Fix 5 + Should Fix 6, 8, 9, 10, 11).
+
+**Affected:** `pages/BalancePage.tsx` · `pages/CashBalancesPage.tsx` ·
+`features/cash/components/{CashBoxCard,SalesSummaryCard,CommissionsCard,PendingAcknowledgments}.tsx`
+— the seller's, the affiliate's and the admin's caja.
+
+### Symptom
+
+**Money.** Of the 14 money figures on `/balance`, only 4 went through `MoneyText`. The other 10 —
+every amount in **Gastos** and **Entregas**, the cash/electronic split, the commission split —
+measured 14–16px, weight 400/500, `font-variant-numeric: **normal**`. Gastos and Entregas are
+literally columns of money whose digits did not align, which is the one job tabular figures have.
+
+**Structure.** The heading outline read `h1 → h6 → h6 → h6`, and the three money cards — the cash
+box, the sales summary, the commissions — contributed **no heading at all**: their labels look like
+overlines, and looking like something is not being it, so all three rendered as `<span>`. A
+screen-reader user navigating by heading skipped straight past the money. On `/cash`, the only
+headings on the screen were `«$2,684.00»`, `«1»` and `«0»` — KPI **values** marked up as `<h6>`.
+
+**Dead end.** With a zero balance the page's single teal accent — «Entregar efectivo» — was live,
+and opened a dialog whose «Todo» and «Entregar» were both disabled under the helper «Disponible para
+entregar: $0.00». The admin's own caja sat in exactly that state.
+
+**Reach.** The two «Eliminar gasto» buttons measured **30×30 px** (the system says ≥48), and the
+expense form used `size="small"` fields — the one form a seller fills standing up, outdoors, below
+the 48px every other input in the product uses.
+
+**Surface.** Two card idioms on one page: `SectionCard` + overline for the money blocks, raw
+`Card variant="outlined"` + `CardContent` + `h6` for Gastos and Entregas.
+
+### Fix — 2026-08-22
+
+- Gastos and Entregas move onto **`SectionCard`** — one card idiom, and its title is already an
+  `h2`. The three money cards keep their overline look and gain `component="h2"`.
+- `/cash`'s KPI figure becomes `component="p"`. That left the Equipo panel with no heading at all,
+  so the tabs gained the wiring that names a tabbed region: `role="tabpanel"` +
+  `aria-labelledby` on both levels. The panels had none — the KPI values had been the only names.
+- Every figure in Gastos, Entregas and the two split blocks goes through **`MoneyText`**; the signed
+  breakdown rows (`−$330.00`) take the `.numeric` utility, which is the design system's other route
+  to tabular figures.
+- «Entregar efectivo» renders only when something is actually available to hand in (balance minus
+  pledged pending drops); otherwise the card reads «Nada por entregar por ahora.»
+- Delete buttons are 48×48 and name their target (`Eliminar gasto: Gasolina de la camioneta`); the
+  expense form is full-size, and its bare wordless `+` is now a labelled **Agregar**.
+
+**Verified on the running app**, all three roles:
+
+| | before | after |
+|---|---|---|
+| `/balance` outline | `h1 → h6 → h6 → h6` | `h1 → h2 ×6` |
+| tabular money figures | 4 of 14 | **17 of 17** |
+| controls under 48px | 2 | **0** |
+| admin caja at $0.00 | live CTA → dead dialog | «Nada por entregar por ahora.» |
+| `/cash` Equipo panel | unnamed, no headings | `role="tabpanel"`, named «Equipo» |
+
+**Pinned by** `features/cash/components/CashBoxCard.test.tsx` (10 tests): the CTA appears only when
+cash is available — not at zero, not when fully pledged, not on a negative balance — the three cards
+name themselves with an `h2`, and the split figures carry `.numeric`.
+
+**Not done here:** the seller's screen still lives in `pages/BalancePage.tsx`, so its outline is
+pinned per-card rather than per-screen. `expectHeadingOutline()` belongs in a screen test, and the
+screen gets one when it moves into `features/cash/components/` — the admin/seller unification the
+review's Must Fix 4 calls for.
+
+---
+
 ## BUG-039 — The Caja's State Pills Are Colour Alone, in Three Hand-Written Copies — ✅ FIXED
 
 **Found:** 2026-08-22, in the `/design-review` pass over `/balance`
