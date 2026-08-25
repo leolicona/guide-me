@@ -55,20 +55,28 @@ const admin = requireRole('admin')
 const agentOrAdmin = requireRole('agent', 'admin')
 // Affiliate parity (affiliate-portal.spec.md D5/D9): an affiliate carries the same running
 // balance and settles via the same cash-drop → admin-confirm flow as an agent. But expenses
-// (US-AG13) are DENIED to an affiliate (D4) — those routes stay `agent`-only, so an affiliate
-// (and an admin) hits 403 there.
+// (US-AG13) are DENIED to an affiliate (D4) — those routes are `agentOrAdmin`, so an affiliate
+// hits 403 there.
 const selfActor = requireRole('agent', 'admin', 'affiliate')
 const agentOrAffiliate = requireRole('agent', 'affiliate')
 
 // Self surface (/me/*) — scoped to the caller.
 cash.get('/me', selfActor, getMyBalance)
+// US-A99 — an admin records their OWN operating expenses, exactly as an agent does: same
+// self-scoped route, same balance arithmetic (`deriveBalance` already subtracts `expense_total`
+// for any caller), same delete guard. The `agent`-only guard here was never a decision — the route
+// was written for agents while the admin's caja was a separate screen that simply never offered
+// the card, and the omission surfaced only when the two screens became one
+// (`caja-surface-parity.spec.md`, its Open question, now answered).
+//
+// An AFFILIATE stays denied: that one IS a decision (affiliate-portal D4).
 cash.post(
   '/me/expenses',
-  agent,
+  agentOrAdmin,
   zValidator('json', addExpenseSchema, validationHook),
   addExpense,
 )
-cash.delete('/me/expenses/:id', agent, deleteExpense)
+cash.delete('/me/expenses/:id', agentOrAdmin, deleteExpense)
 cash.post(
   '/me/drops',
   selfActor,

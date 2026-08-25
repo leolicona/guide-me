@@ -13,6 +13,7 @@ import {
   Alert,
   Fade,
   Stack,
+  Snackbar,
 } from '@mui/material'
 import ArrowBackRounded from '@mui/icons-material/ArrowBackRounded'
 import EditRounded from '@mui/icons-material/EditRounded'
@@ -41,9 +42,13 @@ export default function CatalogDetailPage() {
   const navState = location.state as {
     wizardPartial?: boolean
     scrollTo?: ScrollTarget
+    // US-A91 D15 — the wizard's attach mode lands here; the toast names the property so the
+    // container is spoken one last time, and `saved < total` reports what didn't persist.
+    unitsAdded?: { propertyName: string; saved: number; total: number }
   } | null
   const partial = navState?.wizardPartial
   const [showPartial, setShowPartial] = useState(!!partial)
+  const [added, setAdded] = useState(navState?.unitsAdded ?? null)
 
   // ListRow quick-edit shortcuts land here with a `scrollTo` target — bring that section to
   // the top once the service (and thus the section) has rendered. One-shot per navigation.
@@ -82,6 +87,23 @@ export default function CatalogDetailPage() {
           </Alert>
         )}
 
+        <Snackbar
+          open={!!added}
+          autoHideDuration={5000}
+          onClose={() => setAdded(null)}
+          anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+        >
+          <Alert
+            severity={added && added.saved < added.total ? 'warning' : 'success'}
+            variant="filled"
+            onClose={() => setAdded(null)}
+          >
+            {added && added.saved < added.total
+              ? `${added.total - added.saved} de ${added.total} unidades no se guardaron en ${added.propertyName}.`
+              : `${added?.saved === 1 ? '1 unidad agregada' : `${added?.saved} unidades agregadas`} a ${added?.propertyName}.`}
+          </Alert>
+        </Snackbar>
+
         {isLoading && (
           <Box sx={{ display: 'flex', justifyContent: 'center', py: 6 }}>
             <CircularProgress />
@@ -113,7 +135,7 @@ export default function CatalogDetailPage() {
                       />
                     </Stack>
                     {service.description && (
-                      <Typography color="text.secondary" sx={{ mt: 1 }}>
+                      <Typography color="textSecondary" sx={{ mt: 1 }}>
                         {service.description}
                       </Typography>
                     )}
@@ -122,7 +144,7 @@ export default function CatalogDetailPage() {
                         zeros, so only the commission is meaningful here. */}
                     {(pricesAtServiceLevel(service.category) ||
                       service.commission_value > 0) && (
-                    <Typography variant="body2" color="text.secondary" className="numeric" sx={{ mt: 1.5 }}>
+                    <Typography variant="body2" color="textSecondary" className="numeric" sx={{ mt: 1.5 }}>
                       {pricesAtServiceLevel(service.category) && (
                         <>
                           {formatMoney(service.base_price)} · mín{' '}

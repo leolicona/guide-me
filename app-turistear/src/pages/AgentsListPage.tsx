@@ -62,7 +62,7 @@ export default function AgentsListPage() {
 
         {agents &&
           (agents.length === 0 ? (
-            <Typography color="text.secondary">
+            <Typography color="textSecondary">
               Aún no hay agentes — invita a tu primer agente.
             </Typography>
           ) : (

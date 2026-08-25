@@ -8,6 +8,7 @@ import {
 import { amountToCents, unitCommissionToApi } from '../types'
 import type { UnitFormData, SeasonFormData, BlockoutFormData } from '../schemas'
 import { SERVICES_QUERY_KEY } from './useServices'
+import { unitsQueryKey } from './useUnits'
 
 // Wizard draft shapes — the form output plus a client tempId. Money fields stay as major-unit
 // decimals until this compile converts them to minor units.
@@ -57,24 +58,21 @@ const toUnitInput = (u: UnitDraft) => ({
   checkin_time: u.checkin_time,
   checkout_time: u.checkout_time,
   amenities: u.amenities,
+  max_discount_pct: u.max_discount_pct ?? 0, // US-A92 — absent ⇒ no discount
   // Waterfall override → API (null ⇒ inherit the service base commission).
   ...unitCommissionToApi(u.commission_type, u.commission_value),
 })
 
-// Orchestration (Decision D1 — no transactional endpoint):
-// 1. POST /services → if this throws, nothing is created (wizard stays on the last step).
-// 2. For each unit SEQUENTIALLY: create the unit; if it fails, count it and skip its children
-//    (no parent to attach to); else fan out its seasons + block-outs, counting failures.
-async function createLodgingFull(
-  payload: LodgingSavePayload,
-): Promise<LodgingSaveResult> {
-  const service = await createService(payload.core)
+// The per-unit fan-out, shared by both modes: for each unit SEQUENTIALLY create the unit; if it
+// fails, count it and skip its children (no parent to attach to); else fan out its seasons +
+// block-outs, counting failures.
+async function createUnits(serviceId: string, drafts: UnitDraft[]): Promise<number> {
   let failures = 0
 
-  for (const draft of payload.units) {
+  for (const draft of drafts) {
     let unitId: string
     try {
-      const unit = await createUnitType(service.id, toUnitInput(draft))
+      const unit = await createUnitType(serviceId, toUnitInput(draft))
       unitId = unit.id
     } catch {
       failures += 1
@@ -83,7 +81,7 @@ async function createLodgingFull(
 
     const children: Promise<unknown>[] = [
       ...draft.seasons.map((s: SeasonFormData) =>
-        createSeason(service.id, unitId, {
+        createSeason(serviceId, unitId, {
           name: s.name,
           start_date: s.start_date,
           end_date: s.end_date,
@@ -91,7 +89,7 @@ async function createLodgingFull(
         }),
       ),
       ...draft.blockouts.map((b: BlockoutFormData) =>
-        createBlockout(service.id, unitId, {
+        createBlockout(serviceId, unitId, {
           start_date: b.start_date,
           end_date: b.end_date,
           quantity: b.quantity,
@@ -103,7 +101,31 @@ async function createLodgingFull(
     failures += results.filter((r) => r.status === 'rejected').length
   }
 
+  return failures
+}
+
+// Orchestration (Decision D1 — no transactional endpoint):
+// 1. POST /services → if this throws, nothing is created (wizard stays on the last step).
+// 2. Then the per-unit fan-out.
+async function createLodgingFull(
+  payload: LodgingSavePayload,
+): Promise<LodgingSaveResult> {
+  const service = await createService(payload.core)
+  const failures = await createUnits(service.id, payload.units)
   return { serviceId: service.id, failures }
+}
+
+// US-A91 — attach mode: the property already exists, so step 1 of the orchestration is skipped
+// entirely. No service write of any kind happens here; in particular the property's commission
+// (which governs every unit already under it) is never touched.
+async function attachUnits(payload: LodgingAttachPayload): Promise<LodgingSaveResult> {
+  const failures = await createUnits(payload.serviceId, payload.units)
+  return { serviceId: payload.serviceId, failures }
+}
+
+export interface LodgingAttachPayload {
+  serviceId: string
+  units: UnitDraft[]
 }
 
 export function useCreateLodgingFull() {
@@ -112,5 +134,17 @@ export function useCreateLodgingFull() {
     mutationFn: createLodgingFull,
     onSuccess: () =>
       queryClient.invalidateQueries({ queryKey: SERVICES_QUERY_KEY }),
+  })
+}
+
+/** US-A91 — add units to a property that already exists (wizard attach mode). */
+export function useAttachLodgingUnits() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: attachUnits,
+    onSuccess: (_result, variables) => {
+      queryClient.invalidateQueries({ queryKey: SERVICES_QUERY_KEY })
+      queryClient.invalidateQueries({ queryKey: unitsQueryKey(variables.serviceId) })
+    },
   })
 }

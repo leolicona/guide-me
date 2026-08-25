@@ -76,7 +76,7 @@ export function ExpressTicketOverlay({
           <Typography variant="h5" sx={{ fontWeight: 700 }}>
             {serviceName}
           </Typography>
-          <Typography color="text.secondary">
+          <Typography color="textSecondary">
             {slotLabel} · {passes} {passes === 1 ? 'pase' : 'pases'} ·{' '}
             <Box component="span" className="numeric" sx={{ fontWeight: 700 }}>
               {formatMoney(total)}
@@ -88,7 +88,7 @@ export function ExpressTicketOverlay({
           <QRCodeSVG value={ticketPageUrl(qrToken)} size={300} level="L" />
         )}
 
-        <Typography color="text.secondary">
+        <Typography color="textSecondary">
           El cliente escanea este código con la cámara de su teléfono
           <br />y su boleto queda entregado.
         </Typography>

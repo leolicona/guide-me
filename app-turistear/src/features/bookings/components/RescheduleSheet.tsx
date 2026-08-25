@@ -200,7 +200,7 @@ export function RescheduleSheet({ open, onClose, folioId, lines, isPaid }: Resch
               Fecha movida
             </Typography>
           </Stack>
-          <Typography variant="body2" color="text.secondary">
+          <Typography variant="body2" color="textSecondary">
             El boleto anterior dejó de funcionar. Envíale el nuevo al cliente ahora — si ya lo
             tenía guardado, es lo que evita el susto en el muelle.
           </Typography>
@@ -307,7 +307,7 @@ export function RescheduleSheet({ open, onClose, folioId, lines, isPaid }: Resch
                         <Typography variant="body2" sx={{ fontWeight: 600 }}>
                           {s.start_time}
                         </Typography>
-                        <Typography variant="caption" color="text.secondary">
+                        <Typography variant="caption" color="textSecondary">
                           {s.remaining} lugares
                         </Typography>
                       </ButtonBase>

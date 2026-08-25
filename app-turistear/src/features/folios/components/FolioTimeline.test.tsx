@@ -386,16 +386,31 @@ describe('the collapsed summary is the latest FACT', () => {
   })
 })
 
+// Design review, Should Fix 6 — REVERSED on purpose, and these two tests reverse with it. The card
+// used to render with the words «Sin historial» inside it, ABOVE the payment card: a folio with
+// nothing to narrate spent a whole SectionCard pushing the dominant figure down the screen to say
+// nothing. Money reads first (law #1), so a timeline with no rows renders nothing at all.
 describe('the empty timeline', () => {
-  it('an empty events array still renders the card with its empty line', () => {
-    renderWithProviders(<FolioTimeline events={[]} />)
-    expect(screen.getByText('Historial')).toBeInTheDocument()
-    expect(screen.getByText('Sin historial')).toBeInTheDocument()
+  it('an empty events array renders NO card', () => {
+    const { container } = renderWithProviders(<FolioTimeline events={[]} />)
+    expect(container).toBeEmptyDOMElement()
+    expect(screen.queryByText('Historial')).toBeNull()
   })
 
-  it('a stale cache without events renders the same empty state', () => {
-    renderWithProviders(<FolioTimeline />)
+  it('a stale cache without events renders nothing either', () => {
+    // `events` is undefined on a cache entry predating the embed. An empty card is not better
+    // information than no card; when the refetch lands, the Historial appears with its rows.
+    const { container } = renderWithProviders(<FolioTimeline />)
+    expect(container).toBeEmptyDOMElement()
+  })
+
+  it('but a folio with only a DERIVED row still gets its card', () => {
+    // The rows are not only events: a departed line contributes the Salida marker, and that is a
+    // story worth a card even when nothing was ever logged.
+    const past = '2020-01-01'
+    renderWithProviders(
+      <FolioTimeline events={[]} lines={[{ slot_date: past, slot_start_time: '08:00' }]} />,
+    )
     expect(screen.getByText('Historial')).toBeInTheDocument()
-    expect(screen.getByText('Sin historial')).toBeInTheDocument()
   })
 })

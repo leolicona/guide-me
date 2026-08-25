@@ -1,12 +1,7 @@
 import { Typography } from '@mui/material'
 import type { TypographyProps } from '@mui/material'
 
-const mxn = new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' })
-
-/** minor units (150000) → "$1,500.00". Self-contained so the shared layer stays feature-free. */
-function formatCents(cents: number): string {
-  return mxn.format(cents / 100)
-}
+import { formatCents } from './money'
 
 type MoneySemantic = 'neutral' | 'positive' | 'negative'
 

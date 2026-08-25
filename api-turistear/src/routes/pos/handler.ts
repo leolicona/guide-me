@@ -20,6 +20,7 @@ import {
   services,
   slots,
   slotZones,
+  users,
 } from '../../db/schema'
 import { reconcileSlotTotals } from '../services/zones.reconcile'
 import {
@@ -32,12 +33,12 @@ import type { AppVariables, UserPayload } from '../../types/context'
 import {
   deriveOrgKey,
   signTicket,
-  verifyTicket,
   type TicketPayload,
 } from '../../utils/qr'
 import { generatePortalToken, portalTokenExpiry } from '../../utils/portal'
 import { naiveEpoch, orgToday, orgWallClockMinute } from '../../utils/tz'
 import { folioFulfillment } from '../../utils/folioFulfillment'
+import { readFolioDetail } from '../../utils/folioDetail'
 import {
   rescheduleFolio,
   reissueTicketsAfterReschedule,
@@ -49,6 +50,7 @@ import {
   nightsBetween,
   parseCsvInts,
   quoteStay,
+  stayFloor,
   type SeasonRate,
 } from '../../utils/lodging'
 import { lodgingAvailableDays, lodgingTypeCards } from './lodging.handler'
@@ -62,7 +64,6 @@ import {
   buildCancellationReversal,
   displayMethodSql,
   depositMethodSql,
-  readFolioPayments,
 } from '../../utils/folioPayments'
 // US-LG09 — the pure allocation engine (docs/folios/line-autonomy.spec.md D1–D3): which lines a
 // payment funds. Allocations ride the payment row's own batch; nothing reads them yet (F1).
@@ -72,11 +73,19 @@ import {
   orderForCascade,
   seedAndCascade,
 } from '../../utils/folioAllocations'
-import { anyLineStatusSql, deriveBookingExpiresAtSql, deriveStatusSql } from '../../utils/folioStatus'
+import {
+  anyLineStatusSql,
+  deriveBookingExpiresAtSql,
+  deriveRefundAmountSql,
+  deriveRefundStatusSql,
+  deriveStatusSql,
+} from '../../utils/folioStatus'
+import { asDay, dateRangeFilter } from '../../utils/folioSearch'
 import {
   readListCancellationRequests,
   readListLines,
   readListPortalLinks,
+  serializeFolioListRow,
 } from '../../utils/folioListRows'
 // D20 — the agent apartado cancel shares the admin path's commit, so the two cannot price the same
 // folio differently. Reaching across routes is deliberate: the alternative is a second copy of the
@@ -1088,6 +1097,7 @@ export const confirmSale = async (c: PosContext) => {
           baseOccupancy: accommodationUnitTypes.baseOccupancy,
           maxCapacity: accommodationUnitTypes.maxCapacity,
           minNights: accommodationUnitTypes.minNights,
+          maxDiscountPct: accommodationUnitTypes.maxDiscountPct, // US-A92 — the discount ceiling
           // Waterfall commission inputs: the type's own override (nullable) + the service base.
           typeCommissionType: accommodationUnitTypes.commissionType,
           typeCommissionValue: accommodationUnitTypes.commissionValue,
@@ -1173,6 +1183,27 @@ export const confirmSale = async (c: PosContext) => {
         weekendDays,
       )
 
+      // US-AG57 — the controlled discount, for a stay. `unit_price` is the WHOLE-LINE total (a
+      // stay has no per-spot price), bounded below by the type's percentage ceiling and above by
+      // the quote itself, mirroring the tour line's [minimum_price, base_price] window. Omitted ⇒
+      // the quote, so a client that never sends the field is byte-identical to before (D3).
+      const stayMinimum = stayFloor(quote.total, unitType.maxDiscountPct)
+      const stayPrice = line.unit_price ?? quote.total
+      if (stayPrice < stayMinimum) {
+        throw new ApiError(
+          'PRICE_BELOW_MINIMUM',
+          400,
+          'Stay price is below the minimum price for this unit type',
+        )
+      }
+      if (stayPrice > quote.total) {
+        throw new ApiError(
+          'VALIDATION_ERROR',
+          400,
+          'Stay price may not exceed the quoted total',
+        )
+      }
+
       // Commission waterfall (US-A12): type override ?? service base; affiliate's per-affiliate
       // rate still wins over both (its own allow-list-gated system, unchanged).
       let stayCommType = unitType.typeCommissionType ?? unitType.svcCommissionType
@@ -1202,10 +1233,13 @@ export const confirmSale = async (c: PosContext) => {
         slotDate: null,
         slotStartTime: null,
         quantity: line.quantity, // rooms — a fixed commission counts per room-stay (D13)
-        basePrice: quote.total, // no per-night discounting → base == sold (whole line)
-        minimumPrice: 0,
-        unitPrice: quote.total,
-        lineTotal: quote.total,
+        basePrice: quote.total, // what the stay is worth before any discount (whole line)
+        // US-AG57 (D8) — the RESOLVED floor, not the 0 this used to hardcode. The type's percent
+        // can be edited after the sale, so without the snapshot nobody could reconstruct what the
+        // line was actually validated against — the reason a tour line snapshots its own.
+        minimumPrice: stayMinimum,
+        unitPrice: stayPrice,
+        lineTotal: stayPrice,
         commissionType: stayCommType,
         commissionValue: stayCommValue,
         isFlexible: false,
@@ -1395,8 +1429,13 @@ export const confirmSale = async (c: PosContext) => {
   }
 
   const subtotal = prepared.reduce((sum, l) => sum + l.lineTotal, 0)
+  // US-AG57 (D9) — a stay's discount counts ONCE. For a slot line base/unit are per-SPOT and
+  // `quantity` is spots, so the multiplication is right. For a stay line they are whole-line
+  // totals and `quantity` is ROOMS: a $150 discount on a two-room stay would otherwise be
+  // persisted, and shown back to the org, as $300.
   const discountTotal = prepared.reduce(
-    (sum, l) => sum + (l.basePrice - l.unitPrice) * l.quantity,
+    (sum, l) =>
+      sum + (l.basePrice - l.unitPrice) * (l.lineType === 'stay' ? 1 : l.quantity),
     0,
   )
   const total = subtotal
@@ -1414,8 +1453,24 @@ export const confirmSale = async (c: PosContext) => {
         : 0),
     0,
   )
+  // US-AG57 (D10) — a FIXED commission on a stay line is clamped to that line's discounted
+  // total. accommodation-stays.spec.md § 5 exempted lodging from the `fixed ≤ minimum_price` cap
+  // *because lodging had no floor*; stay discounts create one, so the exemption's reason is gone.
+  // Authoring-time validation cannot replace this: the floor is a percent of a total that does
+  // not exist until dates, rooms and guests are known. A `percent` rate needs no clamp — it is
+  // basis points of the discounted line total and cannot exceed it.
+  //
+  // A SLOT line is left alone (D1): its authoring guard already pins `fixed ≤ minimum_price`, and
+  // minimum_price ≤ unit_price, so commissionValue × quantity ≤ lineTotal holds by construction.
+  // Clamping it too would be a no-op that quietly claims the tour path was in scope.
   const fullFixedCommission = prepared.reduce(
-    (sum, l) => sum + (l.commissionType === 'fixed' ? l.commissionValue * l.quantity : 0),
+    (sum, l) =>
+      sum +
+      (l.commissionType === 'fixed'
+        ? l.lineType === 'stay'
+          ? Math.min(l.commissionValue * l.quantity, l.lineTotal)
+          : l.commissionValue * l.quantity
+        : 0),
     0,
   )
 
@@ -2065,212 +2120,18 @@ export const confirmSale = async (c: PosContext) => {
   )
 }
 
-// Re-read a folio (with lines + extras) scoped to the caller agent, for the response
-// shape. Shared by getFolio; returns null when no such folio belongs to the agent.
-const readFolio = async (
+// docs/oversight/folio-surface-parity.spec.md D6 — the folio detail is read and serialized in ONE
+// place, shared with the admin's surface (`utils/folioDetail.ts`). The caller scope is the only
+// thing this surface adds: `agentId` comes from the session, so a foreign folio is a 404 and never
+// a filtered-out row.
+const readFolio = (
   db: Db,
   org: string,
   agentId: string,
   folioId: string,
   qrSecret: string,
   apiBaseUrl: string,
-) => {
-  const folioRows = await db
-    .select({
-      id: folios.id,
-      status: deriveStatusSql, // D11 — derived from the lines; equals the column by construction
-      paymentMethod: displayMethodSql,
-      paymentReference: folios.paymentReference,
-      paymentVerification: folios.paymentVerification,
-      paymentVerifiedAt: folios.paymentVerifiedAt,
-      customerName: folios.customerName,
-      customerEmail: folios.customerEmail,
-      customerPhone: folios.customerPhone,
-      subtotal: folios.subtotal,
-      discountTotal: folios.discountTotal,
-      total: folios.total,
-      amountPaid: folios.amountPaid,
-      commissionAmount: folios.commissionAmount,
-      cancelledAt: folios.cancelledAt,
-      ticketsSentAt: folios.ticketsSentAt,
-      ticketsViewedAt: folios.ticketsViewedAt,
-      // US-AF13 — the shift operator who made the sale ("Vendido por: {name}"); null if the
-      // manager/agent sold directly.
-      operatorName: affiliateOperators.name,
-      createdAt: folios.createdAt,
-    })
-    .from(folios)
-    .leftJoin(affiliateOperators, eq(folios.operatorId, affiliateOperators.id))
-    .where(
-      and(
-        eq(folios.id, folioId),
-        eq(folios.organizationId, org),
-        eq(folios.agentId, agentId),
-      ),
-    )
-    .limit(1)
-
-  const folio = folioRows[0]
-  if (!folio) return null
-
-  const lineRows = await db
-    .select({
-      id: folioLines.id,
-      serviceId: folioLines.serviceId,
-      slotId: folioLines.slotId,
-      serviceName: folioLines.serviceName,
-      slotDate: folioLines.slotDate,
-      slotStartTime: folioLines.slotStartTime,
-      zoneName: folioLines.zoneName,
-      quantity: folioLines.quantity,
-      basePrice: folioLines.basePrice,
-      minimumPrice: folioLines.minimumPrice,
-      unitPrice: folioLines.unitPrice,
-      lineTotal: folioLines.lineTotal,
-      qrToken: folioLines.qrToken,
-      lineType: folioLines.lineType,
-      unitTypeId: folioLines.unitTypeId,
-      checkIn: folioLines.checkIn,
-      checkOut: folioLines.checkOut,
-      guests: folioLines.guests,
-      nights: folioLines.nights,
-      // US-A22 — the line's own life, mirrored on the seller detail (same fields the admin GET
-      // widened by; the raw outer-column correlation is the displayMethodSql trick).
-      cancelledAt: folioLines.cancelledAt,
-      cancellationSource: folioLines.cancellationSource,
-      lineRefundStatus: folioLines.refundStatus,
-      lineRefundAmount: folioLines.refundAmount,
-      // US-AG54 (D5) — the line's own hold clock, for the per-line countdown + Liquidar rows.
-      lineBookingExpiresAt: folioLines.bookingExpiresAt,
-      allocated: sql<number>`coalesce((select sum(a.amount) from folio_payment_allocations a where a.folio_line_id = folio_lines.id), 0)`,
-    })
-    .from(folioLines)
-    .where(and(eq(folioLines.folioId, folioId), eq(folioLines.organizationId, org)))
-    .orderBy(asc(folioLines.createdAt))
-
-  const extraRows = await db
-    .select({
-      id: folioLineExtras.id,
-      folioLineId: folioLineExtras.folioLineId,
-      extraId: folioLineExtras.extraId,
-      name: folioLineExtras.name,
-      price: folioLineExtras.price,
-      quantity: folioLineExtras.quantity,
-    })
-    .from(folioLineExtras)
-    .where(
-      and(
-        eq(folioLineExtras.folioId, folioId),
-        eq(folioLineExtras.organizationId, org),
-      ),
-    )
-
-  const extrasByLine = new Map<string, typeof extraRows>()
-  for (const ex of extraRows) {
-    const list = extrasByLine.get(ex.folioLineId) ?? []
-    list.push(ex)
-    extrasByLine.set(ex.folioLineId, list)
-  }
-
-  // Decode (and integrity-check) each stored ticket for the UI echo. Tokenless lines
-  // (folios sold before the QR feature) and any corrupt token resolve to qr: null.
-  const orgKey = await deriveOrgKey(qrSecret, org)
-  const lines = await Promise.all(
-    lineRows.map(async (line) => {
-      const payload = line.qrToken
-        ? await verifyTicket(line.qrToken, orgKey)
-        : null
-      return {
-        id: line.id,
-        line_type: line.lineType,
-        service_id: line.serviceId,
-        slot_id: line.slotId,
-        service_name: line.serviceName,
-        slot_date: line.slotDate,
-        slot_start_time: line.slotStartTime,
-        // US-A64 — the physical zone (null for an unzoned or lodging line).
-        zone_name: line.zoneName,
-        // Lodging stay fields (null for a tour line).
-        unit_type_id: line.unitTypeId,
-        check_in: line.checkIn,
-        check_out: line.checkOut,
-        guests: line.guests,
-        nights: line.nights,
-        // US-A22 — the line's own money state (derived from allocations; cancellation read from
-        // its written stamp), same shape as the admin detail.
-        money_state: line.cancelledAt
-          ? ('cancelled' as const)
-          : Math.max(0, Number(line.allocated ?? 0)) >= line.lineTotal
-            ? ('paid' as const)
-            : ('booking' as const),
-        allocated: Math.max(0, Number(line.allocated ?? 0)),
-        pending_balance: line.cancelledAt
-          ? 0
-          : Math.max(0, line.lineTotal - Math.max(0, Number(line.allocated ?? 0))),
-        cancelled_at: line.cancelledAt ? Math.floor(line.cancelledAt.getTime() / 1000) : null,
-        cancellation_source: line.cancellationSource,
-        refund_status: line.lineRefundStatus,
-        refund_amount: line.lineRefundAmount,
-        booking_expires_at: line.lineBookingExpiresAt
-          ? Math.floor(line.lineBookingExpiresAt.getTime() / 1000)
-          : null,
-        quantity: line.quantity,
-        base_price: line.basePrice,
-        minimum_price: line.minimumPrice,
-        unit_price: line.unitPrice,
-        line_total: line.lineTotal,
-        qr_token: line.qrToken ?? null,
-        qr: payload ? qrEcho(payload) : null,
-        extras: (extrasByLine.get(line.id) ?? []).map((ex) => ({
-          id: ex.id,
-          extra_id: ex.extraId,
-          name: ex.name,
-          price: ex.price,
-          quantity: ex.quantity,
-        })),
-      }
-    }),
-  )
-
-  const portalLink = await folioPortalLink(db, org, folioId, apiBaseUrl)
-  // US-LG08 — the per-payment breakdown (deposit vs balance, each with its own method).
-  const payments = await readFolioPayments(db, org, folioId)
-
-  return {
-    id: folio.id,
-    status: folio.status,
-    payment_method: folio.paymentMethod,
-    // US-AG41/US-A67 — payment reference + verification gate (the delivery UI blocks while pending).
-    payment_reference: folio.paymentReference,
-    payment_verification: folio.paymentVerification,
-    payment_verified_at: folio.paymentVerifiedAt
-      ? Math.floor(folio.paymentVerifiedAt.getTime() / 1000)
-      : null,
-    customer_name: folio.customerName,
-    customer_email: folio.customerEmail,
-    customer_phone: folio.customerPhone,
-    subtotal: folio.subtotal,
-    discount_total: folio.discountTotal,
-    total: folio.total,
-    amount_paid: folio.amountPaid,
-    commission_amount: folio.commissionAmount,
-    cancelled_at: folio.cancelledAt
-      ? Math.floor(folio.cancelledAt.getTime() / 1000)
-      : null,
-    // US-AF13 — operator attribution (null ⇒ manager/agent sold directly).
-    operator_name: folio.operatorName ?? null,
-    // Delivery axis (whatsapp-qr-delivery) — portal_link drives the WhatsApp send; sent/viewed
-    // stamps drive the Pendiente → Enviado → Visto badge.
-    portal_link: portalLink,
-    tickets_sent_at: folio.ticketsSentAt ? Math.floor(folio.ticketsSentAt.getTime() / 1000) : null,
-    tickets_viewed_at: folio.ticketsViewedAt
-      ? Math.floor(folio.ticketsViewedAt.getTime() / 1000)
-      : null,
-    created_at: Math.floor(folio.createdAt.getTime() / 1000),
-    payments,
-    lines,
-  }
-}
+) => readFolioDetail(db, org, folioId, { agentId, qrSecret, apiBaseUrl })
 
 // US-AG08 — read back one of the caller agent's own folios (receipt). Foreign /
 // other-agent / unknown → 404.
@@ -3803,13 +3664,23 @@ export const rescheduleBooking = async (c: PosContext) => {
 // agent can never see another agent's folios (that is the admin org-wide list at
 // GET /api/folios). Optional status / date (created_at UTC day) filters; newest first. A
 // lean row — a history list, not a metrics dashboard.
+/** US-AG58 (D5) — the seller's list is their whole history; this is the safety rail, not a page
+ *  size. Chosen without production data: `docs/oversight/folio-surface-parity.spec.md` § Open
+ *  records the query that would confirm it. */
+export const SELLER_LIST_LIMIT = 500
+
 export const listAgentFolios = async (c: PosContext) => {
   const agent = c.get('user')
   const org = agent.organizationId
   const db = getDb(c.env)
 
   const statusQ = c.req.query('status')
-  const dateQ = c.req.query('date')
+  // US-AG58 (folio-surface-parity D11) — the same inclusive ORG-LOCAL range the admin list takes,
+  // through the same helper. The `?date=` it replaces compared a UTC day (`strftime(…
+  // 'unixepoch')`), which for an org at UTC−5 answered for tomorrow from 19:00 local — the busiest
+  // hours of a beach counter. It had no call sites, so there is nothing to deprecate.
+  const fromQ = asDay(c.req.query('from'))
+  const toQ = asDay(c.req.query('to'))
   // US-AF13 — the manager filters the hotel's folios by shift operator; an operator session may
   // narrow to its own sales. Ignored for a plain agent (no operators exist under them).
   const operatorQ = c.req.query('operator')
@@ -3822,14 +3693,21 @@ export const listAgentFolios = async (c: PosContext) => {
     // D15 (line-autonomy) — any-line facet semantics, mirroring the admin list.
     filters.push(anyLineStatusSql(statusQ))
   }
-  if (dateQ) {
-    filters.push(
-      sql`strftime('%Y-%m-%d', ${folios.createdAt}, 'unixepoch') = ${dateQ}`,
-    )
-  }
   if (operatorQ) {
     filters.push(eq(folios.operatorId, operatorQ))
   }
+
+  // The org's zone decides every calendar boundary on this route, exactly as it does on the
+  // admin's. Read BEFORE the query, because the range filter is built from it.
+  const now = new Date()
+  const [fulfillmentOrg] = await db
+    .select({ tz: organizations.timezone, noShowMargin: organizations.noShowMarginMinutes })
+    .from(organizations)
+    .where(eq(organizations.id, org))
+    .limit(1)
+  const tz = fulfillmentOrg?.tz ?? 'America/Mexico_City'
+  const range = dateRangeFilter(tz, fromQ, toQ)
+  if (range) filters.push(range)
 
   const rows = await db
     .select({
@@ -3849,29 +3727,44 @@ export const listAgentFolios = async (c: PosContext) => {
       ticketsViewedAt: folios.ticketsViewedAt,
       paymentMethod: displayMethodSql,
       paymentVerification: folios.paymentVerification,
+      paymentReference: folios.paymentReference,
       operatorName: affiliateOperators.name,
+      // US-AG58 — the debt and the credit. The seller's row never carried these, so the shared
+      // FolioCard picked a degraded money reading for their own cancelled sale — the list-level
+      // twin of BUG-034.
+      refundStatus: deriveRefundStatusSql,
+      refundAmount: deriveRefundAmountSql,
+      creditAmount: folios.creditAmount,
+      creditExpiresAt: folios.creditExpiresAt,
+      agentName: users.name,
+      agentId: folios.agentId,
       saleMode: folios.saleMode,
     })
     .from(folios)
+    .innerJoin(users, eq(folios.agentId, users.id))
     .leftJoin(affiliateOperators, eq(folios.operatorId, affiliateOperators.id))
     .where(and(...filters))
     .orderBy(desc(folios.createdAt))
+    // US-AG58 (D5) — a safety cap, read one over so the response can SAY it capped. The seller's
+    // list is deliberately unbounded otherwise (D4): its payload IS their whole history, which is
+    // what lets the client search and facet it locally without lying about scope. A silent cap
+    // would be the lie the admin's union was built to prevent, one surface down.
+    .limit(SELLER_LIST_LIMIT + 1)
+
+  const truncated = rows.length > SELLER_LIST_LIMIT
+  const page = truncated ? rows.slice(0, SELLER_LIST_LIMIT) : rows
 
   // US-AG49 — same decorations as the admin list; `filters` here is already caller-scoped to this
   // seller's own folios, so the join inherits that scope.
-  const now = new Date()
   // US-A85/US-AG50 — the seller reads the same fulfilment as the admin. Same derivation, same
   // clock, same margin: the line between the two audiences is capability, never information.
-  const [fulfillmentOrg] = await db
-    .select({ tz: organizations.timezone, noShowMargin: organizations.noShowMarginMinutes })
-    .from(organizations)
-    .where(eq(organizations.id, org))
-    .limit(1)
   const fulfillmentCtx = {
-    tz: fulfillmentOrg?.tz ?? 'America/Mexico_City',
+    tz,
     marginMinutes: fulfillmentOrg?.noShowMargin ?? 0,
     nowEpoch: Math.floor(now.getTime() / 1000),
   }
+  // The decorations read the SAME filters, so they cover the page by construction — never a
+  // second, differently-scoped query.
   const [linesByFolio, portalLinkByFolio, requestByFolio] = await Promise.all([
     readListLines(db, org, filters, fulfillmentCtx),
     readListPortalLinks(db, org, filters, c.env.API_BASE_URL),
@@ -3879,55 +3772,19 @@ export const listAgentFolios = async (c: PosContext) => {
   ])
 
   return c.json({
-    folios: rows.map((r) => ({
-      id: r.id,
-      customer_name: r.customerName,
-      // US-AG07.3 — phone surfaces here so the dashboard can build the WhatsApp deep link.
-      customer_phone: r.customerPhone,
-      status: r.status,
-      total: r.total,
-      amount_paid: r.amountPaid,
-      // US-AG41/US-A67 — the seller sees the verification state (delivery is blocked while pending).
-      payment_method: r.paymentMethod,
-      payment_verification: r.paymentVerification,
-      // Delivery axis (whatsapp-qr-delivery) — a paid folio is "deliverable" only once its money has
-      // cleared (cash, or the electronic payment verified). The sent/viewed stamps drive the
-      // Pendiente → Enviado → Visto list badge.
-      deliverable: r.status === 'paid' && r.paymentVerification !== 'pending',
-      tickets_sent_at: r.ticketsSentAt ? Math.floor(r.ticketsSentAt.getTime() / 1000) : null,
-      tickets_viewed_at: r.ticketsViewedAt ? Math.floor(r.ticketsViewedAt.getTime() / 1000) : null,
-      // US-AG07.3 — derived pending balance + booking fields drive the Apartados dashboard.
-      pending_balance: r.total - r.amountPaid,
-      created_at: Math.floor(r.createdAt.getTime() / 1000),
-      cancelled_at: r.cancelledAt
-        ? Math.floor(r.cancelledAt.getTime() / 1000)
-        : null,
-      booking_expires_at: r.bookingExpiresAt
-        ? r.bookingExpiresAt // derived: epoch seconds already
-        : null,
-      reminder_status: r.reminderStatus,
-      reminder_sent_at: r.reminderSentAt
-        ? Math.floor(r.reminderSentAt.getTime() / 1000)
-        : null,
-      reminder_sent_by: r.reminderSentBy,
-      // US-AF13 — "Vendido por: {name}" (null ⇒ the manager/agent sold directly).
-      operator_name: r.operatorName ?? null,
-      // US-AG49 — the seller's list renders the SAME FolioCard as the admin's, so it needs the
-      // same three decorations (docs/oversight/folio-list-scanability.spec.md D13/D14).
-      sale_mode: r.saleMode,
-      portal_link: portalLinkByFolio.get(r.id) ?? null,
-      lines: linesByFolio.get(r.id) ?? [],
-      fulfillment: folioFulfillment(
-        (linesByFolio.get(r.id) ?? []).map((l) => l.fulfillment),
-      ),
-      // US-AG50 — the seller sees the state of their OWN sale: that a customer asked to cancel it,
-      // and that their apartado's deadline passed. Information, not capability — no admin verb
-      // follows from either field on this surface (US-A84 D15).
-      cancellation_request: requestByFolio.get(r.id) ?? null,
-      overdue:
-        r.status === 'booking' &&
-        r.bookingExpiresAt != null &&
-        r.bookingExpiresAt * 1000 < now.getTime(),
-    })),
+    // US-AG58 (D5) — the seller's list says when it capped, so "these are your sales" never means
+    // "these are your 500 most recent" silently.
+    truncated,
+    // US-AG58 (D1/D13) — the SAME row serializer the admin list uses. The two rows are now
+    // identical by construction, `agent` included: what differs between the audiences is which
+    // verbs the card offers and whom the byline names, both decided client-side from `surface`.
+    folios: page.map((r) =>
+      serializeFolioListRow(r, {
+        linesByFolio,
+        portalLinkByFolio,
+        requestByFolio,
+        nowMs: now.getTime(),
+      }),
+    ),
   })
 }

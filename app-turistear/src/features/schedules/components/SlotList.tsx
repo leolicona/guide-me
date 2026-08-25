@@ -51,7 +51,7 @@ export function SlotList({
           <Box>
             <Typography
               variant="subtitle2"
-              color="text.secondary"
+              color="textSecondary"
               sx={{ mb: 1 }}
             >
               {formatDateHeading(date)}

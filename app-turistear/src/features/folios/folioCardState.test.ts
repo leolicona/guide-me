@@ -618,3 +618,37 @@ describe('D14 — folioAttention: one derivation feeds the rail and the button',
     ).toBe('error')
   })
 })
+
+// BUG-035 / folio-surface-parity D17 — the rail answers a question about the FOLIO, the button one
+// about the READER. These tests exist because the old ones only ever called `folioAttention`
+// without a surface: the admin path was covered, the seller path was not, and the defect lived
+// exactly there for three releases.
+describe('BUG-035 — the rail does not change with who is reading', () => {
+  const waiting = {
+    status: 'paid' as const,
+    payment_verification: 'not_required' as const,
+    refund_status: 'none' as const,
+    tickets_sent_at: 1_700_000_000,
+    tickets_viewed_at: 1_700_000_100,
+    portal_link: 'https://x/p/t',
+    deliverable: true,
+    cancellation_request: 'pending' as const,
+  }
+
+  it('a customer waiting on an answer is AMBER for both audiences', () => {
+    // Before the fix the seller got `success` here — "nothing needs a human" — about a folio
+    // whose customer had asked to cancel.
+    expect(folioAttention(waiting, { urgent: false }).rail).toBe('warning')
+    expect(folioAttention(waiting, { urgent: false }).level).toBe('work')
+  })
+
+  it('an unverified transfer is AMBER for both audiences', () => {
+    const unverified = { ...waiting, cancellation_request: null, payment_verification: 'pending' as const }
+    expect(folioAttention(unverified, { urgent: false }).rail).toBe('warning')
+  })
+
+  it('but the VERB stays capability-filtered — the seller is offered no admin action', () => {
+    expect(folioAction(waiting, { urgent: false, surface: 'admin' })).toBe('request')
+    expect(folioAction(waiting, { urgent: false, surface: 'seller' })).toBe('message')
+  })
+})

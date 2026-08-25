@@ -41,7 +41,7 @@ export default function InviteAgentPage() {
               <CloseRounded />
             </IconButton>
           </Stack>
-          <Typography variant="body2" color="text.secondary" sx={{ mt: 0.25 }}>
+          <Typography variant="body2" color="textSecondary" sx={{ mt: 0.25 }}>
             Envía una invitación por correo para que se una a tu equipo.
           </Typography>
         </Box>

@@ -289,7 +289,7 @@ export function CancellationPolicyCard({ policy }: Props) {
           <Typography variant="h6">Política de cancelación</Typography>
         </Stack>
 
-        <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+        <Typography variant="body2" color="textSecondary" sx={{ mb: 2 }}>
           Cuánto se le devuelve al cliente según la anticipación con que cancele. Se aplica a cada
           servicio del folio por separado, y queda congelada en cada venta: cambiarla aquí nunca
           modifica lo que ya se vendió.
@@ -371,7 +371,7 @@ export function CancellationPolicyCard({ policy }: Props) {
             <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 0.5 }}>
               Apartados
             </Typography>
-            <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+            <Typography variant="caption" color="textSecondary" sx={{ display: 'block' }}>
               Un apartado sigue esta misma escalera. Los porcentajes se calculan sobre el total de la
               venta, así que si lo retenido supera el anticipo, no queda nada por devolver — y nunca
               se le cobra la diferencia al cliente.
@@ -435,7 +435,7 @@ export function CancellationPolicyCard({ policy }: Props) {
             >
               Restablecer a la política estándar
             </Button>
-            <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+            <Typography variant="caption" color="textSecondary" sx={{ display: 'block' }}>
               Vuelve a la que traen todas las empresas: 5 días o más antes, se devuelve todo; entre 5
               días y 24 horas, la mitad; después de la salida, nada. Las ventas ya hechas conservan
               la política con la que se vendieron.
@@ -500,7 +500,7 @@ function ThresholdField({
       </Stack>
       <Typography
         variant="caption"
-        color="text.secondary"
+        color="textSecondary"
         sx={{ display: 'block', mt: 0.5, ml: 1.75 }}
       >
         {thresholdHint(hours, row.unit)}
@@ -548,7 +548,7 @@ function TierBlock({
         )}
       </Stack>
       {subtitle && (
-        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1.5 }}>
+        <Typography variant="caption" color="textSecondary" sx={{ display: 'block', mb: 1.5 }}>
           {subtitle}
         </Typography>
       )}
@@ -562,7 +562,7 @@ function TierBlock({
             direction="row"
             sx={{ justifyContent: 'space-between', alignItems: 'baseline', gap: 1 }}
           >
-            <Typography variant="caption" color="text.secondary">
+            <Typography variant="caption" color="textSecondary">
               De una venta de $1,000 se devuelven
             </Typography>
             <MoneyText

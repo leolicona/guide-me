@@ -53,7 +53,7 @@ export function ScanResult({ result }: ScanResultProps) {
           </Typography>
 
           {!isValid && result.reason && (
-            <Typography color="error.main">
+            <Typography color="error">
               {reasonCopy(result.reason, t)}
             </Typography>
           )}
@@ -64,12 +64,12 @@ export function ScanResult({ result }: ScanResultProps) {
                 <Typography variant="body1">{t!.client_identity}</Typography>
               )}
               {t!.service_name && (
-                <Typography variant="body2" color="text.secondary">
+                <Typography variant="body2" color="textSecondary">
                   {t!.service_name}
                 </Typography>
               )}
               {(t!.slot_date || t!.slot_start_time) && (
-                <Typography variant="caption" color="text.secondary">
+                <Typography variant="caption" color="textSecondary">
                   {t!.slot_date} · {t!.slot_start_time}
                 </Typography>
               )}

@@ -89,7 +89,7 @@ export default function OperatorsPage() {
         }
       />
 
-      <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+      <Typography variant="body2" color="textSecondary" sx={{ mb: 3 }}>
         Registra a tu personal de caja. Cada operador recibe un enlace por WhatsApp, crea su PIN de 4
         dígitos y vende bajo tu cuenta. Todas sus ventas entran a tu caja, etiquetadas con su nombre.
       </Typography>
@@ -109,7 +109,7 @@ export default function OperatorsPage() {
             <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
               Aún no tienes operadores
             </Typography>
-            <Typography variant="body2" color="text.secondary">
+            <Typography variant="body2" color="textSecondary">
               Agrega a tu primer cajero de turno para empezar.
             </Typography>
           </Stack>
@@ -125,7 +125,7 @@ export default function OperatorsPage() {
             <>
               <Typography
                 variant="overline"
-                color="text.secondary"
+                color="textSecondary"
                 sx={{ mt: 2, display: 'block' }}
               >
                 Retirados

@@ -245,7 +245,7 @@ export default function PosCatalogPage() {
 
         {services &&
           (visibleServices.length === 0 ? (
-            <Typography color="text.secondary">
+            <Typography color="textSecondary">
               No hay servicios disponibles en este momento.
             </Typography>
           ) : (
@@ -331,14 +331,14 @@ export default function PosCatalogPage() {
 
                       {/* A type card grounds itself in its property; a tour keeps its blurb. */}
                       {item.item_type === 'unit_type' && item.property_name ? (
-                        <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+                        <Typography variant="body2" color="textSecondary" sx={{ mt: 0.5 }}>
                           {item.property_name}
                         </Typography>
                       ) : (
                         item.description && (
                           <Typography
                             variant="body2"
-                            color="text.secondary"
+                            color="textSecondary"
                             sx={{
                               mt: 0.5,
                               fontWeight: 300,
@@ -391,7 +391,7 @@ export default function PosCatalogPage() {
                               }
                             />
                             {isTypeCard && (
-                              <Typography variant="body2" color="text.secondary">
+                              <Typography variant="body2" color="textSecondary">
                                 / noche
                               </Typography>
                             )}

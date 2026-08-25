@@ -66,6 +66,10 @@ const stayLine = (over: Partial<StayCartLine> = {}): StayCartLine => ({
   quantity: 1,
   nights: 2,
   total: 300_000,
+  // US-AG57 — a stay line born undiscounted: the quote it came with, and a floor equal to it
+  // (max_discount_pct 0), which is the state every existing unidad is in.
+  quoted_total: 300_000,
+  min_total: 300_000,
   per_night: [],
   ...over,
 })
@@ -135,8 +139,22 @@ describe('money selectors', () => {
       expect(cartDiscountTotal([slotLine({ unit_price: 50_000 })])).toBe(0)
     })
 
-    it('ignores stay lines — lodging has no per-night discounting (US-AG38 D12)', () => {
+    it('is zero for an undiscounted stay — its total still equals the quote', () => {
       expect(cartDiscountTotal([stayLine()])).toBe(0)
+    })
+
+    // Was asserted as an unconditional 0 until US-AG57 made stays discountable. The row this
+    // feeds («Descuento» in the checkout summary) then disagreed with the discount_total the
+    // server persists — the client simply did not look at stay lines.
+    it('counts a discounted stay ONCE, not per room', () => {
+      const discounted = stayLine({ quantity: 2, quoted_total: 400_000, total: 385_000 })
+      expect(cartDiscountTotal([discounted])).toBe(15_000)
+    })
+
+    it('adds a tour and a stay discount together', () => {
+      const tour = slotLine({ quantity: 4, unit_price: 45_000 }) // $50 off × 4
+      const stay = stayLine({ quoted_total: 300_000, total: 280_000 })
+      expect(cartDiscountTotal([tour, stay])).toBe(40_000)
     })
   })
 
@@ -244,6 +262,57 @@ describe('usePosCart', () => {
     it('accepts a price inside the band, rounded to whole minor units', () => {
       usePosCart.getState().setUnitPrice('slot-1', 45_000.4)
       expect((usePosCart.getState().lines[0] as SlotCartLine).unit_price).toBe(45_000)
+    })
+  })
+
+  // US-AG57 — the stay equivalent of setUnitPrice, bounded by the SERVER's floor rather than by a
+  // percent recomputed in the client (D6).
+  describe('setStayTotal', () => {
+    const DISCOUNTABLE = { total: 200_000, quoted_total: 200_000, min_total: 180_000 }
+
+    beforeEach(() => {
+      usePosCart.setState({ lines: [stayLine(DISCOUNTABLE)] })
+    })
+
+    it('holds the server-resolved floor', () => {
+      usePosCart.getState().setStayTotal('stay-1', 100_000)
+      expect((usePosCart.getState().lines[0] as StayCartLine).total).toBe(180_000)
+    })
+
+    it('holds the quote as the ceiling — a discount may not raise the price', () => {
+      usePosCart.getState().setStayTotal('stay-1', 250_000)
+      expect((usePosCart.getState().lines[0] as StayCartLine).total).toBe(200_000)
+    })
+
+    it('accepts a total inside the band and leaves the quote alone', () => {
+      usePosCart.getState().setStayTotal('stay-1', 185_000)
+      const line = usePosCart.getState().lines[0] as StayCartLine
+      expect(line.total).toBe(185_000)
+      expect(line.quoted_total).toBe(200_000) // what it was worth, still readable
+    })
+
+    it('a 0 % unidad cannot move at all — min_total === quoted_total', () => {
+      usePosCart.setState({ lines: [stayLine()] }) // floor === quote === 300_000
+      usePosCart.getState().setStayTotal('stay-1', 1)
+      expect((usePosCart.getState().lines[0] as StayCartLine).total).toBe(300_000)
+    })
+  })
+
+  // The scope boundary, mechanically: an undiscounted stay puts the same bytes on the wire as it
+  // did before this feature — no `unit_price` key at all.
+  describe('the confirm payload carries a stay price only when discounted', () => {
+    it('omits unit_price when the total still equals the quote', () => {
+      usePosCart.setState({ lines: [stayLine()] })
+      expect(toConfirmPayload(usePosCart.getState()).lines[0]).not.toHaveProperty('unit_price')
+    })
+
+    it('sends the whole-line total once the agent discounts it', () => {
+      usePosCart.setState({
+        lines: [stayLine({ total: 185_000, quoted_total: 200_000, min_total: 180_000 })],
+      })
+      expect(toConfirmPayload(usePosCart.getState()).lines[0]).toMatchObject({
+        unit_price: 185_000,
+      })
     })
   })
 
@@ -357,6 +426,7 @@ describe('toConfirmPayload', () => {
       quantity: 1,
       nights: 2,
       total: 300_000,
+      min_total: 300_000,
       per_night: [],
     })
     const [line] = toConfirmPayload(usePosCart.getState()).lines

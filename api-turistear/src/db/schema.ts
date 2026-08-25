@@ -728,6 +728,12 @@ export const accommodationUnitTypes = sqliteTable('accommodation_unit_types', {
   // When set, commissionValue mirrors services.commission_*: basis points (percent) / minor units (fixed).
   commissionType: text('commission_type', { enum: ['percent', 'fixed'] }),
   commissionValue: integer('commission_value'),
+  // US-A92 (docs/pos/discount-min-price.spec.md D2) — how far an agent may discount a stay of
+  // this type, as a whole percent of the SERVER-QUOTED total. Relative on purpose: the total is
+  // assembled per night (seasonal > weekend > base, × rooms, + extra-person), so an absolute
+  // per-night floor would need a second engine and would drift from quoteStay silently. 0 = no
+  // discount, which is what every row born before migration 0066 carries.
+  maxDiscountPct: integer('max_discount_pct').notNull().default(0),
   status: text('status', { enum: ['active', 'inactive'] })
     .notNull()
     .default('active'),

@@ -3,10 +3,6 @@ import {
   Alert,
   Box,
   Button,
-  Dialog,
-  DialogActions,
-  DialogContent,
-  DialogTitle,
   Stack,
   TextField,
   Typography,
@@ -15,7 +11,7 @@ import { useAcknowledgeDrop, useDisputeDrop } from '../hooks'
 import type { PendingAck } from '../types'
 import { formatMoney } from '../../catalog/types'
 import { ackCountdown } from './ackPresentation'
-import { AlertCard, MoneyText } from '../../../components'
+import { AlertCard, MoneyText, FormSheet } from '../../../components'
 
 // US-AG27/AG28 — the agent's outstanding signature obligations, rendered as a NON-BLOCKING
 // inline card list (never a modal: it must not interrupt a sale or the balance view). Each
@@ -45,10 +41,10 @@ export function PendingAcknowledgments({ items }: { items: PendingAck[] }) {
 
   return (
     <Box>
-      <Typography variant="h6" sx={{ mb: 0.5 }}>
+      <Typography variant="h6" component="h2" sx={{ mb: 0.5 }}>
         Pendientes de firma
       </Typography>
-      <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+      <Typography variant="body2" color="textSecondary" sx={{ mb: 2 }}>
         El administrador registró estos movimientos en tu saldo. Revísalos y firma de
         conformidad, o levanta una disputa si no estás de acuerdo.
       </Typography>
@@ -126,47 +122,40 @@ export function PendingAcknowledgments({ items }: { items: PendingAck[] }) {
         })}
       </Stack>
 
-      <Dialog
+      {/* US-UX08 — the dispute is entity editing, so it is a FormSheet. Its reason is required:
+          an unexplained dispute is a flag the admin cannot act on. */}
+      <FormSheet
         open={!!disputeTarget}
         onClose={() => setDisputeTarget(null)}
-        fullWidth
-        maxWidth="xs"
+        title="Disputar movimiento"
+        submitLabel={dispute.isPending ? 'Enviando…' : 'Disputar'}
+        onSubmit={(e) => {
+          e.preventDefault()
+          submitDispute()
+        }}
+        busy={dispute.isPending}
+        disabled={!reason.trim()}
+        error={
+          dispute.isError ? (
+            <Alert severity="error">No se pudo registrar la disputa. Inténtalo de nuevo.</Alert>
+          ) : undefined
+        }
       >
-        <DialogTitle>Disputar movimiento</DialogTitle>
-        <DialogContent>
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-            Tu saldo no cambia con la disputa — el administrador la revisará y, si procede,
-            registrará la corrección. Explica por qué no estás de acuerdo.
-          </Typography>
-          <TextField
-            label="Razón"
-            fullWidth
-            multiline
-            minRows={2}
-            autoFocus
-            required
-            value={reason}
-            onChange={(e) => setReason(e.target.value)}
-          />
-          {dispute.isError && (
-            <Alert severity="error" sx={{ mt: 2 }}>
-              No se pudo registrar la disputa. Inténtalo de nuevo.
-            </Alert>
-          )}
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setDisputeTarget(null)}>Cancelar</Button>
-          <Button
-            variant="contained"
-            color="error"
-            disableElevation
-            onClick={submitDispute}
-            disabled={dispute.isPending || !reason.trim()}
-          >
-            {dispute.isPending ? 'Enviando…' : 'Disputar'}
-          </Button>
-        </DialogActions>
-      </Dialog>
+        <Typography variant="body2" color="textSecondary" sx={{ mb: 2 }}>
+          Tu saldo no cambia con la disputa — el administrador la revisará y, si procede,
+          registrará la corrección. Explica por qué no estás de acuerdo.
+        </Typography>
+        <TextField
+          label="Razón"
+          fullWidth
+          multiline
+          minRows={2}
+          autoFocus
+          required
+          value={reason}
+          onChange={(e) => setReason(e.target.value)}
+        />
+      </FormSheet>
     </Box>
   )
 }

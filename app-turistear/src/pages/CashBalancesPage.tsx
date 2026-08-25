@@ -5,7 +5,6 @@ import {
   Typography,
   Button,
   Card,
-  CardActionArea,
   CardContent,
   CircularProgress,
   Alert,
@@ -15,17 +14,10 @@ import {
   Divider,
   Chip,
   Badge,
-  Tabs,
-  Tab,
   TextField,
-  ToggleButton,
-  ToggleButtonGroup,
-  Dialog,
-  DialogTitle,
-  DialogContent,
-  DialogActions,
 } from '@mui/material'
 import ExpandMoreRounded from '@mui/icons-material/ExpandMoreRounded'
+import ArrowForwardRounded from '@mui/icons-material/ArrowForwardRounded'
 import StorefrontRounded from '@mui/icons-material/StorefrontRounded'
 import PersonRounded from '@mui/icons-material/Person'
 import TrendingDownRounded from '@mui/icons-material/TrendingDown'
@@ -33,32 +25,17 @@ import TrendingUpRounded from '@mui/icons-material/TrendingUp'
 import {
   useBalances,
   useDrops,
-  usePendingDropCount,
   useRegisterCollection,
   useRegisterPayout,
 } from '../features/cash/hooks'
-import { AckChip } from '../features/cash/components/AckChip'
-import { TuCajaSection } from '../features/cash/components/TuCajaSection'
 import { useOrgDateFormatter } from '../features/organization'
-import { SOURCE_LABEL } from '../features/cash/components/ackPresentation'
 import { METHOD_LABEL } from '../features/cash/components/paymentPresentation'
-import type { BalanceListItem, DropStatus } from '../features/cash/types'
+import type { BalanceListItem } from '../features/cash/types'
 import { formatMoney, amountToCents, centsToAmount } from '../features/catalog/types'
+import { DropCard } from '../features/cash/components/DropCard'
+import { PendingConfirmations } from '../features/cash/components/PendingConfirmations'
 import { ROUTES } from '../config/routes'
-import { MoneyText, StatusChip, InfoPopover } from '../components'
-import { FilterStrip } from '../features/filters'
-
-const DROP_COLOR: Record<DropStatus, 'warning' | 'success' | 'error'> = {
-  pending: 'warning',
-  confirmed: 'success',
-  rejected: 'error',
-}
-
-const DROP_LABEL: Record<DropStatus, string> = {
-  pending: 'Pendiente',
-  confirmed: 'Confirmado',
-  rejected: 'Rechazado',
-}
+import { MoneyText, StatusChip, InfoPopover, FormSheet } from '../components'
 
 const DATE_FMT: Intl.DateTimeFormatOptions = {
   month: 'short',
@@ -67,61 +44,20 @@ const DATE_FMT: Intl.DateTimeFormatOptions = {
   minute: '2-digit',
 }
 
-// 'disputed' is a pseudo-filter: it queries by acknowledgment (any status) so open disputes
-// — which live on already-confirmed drops — surface in one tap.
-type DropFilter = DropStatus | 'all' | 'disputed'
-
-function KpiStat({
-  label,
-  value,
-  accent,
-}: {
-  label: string
-  value: string
-  accent?: 'warning' | 'error'
-}) {
+// D18 — «Efectivo en la calle» is the only surviving stat. «Por confirmar» and «En disputa» were
+// counts sitting above the very lists that counted them; they are the blocks now.
+function CashInFieldHeading({ balances }: { balances: BalanceListItem[] }) {
+  const total = balances.reduce((n, r) => n + (r.balance > 0 ? r.balance : 0), 0)
   return (
-    <Box sx={{ flex: 1, minWidth: 0 }}>
-      <Typography variant="caption" color="text.secondary" noWrap>
-        {label}
+    <Stack direction="row" spacing={1} sx={{ alignItems: 'baseline', mb: 2, flexWrap: 'wrap' }}>
+      <Typography variant="h3" component="h2">
+        Efectivo en la calle
       </Typography>
-      <Typography
-        variant="h6"
-        sx={{ fontWeight: 600, color: accent ? `${accent}.main` : 'text.primary' }}
-      >
-        {value}
+      <MoneyText cents={total} variant="h3" srLabel="Efectivo en la calle" />
+      <Typography variant="body2" color="textSecondary">
+        {balances.length === 1 ? '1 persona' : `${balances.length} personas`}
       </Typography>
-    </Box>
-  )
-}
-
-// --- Triage header: the at-a-glance state of the company's field cash (US-A19). ---
-// One compact stat strip so the admin lands on "how much is out, how much needs me" without
-// scanning every card. Cash in field = Σ positive balances (money agents/affiliates hold).
-function KpiHeader({ balances }: { balances: BalanceListItem[] }) {
-  const { data: disputed } = useDrops({ status: 'all', ack: 'disputed' })
-  const cashInField = balances.reduce((n, r) => n + (r.balance > 0 ? r.balance : 0), 0)
-  const pending = balances.reduce((n, r) => n + r.pending_drops_count, 0)
-  const disputes = disputed?.length ?? 0
-
-  return (
-    <Card variant="outlined" sx={{ mb: 3 }}>
-      <CardContent>
-        <Stack direction="row" spacing={2} divider={<Divider orientation="vertical" flexItem />}>
-          <KpiStat label="Efectivo en la calle" value={formatMoney(cashInField)} />
-          <KpiStat
-            label="Por confirmar"
-            value={String(pending)}
-            accent={pending > 0 ? 'warning' : undefined}
-          />
-          <KpiStat
-            label="En disputa"
-            value={String(disputes)}
-            accent={disputes > 0 ? 'error' : undefined}
-          />
-        </Stack>
-      </CardContent>
-    </Card>
+    </Stack>
   )
 }
 
@@ -138,10 +74,12 @@ function BreakdownRow({
 }) {
   return (
     <Stack direction="row" sx={{ justifyContent: 'space-between' }}>
-      <Typography variant="body2" color="text.secondary">
+      <Typography variant="body2" color="textSecondary">
         {label}
       </Typography>
-      <Typography variant="body2">
+      {/* A signed figure cannot be a bare MoneyText, so it takes the `.numeric` utility — the
+          design system's other route to tabular figures — and the column still aligns. */}
+      <Typography variant="body2" className="numeric">
         {sign === '−' && value > 0 ? '−' : ''}
         {sign === '+' && value > 0 ? '+' : ''}
         {formatMoney(value)}
@@ -171,11 +109,15 @@ function BalanceRow({
     <Card variant="outlined">
       <CardContent>
         <Stack direction="row" sx={{ justifyContent: 'space-between', alignItems: 'center' }}>
-          <Box sx={{ minWidth: 0 }}>
-            <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
-              <Typography variant="subtitle1" noWrap>
-                {row.agent.name}
-              </Typography>
+          <Box sx={{ minWidth: 0, flex: '1 1 10rem' }}>
+            {/* Not `noWrap` beside the company chip: at 375px «Sofía Reyes» clipped to «So…»,
+                which is not a name. The chip wraps under it instead. */}
+            <Stack
+              direction="row"
+              spacing={1}
+              sx={{ alignItems: 'center', flexWrap: 'wrap', rowGap: 0.5 }}
+            >
+              <Typography variant="subtitle1">{row.agent.name}</Typography>
               {isAffiliate && (
                 <Chip
                   size="small"
@@ -186,7 +128,7 @@ function BalanceRow({
                 />
               )}
             </Stack>
-            <Typography variant="caption" color="text.secondary">
+            <Typography variant="caption" color="textSecondary">
               {negative
                 ? `La empresa debe ${isAffiliate ? 'al afiliado' : 'al agente'}`
                 : 'Tiene efectivo de la empresa'}
@@ -240,7 +182,7 @@ function BalanceRow({
           <Divider sx={{ my: 1.5 }} />
           {/* Shift-scoped breakdown (US-A19) — mirrors the agent's own /me view: a
               carry-forward line plus the components since their last confirmed drop. */}
-          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+          <Typography variant="caption" color="textSecondary" sx={{ display: 'block', mb: 1 }}>
             {row.last_drop
               ? `Desde la última entrega · ${formatDate(row.last_drop.created_at)}`
               : 'Toda la actividad'}
@@ -268,17 +210,17 @@ function BalanceRow({
           <Divider sx={{ my: 1.5 }} />
           <Stack spacing={0.5}>
             <Stack direction="row" sx={{ justifyContent: 'space-between' }}>
-              <Typography variant="body2" color="text.secondary">
+              <Typography variant="body2" color="textSecondary">
                 Ventas del turno · {row.sales.cash_count + row.sales.electronic_count}
               </Typography>
               <Typography variant="body2">{formatMoney(row.sales.total)}</Typography>
             </Stack>
             <Stack direction="row" sx={{ justifyContent: 'space-between' }}>
-              <Typography variant="caption" color="text.secondary">
+              <Typography variant="caption" color="textSecondary">
                 Efectivo {formatMoney(row.sales.cash)} · Electrónico{' '}
                 {formatMoney(row.sales.electronic)}
               </Typography>
-              <Typography variant="caption" color="text.secondary">
+              <Typography variant="caption" color="textSecondary">
                 Comisiones {formatMoney(row.commissions.total)}
                 {row.commissions.electronic > 0
                   ? ` (electrónicas ${formatMoney(row.commissions.electronic)})`
@@ -308,7 +250,7 @@ function BalanceRow({
 
 // --- Balances tab: company cash exposure per agent/affiliate (US-A19) + payouts (US-A25)
 //     + direct collections (US-A27) ---
-function BalancesTab() {
+function TeamBalances() {
   const { data: balances, isLoading, isError } = useBalances()
   const payout = useRegisterPayout()
   const collection = useRegisterCollection()
@@ -363,12 +305,12 @@ function BalancesTab() {
     return <Alert severity="error">No se pudieron cargar los saldos. Inténtalo de nuevo.</Alert>
   }
   if (!balances || balances.length === 0) {
-    return <Typography color="text.secondary">No hay agentes ni afiliados para mostrar.</Typography>
+    return <Typography color="textSecondary">No hay agentes ni afiliados para mostrar.</Typography>
   }
 
   return (
     <>
-      <KpiHeader balances={balances} />
+      <CashInFieldHeading balances={balances} />
       <Stack spacing={2}>
         {balances.map((row) => (
           <BalanceRow
@@ -380,257 +322,168 @@ function BalancesTab() {
         ))}
       </Stack>
 
-      {/* US-A27 — direct collection dialog */}
-      <Dialog open={!!collectTarget} onClose={() => setCollectTarget(null)} fullWidth maxWidth="xs">
-        <DialogTitle>Registrar cobro directo</DialogTitle>
-        <DialogContent>
-          {/* Structured context: who + effect as icon-paired chips; the signature nuance
-              (rarely needed at the moment of collecting) sits one tap away in the popover. */}
-          <Stack
-            direction="row"
-            spacing={1}
-            useFlexGap
-            sx={{ alignItems: 'center', flexWrap: 'wrap', mb: 2 }}
-          >
-            <StatusChip
-              tone="neutral"
-              icon={<PersonRounded />}
-              label={collectTarget?.agent.name ?? ''}
-            />
-            <StatusChip
-              tone="neutral"
-              icon={<TrendingDownRounded />}
-              label="Reduce su saldo al instante"
-            />
-            <InfoPopover label="Sobre la firma de conformidad">
-              Se le pedirá al agente firmar de conformidad. Si no firma, el cobro se confirma
-              automáticamente.
-            </InfoPopover>
-          </Stack>
-          <Stack spacing={2}>
-            <TextField
-              label="Monto recibido"
-              type="number"
-              fullWidth
-              autoFocus
-              value={collectAmount}
-              onChange={(e) => setCollectAmount(e.target.value)}
-            />
-            <TextField
-              label="Nota (opcional)"
-              fullWidth
-              multiline
-              minRows={2}
-              value={collectNote}
-              onChange={(e) => setCollectNote(e.target.value)}
-            />
-          </Stack>
-          {collection.isError && (
-            <Alert severity="error" sx={{ mt: 2 }}>
-              No se pudo registrar el cobro. Inténtalo de nuevo.
-            </Alert>
-          )}
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setCollectTarget(null)}>Cancelar</Button>
-          <Button
-            variant="contained"
-            disableElevation
-            onClick={submitCollection}
-            disabled={collection.isPending || !collectAmount}
-          >
-            {collection.isPending ? 'Registrando…' : 'Registrar cobro'}
-          </Button>
-        </DialogActions>
-      </Dialog>
+      {/* US-A27 / US-UX08 — a money form, so a FormSheet. */}
+      <FormSheet
+        open={!!collectTarget}
+        onClose={() => setCollectTarget(null)}
+        title="Registrar cobro directo"
+        submitLabel={collection.isPending ? 'Registrando…' : 'Registrar cobro'}
+        onSubmit={(e) => {
+          e.preventDefault()
+          submitCollection()
+        }}
+        busy={collection.isPending}
+        disabled={!collectAmount}
+        error={
+          collection.isError ? (
+            <Alert severity="error">No se pudo registrar el cobro. Inténtalo de nuevo.</Alert>
+          ) : undefined
+        }
+      >
+        {/* Structured context: who + effect as icon-paired chips; the signature nuance
+            (rarely needed at the moment of collecting) sits one tap away in the popover. */}
+        <Stack
+          direction="row"
+          spacing={1}
+          useFlexGap
+          sx={{ alignItems: 'center', flexWrap: 'wrap', mb: 2 }}
+        >
+          <StatusChip
+            tone="neutral"
+            icon={<PersonRounded />}
+            label={collectTarget?.agent.name ?? ''}
+          />
+          <StatusChip
+            tone="neutral"
+            icon={<TrendingDownRounded />}
+            label="Reduce su saldo al instante"
+          />
+          <InfoPopover label="Sobre la firma de conformidad">
+            Se le pedirá al agente firmar de conformidad. Si no firma, el cobro se confirma
+            automáticamente.
+          </InfoPopover>
+        </Stack>
+        <Stack spacing={2}>
+          <TextField
+            label="Monto recibido"
+            type="number"
+            fullWidth
+            autoFocus
+            value={collectAmount}
+            onChange={(e) => setCollectAmount(e.target.value)}
+          />
+          <TextField
+            label="Nota (opcional)"
+            fullWidth
+            multiline
+            minRows={2}
+            value={collectNote}
+            onChange={(e) => setCollectNote(e.target.value)}
+          />
+        </Stack>
+      </FormSheet>
 
-      <Dialog open={!!target} onClose={() => setTarget(null)} fullWidth maxWidth="xs">
-        <DialogTitle>Registrar pago</DialogTitle>
-        <DialogContent>
-          <Stack
-            direction="row"
-            spacing={1}
-            useFlexGap
-            sx={{ alignItems: 'center', flexWrap: 'wrap', mb: 2 }}
-          >
-            <StatusChip
-              tone="neutral"
-              icon={<PersonRounded />}
-              label={target?.agent.name ?? ''}
-            />
-            <StatusChip
-              tone="neutral"
-              icon={<TrendingUpRounded />}
-              label="Sube su saldo hacia cero"
-            />
-          </Stack>
-          <Stack spacing={2}>
-            <TextField
-              label="Monto"
-              type="number"
-              fullWidth
-              autoFocus
-              value={amount}
-              onChange={(e) => setAmount(e.target.value)}
-            />
-            <TextField
-              label="Nota (opcional)"
-              fullWidth
-              multiline
-              minRows={2}
-              value={note}
-              onChange={(e) => setNote(e.target.value)}
-            />
-          </Stack>
-          {payout.isError && (
-            <Alert severity="error" sx={{ mt: 2 }}>
-              No se pudo registrar ese pago. Inténtalo de nuevo.
-            </Alert>
-          )}
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setTarget(null)}>Cancelar</Button>
-          <Button
-            variant="contained"
-            disableElevation
-            onClick={submitPayout}
-            disabled={payout.isPending || !amount}
-          >
-            {payout.isPending ? 'Registrando…' : 'Registrar pago'}
-          </Button>
-        </DialogActions>
-      </Dialog>
+      <FormSheet
+        open={!!target}
+        onClose={() => setTarget(null)}
+        title="Registrar pago"
+        submitLabel={payout.isPending ? 'Registrando…' : 'Registrar pago'}
+        onSubmit={(e) => {
+          e.preventDefault()
+          submitPayout()
+        }}
+        busy={payout.isPending}
+        disabled={!amount}
+        error={
+          payout.isError ? (
+            <Alert severity="error">No se pudo registrar ese pago. Inténtalo de nuevo.</Alert>
+          ) : undefined
+        }
+      >
+        <Stack
+          direction="row"
+          spacing={1}
+          useFlexGap
+          sx={{ alignItems: 'center', flexWrap: 'wrap', mb: 2 }}
+        >
+          <StatusChip tone="neutral" icon={<PersonRounded />} label={target?.agent.name ?? ''} />
+          <StatusChip
+            tone="neutral"
+            icon={<TrendingUpRounded />}
+            label="Sube su saldo hacia cero"
+          />
+        </Stack>
+        <Stack spacing={2}>
+          <TextField
+            label="Monto"
+            type="number"
+            fullWidth
+            autoFocus
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+          />
+          <TextField
+            label="Nota (opcional)"
+            fullWidth
+            multiline
+            minRows={2}
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+          />
+        </Stack>
+      </FormSheet>
     </>
   )
 }
 
 // --- Drops tab: the review queue (US-A19) + open disputes (US-A27/A28) ---
-function DropsTab() {
-  const formatDate = useOrgDateFormatter(DATE_FMT) // US-A66 — org-local audit timestamps
-  const [filter, setFilter] = useState<DropFilter>('pending')
-  const { data: drops, isLoading, isError } = useDrops(
-    filter === 'disputed' ? { status: 'all', ack: 'disputed' } : { status: filter },
-  )
+// A contested hand-in is the other thing that needs a human, and unlike a pending one it has no
+// one-tap answer — resolving a dispute is a conversation. So: named, counted, and one tap from the
+// detail where it can be resolved. Renders nothing when there are none.
+function OpenDisputes() {
+  const { data: page } = useDrops({ status: 'all', ack: 'disputed' })
+  const disputed = page?.drops
+  if (!disputed || disputed.length === 0) return null
 
   return (
-    <Box>
-        {/* BUG-023 — the filter row is wider than a phone. Contained here so the scroll stays
-            inside the row instead of dragging the whole page sideways. */}
-      <FilterStrip sx={{ mb: 3 }}>
-      <ToggleButtonGroup
-        size="small"
-        exclusive
-        value={filter}
-        onChange={(_, v) => v && setFilter(v)}
-      >
-        <ToggleButton value="pending">Pendientes</ToggleButton>
-        <ToggleButton value="confirmed">Confirmadas</ToggleButton>
-        <ToggleButton value="rejected">Rechazadas</ToggleButton>
-        <ToggleButton value="disputed">En disputa</ToggleButton>
-        <ToggleButton value="all">Todas</ToggleButton>
-      </ToggleButtonGroup>
-      </FilterStrip>
-
-      {isLoading && (
-        <Box sx={{ display: 'flex', justifyContent: 'center', py: 6 }}>
-          <CircularProgress />
-        </Box>
-      )}
-      {isError && <Alert severity="error">No se pudieron cargar las entregas. Inténtalo de nuevo.</Alert>}
-
-      {drops && drops.length === 0 && (
-        <Typography color="text.secondary">No hay entregas para mostrar.</Typography>
-      )}
-
-      {drops && drops.length > 0 && (
-        <Stack spacing={2}>
-          {drops.map((drop) => (
-            <Card key={drop.id} variant="outlined">
-              <CardActionArea
-                component={RouterLink}
-                to={ROUTES.CASH_DROP_DETAIL.replace(':id', drop.id)}
-              >
-                <CardContent>
-                  <Stack direction="row" sx={{ justifyContent: 'space-between', alignItems: 'center' }}>
-                    <Box sx={{ minWidth: 0 }}>
-                      <Typography variant="subtitle1">{formatMoney(drop.amount)}</Typography>
-                      <Typography variant="caption" color="text.secondary">
-                        {drop.agent?.name} · {SOURCE_LABEL[drop.source]} · {formatDate(drop.created_at)}
-                      </Typography>
-                    </Box>
-                    <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
-                      <AckChip state={drop.acknowledgment} />
-                      <Chip size="small" color={DROP_COLOR[drop.status]} label={DROP_LABEL[drop.status]} />
-                    </Stack>
-                  </Stack>
-                  {drop.note && (
-                    <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-                      {drop.note}
-                    </Typography>
-                  )}
-                  {drop.acknowledgment === 'disputed' && drop.ack_note && (
-                    <Typography variant="body2" color="error" sx={{ mt: 1 }}>
-                      Disputa del agente: {drop.ack_note}
-                    </Typography>
-                  )}
-                </CardContent>
-              </CardActionArea>
-            </Card>
-          ))}
-        </Stack>
-      )}
-    </Box>
+    <Stack spacing={2} sx={{ mb: 4 }}>
+      <Typography variant="h3" component="h2">
+        {disputed.length === 1 ? 'Una entrega en disputa' : `${disputed.length} entregas en disputa`}
+      </Typography>
+      {disputed.map((drop) => (
+        <DropCard key={drop.id} drop={drop} />
+      ))}
+    </Stack>
   )
 }
 
 export default function CashBalancesPage() {
-  // Top-level split: the admin's own drawer ("Mi caja") vs. the team ("Equipo"). Mi caja is the
-  // default landing — it's the admin's own actionable cash.
-  const [section, setSection] = useState(0)
-  // Within Equipo: the balances list vs. the drops review queue.
-  const [tab, setTab] = useState(0)
-  // Pending hand-ins awaiting confirmation — surfaced as a badge on BOTH the top-level Equipo tab
-  // (so the admin sees review work while on Mi caja) and the Entregas sub-tab. Shares the cache.
-  const { data: pendingCount } = usePendingDropCount(true)
-  const pendingBadgeSx = { '& .MuiBadge-badge': { right: -14, top: 2 } }
-
   return (
     <Fade in timeout={400}>
       <Box sx={{ maxWidth: 760, mx: 'auto' }}>
+        {/* US-A98 — «Caja del equipo», not «Caja». The admin's own drawer moved to /balance with
+            everyone else's (D2′), which deleted the first of three stacked tab rows; the other two
+            went with it. What is left is ordered by the job the admin came to do: what needs a
+            human, what is contested, then who is holding company cash. No tabs at all. */}
         <Typography variant="h4" component="h1" sx={{ mb: 3 }}>
-          Caja
+          Caja del equipo
         </Typography>
 
-        <Tabs value={section} onChange={(_, v) => setSection(v)} sx={{ mb: 3 }}>
-          <Tab label="Mi caja" />
-          <Tab
-            label={
-              <Badge color="warning" badgeContent={pendingCount ?? 0} sx={pendingBadgeSx}>
-                Equipo
-              </Badge>
-            }
-          />
-        </Tabs>
+        <PendingConfirmations />
+        <OpenDisputes />
+        <TeamBalances />
 
-        {section === 0 ? (
-          // US-A35 — the admin's own drawer, self-authorized moves.
-          <TuCajaSection />
-        ) : (
-          <>
-            <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ mb: 3 }}>
-              <Tab label="Saldos" />
-              <Tab
-                label={
-                  <Badge color="warning" badgeContent={pendingCount ?? 0} sx={pendingBadgeSx}>
-                    Entregas
-                  </Badge>
-                }
-              />
-            </Tabs>
-
-            {tab === 0 ? <BalancesTab /> : <DropsTab />}
-          </>
-        )}
+        <Box sx={{ mt: 4, textAlign: 'center' }}>
+          {/* Confirmed and rejected hand-ins are audit, not daily work (D15). */}
+          <Button
+            component={RouterLink}
+            to={ROUTES.CASH_DROPS}
+            endIcon={<ArrowForwardRounded />}
+            color="inherit"
+          >
+            Ver historial de entregas
+          </Button>
+        </Box>
       </Box>
     </Fade>
   )

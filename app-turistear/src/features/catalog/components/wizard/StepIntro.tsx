@@ -14,7 +14,7 @@ export function StepIntro({
       <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
         {title}
       </Typography>
-      <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+      <Typography variant="body2" color="textSecondary" sx={{ mt: 0.5 }}>
         {subtitle}
       </Typography>
     </Box>

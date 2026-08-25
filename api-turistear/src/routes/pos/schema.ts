@@ -41,6 +41,12 @@ const stayLineSchema = z.object({
   check_out: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Expected YYYY-MM-DD'),
   guests: z.number().int().min(1),
   quantity: z.number().int().min(1),
+  // US-AG57 — the agent's discounted total for the WHOLE line (base_price = unit_price =
+  // line_total for a stay, so there is no per-night number to send). OMITTED ⇒ the server's own
+  // quote, byte-identical to every sale made before this feature. Its floor depends on the type's
+  // max_discount_pct read from the DB, so the bound is enforced in the handler, not here —
+  // the same split the tour line's unit_price uses.
+  unit_price: z.number().int().min(0).optional(),
 })
 
 // A cart line is EITHER a stay (has unit_type_id) or a slot (has slot_id). union tries stay

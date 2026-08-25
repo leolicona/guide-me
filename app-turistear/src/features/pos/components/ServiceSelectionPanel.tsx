@@ -158,11 +158,11 @@ export function ServiceSelectionPanel({
           {service.name}
         </Typography>
         {service.description && (
-          <Typography color="text.secondary" sx={{ mt: 0.5 }}>
+          <Typography color="textSecondary" sx={{ mt: 0.5 }}>
             {service.description}
           </Typography>
         )}
-        <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+        <Typography variant="body2" color="textSecondary" sx={{ mt: 1 }}>
           {formatMoney(service.base_price)} · mín {formatMoney(service.minimum_price)}
         </Typography>
 
@@ -175,7 +175,7 @@ export function ServiceSelectionPanel({
               Personas
             </Typography>
             {inFlexZone && (
-              <Typography variant="caption" color="warning.main" sx={{ fontWeight: 600 }}>
+              <Typography variant="caption" color="warning" sx={{ fontWeight: 600 }}>
                 Usando cupo flexible · {flexRemaining} máx.
               </Typography>
             )}
@@ -232,11 +232,11 @@ export function ServiceSelectionPanel({
 
       {/* ── Scrollable matrix (the ONLY overflow-y region) ── */}
       <Box sx={{ flex: 1, minHeight: 0, overflowY: 'auto', px: 3, py: 2.5 }}>
-        <Typography variant="subtitle2" color="text.secondary" sx={{ mb: 1.5 }}>
+        <Typography variant="subtitle2" color="textSecondary" sx={{ mb: 1.5 }}>
           Elige un horario
         </Typography>
         {service.slots.length === 0 ? (
-          <Typography color="text.secondary">
+          <Typography color="textSecondary">
             No hay horarios disponibles para este servicio.
           </Typography>
         ) : (
@@ -256,7 +256,7 @@ export function ServiceSelectionPanel({
             own remaining; a zone that can't seat the party (or is closed) is disabled. */}
         {slot && zonesEnabled && (
           <Box sx={{ mt: 3 }}>
-            <Typography variant="subtitle2" color="text.secondary" sx={{ mb: 1 }}>
+            <Typography variant="subtitle2" color="textSecondary" sx={{ mb: 1 }}>
               Elige una zona
             </Typography>
             <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: 'wrap' }}>
@@ -303,7 +303,7 @@ export function ServiceSelectionPanel({
 
         {slot && (!zonesEnabled || zone) && service.extras.length > 0 && (
           <Box sx={{ mt: 3 }}>
-            <Typography variant="subtitle2" color="text.secondary" sx={{ mb: 1 }}>
+            <Typography variant="subtitle2" color="textSecondary" sx={{ mb: 1 }}>
               Extras
             </Typography>
             <Stack spacing={1} divider={<Divider flexItem />}>
@@ -318,7 +318,7 @@ export function ServiceSelectionPanel({
                   >
                     <Box sx={{ minWidth: 0 }}>
                       <Typography variant="body2">{extra.name}</Typography>
-                      <Typography variant="caption" color="text.secondary">
+                      <Typography variant="caption" color="textSecondary">
                         {formatMoney(extra.price)}
                       </Typography>
                     </Box>

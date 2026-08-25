@@ -8,8 +8,7 @@ import {
   Typography,
   Alert,
 } from '@mui/material'
-import AddRounded from '@mui/icons-material/AddRounded'
-import DeleteOutlineRounded from '@mui/icons-material/DeleteOutlineRounded'
+import { AddRounded, DeleteOutlineRounded } from '@mui/icons-material'
 import { blockoutFormSchema } from '../schemas'
 
 // A block-out row as held in the controlled value. `id` is the stable list key (tempId / server id).
@@ -55,7 +54,7 @@ export function BlockoutsField({ value, onChange, disabled }: BlockoutsFieldProp
   return (
     <Stack spacing={1.5}>
       {value.length === 0 && (
-        <Typography variant="body2" color="text.secondary">
+        <Typography variant="body2" color="textSecondary">
           Sin bloqueos
         </Typography>
       )}
@@ -79,7 +78,7 @@ export function BlockoutsField({ value, onChange, disabled }: BlockoutsFieldProp
               {b.quantity > 1 ? ` · ${b.quantity} hab.` : ''}
             </Typography>
             {b.reason && (
-              <Typography variant="caption" color="text.secondary" noWrap>
+              <Typography variant="caption" color="textSecondary" noWrap>
                 {b.reason}
               </Typography>
             )}

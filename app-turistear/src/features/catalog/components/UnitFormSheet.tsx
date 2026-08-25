@@ -34,6 +34,7 @@ const EMPTY: UnitFormData = {
   amenities: [],
   commission_type: 'inherit',
   commission_value: null,
+  max_discount_pct: 0, // US-A92 — no discount until the admin says otherwise
 }
 
 const toInput = (data: UnitFormData) => ({
@@ -50,6 +51,7 @@ const toInput = (data: UnitFormData) => ({
   checkin_time: data.checkin_time,
   checkout_time: data.checkout_time,
   amenities: data.amenities,
+  max_discount_pct: data.max_discount_pct ?? 0,
   ...unitCommissionToApi(data.commission_type, data.commission_value),
 })
 
@@ -84,6 +86,7 @@ export function UnitFormSheet({ serviceId, unit, open, onClose }: UnitFormSheetP
           checkin_time: unit.checkin_time,
           checkout_time: unit.checkout_time,
           amenities: unit.amenities,
+          max_discount_pct: unit.max_discount_pct,
           ...unitCommissionFromApi(unit.commission_type, unit.commission_value),
         })
       } else {

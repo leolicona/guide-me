@@ -45,7 +45,7 @@ export default function CatalogListPage() {
               startIcon={<AddRounded />}
               onClick={() => navigate(ROUTES.CATALOG_NEW)}
             >
-              Nuevo servicio
+              Agregar al catálogo
             </Button>
           }
         />
@@ -62,8 +62,8 @@ export default function CatalogListPage() {
 
         {services &&
           (services.length === 0 ? (
-            <Typography color="text.secondary">
-              Aún no hay servicios — crea tu primer tour.
+            <Typography color="textSecondary">
+              Aún no hay servicios — agrega el primero.
             </Typography>
           ) : (
             <ServiceList services={services} />

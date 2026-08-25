@@ -21,13 +21,14 @@ const rateContext = (units: UnitDraft[]): string | null => {
   const min = Math.min(...rates)
   const max = Math.max(...rates)
   return min === max
-    ? `Tus tipos cuestan ${formatMoney(amountToCents(min))} por noche.`
-    : `Tus tipos van de ${formatMoney(amountToCents(min))} a ${formatMoney(amountToCents(max))} por noche.`
+    ? `Tus unidades cuestan ${formatMoney(amountToCents(min))} por noche.`
+    : `Tus unidades van de ${formatMoney(amountToCents(min))} a ${formatMoney(amountToCents(max))} por noche.`
 }
 
 // Lodging Step 3 — the service-level commission ANY seller earns for this property (US-A12),
 // decided WITH the nightly rates from Step 2 in view. One base rate for the whole property; each
-// type can override it individually (the Heredar/%/$ control on the type form).
+// unit can override it individually (the Heredar/%/$ control on the unit form). US-A91 D7: this
+// step does not exist when attaching units to a property that already answered the question.
 export function StepCommission({ units }: { units: UnitDraft[] }) {
   const {
     register,
@@ -86,8 +87,8 @@ export function StepCommission({ units }: { units: UnitDraft[] }) {
           {...register('commission_value', { valueAsNumber: true })}
         />
       </Stack>
-      <Typography variant="caption" color="text.secondary">
-        Es la comisión base de la propiedad — puedes ajustar la de cada tipo al editarlo.
+      <Typography variant="caption" color="textSecondary">
+        Es la comisión base de la propiedad — puedes ajustar la de cada unidad al editarla.
       </Typography>
     </Stack>
   )

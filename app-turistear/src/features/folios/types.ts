@@ -2,7 +2,15 @@
 // integer minor units (centavos) — render with the helpers in features/catalog/types.
 // Spec: docs/cancellation/total-folio-cancellation.spec.md
 
-import type { Fulfillment, FolioListLine, PaymentMethod, PaymentVerification } from '../pos/types'
+import type {
+  DisplayMethod,
+  FolioPaymentEntry,
+  FolioTicket,
+  Fulfillment,
+  FolioListLine,
+  PaymentMethod,
+  PaymentVerification,
+} from '../pos/types'
 
 export type { Fulfillment }
 
@@ -107,6 +115,14 @@ export interface FolioDetailLine {
   cancellation_source?: string | null
   refund_status?: RefundStatus
   refund_amount?: number | null
+  /** US-AG54 (D5) — the line's own hold clock, for its countdown. */
+  booking_expires_at?: number | null
+  /** US-A64 — the physical zone (null for an unzoned or lodging line). */
+  zone_name?: string | null
+  /** The signed access ticket and its signature-free echo. US-A93: both surfaces receive them —
+   *  the admin taking the "my QR doesn't scan" call has to see what the customer is holding. */
+  qr_token?: string | null
+  qr?: FolioTicket | null
   extras: FolioLineExtra[]
 }
 
@@ -122,7 +138,9 @@ export interface FolioDetail {
   customer_email: string | null
   customer_phone: string | null
   // US-AG41/US-A67 — payment method + reference + verification gate (drives verify/reject actions).
-  payment_method?: PaymentMethod
+  // US-LG08 — DERIVED from the collection rows, so it can be the literal 'Mixto'. Always sent:
+  // this is the display value, never an input.
+  payment_method: DisplayMethod
   payment_reference?: string | null
   payment_verification?: PaymentVerification
   payment_verified_at?: number | null
@@ -156,6 +174,10 @@ export interface FolioDetail {
   portal_link?: string | null
   tickets_sent_at?: number | null
   tickets_viewed_at?: number | null
+  /** The seller's commission on this sale — the per-folio resolution of `/balance`'s aggregate. */
+  commission_amount?: number
+  /** US-LG08 — the money movements that make up `amount_paid` (deposit, balance, reversals). */
+  payments?: FolioPaymentEntry[]
   created_at: number
   lines: FolioDetailLine[]
   // US-A84 rule 7 — the folio's petition history, newest first. Rendered by the timeline: a

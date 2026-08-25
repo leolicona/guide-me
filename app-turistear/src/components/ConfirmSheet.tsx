@@ -51,8 +51,10 @@ export function ConfirmSheet({
       open={open}
       onClose={onClose}
       title={title}
+      // The sheet is its own context, so its title is an `h2` inside it — not an `<h6>` the
+      // page's outline has to absorb (design review, Must Fix 2).
       header={
-        <Typography variant="h6" sx={{ px: 2, pb: 1 }}>
+        <Typography variant="h6" component="h2" sx={{ px: 2, pb: 1 }}>
           {title}
         </Typography>
       }
@@ -82,7 +84,7 @@ export function ConfirmSheet({
     >
       <Box sx={{ px: 2, pb: 1 }}>
         {description && (
-          <Typography variant="body2" color="text.secondary">
+          <Typography variant="body2" color="textSecondary">
             {description}
           </Typography>
         )}

@@ -16,7 +16,7 @@ function GroupLabel({ children }: { children: string }) {
   return (
     <Typography
       variant="overline"
-      color="text.secondary"
+      color="textSecondary"
       sx={{ letterSpacing: '0.06em', fontWeight: 700, display: 'block', mt: 1 }}
     >
       {children}
@@ -97,30 +97,31 @@ export function UnitFields({ disabled, inheritedCommissionLabel }: UnitFieldsPro
         fullWidth
         disabled={disabled}
         error={!!errors.name}
-        helperText={errors.name?.message ?? 'Ej. "Cabaña 1", "Suite Vista"'}
+        helperText={errors.name?.message ?? 'Ej. "Cabaña Río", "Suite Vista"'}
         {...register('name')}
       />
       <TextField
-        label="Tipo (opcional)"
+        label="¿Qué es? (opcional)"
         fullWidth
         disabled={disabled}
         error={!!errors.unit_type}
-        helperText={errors.unit_type?.message ?? 'Ej. cabaña, suite, habitación'}
+        helperText={errors.unit_type?.message ?? 'Cabaña, habitación, suite…'}
         {...register('unit_type')}
       />
 
       <GroupLabel>Inventario y capacidad</GroupLabel>
-      {/* v2 — how many interchangeable rooms of this type exist. 1 = a unique cabin/suite
-          (boutique); a hotel enters its room count. Occupancy/capacity are PER ROOM. */}
+      {/* v2 — how many interchangeable rooms this unit represents (`inventory_count`). 1 = a
+          unique cabin/suite (boutique); a hotel enters its room count. US-A91 D10 asks it as a
+          plain question: the owner owns cabins, not types of cabins. Occupancy is PER ROOM. */}
       <TextField
-        label="Habitaciones de este tipo"
+        label="¿Cuántas iguales tienes?"
         type="number"
         fullWidth
         disabled={disabled}
         error={!!errors.inventory_count}
         helperText={
           errors.inventory_count?.message ??
-          '¿Cuántas habitaciones idénticas de este tipo tienes? (1 = única)'
+          '1 si es única; un hotel con 8 habitaciones iguales pone 8'
         }
         slotProps={{ htmlInput: { step: 1, min: 1, inputMode: 'numeric' } }}
         {...register('inventory_count', { valueAsNumber: true })}
@@ -161,6 +162,27 @@ export function UnitFields({ disabled, inheritedCommissionLabel }: UnitFieldsPro
         />
       </Stack>
 
+      <GroupLabel>Descuento</GroupLabel>
+      {/* US-A92 — how far an agent may take this unidad's stay total at the POS. A PERCENT, not an
+          amount: the total is assembled per night (temporada > fin de semana > base, × cuartos,
+          + persona extra), so only a relative ceiling stays true without re-deriving that. */}
+      <TextField
+        label="Descuento máximo"
+        type="number"
+        fullWidth
+        disabled={disabled}
+        error={!!errors.max_discount_pct}
+        helperText={
+          errors.max_discount_pct?.message ??
+          '0% = sin descuento. El agente no podrá bajar la estancia más de este porcentaje.'
+        }
+        slotProps={{
+          input: { endAdornment: <InputAdornment position="end">%</InputAdornment> },
+          htmlInput: { step: 1, min: 0, max: 100, inputMode: 'numeric' },
+        }}
+        {...register('max_discount_pct', { valueAsNumber: true })}
+      />
+
       <GroupLabel>Comisión</GroupLabel>
       <Controller
         name="commission_type"
@@ -184,7 +206,7 @@ export function UnitFields({ disabled, inheritedCommissionLabel }: UnitFieldsPro
         )}
       />
       {commissionType === 'inherit' ? (
-        <Typography variant="caption" color="text.secondary">
+        <Typography variant="caption" color="textSecondary">
           {inheritedCommissionLabel ?? 'Usa la comisión del servicio (la regla general).'}
         </Typography>
       ) : (

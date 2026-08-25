@@ -2,6 +2,9 @@
 // (centavos) — render with the helpers in features/catalog/types.
 
 import type { ServiceCategory } from '../catalog/categories'
+// US-AG59 — the petition row the folio detail carries. Type-only, so this is erased at build and
+// creates no runtime dependency between the two feature modules.
+import type { FolioDetail, FolioDetailLine } from '../folios/types'
 
 // --- Flattened POS catalog (spec §4.3, D14) — a MIXED list discriminated by `item_type` ---
 
@@ -91,6 +94,13 @@ export interface LodgingAvailabilityUnitType {
   quantity: number
   /** Stay total (minor units) — rooms × nights × nightly rate + extra-person surcharge (D12). */
   total: number
+  /**
+   * US-AG57 (D6) — the lowest total the confirm will accept, in pesos, resolved server-side from
+   * the unidad's `max_discount_pct`. Handed over rather than derived here so the field the agent
+   * sees and the bound the server enforces cannot drift. `min_total === total` ⇒ no discount is
+   * allowed, and the cart renders the total as text rather than a field (D7).
+   */
+  min_total: number
   per_night: StayNight[]
 }
 
@@ -183,45 +193,8 @@ export interface FolioTicket {
   expires_at: number
 }
 
-export interface FolioLine {
-  id: string
-  /** 'slot' (tour) or 'stay' (lodging). Absent on folios read before this feature → treat as slot. */
-  line_type?: 'slot' | 'stay'
-  service_id: string
-  /** Null for a lodging stay line. */
-  slot_id: string | null
-  service_name: string
-  /** Null for a lodging stay line. */
-  slot_date: string | null
-  slot_start_time: string | null
-  /** US-A64 — the physical zone (null for an unzoned or lodging line). */
-  zone_name?: string | null
-  /** Lodging stay fields (null for a tour line). For a stay, `quantity` = rooms reserved. */
-  unit_type_id?: string | null
-  check_in?: string | null
-  check_out?: string | null
-  guests?: number | null
-  nights?: number | null
-  quantity: number
-  base_price: number
-  minimum_price: number
-  unit_price: number
-  line_total: number
-  /** Signed access ticket; null for folios sold before the QR feature. */
-  qr_token: string | null
-  qr: FolioTicket | null
-  /** US-A22/US-AG54 (line-autonomy) — the line's OWN life, server-derived: money state from its
-   * allocations, cancellation from its written stamp, and its own hold clock. Render, never derive. */
-  money_state?: FolioStatus
-  allocated?: number
-  pending_balance?: number
-  cancelled_at?: number | null
-  cancellation_source?: string | null
-  refund_status?: 'none' | 'pending' | 'refunded'
-  refund_amount?: number | null
-  booking_expires_at?: number | null
-  extras: FolioLineExtra[]
-}
+export type FolioLine = FolioDetailLine
+
 
 // US-LG08 — one money movement in a folio's per-payment breakdown (deposit, balance, or a
 // cancellation reversal), each with its own method/reference/verification and who collected it.
@@ -237,42 +210,13 @@ export interface FolioPaymentEntry {
   collected_at: number
 }
 
-export interface Folio {
-  id: string
-  status: FolioStatus
-  customer_name: string | null
-  customer_email: string | null
-  customer_phone: string | null
-  subtotal: number
-  discount_total: number
-  total: number
-  amount_paid: number
-  /** US-AG07 — total − amount_paid (present on a booking; 0 once paid). */
-  pending_balance?: number
-  /** US-AG07 — booking hold expiry (unix secs); null for a non-booking folio. */
-  booking_expires_at?: number | null
-  /** How payment was collected — DERIVED from the ledger; 'Mixto' when multi-method (US-LG08). */
-  payment_method: DisplayMethod
-  /** US-AG41/US-A67 — the transfer's bank reference + the verification gate. Delivery is blocked
-   *  while `payment_verification === 'pending'`. */
-  payment_reference?: string | null
-  payment_verification?: PaymentVerification
-  payment_verified_at?: number | null
-  /** Set when the folio was cancelled by an admin (US-A21); null otherwise. */
-  cancelled_at: number | null
-  /** Delivery axis (whatsapp-qr-delivery). portal_link: the WhatsApp/QR portal URL (null until a
-   *  QR/portal exists — unpaid booking / pre-feature). tickets_sent_at: the agent sent it (unix
-   *  secs). tickets_viewed_at: the tourist opened the portal ("Visto"). */
-  portal_link?: string | null
-  tickets_sent_at?: number | null
-  tickets_viewed_at?: number | null
-  /** US-AF13 — the affiliate shift operator who made the sale; null if sold directly. */
-  operator_name?: string | null
-  /** US-LG08 — the money movements that make up amount_paid (deposit, balance, reversals). */
-  payments?: FolioPaymentEntry[]
-  created_at: number
-  lines: FolioLine[]
-}
+// US-A93 (folio-surface-parity D6) — ONE folio detail type. `Folio` and `FolioDetail` were two
+// hand-maintained declarations of the same server payload, and the pair is exactly what let the
+// seller's screen fall behind: the fields the admin's detail read simply did not exist over here.
+// Since #126 one serializer produces both responses, so one type describes both — the admin's,
+// which carries `agent`. What the seller's screen SHOWS is a rendering decision, never a type.
+export type Folio = FolioDetail
+
 
 export type ReminderStatus = 'none' | 'sent'
 

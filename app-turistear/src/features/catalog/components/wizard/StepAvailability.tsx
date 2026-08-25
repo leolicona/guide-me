@@ -14,8 +14,7 @@ import {
   Button,
   Alert,
 } from '@mui/material'
-import AddRounded from '@mui/icons-material/AddRounded'
-import CloseRounded from '@mui/icons-material/CloseRounded'
+import { AddRounded, CloseRounded } from '@mui/icons-material'
 import { FLEX_CAP_MAX_PCT } from '../../types'
 import { todayStr } from '../../dates'
 import type { WizardFormData } from './wizardSchema'
@@ -127,7 +126,7 @@ export function StepAvailability({
       {/* Capacity model (US-A36 + US-A64): the single decision of how seats are counted —
           a strict pool, a flexible pool, or physical zones. */}
       <Box>
-        <Typography variant="subtitle2" color="text.secondary" sx={{ mb: 1 }}>
+        <Typography variant="subtitle2" color="textSecondary" sx={{ mb: 1 }}>
           Tipo de cupo
         </Typography>
         <ToggleButtonGroup
@@ -184,7 +183,7 @@ export function StepAvailability({
         {/* Zones: the capacity number is replaced by the per-zone seat editor (2–6 zones). */}
         {capMode === 'zones' && (
           <Stack spacing={2} sx={{ mt: 2 }}>
-            <Typography variant="caption" color="text.secondary">
+            <Typography variant="caption" color="textSecondary">
               Divide los asientos de cada salida en zonas físicas (p. ej. Piso alto / Piso bajo)
               para venderlas por separado. El cupo total es la suma de las zonas.
             </Typography>
@@ -225,7 +224,7 @@ export function StepAvailability({
               >
                 Agregar zona
               </Button>
-              <Typography variant="body2" color="text.secondary" className="numeric">
+              <Typography variant="body2" color="textSecondary" className="numeric">
                 Total: {zonesTotal} asientos
               </Typography>
             </Box>
@@ -242,7 +241,7 @@ export function StepAvailability({
 
       {/* Frequency (US-A41) */}
       <Box>
-        <Typography variant="subtitle2" color="text.secondary" sx={{ mb: 1 }}>
+        <Typography variant="subtitle2" color="textSecondary" sx={{ mb: 1 }}>
           Frecuencia
         </Typography>
         <ToggleButtonGroup
@@ -283,7 +282,7 @@ export function StepAvailability({
           />
 
           <Box>
-            <Typography variant="caption" color="text.secondary">
+            <Typography variant="caption" color="textSecondary">
               Días de operación
             </Typography>
             <ToggleButtonGroup

@@ -6,6 +6,7 @@ import type {
   PosCatalogItem,
   PosServiceDetail,
 } from '../features/pos/types'
+import type { CancellationQuote } from '../features/organization/types'
 import type { FolioEvent } from '../features/folios/types'
 
 // US-AG03 / AG04 / AG05 / AG06 / AG08 — agent-facing POS. All endpoints require
@@ -35,6 +36,11 @@ export interface ConfirmStayLineInput {
   check_out: string
   guests: number
   quantity: number
+  /**
+   * US-AG57 — the agent's discounted total for the WHOLE line. Sent ONLY when it differs from the
+   * quote, so an undiscounted sale puts the exact same bytes on the wire as before this feature.
+   */
+  unit_price?: number
 }
 
 /** A cart line is either a tour slot or a lodging stay. */
@@ -149,22 +155,10 @@ export const voidExpressSale = async (id: string): Promise<VoidExpressResult> =>
 // What cancelling this folio RIGHT NOW would cost. The server computes it with the same function
 // the cancel endpoint uses, so the figure shown before confirming is the figure that gets written.
 // `null` once the folio is cancelled — there is nothing left to quote.
-export interface PosCancellationQuote {
-  refund: number
-  retention: number
-  kept_commission: number
-  reversed_commission: number
-  /** US-AG54 — per-line ladder readings incl. the single-line SUBSET refund, server-computed. */
-  lines?: Array<{
-    line_id: string
-    hours_out: number | null
-    refund_pct: number
-    retention: number
-    redeemed: boolean
-    line_refund?: number | null
-    line_reversed_commission?: number | null
-  }>
-}
+// US-A93 (folio-surface-parity D6) — the SAME object the admin's detail receives: both endpoints
+// serialize it with `serializeQuote`. It is an alias rather than a second declaration, because a
+// parallel shape is exactly what let the two surfaces drift in the first place.
+export type PosCancellationQuote = CancellationQuote
 
 // US-AG08 / AG21 — read back one of the caller agent's own folios (receipt + history detail).
 // Returns the quote alongside the folio so the cancel dialog can state the refund instead of
@@ -186,19 +180,34 @@ export const getFolio = async (
 
 export interface MyFolioFilters {
   status?: FolioStatus
-  date?: string
+  /** US-AG58 (D11) — the inclusive ORG-LOCAL range the admin list already takes. Replaces the
+   *  dead `date` param, which compared a UTC calendar day. */
+  from?: string
+  to?: string
+}
+
+/** US-AG58 (D4/D5) — the seller's list is their WHOLE history, so the client can search and facet
+ *  it locally and still answer about everything. `truncated` is the safety cap announcing itself:
+ *  a cap that stays quiet reports "these are your sales" when it means "these are your 500 most
+ *  recent". Same shape as the admin's `FolioListPage`; `window_days` is null because this read has
+ *  no window to state. */
+export interface MyFolioListPage {
+  folios: FolioHistoryItem[]
+  window_days: null
+  truncated: boolean
 }
 
 // US-AG20 — the caller agent's own folio history. Server scopes to the caller (no agent_id).
 export const listMyFolios = async (
   filters: MyFolioFilters = {},
-): Promise<FolioHistoryItem[]> => {
+): Promise<MyFolioListPage> => {
   const params = new URLSearchParams()
   if (filters.status) params.set('status', filters.status)
-  if (filters.date) params.set('date', filters.date)
+  if (filters.from) params.set('from', filters.from)
+  if (filters.to) params.set('to', filters.to)
   const qs = params.toString()
-  const res = await request<{ folios: FolioHistoryItem[] }>(
+  const res = await request<{ folios: FolioHistoryItem[]; truncated?: boolean }>(
     `/api/pos/folios${qs ? `?${qs}` : ''}`,
   )
-  return res.folios
+  return { folios: res.folios, window_days: null, truncated: res.truncated ?? false }
 }

@@ -71,7 +71,7 @@ What's in the codebase today. The fresh system **replaces** the indigo token lay
 the structural conventions (MUI theming, feature-folder layout, BottomSheet pattern, Material
 Symbols). It must refactor *toward* the new tokens, not bolt on beside them.
 
-- **Framework**: React 18 + TypeScript + Vite (CRXJS), **MUI v6** with `createTheme`
+- **Framework**: React 18 + TypeScript + Vite (CRXJS), **MUI v9** with `createTheme`
   (`cssVariables: true`). Theme lives at `app-turistear/src/config/theme.ts`.
 - **Typography (current → keep face)**: Manrope (`"Manrope", "Inter", sans-serif`). Hierarchy via
   weight (400 body / 600 emphasis / 700 headings), `-0.02em` heading tracking. **Kept**; the fresh

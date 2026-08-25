@@ -9,12 +9,7 @@ import {
   Fade,
   Stack,
   Divider,
-  Chip,
   TextField,
-  Dialog,
-  DialogTitle,
-  DialogContent,
-  DialogActions,
 } from '@mui/material'
 import ArrowBackRounded from '@mui/icons-material/ArrowBackRounded'
 import ReceiptLongRounded from '@mui/icons-material/ReceiptLong'
@@ -22,23 +17,12 @@ import LockRounded from '@mui/icons-material/Lock'
 import { useDrop, useResolveDispute, useReviewDrop } from '../features/cash/hooks'
 import { useOrgDateFormatter } from '../features/organization'
 import { AckChip } from '../features/cash/components/AckChip'
+import { DropStatusChip } from '../features/cash/components/DropStatusChip'
 import { SOURCE_LABEL } from '../features/cash/components/ackPresentation'
-import type { DropStatus, ReviewDropInput } from '../features/cash/types'
+import type { ReviewDropInput } from '../features/cash/types'
 import { formatMoney, amountToCents } from '../features/catalog/types'
 import { ROUTES } from '../config/routes'
-import { SectionCard, MoneyText, StatusChip, InfoPopover } from '../components'
-
-const DROP_COLOR: Record<DropStatus, 'warning' | 'success' | 'error'> = {
-  pending: 'warning',
-  confirmed: 'success',
-  rejected: 'error',
-}
-
-const DROP_LABEL: Record<DropStatus, string> = {
-  pending: 'Pendiente',
-  confirmed: 'Confirmado',
-  rejected: 'Rechazado',
-}
+import { SectionCard, MoneyText, StatusChip, InfoPopover, FormSheet } from '../components'
 
 const DATE_FMT: Intl.DateTimeFormatOptions = {
   year: 'numeric',
@@ -108,29 +92,39 @@ export default function CashDropDetailPage() {
 
         {drop && (
           <Stack spacing={3}>
-            <Stack direction="row" sx={{ justifyContent: 'space-between', alignItems: 'center' }}>
-              <Box sx={{ minWidth: 0 }}>
+            <Stack
+              direction="row"
+              // Two medium icon-paired chips beside an h2 figure do not fit 375px — wrap them under
+              // the money rather than let either shrink.
+              sx={{
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                flexWrap: 'wrap',
+                rowGap: 1,
+              }}
+            >
+              <Box sx={{ minWidth: 0, flex: '1 1 12rem' }}>
                 <MoneyText cents={drop.amount} variant="h2" srLabel="Monto de la entrega" />
-                <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+                <Typography variant="caption" color="textSecondary" sx={{ display: 'block' }}>
                   {drop.agent?.name} · {SOURCE_LABEL[drop.source]} · {formatDate(drop.created_at)}
                 </Typography>
               </Box>
               <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
                 <AckChip state={drop.acknowledgment} size="medium" />
-                <Chip color={DROP_COLOR[drop.status]} label={DROP_LABEL[drop.status]} />
+                <DropStatusChip status={drop.status} size="medium" />
               </Stack>
             </Stack>
 
             <SectionCard>
                 <Stack spacing={1}>
                   <Stack direction="row" sx={{ justifyContent: 'space-between' }}>
-                    <Typography color="text.secondary">Saldo del agente al entregar</Typography>
+                    <Typography color="textSecondary">Saldo del agente al entregar</Typography>
                     <Typography className="numeric">{formatMoney(drop.balance_before)}</Typography>
                   </Stack>
                   {drop.amount_requested != null && (
                     <Stack direction="row" sx={{ justifyContent: 'space-between' }}>
-                      <Typography color="text.secondary">Monto solicitado por el agente</Typography>
-                      <Typography sx={{ textDecoration: 'line-through' }} color="text.secondary">
+                      <Typography color="textSecondary">Monto solicitado por el agente</Typography>
+                      <Typography sx={{ textDecoration: 'line-through' }} color="textSecondary">
                         {formatMoney(drop.amount_requested)}
                       </Typography>
                     </Stack>
@@ -138,7 +132,7 @@ export default function CashDropDetailPage() {
                   {drop.note && (
                     <>
                       <Divider sx={{ my: 1 }} />
-                      <Typography variant="body2" color="text.secondary">
+                      <Typography variant="body2" color="textSecondary">
                         Nota del agente
                       </Typography>
                       <Typography variant="body2">{drop.note}</Typography>
@@ -224,133 +218,116 @@ export default function CashDropDetailPage() {
           </Stack>
         )}
 
-        <Dialog open={confirmOpen} onClose={() => setConfirmOpen(false)} fullWidth maxWidth="xs">
-          <DialogTitle>Confirmar recibo</DialogTitle>
-          <DialogContent>
-            {/* The agent-registered amount shown as a reference chip; the adjustment mechanics
-                (rarely needed) move behind the info tap. The field carries the actionable copy. */}
-            <Stack
-              direction="row"
-              spacing={1}
-              sx={{ alignItems: 'center', flexWrap: 'wrap', mb: 2 }}
-            >
-              <StatusChip
-                tone="neutral"
-                icon={<ReceiptLongRounded />}
-                label={`El agente registró ${drop ? formatMoney(drop.amount) : ''}`}
-              />
-              <InfoPopover label="Sobre el monto corregido">
-                Si el efectivo difiere de lo registrado, captura el monto corregido — se descontará
-                ese del saldo del agente y se registrará el ajuste.
-              </InfoPopover>
-            </Stack>
-            <TextField
-              label="Monto corregido (opcional)"
-              type="number"
-              fullWidth
-              autoFocus
-              placeholder={drop ? String(drop.amount / 100) : ''}
-              helperText="Déjalo vacío para confirmar el monto solicitado."
-              value={adjustAmount}
-              onChange={(e) => setAdjustAmount(e.target.value)}
+        {/* US-UX08 — three money forms, three sheets. The «Confirmar recibo» sheet is a FORM,
+            not a confirmation: it carries the corrected-amount field, which is the whole reason an
+            admin opens the detail instead of confirming inline from the team's caja (D16). */}
+        <FormSheet
+          open={confirmOpen}
+          onClose={() => setConfirmOpen(false)}
+          title="Confirmar recibo"
+          submitLabel={review.isPending ? 'Confirmando…' : 'Confirmar recibo'}
+          onSubmit={(e) => {
+            e.preventDefault()
+            confirm()
+          }}
+          busy={review.isPending}
+          error={
+            review.isError ? (
+              <Alert severity="error">No se pudo confirmar. Inténtalo de nuevo.</Alert>
+            ) : undefined
+          }
+        >
+          {/* The agent-registered amount shown as a reference chip; the adjustment mechanics
+              (rarely needed) move behind the info tap. The field carries the actionable copy. */}
+          <Stack direction="row" spacing={1} sx={{ alignItems: 'center', flexWrap: 'wrap', mb: 2 }}>
+            <StatusChip
+              tone="neutral"
+              icon={<ReceiptLongRounded />}
+              label={`El agente registró ${drop ? formatMoney(drop.amount) : ''}`}
             />
-            {review.isError && (
-              <Alert severity="error" sx={{ mt: 2 }}>
-                No se pudo confirmar. Inténtalo de nuevo.
-              </Alert>
-            )}
-          </DialogContent>
-          <DialogActions>
-            <Button onClick={() => setConfirmOpen(false)}>Cancelar</Button>
-            <Button
-              variant="contained"
-              color="success"
-              disableElevation
-              onClick={confirm}
-              disabled={review.isPending}
-            >
-              {review.isPending ? 'Confirmando…' : 'Confirmar recibo'}
-            </Button>
-          </DialogActions>
-        </Dialog>
+            <InfoPopover label="Sobre el monto corregido">
+              Si el efectivo difiere de lo registrado, captura el monto corregido — se descontará
+              ese del saldo del agente y se registrará el ajuste.
+            </InfoPopover>
+          </Stack>
+          <TextField
+            label="Monto corregido (opcional)"
+            type="number"
+            fullWidth
+            autoFocus
+            placeholder={drop ? String(drop.amount / 100) : ''}
+            helperText="Déjalo vacío para confirmar el monto solicitado."
+            value={adjustAmount}
+            onChange={(e) => setAdjustAmount(e.target.value)}
+          />
+        </FormSheet>
 
-        {/* Resolve-dispute dialog (required note; no money change). */}
-        <Dialog open={resolveOpen} onClose={() => setResolveOpen(false)} fullWidth maxWidth="xs">
-          <DialogTitle>Resolver disputa</DialogTitle>
-          <DialogContent>
-            <Stack
-              direction="row"
-              spacing={1}
-              sx={{ alignItems: 'center', flexWrap: 'wrap', mb: 2 }}
-            >
-              <StatusChip tone="neutral" icon={<LockRounded />} label="No cambia montos" />
-              <InfoPopover label="Cómo corregir un monto">
-                Si el agente tiene razón, registra después la corrección como un pago o un nuevo
-                cobro. La resolución sólo cierra la disputa con una explicación.
-              </InfoPopover>
-            </Stack>
-            <TextField
-              label="Resolución"
-              fullWidth
-              multiline
-              minRows={2}
-              autoFocus
-              required
-              value={resolutionNote}
-              onChange={(e) => setResolutionNote(e.target.value)}
-            />
-            {resolve.isError && (
-              <Alert severity="error" sx={{ mt: 2 }}>
-                No se pudo resolver la disputa. Inténtalo de nuevo.
-              </Alert>
-            )}
-          </DialogContent>
-          <DialogActions>
-            <Button onClick={() => setResolveOpen(false)}>Cancelar</Button>
-            <Button
-              variant="contained"
-              disableElevation
-              onClick={submitResolution}
-              disabled={resolve.isPending || !resolutionNote.trim()}
-            >
-              {resolve.isPending ? 'Resolviendo…' : 'Resolver disputa'}
-            </Button>
-          </DialogActions>
-        </Dialog>
+        {/* Resolving a dispute changes no money — only closes it with an explanation, which is
+            required. */}
+        <FormSheet
+          open={resolveOpen}
+          onClose={() => setResolveOpen(false)}
+          title="Resolver disputa"
+          submitLabel={resolve.isPending ? 'Resolviendo…' : 'Resolver disputa'}
+          onSubmit={(e) => {
+            e.preventDefault()
+            submitResolution()
+          }}
+          busy={resolve.isPending}
+          disabled={!resolutionNote.trim()}
+          error={
+            resolve.isError ? (
+              <Alert severity="error">No se pudo resolver la disputa. Inténtalo de nuevo.</Alert>
+            ) : undefined
+          }
+        >
+          <Stack direction="row" spacing={1} sx={{ alignItems: 'center', flexWrap: 'wrap', mb: 2 }}>
+            <StatusChip tone="neutral" icon={<LockRounded />} label="No cambia montos" />
+            <InfoPopover label="Cómo corregir un monto">
+              Si el agente tiene razón, registra después la corrección como un pago o un nuevo
+              cobro. La resolución sólo cierra la disputa con una explicación.
+            </InfoPopover>
+          </Stack>
+          <TextField
+            label="Resolución"
+            fullWidth
+            multiline
+            minRows={2}
+            autoFocus
+            required
+            value={resolutionNote}
+            onChange={(e) => setResolutionNote(e.target.value)}
+          />
+        </FormSheet>
 
-        <Dialog open={rejectOpen} onClose={() => setRejectOpen(false)} fullWidth maxWidth="xs">
-          <DialogTitle>¿Rechazar esta entrega?</DialogTitle>
-          <DialogContent>
-            <Box sx={{ mb: 2 }}>
-              <StatusChip
-                tone="neutral"
-                icon={<LockRounded />}
-                label="Su saldo no cambia · sigue responsable"
-              />
-            </Box>
-            <TextField
-              label="Razón (opcional)"
-              fullWidth
-              multiline
-              minRows={2}
-              autoFocus
-              value={note}
-              onChange={(e) => setNote(e.target.value)}
+        <FormSheet
+          open={rejectOpen}
+          onClose={() => setRejectOpen(false)}
+          title="¿Rechazar esta entrega?"
+          submitLabel={review.isPending ? 'Rechazando…' : 'Rechazar'}
+          onSubmit={(e) => {
+            e.preventDefault()
+            reject()
+          }}
+          busy={review.isPending}
+        >
+          <Box sx={{ mb: 2 }}>
+            <StatusChip
+              tone="neutral"
+              icon={<LockRounded />}
+              label="Su saldo no cambia · sigue responsable"
             />
-          </DialogContent>
-          <DialogActions>
-            <Button onClick={() => setRejectOpen(false)}>Mantener pendiente</Button>
-            <Button
-              variant="contained"
-              color="error"
-              disableElevation
-              onClick={reject}
-              disabled={review.isPending}
-            >
-              {review.isPending ? 'Rechazando…' : 'Rechazar'}
-            </Button>
-          </DialogActions>
-        </Dialog>
+          </Box>
+          <TextField
+            label="Razón (opcional)"
+            fullWidth
+            multiline
+            minRows={2}
+            autoFocus
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+          />
+        </FormSheet>
       </Box>
     </Fade>
   )

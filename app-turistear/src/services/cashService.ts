@@ -13,6 +13,7 @@ import type {
   RegisterCollectionInput,
   ResolveDisputeInput,
   ReviewDropInput,
+  DropsPage,
 } from '../features/cash/types'
 
 // Agent continuous cash balance with cash drops. The `/me/*` calls require the agent role;
@@ -87,14 +88,18 @@ export const listBalances = async (): Promise<BalanceListItem[]> => {
 }
 
 // US-A19 — the drops review queue (defaults to pending; optional status/agent/ack filters).
-export const listDrops = async (filters: DropFilters = {}): Promise<CashDrop[]> => {
+export const listDrops = async (filters: DropFilters = {}): Promise<DropsPage> => {
   const params = new URLSearchParams()
   if (filters.status) params.set('status', filters.status)
   if (filters.agentId) params.set('agent_id', filters.agentId)
   if (filters.ack) params.set('ack', filters.ack)
   const qs = params.toString()
-  const res = await request<{ drops: CashDrop[] }>(`/api/cash/drops${qs ? `?${qs}` : ''}`)
-  return res.drops
+  const res = await request<{ drops: CashDrop[]; truncated?: boolean }>(
+    `/api/cash/drops${qs ? `?${qs}` : ''}`,
+  )
+  // The page, not a bare array: the caller has to be able to say the list was capped rather than
+  // imply a whole (D12′, and the lesson folio-surface-parity learned once already).
+  return { drops: res.drops, truncated: res.truncated ?? false }
 }
 
 // US-A19 — one drop's detail (with its agent).

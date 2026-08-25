@@ -45,7 +45,7 @@ export function UnitRow({ unit, actions }: UnitRowProps) {
           <Typography sx={{ fontSize: 18, fontWeight: 600 }} noWrap>
             {unit.name}
           </Typography>
-          <Typography variant="body2" color="text.secondary">
+          <Typography variant="body2" color="textSecondary">
             {unit.unit_type ? `${unit.unit_type} · ` : ''}
             {unit.inventory_count != null
               ? `${unit.inventory_count} ${unit.inventory_count === 1 ? 'habitación' : 'habitaciones'} · `
@@ -68,7 +68,7 @@ export function UnitRow({ unit, actions }: UnitRowProps) {
         srLabel="Desde, por noche"
         sx={{ mt: 1, display: 'block' }}
       />
-      <Typography variant="caption" color="text.secondary">
+      <Typography variant="caption" color="textSecondary">
         Desde, por noche
       </Typography>
 

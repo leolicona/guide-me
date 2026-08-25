@@ -20,6 +20,14 @@ const folioQuery = (id: string | undefined) => ({
   staleTime: 60_000,
 })
 
+// US-A93 (folio-surface-parity D1) — the WHOLE detail read, in the shape the admin's `useFolio`
+// returns (`{ folio, quote, events }`), so one screen can take either without branching on the
+// surface to read its own data. The three selecting hooks below stay for the POS screens that want
+// one slice; all four share the single request above.
+export function useFolioDetailRead(id: string | undefined) {
+  return useQuery(folioQuery(id))
+}
+
 export function useFolio(id: string | undefined) {
   return useQuery({
     ...folioQuery(id),

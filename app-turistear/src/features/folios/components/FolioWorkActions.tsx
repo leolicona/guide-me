@@ -41,14 +41,23 @@ const DATE_FMT: Intl.DateTimeFormatOptions = {
   minute: '2-digit',
 }
 
+// Each rung's title is the heading of the card it owns — `h2`, the level `SectionCard` gives its
+// own titles, because these cards have no `title` prop and this line is it. (Design review, Must
+// Fix 2: as an accidental `<h6>` it sat two levels under a page `<h1>` with nothing in between.)
 export function FolioWorkActions({
   folio,
   onConfirmRefund,
+  surface = 'admin',
 }: {
   folio: FolioDetail
   /** Opens the page's refund FormSheet (PIN / override) — the sheet stays with the page because
    *  its success path opens the receipt composer, which is page-level navigation. */
   onConfirmRefund: () => void
+  /** US-AG58/US-A93 (folio-surface-parity D7) — which rungs this audience may PRESS. Three of the
+   *  four are admin verbs: approving a petition, verifying a transfer and confirming a refund are
+   *  authorizations the seller does not hold (US-A84 D15). The seller keeps delivery, which is
+   *  their job, so the ladder collapses to its last rung rather than becoming a second component. */
+  surface?: 'admin' | 'seller'
 }) {
   const formatDate = useOrgDateFormatter(DATE_FMT)
   const verify = useVerifyPayment()
@@ -86,11 +95,12 @@ export function FolioWorkActions({
   // The ladder, structural: the first true rung is the ONLY one that renders. Resolved petitions
   // no longer render here — the timeline carries them (approved ones as their events, rejected
   // ones as derived rows) — so a folio with only history renders nothing.
-  const rung = pending
+  const isAdmin = surface === 'admin'
+  const rung = pending && isAdmin
     ? 'petition'
-    : awaitingVerification
+    : awaitingVerification && isAdmin
       ? 'verification'
-      : refundPending
+      : refundPending && isAdmin
         ? 'refund'
         : deliverable
           ? 'delivery'
@@ -103,10 +113,10 @@ export function FolioWorkActions({
           which makes any payment verification below moot (D12, one layer down from the card). */}
       {rung === 'petition' && pending && (
         <SectionCard>
-          <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 0.5 }}>
+          <Typography variant="subtitle1" component="h2" sx={{ fontWeight: 600, mb: 0.5 }}>
             {pendingIsReschedule ? 'El cliente pidió reagendar' : 'El cliente pidió cancelar'}
           </Typography>
-          <Typography variant="body2" color="text.secondary">
+          <Typography variant="body2" color="textSecondary">
             {formatDate(pending.created_at)}
             {pending.reason ? ` — ${pending.reason}` : ''}
           </Typography>
@@ -149,10 +159,10 @@ export function FolioWorkActions({
           still says the unverified money exists. */}
       {rung === 'verification' && (
         <SectionCard>
-          <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 0.5 }}>
+          <Typography variant="subtitle1" component="h2" sx={{ fontWeight: 600, mb: 0.5 }}>
             Pago por verificar
           </Typography>
-          <Typography variant="body2" color="text.secondary">
+          <Typography variant="body2" color="textSecondary">
             Transferencia
             {folio.payment_reference ? ` · Ref. ${folio.payment_reference}` : ''}
           </Typography>
@@ -210,16 +220,18 @@ export function FolioWorkActions({
         <SectionCard>
           <Stack spacing={1.5}>
             <Stack direction="row" sx={{ alignItems: 'center', justifyContent: 'space-between' }}>
-              <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
+              <Typography variant="subtitle1" component="h2" sx={{ fontWeight: 700 }}>
                 Entregar boletos
               </Typography>
               <DeliveryBadge folio={folio} />
             </Stack>
+            {/* The send goes through THIS audience's endpoint — the admin's `ticket-delivery` or
+                the POS one — so `tickets_sent_at` is stamped by whoever actually sent it. */}
             <TicketWhatsAppButton
               folio={folio}
-              surface="admin"
+              surface={surface}
               variant="primary"
-              agentName={folio.agent.name}
+              agentName={folio.agent?.name}
             />
             {/* The "Pendiente de enviar" chip above already states this fact — a second amber
                 line saying it again is noise (design review, Should Fix 1). */}
@@ -231,6 +243,13 @@ export function FolioWorkActions({
           already appear there as their `cancelled`/`rescheduled` events, and REJECTED ones
           interleave as derived rows — one Historial, not two. */}
 
+      {/* Every overlay below is an ADMIN authorization, and they used to render on BOTH surfaces —
+          closed and `aria-hidden`, so nothing leaked, but four `keepMounted` drawers sat in the
+          seller's DOM on a screen with no way to open any of them (design review, Should Fix 3).
+          BUG-033 is exactly about what extra keepMounted drawers do to the a11y tree, so the
+          cheapest fix is to not mount what this audience can never press. */}
+      {isAdmin && (
+        <>
       <ConfirmSheet
         open={confirming === 'verify'}
         onClose={() => setConfirming(null)}
@@ -248,15 +267,15 @@ export function FolioWorkActions({
         title={pendingIsReschedule ? '¿Aprobar la reagenda?' : '¿Aprobar la cancelación?'}
         description={
           pendingIsReschedule
-            ? 'Se mueve el servicio al horario que pidió el cliente y se libera el anterior. Si el folio está pagado, el boleto anterior deja de funcionar y se envía uno nuevo. Si ya no hay lugar, la solicitud se rechaza sola con el motivo y fechas alternativas.'
-            : 'Esto cancela el folio completo: libera todos los lugares, notifica al cliente por correo y — si el folio tiene pago registrado — genera un PIN de reembolso que el cliente verá en su portal. El reembolso y la comisión del vendedor los decide la política de cancelación de la empresa.'
+            ? 'Se mueve el servicio al horario que pidió el cliente y se libera el anterior. Si la venta está pagada, el boleto anterior deja de funcionar y se envía uno nuevo. Si ya no hay lugar, la solicitud se rechaza sola con el motivo y fechas alternativas.'
+            : 'Esto cancela la venta completa: libera todos los lugares, notifica al cliente por correo y — si la venta tiene pago registrado — genera un PIN de reembolso que el cliente verá en su portal. El reembolso y la comisión del vendedor los decide la política de cancelación de la empresa.'
         }
         confirmLabel={
           approveRequest.isPending
             ? 'Aprobando…'
             : pendingIsReschedule
               ? 'Aprobar reagenda'
-              : 'Aprobar y cancelar folio'
+              : 'Aprobar y cancelar venta'
         }
         confirmColor={pendingIsReschedule ? 'primary' : undefined}
         busy={approveRequest.isPending}
@@ -298,8 +317,8 @@ export function FolioWorkActions({
         }}
       >
         <Stack spacing={2} sx={{ px: 2, pb: 2 }}>
-          <Typography variant="body2" color="text.secondary">
-            La reserva sigue activa y nada cambia en el folio. Explica el motivo — el cliente lo
+          <Typography variant="body2" color="textSecondary">
+            La reserva sigue activa y nada cambia en la venta. Explica el motivo — el cliente lo
             verá en su portal.
           </Typography>
           <TextField
@@ -334,7 +353,7 @@ export function FolioWorkActions({
         }}
       >
         <Stack spacing={2} sx={{ px: 2, pb: 2 }}>
-          <Typography variant="body2" color="text.secondary">
+          <Typography variant="body2" color="textSecondary">
             La venta se cancelará: se liberan los lugares y se descuenta la comisión del vendedor.
           </Typography>
           <TextField
@@ -348,6 +367,8 @@ export function FolioWorkActions({
           />
         </Stack>
       </FormSheet>
+        </>
+      )}
     </>
   )
 }

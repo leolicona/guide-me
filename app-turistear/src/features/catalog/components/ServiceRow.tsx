@@ -1,9 +1,5 @@
 import { Typography, Chip, Button, IconButton, Switch, FormControlLabel, Skeleton } from '@mui/material'
-import EditRounded from '@mui/icons-material/EditRounded'
-import DeleteOutlineRounded from '@mui/icons-material/DeleteOutlineRounded'
-import ScheduleRounded from '@mui/icons-material/ScheduleRounded'
-import SellRounded from '@mui/icons-material/SellRounded'
-import BedRounded from '@mui/icons-material/BedRounded'
+import { EditRounded, DeleteOutlineRounded, ScheduleRounded, SellRounded, BedRounded } from '@mui/icons-material'
 import { Link as RouterLink } from 'react-router-dom'
 import type { Service } from '../types'
 import { formatMoney } from '../types'
@@ -22,7 +18,7 @@ interface ServiceRowProps {
 }
 
 // The unit-based (lodging) meta line: the service record carries canonical zeros, so the
-// row's useful numbers live on its unit types. This shares UnitsSection's query key, so the
+// row's useful numbers live on its units. This shares UnitsSection's query key, so the
 // list fetch pre-warms the detail page's cache (and vice versa).
 function LodgingSummary({ serviceId }: { serviceId: string }) {
   const { data: units, isLoading } = useUnits(serviceId)
@@ -34,8 +30,8 @@ function LodgingSummary({ serviceId }: { serviceId: string }) {
   const active = (units ?? []).filter((u) => u.status === 'active')
   if (active.length === 0) {
     return (
-      <Typography variant="body2" color="text.secondary">
-        Sin tipos de unidad
+      <Typography variant="body2" color="textSecondary">
+        Sin unidades
       </Typography>
     )
   }
@@ -44,9 +40,8 @@ function LodgingSummary({ serviceId }: { serviceId: string }) {
   const fromRate = Math.min(...active.map((u) => fromNightlyRate(u.base_rate, u.weekend_rate)))
 
   return (
-    <Typography variant="body2" color="text.secondary" className="numeric">
-      {active.length} tipo{active.length === 1 ? '' : 's'} ·{' '}
-      {rooms === 1 ? '1 habitación' : `${rooms} habitaciones`} · desde{' '}
+    <Typography variant="body2" color="textSecondary" className="numeric">
+      {active.length} unidad{active.length === 1 ? '' : 'es'} · {rooms} en total · desde{' '}
       {formatMoney(fromRate)}/noche
     </Typography>
   )
@@ -63,7 +58,7 @@ function ZonesSummary({ serviceId }: { serviceId: string }) {
   const active = (zones ?? []).filter((z) => z.status === 'active')
   const seats = active.reduce((sum, z) => sum + z.capacity, 0)
   return (
-    <Typography variant="body2" color="text.secondary" className="numeric">
+    <Typography variant="body2" color="textSecondary" className="numeric">
       {active.length} zona{active.length === 1 ? '' : 's'} · {seats} asientos
     </Typography>
   )
@@ -95,13 +90,13 @@ export function ServiceRow({
       meta={
         slotBased ? (
           <>
-            <Typography variant="body2" color="text.secondary" className="numeric">
+            <Typography variant="body2" color="textSecondary" className="numeric">
               {formatMoney(service.base_price)} · mín {formatMoney(service.minimum_price)}
             </Typography>
             {service.zones_enabled ? (
               <ZonesSummary serviceId={service.id} />
             ) : (
-              <Typography variant="body2" color="text.secondary">
+              <Typography variant="body2" color="textSecondary">
                 Cap. {service.default_capacity}
                 {extrasCount > 0 ? ` · ${extrasCount} extra${extrasCount > 1 ? 's' : ''}` : ''}
               </Typography>

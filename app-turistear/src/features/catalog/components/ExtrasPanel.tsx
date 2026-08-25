@@ -10,9 +10,7 @@ import {
   Alert,
   Divider,
 } from '@mui/material'
-import AddRounded from '@mui/icons-material/AddRounded'
-import EditRounded from '@mui/icons-material/EditRounded'
-import DeleteOutlineRounded from '@mui/icons-material/DeleteOutlineRounded'
+import { AddRounded, EditRounded, DeleteOutlineRounded } from '@mui/icons-material'
 import { useService } from '../hooks/useService'
 import { useRemoveExtra } from '../hooks/useRemoveExtra'
 import { formatMoney } from '../types'
@@ -69,7 +67,7 @@ export function ExtrasPanel({ serviceId }: ExtrasPanelProps) {
               <Chip size="small" variant="outlined" label="Eliminado" sx={{ ml: 1 }} />
             )}
           </Typography>
-          <Typography variant="body2" color="text.secondary">
+          <Typography variant="body2" color="textSecondary">
             {formatMoney(extra.price)}
           </Typography>
         </Box>
@@ -101,7 +99,7 @@ export function ExtrasPanel({ serviceId }: ExtrasPanelProps) {
     <>
       <Stack spacing={2} divider={<Divider flexItem />}>
         {extras.length === 0 ? (
-          <Typography color="text.secondary" variant="body2">
+          <Typography color="textSecondary" variant="body2">
             Aún no hay extras.
           </Typography>
         ) : (

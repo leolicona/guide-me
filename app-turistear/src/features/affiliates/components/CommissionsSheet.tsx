@@ -64,7 +64,7 @@ export function CommissionsSheet({
       }}
     >
       <Stack spacing={2}>
-        <Typography variant="body2" color="text.secondary">
+        <Typography variant="body2" color="textSecondary">
           Activa los servicios que este afiliado puede vender y define su comisión.
         </Typography>
         <CommissionCatalogEditor services={services} value={drafts} onChange={setDrafts} />

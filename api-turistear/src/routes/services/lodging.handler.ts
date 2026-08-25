@@ -39,6 +39,7 @@ interface UnitTypeRow {
   amenities: string
   commissionType: 'percent' | 'fixed' | null
   commissionValue: number | null
+  maxDiscountPct: number
   status: string
 }
 
@@ -61,6 +62,8 @@ const serializeUnitType = (row: UnitTypeRow) => ({
   // Commission override (null ⇒ inherits the service rate).
   commission_type: row.commissionType,
   commission_value: row.commissionValue,
+  // US-A92 — discount ceiling as a whole percent of the quoted stay total (0 = no discount).
+  max_discount_pct: row.maxDiscountPct,
   status: row.status,
 })
 
@@ -82,6 +85,7 @@ const unitTypeColumns = {
   amenities: accommodationUnitTypes.amenities,
   commissionType: accommodationUnitTypes.commissionType,
   commissionValue: accommodationUnitTypes.commissionValue,
+  maxDiscountPct: accommodationUnitTypes.maxDiscountPct,
   status: accommodationUnitTypes.status,
 } as const
 
@@ -206,6 +210,8 @@ export const createUnitType = async (c: ServicesContext) => {
       amenities: (input.amenities ?? []).join(','),
       commissionType: input.commission_type ?? null, // null ⇒ inherit service rate
       commissionValue: input.commission_value ?? null,
+      maxDiscountPct: input.max_discount_pct ?? 0, // US-A92 — omitted ⇒ no discount
+
       status: 'active',
     })
     .returning(unitTypeColumns)
@@ -274,6 +280,8 @@ export const updateUnitType = async (c: ServicesContext) => {
       // Full replace: a PUT without an override clears it back to inherit.
       commissionType: input.commission_type ?? null,
       commissionValue: input.commission_value ?? null,
+      maxDiscountPct: input.max_discount_pct ?? 0, // PUT is a full replace
+
       updatedAt: new Date(),
     })
     .where(

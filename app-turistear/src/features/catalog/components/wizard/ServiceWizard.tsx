@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useForm, FormProvider } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { Alert } from '@mui/material'
@@ -11,7 +11,9 @@ import {
   type DepartureTime,
   type ExtraDraft,
   type ZoneDraft,
+  type LodgingMode,
 } from './wizardTypes'
+import { NEW_PROPERTY, type PropertyChoice } from './PropertyPicker'
 import { StepBasicInfo } from './StepBasicInfo'
 import { StepPricing } from './StepPricing'
 import { StepAvailability } from './StepAvailability'
@@ -21,8 +23,11 @@ import { StepUnits } from './StepUnits'
 import { useCreateServiceFull } from '../../hooks/useCreateServiceFull'
 import {
   useCreateLodgingFull,
+  useAttachLodgingUnits,
   type UnitDraft,
 } from '../../hooks/useCreateLodgingFull'
+import { useServices } from '../../hooks/useServices'
+import { useUnits } from '../../hooks/useUnits'
 import { amountToCents, percentToBasisPoints } from '../../types'
 import { inventoryModel, type ServiceCategory } from '../../categories'
 import type { ServiceInput, ExtraInput } from '../../../../services/catalogService'
@@ -49,8 +54,14 @@ interface ServiceWizardProps {
   /** Exit confirmed (X on a clean form, or discard confirmed) — the parent navigates away. */
   onClose: () => void
   /** Fired after a successful create. `failures` > 0 means the service exists but some
-   * schedules/extras didn't persist (US-A44 partial path). */
-  onCreated: (serviceId: string, failures: number) => void
+   * schedules/extras didn't persist (US-A44 partial path). US-A91 — `attached` carries the
+   * target property's name when units were added to an existing property (units created,
+   * no service written), so the caller can name it in the confirmation. */
+  onCreated: (
+    serviceId: string,
+    failures: number,
+    attached?: { propertyName: string; unitCount: number },
+  ) => void
 }
 
 // The full-page service creation wizard (US-A38–A44) — always mounted as a route's content
@@ -72,21 +83,57 @@ export function ServiceWizard({ onClose, onCreated }: ServiceWizardProps) {
   const [showUnitsError, setShowUnitsError] = useState(false)
   const [showZonesError, setShowZonesError] = useState(false)
   const [confirmDiscard, setConfirmDiscard] = useState(false)
+  // US-A91 — which property the units go to. Wizard-local (like `units`/`times`): it is a
+  // routing decision, not part of the service payload, so it never reaches ServiceInput.
+  const [choice, setChoice] = useState<PropertyChoice>(null)
+  const [showChoiceError, setShowChoiceError] = useState(false)
 
   const category = watch('category')
   // Structural branch on the category's operational model (categories.ts): the unit track
   // (lodging) swaps steps 2–4 and the save path; the slot track is everything else.
   const isLodging = inventoryModel(category) === 'units'
 
+  // US-A91 D12 — only ACTIVE lodging properties are offerable: a unit under a deactivated
+  // property cannot be sold. An org whose properties are all inactive is an org with none.
+  const { data: services } = useServices()
+  const properties = useMemo(
+    () =>
+      (services ?? []).filter((s) => s.category === 'lodging' && s.status === 'active'),
+    [services],
+  )
+  // D6 — exactly one property is unambiguous, so it is preselected; with two or more nothing is,
+  // and goNext() refuses to advance. Preselecting the first of several would invite a unit to be
+  // filed under the wrong building, which looks correct everywhere afterwards.
+  useEffect(() => {
+    if (isLodging && choice === null && properties.length === 1) {
+      setChoice(properties[0].id)
+    }
+  }, [isLodging, choice, properties])
+
+  const attachTo =
+    isLodging && choice !== null && choice !== NEW_PROPERTY
+      ? (properties.find((p) => p.id === choice) ?? null)
+      : null
+  const mode: LodgingMode = attachTo ? 'attach' : 'create'
+  // D11 — the guard must see what the SERVER already holds, or attach mode ships the duplicate
+  // one level down. Same query key as the catalog list's summary, so the cache is warm.
+  const { data: targetUnits } = useUnits(attachTo?.id ?? '', !!attachTo)
+  const serverUnitNames = useMemo(
+    () => (targetUnits ?? []).filter((u) => u.status === 'active').map((u) => u.name),
+    [targetUnits],
+  )
+
   const saveMutation = useCreateServiceFull()
   const lodgingSave = useCreateLodgingFull()
+  const lodgingAttach = useAttachLodgingUnits()
 
   const isDirty =
     formState.isDirty ||
     times.length > 0 ||
     extras.length > 0 ||
     units.length > 0 ||
-    zones.length > 0
+    zones.length > 0 ||
+    choice !== null
 
   // US-A64 — zones are optional; when present they must be a complete 2–6 set with unique names
   // and ≥ 1 seat each. Empty = unzoned (valid).
@@ -119,10 +166,17 @@ export function ServiceWizard({ onClose, onCreated }: ServiceWizardProps) {
   }, [isDirty])
 
   const goNext = async () => {
-    const ok = await trigger([...stepFields(category, step)])
+    // US-A91 D6 — with a picker on screen, step 1 gates on the choice: nothing is preselected
+    // when there are two or more properties, precisely so a unit cannot be filed under the
+    // wrong building by blowing through.
+    if (isLodging && step === 1 && properties.length > 0 && choice === null) {
+      setShowChoiceError(true)
+      return
+    }
+    const ok = await trigger([...stepFields(category, step, mode)])
     if (!ok) return
     // The inventory step gates on a local array (not an RHF field): tours need ≥1 departure
-    // time (step 3), lodging needs ≥1 unit type (step 2 — types come before the commission).
+    // time (step 3), lodging needs ≥1 unit (step 2 — units come before the commission).
     if (isLodging) {
       if (step === 2 && units.length === 0) {
         setShowUnitsError(true)
@@ -144,6 +198,27 @@ export function ServiceWizard({ onClose, onCreated }: ServiceWizardProps) {
   const goBack = () => setStep((s) => Math.max(1, s - 1) as WizardStep)
 
   const saveLodging = async () => {
+    // US-A91 — attach mode writes NOTHING on the service. `name` and the commission fields
+    // belong to a property being created; validating (let alone sending) them here would
+    // rewrite the rate governing every unit already under the chosen property (D7).
+    if (attachTo) {
+      if (units.length === 0) {
+        setShowUnitsError(true)
+        setStep(2)
+        return
+      }
+      lodgingAttach.mutate(
+        { serviceId: attachTo.id, units },
+        {
+          onSuccess: ({ serviceId, failures }) =>
+            onCreated(serviceId, failures, {
+              propertyName: attachTo.name,
+              unitCount: units.length,
+            }),
+        },
+      )
+      return
+    }
     const ok = await trigger(['name', 'category', 'commission_type', 'commission_value'])
     if (!ok) {
       // Jump to the earliest lodging step still holding an error (1: identidad · 3: comisión).
@@ -250,18 +325,18 @@ export function ServiceWizard({ onClose, onCreated }: ServiceWizardProps) {
     )
   }
 
-  const total = totalSteps(category)
+  const total = totalSteps(category, mode)
   const isLast = step === total
-  const saving = saveMutation.isPending || lodgingSave.isPending
+  const saving = saveMutation.isPending || lodgingSave.isPending || lodgingAttach.isPending
 
   return (
     <>
       <WizardPage
         onClose={handleClose}
-        title="Nuevo servicio"
+        title={attachTo ? 'Agregar unidad' : 'Nuevo servicio'}
         step={step}
         totalSteps={total}
-        stepTitle={stepTitle(category, step)}
+        stepTitle={stepTitle(category, step, mode)}
         onBack={goBack}
         onNext={goNext}
         onFinish={save}
@@ -269,18 +344,37 @@ export function ServiceWizard({ onClose, onCreated }: ServiceWizardProps) {
         finishLabel="Guardar"
         busy={saving}
         error={
-          saveMutation.isError || lodgingSave.isError ? (
+          saveMutation.isError || lodgingSave.isError || lodgingAttach.isError ? (
             <Alert severity="error">
-              No se pudo crear el servicio. Revisa los datos e inténtalo de nuevo.
+              {attachTo
+                ? 'No se pudieron agregar las unidades. Revisa los datos e inténtalo de nuevo.'
+                : 'No se pudo crear el servicio. Revisa los datos e inténtalo de nuevo.'}
             </Alert>
           ) : undefined
         }
       >
         <FormProvider {...methods}>
-          {step === 1 && <StepBasicInfo />}
+          {step === 1 && (
+            <StepBasicInfo
+              properties={properties}
+              choice={choice}
+              onChoiceChange={(next) => {
+                setChoice(next)
+                setShowChoiceError(false)
+              }}
+              showChoiceError={showChoiceError}
+            />
+          )}
           {step === 2 &&
             (isLodging ? (
-              <StepUnits units={units} onChange={setUnits} showUnitsError={showUnitsError} />
+              <StepUnits
+                units={units}
+                onChange={setUnits}
+                showUnitsError={showUnitsError}
+                propertyName={attachTo?.name}
+                serverUnitNames={serverUnitNames}
+                suggestedName={attachTo ? getValues('name')?.trim() : undefined}
+              />
             ) : (
               <StepPricing />
             ))}
@@ -305,7 +399,7 @@ export function ServiceWizard({ onClose, onCreated }: ServiceWizardProps) {
       <ConfirmSheet
         open={confirmDiscard}
         onClose={() => setConfirmDiscard(false)}
-        title="¿Descartar este servicio?"
+        title={attachTo ? '¿Descartar esta unidad?' : '¿Descartar este servicio?'}
         description="Perderás la información que has capturado en el asistente."
         confirmLabel="Descartar"
         cancelLabel="Seguir editando"

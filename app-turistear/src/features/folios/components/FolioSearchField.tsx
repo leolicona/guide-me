@@ -25,7 +25,7 @@ export function FolioSearchField({
       // typing a tour name works at all, and that is the case the Express sale depends on.
       sx={{ mb: 2 }}
       slotProps={{
-        htmlInput: { 'aria-label': 'Buscar folios', enterKeyHint: 'search' },
+        htmlInput: { 'aria-label': 'Buscar ventas', enterKeyHint: 'search' },
         input: {
           startAdornment: (
             <InputAdornment position="start">

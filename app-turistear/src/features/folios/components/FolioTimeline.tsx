@@ -340,11 +340,11 @@ export function FolioTimeline({
           {row.primary}
         </Typography>
         {row.details?.map((detail) => (
-          <Typography key={detail} variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+          <Typography key={detail} variant="caption" color="textSecondary" sx={{ display: 'block' }}>
             {detail}
           </Typography>
         ))}
-        <Typography variant="caption" color="text.secondary">
+        <Typography variant="caption" color="textSecondary">
           {row.caption}
         </Typography>
       </Box>
@@ -356,13 +356,14 @@ export function FolioTimeline({
   const latest = rows[rows.length - 1]
   const collapsed = collapsible && !expanded
 
+  // Nothing to narrate ⇒ no card. It used to spend a whole `SectionCard` on the words «Sin
+  // historial», ABOVE the payment card — so a folio with no events pushed the dominant figure
+  // further down the screen to say nothing (design review, Should Fix 6). Money reads first.
+  if (rows.length === 0) return null
+
   return (
     <SectionCard title="Historial">
-      {rows.length === 0 ? (
-        <Typography variant="body2" color="text.secondary">
-          Sin historial
-        </Typography>
-      ) : collapsed ? (
+      {collapsed ? (
         <Stack spacing={1}>
           {renderRow(latest)}
           {rows.length > 1 && (

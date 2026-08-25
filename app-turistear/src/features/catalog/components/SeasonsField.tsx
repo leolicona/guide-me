@@ -9,8 +9,7 @@ import {
   InputAdornment,
   Alert,
 } from '@mui/material'
-import AddRounded from '@mui/icons-material/AddRounded'
-import DeleteOutlineRounded from '@mui/icons-material/DeleteOutlineRounded'
+import { AddRounded, DeleteOutlineRounded } from '@mui/icons-material'
 import { MoneyText } from '../../../components'
 import { amountToCents } from '../types'
 import { seasonFormSchema, seasonOverlaps } from '../schemas'
@@ -63,7 +62,7 @@ export function SeasonsField({ value, onChange, disabled }: SeasonsFieldProps) {
   return (
     <Stack spacing={1.5}>
       {value.length === 0 && (
-        <Typography variant="body2" color="text.secondary">
+        <Typography variant="body2" color="textSecondary">
           Sin temporadas
         </Typography>
       )}
@@ -85,7 +84,7 @@ export function SeasonsField({ value, onChange, disabled }: SeasonsFieldProps) {
             <Typography variant="body2" sx={{ fontWeight: 600 }} noWrap>
               {s.name}
             </Typography>
-            <Typography variant="caption" color="text.secondary">
+            <Typography variant="caption" color="textSecondary">
               {s.start_date} → {s.end_date}
             </Typography>
           </Box>

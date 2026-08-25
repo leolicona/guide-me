@@ -101,7 +101,7 @@ export function DateRangeSheet({ open, onClose, from, to, maxDate, onApply }: Da
     <Box sx={{ px: 3, py: 2 }}>
       <Typography
         variant="caption"
-        color="text.secondary"
+        color="textSecondary"
         sx={{ display: 'block', textAlign: 'center', mb: 1 }}
       >
         {end === null

@@ -6,6 +6,496 @@ Tracks confirmed bugs, root causes, and fixes. Each entry is immutable once clos
 
 ---
 
+## BUG-041 — The Team's Caja Became Unreachable Whenever Nothing Was Pending — ✅ FIXED
+
+**Found:** 2026-08-25, by the admin using the product. *«He estado vagando en caja y no veo ningún
+enlace.»* Not by a test, not by a review — by someone who could no longer do their job.
+
+**Affected:** `features/cash/components/BalanceScreen.tsx` — the admin surface, shipped in #141.
+
+### Symptom
+
+An admin could not reach **Caja del equipo** at all: not the team's balances, not *Registrar cobro
+directo*, not *Registrar pago*, not the hand-in history. `/cash` was reachable only by typing the
+URL.
+
+### Cause
+
+US-A98 (D2′) moved the admin's own caja to `/balance` and collapsed the nav's two «Caja» entries
+into one pointing there. That part was right — the word meant two things. The replacement door was
+D17's block on the admin's own screen, and it was written:
+
+```tsx
+{isAdmin && teamPending > 0 && <AlertCard … />}
+```
+
+**Gated on pending work, and it was the only door.** With nothing pending — the *normal* state, and
+the state an org is in most of the time — every entry point to the team's caja disappeared at once.
+The two remaining links to `ROUTES.CASH` are the *back* buttons on `/cash/drops/:id` and
+`/cash/entregas`, both of which live behind the door they lead back to.
+
+The nav badge branch `if (to === ROUTES.CASH)` also survived in `AppLayout`, matching no nav item —
+dead code that made the loss look accounted for.
+
+### Why the tests did not catch it
+
+Both tests written for D17 asserted the state where work exists: the block renders for an admin, and
+does not for a seller. **Neither asserted the empty state**, which is the one that broke. An absence
+test on the surface that never had the block passes whether or not the block works.
+
+### Fix — 2026-08-25
+
+`features/cash/components/TeamCajaDoor.tsx` — **unconditional**; only its TONE follows the work:
+
+- pending > 0 → the warning `AlertCard` with *Ver caja del equipo* (unchanged)
+- otherwise → a quiet `SectionCard`: **«Caja del equipo · $X en la calle · N personas»** with
+  *Abrir*.
+
+The quiet card is not a placeholder. It carries the figure an admin opens this section for anyway,
+and it costs no request: `useBalances` shares the `['cash','balances']` cache the nav badge already
+fills. `useBalances(enabled)` gained the flag so a seller never fires the admin-only read.
+
+The dead `ROUTES.CASH` badge branch is deleted.
+
+**Pinned by** three cases in `BalanceScreen.test.tsx` — the alert state, **the quiet state**, and a
+seller getting no door at all. The middle one is the regression.
+
+**Verified in the browser** with every drop confirmed (the reported state): the door renders,
+`/cash` is one tap away, and re-seeding one pending hand-in swaps the card back to the alert.
+
+---
+
+## BUG-040 — The Caja's Money Is Not the Money Primitive, and Its Regions Have No Headings — ✅ FIXED
+
+**Found:** 2026-08-22, in the `/design-review` pass over `/balance`
+(`.design/balance/DESIGN_REVIEW.md`, Must Fix 5 + Should Fix 6, 8, 9, 10, 11).
+
+**Affected:** `pages/BalancePage.tsx` · `pages/CashBalancesPage.tsx` ·
+`features/cash/components/{CashBoxCard,SalesSummaryCard,CommissionsCard,PendingAcknowledgments}.tsx`
+— the seller's, the affiliate's and the admin's caja.
+
+### Symptom
+
+**Money.** Of the 14 money figures on `/balance`, only 4 went through `MoneyText`. The other 10 —
+every amount in **Gastos** and **Entregas**, the cash/electronic split, the commission split —
+measured 14–16px, weight 400/500, `font-variant-numeric: **normal**`. Gastos and Entregas are
+literally columns of money whose digits did not align, which is the one job tabular figures have.
+
+**Structure.** The heading outline read `h1 → h6 → h6 → h6`, and the three money cards — the cash
+box, the sales summary, the commissions — contributed **no heading at all**: their labels look like
+overlines, and looking like something is not being it, so all three rendered as `<span>`. A
+screen-reader user navigating by heading skipped straight past the money. On `/cash`, the only
+headings on the screen were `«$2,684.00»`, `«1»` and `«0»` — KPI **values** marked up as `<h6>`.
+
+**Dead end.** With a zero balance the page's single teal accent — «Entregar efectivo» — was live,
+and opened a dialog whose «Todo» and «Entregar» were both disabled under the helper «Disponible para
+entregar: $0.00». The admin's own caja sat in exactly that state.
+
+**Reach.** The two «Eliminar gasto» buttons measured **30×30 px** (the system says ≥48), and the
+expense form used `size="small"` fields — the one form a seller fills standing up, outdoors, below
+the 48px every other input in the product uses.
+
+**Surface.** Two card idioms on one page: `SectionCard` + overline for the money blocks, raw
+`Card variant="outlined"` + `CardContent` + `h6` for Gastos and Entregas.
+
+### Fix — 2026-08-22
+
+- Gastos and Entregas move onto **`SectionCard`** — one card idiom, and its title is already an
+  `h2`. The three money cards keep their overline look and gain `component="h2"`.
+- `/cash`'s KPI figure becomes `component="p"`. That left the Equipo panel with no heading at all,
+  so the tabs gained the wiring that names a tabbed region: `role="tabpanel"` +
+  `aria-labelledby` on both levels. The panels had none — the KPI values had been the only names.
+- Every figure in Gastos, Entregas and the two split blocks goes through **`MoneyText`**; the signed
+  breakdown rows (`−$330.00`) take the `.numeric` utility, which is the design system's other route
+  to tabular figures.
+- «Entregar efectivo» renders only when something is actually available to hand in (balance minus
+  pledged pending drops); otherwise the card reads «Nada por entregar por ahora.»
+- Delete buttons are 48×48 and name their target (`Eliminar gasto: Gasolina de la camioneta`); the
+  expense form is full-size, and its bare wordless `+` is now a labelled **Agregar**.
+
+**Verified on the running app**, all three roles:
+
+| | before | after |
+|---|---|---|
+| `/balance` outline | `h1 → h6 → h6 → h6` | `h1 → h2 ×6` |
+| tabular money figures | 4 of 14 | **17 of 17** |
+| controls under 48px | 2 | **0** |
+| admin caja at $0.00 | live CTA → dead dialog | «Nada por entregar por ahora.» |
+| `/cash` Equipo panel | unnamed, no headings | `role="tabpanel"`, named «Equipo» |
+
+**Pinned by** `features/cash/components/CashBoxCard.test.tsx` (10 tests): the CTA appears only when
+cash is available — not at zero, not when fully pledged, not on a negative balance — the three cards
+name themselves with an `h2`, and the split figures carry `.numeric`.
+
+**Not done here:** the seller's screen still lives in `pages/BalancePage.tsx`, so its outline is
+pinned per-card rather than per-screen. `expectHeadingOutline()` belongs in a screen test, and the
+screen gets one when it moves into `features/cash/components/` — the admin/seller unification the
+review's Must Fix 4 calls for.
+
+---
+
+## BUG-039 — The Caja's State Pills Are Colour Alone, in Three Hand-Written Copies — ✅ FIXED
+
+**Found:** 2026-08-22, in the `/design-review` pass over `/balance`
+(`.design/balance/DESIGN_REVIEW.md`, Must Fix 3 + Should Fix 12).
+
+**Affected:** `pages/BalancePage.tsx` · `pages/CashBalancesPage.tsx` · `pages/CashDropDetailPage.tsx`
+· `features/cash/components/AckChip.tsx` — the seller's, the affiliate's and the admin's caja alike.
+
+### Symptom
+
+Every state pill in the caja measured `icon: false`: `Pendiente` (bg `#B45309`), `Rechazado`
+(`#B91C1C`), `Confirmado` (`#15803D`), `Por firmar` (amber outline). Raw MUI `Chip color=…` — a
+coloured pill with no glyph, so **state was carried by colour alone**, which the design system calls
+non-negotiable (`CLAUDE.md`: *"always icon-paired — state is never colour-alone"*). The same defect
+BUG-035 was, on the surfaces that fix never reached.
+
+Worse in combination: a drop confirmed by the admin but still awaiting the agent's signature rendered
+an amber `Por firmar` **beside** a green `Confirmado` — two pills, two tones, two weights, one object.
+The review read it as contradictory.
+
+### Cause
+
+`DROP_COLOR` / `DROP_LABEL` existed in **three byte-identical copies**, one per page, each feeding a
+raw `Chip`. `StatusChip` — the primitive whose entire job is icon-paired functional colour, with a
+test that fails if a preset ships without an icon — was never reached from here.
+
+One presentation written three times is the epic's own thesis: it does not stay in agreement, and no
+single edit can fix it.
+
+### Fix — 2026-08-22
+
+- New `features/cash/components/DropStatusChip.tsx` — the one map, on `StatusChip`, icon-paired
+  (`ScheduleRounded` / `CheckCircleRounded` / `DoNotDisturbOnRounded`). All three copies deleted.
+- `AckChip` moved onto `StatusChip` too, with an icon per state.
+- **`pending` acknowledgment is now NEUTRAL.** It is the one actionable ack state, and it already
+  shouts once — correctly — at the top of the page, where `PendingAcknowledgments` renders it as a
+  warning AlertCard with the Firmar / Disputar buttons. The row keeps the fact, not the alarm; one
+  obligation, one call to action.
+- An icon-paired chip is wider than the bare pill it replaces, and two of them squeezed the row text
+  into three wrapped lines at 375px. The three drop rows now `flexWrap` their chip group onto its own
+  line instead of shredding the text it describes.
+
+**Verified on the running app**, seller and admin: every state chip reports `icon: true`, `Pendiente`
+`#FEF3C7`/`#92400E`, `Rechazado` `#FEE2E2`/`#991B1B`, `Confirmado` `#DCFCE7`/`#166534`, `Por firmar`
+neutral `#F1F5F9`/`#475569`. Screenshots `review-drop-chips-after-mobile-375.png`,
+`review-cash-admin-drops-chips-after-mobile-375.png`, `review-cash-drop-detail-chips-after-mobile-375.png`.
+
+**Pinned by** `features/cash/components/DropStatusChip.test.tsx` — every drop status and every
+acknowledgment state must render `.MuiChip-icon`, `not_required` must render nothing, `pending` must
+stay neutral and a dispute must stay red.
+
+**Noted, not fixed:** the drop detail's «Confirmar recibo» is a green filled button and «Rechazar» a
+red outlined one — functional colour spent on an *action*, which the design system reserves for teal.
+Out of this PR's scope (a different screen and a different rule); it needs its own look at the
+review/reject pair.
+
+---
+
+## BUG-038 — Every Muted Label Renders at Full Ink; Warning and Error Text Lost Their Colour — ✅ FIXED
+
+**Found:** 2026-08-22, in the `/design-review` pass over `/balance`
+(`.design/balance/DESIGN_REVIEW.md`, Must Fix 2). Found by measuring computed colours in the running
+app; invisible in every diff, and invisible to the test suite by construction.
+
+**Affected:** 267 `Typography` call sites across 82 files — i.e. most screens in the product.
+
+### Symptom
+
+`<Typography color="text.secondary">` renders at `#0F172A` — **`text.primary`**. On `/balance` the
+three card labels («Efectivo por entregar», «Ventas del turno», «Comisiones ganadas») measured
+`rgb(15,23,42)`, the same ink as the money beside them, and the generated emotion rule
+`.css-ip2lr-MuiTypography-root` carried **no `color` declaration at all**. Across the whole page,
+exactly three leaf elements rendered `#475569`, and all three were MUI-internal input labels: **zero**
+of our own call sites took effect.
+
+The same defect ate FUNCTIONAL colour, which is worse. `color="warning.main"` on «$200.00 entregado,
+pendiente de confirmación» rendered ink, not amber — 7 sites, including the scanner's error text
+(`ScanResult`), the outbox's failure caption (`OutboxPage`), the operator access error and the
+receipt's success line. Meaning-carrying colour, silently absent.
+
+### Impact
+
+The design's whole *"money reads first"* mechanism depends on the label **receding**. With every label
+at full ink, hierarchy came from size and weight alone — on a screen whose first law is *legible in
+sunlight*. And a warning that renders as body text is a warning nobody sees.
+
+### Cause
+
+The MUI v6 → v9 upgrade. v9's `Typography` resolves `color` through palette-derived **variants** named
+`textPrimary | textSecondary | textDisabled` (and bare `warning | error | success | …` for
+`palette.<key>.main`) — see `@mui/material/Typography/Typography.js:62–74`. A **dotted path** matches
+no variant and is dropped: no error, no warning, no `color` in the generated class.
+
+Nothing caught it. `tsc` is happy (`color` is typed `string`), and the test suite queries by role and
+accessible name, never by colour (`docs/TESTING.md` D5) — so 82 files changed meaning and every test
+stayed green. `CLAUDE.md` still described the stack as MUI v6 while `package.json` pinned `^9.0.1`.
+
+### Fix — 2026-08-22
+
+- `color="text.secondary"` → `color="textSecondary"` (266 sites), `text.primary` → `textPrimary` (1).
+- `color="<palette>.main"` → `color="<palette>"` (7 sites) — v9's variant form for the same value.
+- The 2 non-`Typography` sites (`Box`, `SettingsPage`) moved to `sx={{ color: 'text.secondary' }}`,
+  which never had this failure mode.
+
+**Verified on the running app:** `/balance` went from 3 leaf elements rendering `#475569` (all MUI
+internals) to **23**, and «$200.00 entregado, pendiente de confirmación» from `rgb(15,23,42)` to
+`rgb(180,83,9)` — the WARNING token. The `AlertCard` amber-on-amber was untouched and still measures
+≈7:1.
+
+**Guarded by** a `no-restricted-syntax` ESLint rule in `app-turistear/eslint.config.js`: a dotted
+palette path in the `color` **prop** is now an error, with the fix in the message. `lint:app` is in
+CI's `verify` job, so this cannot come back the way it arrived — silently, during an upgrade. The
+`sx={{ color: 'text.secondary' }}` object form still works and is deliberately not restricted.
+
+**Found by the guard, not by the grep:** the 7 functional-colour sites. The search that found the
+muted labels looked for `text.` only; the lint rule looks for the shape of the mistake.
+
+---
+
+## BUG-037 — Nothing in the App Shows Keyboard Focus — ✅ FIXED
+
+**Found:** 2026-08-22, in the `/design-review` pass over `/balance`
+(`.design/balance/DESIGN_REVIEW.md`, Must Fix 1). Found by pressing Tab in the running app.
+
+**Affected:** `app-turistear/src/config/theme.ts` — every control in the product.
+
+### Symptom
+
+Tab into the primary nav. The focused link carries `Mui-focusVisible`, `:focus-visible` matches, and
+it computes `outline: 0px none` · `box-shadow: none` · `background: rgba(0,0,0,0)` — **byte-identical
+to its unfocused neighbour.** Same result forcing `.Mui-focusVisible` onto the contained CTA
+(«Entregar efectivo») and a text button («Disputar»): no outline, no shadow, no background change.
+
+A keyboard-only user cannot tell where they are, on any screen, in any role. WCAG 2.4.7 (AA).
+
+### Cause
+
+`DESIGN_TOKENS.md §4` has always defined the ring — `--shadow-focus: 0 0 0 3px rgba(15,118,110,0.28)`,
+annotated *"keyboard focus-visible ring, non-text controls"* — and `tokens.css:54` has always emitted
+it. Exactly **one** component in `src/` ever applied it: `components/ListRow.tsx:59`. `theme.ts` had no
+`focusVisible` rule at all, so every Button, IconButton, Tab, ListItemButton and nav link fell back to
+MUI's default focus shadow — which the theme itself removes twice over: `disableElevation: true` in
+`MuiButton.defaultProps`, and `boxShadow: 'none'` in its `styleOverrides.root`.
+
+The token was never wrong. It was never wired.
+
+### Fix — 2026-08-22
+
+`MuiButtonBase.styleOverrides.root['&.Mui-focusVisible'] = { boxShadow: SHADOW_FOCUS }`, so every
+control inherits the ring from one place, `:focus-visible` only (a mouse press stays silent).
+
+`MuiButton` has to **restate** it: `disableElevation` emits its own
+`.css-…-MuiButton-root.Mui-focusVisible { box-shadow: none }` at the same specificity and later in the
+sheet, so the ButtonBase rule loses there — and the one control a keyboard user most needs to find is
+the primary CTA. Restated inside `MuiButton`'s own overrides, which land last, without giving elevation
+back.
+
+Text inputs are deliberately untouched: `DESIGN_TOKENS.md §4` gives them `--color-focus-tint` instead
+(*"bg only, no border/outline/box-shadow"*), and that one measured correct all along —
+`rgba(15,118,110,0.08)`, exactly the token.
+
+**Verified on the running app** (the only place the defect was visible): after the change, a real Tab
+press lands a ring of `rgba(15,118,110,0.28) 0px 0px 0px 3px` on the nav link, the account avatar, the
+contained CTA, the text button and the icon button alike — see
+`.design/balance/screenshots/review-focus-ring-after-mobile-375.png`. Buttons transition `box-shadow`,
+so a computed read in the same tick as the class change returns the t=0 value; the settled value is the
+ring.
+
+**Pinned by** `src/config/theme.test.ts`. jsdom cannot answer *"is focus visible"* — `:focus-visible`
+and `var()` inside `box-shadow` are both out of its reach — so the test asserts the rules exist and
+still point at the token. It cannot prove the ring renders; it does stop it from being deleted again,
+which is the failure that actually happened. Confirmed non-vacuous: removing the `MuiButton` rule fails
+it.
+
+---
+
+## BUG-036 — The App Test Suite Flakes Under Parallel Load — ✅ FIXED
+
+**Found:** 2026-08-22, while verifying the heading-outline fix. Two full-suite runs failed on
+**different** tests each time, always with `Test timed out in 5000ms` — and one of them
+(*"applies a facet in place instead of navigating away"*) is in a file that run did not touch.
+
+**Not caused by that change.** The same symptom reproduces on a clean checkout carrying none of it
+(`2336a90`): two files failed there too, again a different pair. `vitest run --no-file-parallelism`
+passes **38 files / 643 tests** every time.
+
+**Suspected cause:** jsdom + MSW + TanStack Query under `vitest`'s default file parallelism on a
+loaded machine. Each test's `findBy*` waits against the 5 s default; when several heavy files render
+concurrently the first paint can cross it. Nothing in the failures suggests a wrong assertion — they
+time out waiting for a render that eventually happens.
+
+**Impact:** CI's `verify` job can fail on an innocent PR, and a flaky suite is one that stops being
+read. It also masks real regressions: two red tests you have learned to re-run are two tests you no
+longer trust.
+
+### Fix — 2026-08-22
+
+Measured first, per that note. `vitest run --reporter=json` over the whole suite says the slowest
+individual tests take **2.8 s, 4.6 s and 8.7 s** — a screen render with MSW and TanStack Query,
+sometimes typing into a debounced field. Against a **5 s** default, several tests had no headroom at
+all, and under vitest's default file parallelism on 8 cores whichever one loses the CPU race crosses
+it. Nothing was hanging: they time out waiting for a render that does arrive.
+
+So the timeout was the defect, not the tests. `testTimeout: 15_000` in
+`app-turistear/vitest.config.ts`, documented in `docs/TESTING.md` § Conventions with the numbers and
+with the rule that anything needing more than 15 s is hung rather than slow.
+
+**Verified:** three consecutive full runs in the default parallel mode, 39 files / 649 tests green
+each time — against two of two runs failing before.
+
+**Not done, deliberately:** capping `maxThreads` would trade wall-clock for determinism the timeout
+already buys, and making the slow tests fast is a different project (the three worst are the catalog
+wizard's, not the folio screens'). What was wrong here was the budget.
+
+---
+
+## BUG-035 — The Seller's Card Paints a Waiting Customer Green — ✅ FIXED
+
+**Found:** 2026-08-22, in the `/design-review` pass over the unified folio surfaces
+(`.design/folio-surface-parity/DESIGN_REVIEW.md`, Must Fix 1). Found by LOOKING at the running app
+with the seeded database, not by reasoning about the code.
+
+**Affected:** `app-turistear/src/features/folios/folioCardState.ts` (`folioAttention`) — the seller
+surface of the shared `FolioCard`.
+
+### Symptom
+
+A folio whose customer has an OPEN petition — they asked to cancel or to reschedule from their
+portal — renders on the seller's list with a **green** rail (`rgb(21,128,61)` = "nothing needs a
+human"), the neutral verb *Enviar mensaje*, and **no text anywhere naming the request**. The admin's
+card for the same folio says *Revisar solicitud* on an amber rail.
+
+Measured on the seeded board: *Lucía Ortega* and *Carlos Peña*, both with a live petition.
+
+### Cause
+
+`folioAttention` derives the rail from `folioAction`, and `folioAction` is **surface-filtered**: the
+three admin verbs are skipped for a seller, so a folio with `cancellation_request: 'pending'` falls
+through to `'message'` → `rail: 'success'`.
+
+Hiding the admin **verb** therefore also downgraded the **state**. Line-autonomy D14 tied the two
+together on purpose — *"derived FROM `folioAction`'s pending-work ladder, so the rail's colour and
+the button's verb can never disagree"* — which is right on one surface and wrong across two.
+
+### Impact
+
+US-AG50 promised the seller exactly this, in these words: *"I want my list to show the state my own
+sale is actually in — … that the customer asked to cancel — because today those states live only on
+admin screens I cannot open, **and my card shows a sale that looks fine**."* It looks fine. The
+seller is the person the customer calls to ask what happened to their request.
+
+The other two admin-only states do NOT have this problem, because their words carry them: an
+unverified transfer reads *«$1,800.00 por verificar»* and an owed refund reads *«Reembolsar
+$1,500.00»*. Only the petition was mute.
+
+### Fix — 2026-08-22
+
+`folio-surface-parity.spec.md` **D17**. `folioAttention` no longer takes a surface at all: it asks
+the FULL ladder, because *"does this folio need a human?"* is a fact about the folio. The verb stays
+capability-filtered, and the card gained an icon-paired line — *«El cliente pidió un cambio»*,
+kind-agnostic because the list row carries no `kind` — rendered only where the button is not already
+naming the work, so the admin never reads the same fact twice.
+
+**Why the unit tests missed it:** `folioCardState.test.ts`'s D14 block called `folioAttention`
+without a surface, which is the admin path. The seller path had no unit coverage and the defect
+lived exactly there. The regression tests now assert the *invariance* — the same folio yields the
+same rail for both audiences — rather than one audience's value.
+
+---
+
+## BUG-034 — A Cancelled Sale Tells the Seller Nothing About the Money — ✅ FIXED
+
+**Found:** 2026-08-22, comparing `/history/:id` against `/folios/:id` while writing
+`docs/oversight/folio-surface-parity.spec.md`.
+
+**Affected:** `api-turistear/src/routes/pos/handler.ts` (`getFolio`, line 2277) and
+`app-turistear/src/pages/FolioHistoryDetailPage.tsx`.
+
+### Symptom
+
+A folio the seller sold, paid in full and later cancelled renders in their detail as `Pagado $3,000`
+and nothing else. What was refunded, what the company retained under the cancellation ladder, and
+what credit the customer was left with (US-A87) are all absent. The admin's detail on the same folio
+states all three.
+
+### Cause
+
+`GET /api/pos/folios/:id` never grew the fields. `GET /api/folios/:id` returns `refund_status`,
+`refund_amount`, `refund_note`, `credit_amount`, `credit_expires_at` and `cancellation_reason`
+(`routes/folios/handler.ts:294-300`); the POS serializer is a separate literal that returns none of
+them, and the frontend `Folio` type mirrors that omission. Line-level refund data is already
+identical on both — only the folio level diverged.
+
+This is the same defect `folio-state-machine.spec.md` named *"the `(reembolsado)` bug"* and fixed on
+the admin surface. It survived on the seller's because the two detail pages are separate code with
+separate payloads, and nothing asserts they agree.
+
+### Impact
+
+The seller is the person standing in front of the customer when a cancellation is disputed, and the
+one screen they can open says the sale was paid and stops. They cannot state the refund, cannot
+state the retention, and cannot see a credit they are expected to honour as a manual discount
+(US-A87 D6/D10). No money is wrong — only what the person answering for it can see.
+
+### Fix — 2026-08-22
+
+`folio-surface-parity.spec.md` **D6**, PR-1. The two hand-maintained payloads became one function,
+`api-turistear/src/utils/folioDetail.ts` (`readFolioDetail`), which both `getFolioDetail` and the
+POS `getFolio` call; the seller surface passes `agentId`, and that caller scope is the ONLY thing
+that differs between them. The gap was wider than first recorded: the seller's payload also lacked
+the folio-level `booking_expires_at`, `pending_balance`, the reminder stamps and `fulfillment`.
+
+The frontend rows moved into a shared `FolioMoneyOutcome` — the admin's detail rendered them as
+inline JSX, and copying that JSX would have made a second copy of the thing that already drifted.
+
+**What keeps it fixed:** `test/folios/folio-surface-parity.test.ts` S-3 asserts the two detail GETs
+are **deep-equal** — whole response, not a chosen subset. A field that reaches one audience and not
+the other now fails CI instead of surviving three releases.
+
+---
+
+## BUG-033 — A Closed Bottom Sheet Leaves the Wizard Hidden From Screen Readers — ⚠️ OPEN
+
+**Found:** 2026-08-21, writing the US-A91 wizard tests. Every query for the wizard's footer after a
+`BottomSheet` had been opened and closed failed with *"Unable to find an accessible element with
+the role button"* — while the button was plainly in the DOM.
+
+**Affected component:** `app-turistear/src/components/BottomSheet.tsx` (and every host built on it:
+`FormSheet`, `ConfirmSheet`, `UnitDraftSheet`, the wizard's discard confirm).
+
+### Symptom
+
+After a sheet closes, an ancestor `<div>` of the page content still carries `aria-hidden="true"`.
+The content is visible and clickable with a mouse; it is simply **absent from the accessibility
+tree**, so a screen reader announces nothing and the whole surface is unreachable by assistive
+navigation until a full remount.
+
+Reproduced in jsdom on the **untouched** create path (open the unit sheet from wizard step 2, add a
+unit, then query the footer), so it predates US-A91 and is not specific to the attach flow.
+
+### Suspected cause
+
+`BottomSheet` renders MUI's `SwipeableDrawer`, which is `keepMounted` by default (it needs the node
+present to support the iOS swipe-to-open gesture). MUI's `Modal` applies `aria-hidden` to the
+siblings of an open modal and removes it on close; with two keepMounted drawers mounted by the same
+subtree (the draft sheet and the discard `ConfirmSheet`), the un-hiding appears not to complete.
+
+### Impact
+
+Screen-reader users lose the wizard — and any screen where a sheet has been opened and dismissed —
+until they navigate away and back. Sighted mouse/touch users are unaffected, which is why it went
+unnoticed: nothing looks wrong.
+
+### Not yet verified in a real browser
+
+The reproduction is in jsdom. Before fixing, confirm it in Chrome/Safari with VoiceOver — MUI's
+`ariaHidden` bookkeeping is not jsdom-specific, but the ref-counting could behave differently where
+transitions actually run.
+
+**Workaround in tests:** `ServiceWizard.test.tsx` queries the wizard chrome with `{ hidden: true }`,
+with a comment pointing here. Drop that option when this is fixed — it is the assertion that would
+catch a regression.
 ## BUG-032 — The POS Detail Answers for the First Day of a Range and Calls the Rest Nonexistent — ✅ FIXED
 
 **Found:** 2026-08-21, reported from the floor: filter `/pos` to **21–23 Aug**, open the card for

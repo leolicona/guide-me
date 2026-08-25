@@ -17,6 +17,7 @@ import {
   nightlyRate,
   parseCsvInts,
   quoteStay,
+  stayFloor,
   remainingOnNight,
   type QuantityRange,
   type SeasonRate,
@@ -89,6 +90,7 @@ const typeCols = {
   checkinTime: accommodationUnitTypes.checkinTime,
   checkoutTime: accommodationUnitTypes.checkoutTime,
   amenities: accommodationUnitTypes.amenities,
+  maxDiscountPct: accommodationUnitTypes.maxDiscountPct, // US-A92 — resolves min_total below
   status: accommodationUnitTypes.status,
 } as const
 
@@ -256,6 +258,11 @@ export const getLodgingAvailability = async (c: PosContext) => {
         nights: quote.nights,
         quantity,
         total: quote.total,
+        // US-AG57 (D6) — the floor travels WITH the quote, in pesos. The client compares two
+        // numbers it was handed and never re-derives the ceil, so the field the agent sees and
+        // the bound the confirm enforces cannot drift by a centavo. Equals `total` at 0 %,
+        // which is how the cart knows to render the total as text rather than a field (D7).
+        min_total: stayFloor(quote.total, t.maxDiscountPct),
         per_night: quote.perNight.map((n) => ({ date: n.date, rate: n.rate })),
       }
     })

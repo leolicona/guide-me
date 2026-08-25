@@ -61,7 +61,7 @@ export default function FolioReceiptPage() {
         )}
 
         {isError && (
-          <Alert severity="error">No se pudo cargar este folio. Inténtalo de nuevo.</Alert>
+          <Alert severity="error">No se pudo cargar esta venta. Inténtalo de nuevo.</Alert>
         )}
 
         {folio && (
@@ -81,11 +81,11 @@ export default function FolioReceiptPage() {
                     ? 'Apartado vencido'
                     : 'Venta confirmada'}
               </Typography>
-              <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+              <Typography variant="caption" color="textSecondary" sx={{ display: 'block' }}>
                 Folio {folio.id}
               </Typography>
               {folio.customer_email && (
-                <Typography variant="body2" color="success.main" sx={{ mt: 1 }}>
+                <Typography variant="body2" color="success" sx={{ mt: 1 }}>
                   📧 {isBooking ? 'Comprobante de apartado enviado a' : 'Recibo enviado a'}{' '}
                   {folio.customer_email}
                 </Typography>
@@ -103,7 +103,7 @@ export default function FolioReceiptPage() {
                     <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
                       Pago en verificación
                     </Typography>
-                    <Typography variant="body2" color="text.secondary">
+                    <Typography variant="body2" color="textSecondary">
                       Los boletos se enviarán en cuanto un administrador confirme la transferencia.
                     </Typography>
                   </Box>
@@ -149,7 +149,7 @@ export default function FolioReceiptPage() {
                 </Stack>
 
                 {(folio.customer_name || folio.customer_email) && (
-                  <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                  <Typography variant="body2" color="textSecondary" sx={{ mb: 2 }}>
                     {folio.customer_name}
                     {folio.customer_name && folio.customer_email ? ' · ' : ''}
                     {folio.customer_email}
@@ -172,14 +172,14 @@ export default function FolioReceiptPage() {
                               <FolioStatusChip status={line.money_state} />
                             )}
                           </Stack>
-                          <Typography variant="caption" color="text.secondary">
+                          <Typography variant="caption" color="textSecondary">
                             {folioLineMeta(line)} · {formatMoney(line.unit_price)}
                           </Typography>
                           {line.extras.map((e) => (
                             <Typography
                               key={e.id}
                               variant="caption"
-                              color="text.secondary"
+                              color="textSecondary"
                               sx={{ display: 'block' }}
                             >
                               + {e.quantity}× {e.name} ({formatMoney(e.price)})
@@ -197,12 +197,12 @@ export default function FolioReceiptPage() {
                 <Divider sx={{ my: 2 }} />
                 <Stack spacing={1}>
                   <Stack direction="row" sx={{ justifyContent: 'space-between' }}>
-                    <Typography color="text.secondary">Subtotal</Typography>
+                    <Typography color="textSecondary">Subtotal</Typography>
                     <Typography>{formatMoney(folio.subtotal)}</Typography>
                   </Stack>
                   {folio.discount_total > 0 && (
                     <Stack direction="row" sx={{ justifyContent: 'space-between' }}>
-                      <Typography color="text.secondary">Descuento</Typography>
+                      <Typography color="textSecondary">Descuento</Typography>
                       <Typography>−{formatMoney(folio.discount_total)}</Typography>
                     </Stack>
                   )}
@@ -211,25 +211,25 @@ export default function FolioReceiptPage() {
                     <Typography variant="h6">{formatMoney(folio.total)}</Typography>
                   </Stack>
                   <Stack direction="row" sx={{ justifyContent: 'space-between' }}>
-                    <Typography color="text.secondary">{isBooking ? 'Anticipo' : 'Pagado'}</Typography>
+                    <Typography color="textSecondary">{isBooking ? 'Anticipo' : 'Pagado'}</Typography>
                     <Typography>{formatMoney(folio.amount_paid)}</Typography>
                   </Stack>
                   {isBooking && (
                     <Stack direction="row" sx={{ justifyContent: 'space-between' }}>
-                      <Typography color="text.secondary">Saldo pendiente</Typography>
+                      <Typography color="textSecondary">Saldo pendiente</Typography>
                       <Typography color="primary">
                         {formatMoney(folio.pending_balance ?? folio.total - folio.amount_paid)}
                       </Typography>
                     </Stack>
                   )}
                   <Stack direction="row" sx={{ justifyContent: 'space-between' }}>
-                    <Typography color="text.secondary">Método de pago</Typography>
+                    <Typography color="textSecondary">Método de pago</Typography>
                     <Typography>{PAYMENT_METHOD_LABEL[folio.payment_method]}</Typography>
                   </Stack>
                   {/* US-AF13 — who took the sale (only when an operator, not the manager, sold it). */}
                   {folio.operator_name && (
                     <Stack direction="row" sx={{ justifyContent: 'space-between' }}>
-                      <Typography color="text.secondary">Vendido por</Typography>
+                      <Typography color="textSecondary">Vendido por</Typography>
                       <Typography>{folio.operator_name}</Typography>
                     </Stack>
                   )}
@@ -253,7 +253,7 @@ export default function FolioReceiptPage() {
                 <Typography variant="h6" sx={{ mb: 1.5 }}>
                   Boletos de acceso
                 </Typography>
-                <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                <Typography variant="body2" color="textSecondary" sx={{ mb: 2 }}>
                   Un QR por servicio. El cliente lo presenta a la entrada; un agente lo escanea
                   para canjear un pase.
                 </Typography>

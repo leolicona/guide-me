@@ -47,7 +47,7 @@ export default function DashboardPage() {
         <Typography variant="h4" component="h1" sx={{ mb: 3 }}>
           Hoy
         </Typography>
-        <Typography color="text.secondary" sx={{ mb: 3 }}>
+        <Typography color="textSecondary" sx={{ mb: 3 }}>
           Hola, {user.name}. Así va tu día.
         </Typography>
 

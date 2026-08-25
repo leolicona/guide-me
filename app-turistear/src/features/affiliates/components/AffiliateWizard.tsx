@@ -154,7 +154,7 @@ export function AffiliateWizard({ onClose, onCreated }: Props) {
 
             {step === 2 && (
               <>
-                <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                <Typography variant="body2" color="textSecondary" sx={{ mb: 2 }}>
                   Activa los servicios que este afiliado puede vender y define la comisión que
                   ganará en cada uno. Solo los servicios activos aparecen en su punto de venta.
                 </Typography>
@@ -174,7 +174,7 @@ export function AffiliateWizard({ onClose, onCreated }: Props) {
 
             {step === 3 && (
               <Stack spacing={2}>
-                <Typography variant="body2" color="text.secondary">
+                <Typography variant="body2" color="textSecondary">
                   Invita al <strong>gerente</strong> de la empresa (su cuenta con correo y
                   contraseña). Es quien administra la caja y da de alta a sus cajeros. Puedes dejarlo
                   vacío e invitarlo más tarde.
@@ -191,7 +191,7 @@ export function AffiliateWizard({ onClose, onCreated }: Props) {
                   fullWidth
                   autoFocus
                 />
-                <Typography variant="caption" color="text.secondary">
+                <Typography variant="caption" color="textSecondary">
                   Los cajeros o vendedores adicionales no se invitan aquí: el gerente los agrega como
                   operadores con un PIN, desde su panel.
                 </Typography>

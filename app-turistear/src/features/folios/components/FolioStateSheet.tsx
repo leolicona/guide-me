@@ -56,7 +56,7 @@ export function FolioStateSheet({ open, onClose, active, onToggle, onClear }: Fo
             </Typography>
             {/* The hint is what makes the three sections learnable without a manual: each names the
                 question it answers, so "Por verificar" is obviously work and not a payment state. */}
-            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+            <Typography variant="caption" color="textSecondary" sx={{ display: 'block', mb: 1 }}>
               {SECTION_HINT[section]}
             </Typography>
             <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>

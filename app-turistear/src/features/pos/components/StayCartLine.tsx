@@ -2,9 +2,9 @@ import { useState } from 'react'
 import { Box, Stack, Typography, IconButton, Collapse, Button } from '@mui/material'
 import DeleteOutlineRounded from '@mui/icons-material/DeleteOutlineRounded'
 import ExpandMoreRounded from '@mui/icons-material/ExpandMoreRounded'
-import { MoneyText } from '../../../components'
+import { EditableMoney } from '../../../components'
 import { formatMoney } from '../../catalog/types'
-import type { StayCartLine as StayCartLineModel } from '../../../store/posCart'
+import { usePosCart, type StayCartLine as StayCartLineModel } from '../../../store/posCart'
 
 const WEEKDAYS_ES = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb']
 
@@ -20,9 +20,13 @@ interface StayCartLineProps {
 }
 
 // US-AG38 — the checkout line for a stay (transactional hierarchy: the total reads first, the
-// per-night math is secondary and expandable).
+// per-night math is secondary and expandable). US-AG57 — that total is also where the discount is
+// entered, through the shared `EditableMoney`: for a stay `unit_price === line_total`, so the
+// figure the agent reads and the figure they negotiate are literally the same number. A unidad
+// with no discount ceiling has `min_total === quoted_total`, and the control renders borderless.
 export function StayCartLine({ line, onRemove }: StayCartLineProps) {
   const [open, setOpen] = useState(false)
+  const setStayTotal = usePosCart((s) => s.setStayTotal)
 
   return (
     <Box>
@@ -32,7 +36,7 @@ export function StayCartLine({ line, onRemove }: StayCartLineProps) {
             {line.unit_type_name}
             {line.quantity > 1 ? ` × ${line.quantity}` : ''}
           </Typography>
-          <Typography variant="caption" color="text.secondary">
+          <Typography variant="caption" color="textSecondary">
             {/* Rooms live in the title ("× 2") — the meta stays dates · nights · guests. */}
             {dayLabel(line.check_in)} → {dayLabel(line.check_out)} · {line.nights}{' '}
             {line.nights === 1 ? 'noche' : 'noches'} · {line.guests}{' '}
@@ -47,14 +51,24 @@ export function StayCartLine({ line, onRemove }: StayCartLineProps) {
                   sx={{ transform: open ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }}
                 />
               }
-              sx={{ mt: 0.5, px: 0.5 }}
+              sx={{ mt: 0.5, px: 0.5, display: 'flex' }}
             >
               Ver desglose
             </Button>
           )}
         </Box>
         <Stack spacing={0.5} sx={{ alignItems: 'flex-end', flexShrink: 0 }}>
-          <MoneyText cents={line.total} variant="subtitle2" srLabel="Total de la estancia" />
+          <EditableMoney
+            cents={line.total}
+            min={line.min_total}
+            max={line.quoted_total}
+            onCommit={(cents) => setStayTotal(line.id, cents)}
+            label="Total"
+            // "cotizado", not "base": a stay has no unit base price — the ceiling is whatever the
+            // server's engine quoted for these dates, rooms and guests.
+            maxLabel="cotizado"
+            srLabel="Total de la estancia"
+          />
           <IconButton size="small" aria-label="Eliminar estancia" onClick={onRemove}>
             <DeleteOutlineRounded fontSize="small" />
           </IconButton>
@@ -65,10 +79,10 @@ export function StayCartLine({ line, onRemove }: StayCartLineProps) {
         <Stack spacing={0.25} sx={{ mt: 1, pl: 1 }}>
           {line.per_night.map((n) => (
             <Stack key={n.date} direction="row" sx={{ justifyContent: 'space-between' }}>
-              <Typography variant="caption" color="text.secondary">
+              <Typography variant="caption" color="textSecondary">
                 {dayLabel(n.date)}
               </Typography>
-              <Typography variant="caption" color="text.secondary" className="numeric">
+              <Typography variant="caption" color="textSecondary" className="numeric">
                 {formatMoney(n.rate)}
               </Typography>
             </Stack>

@@ -1,5 +1,5 @@
 import { Box, Chip, Typography } from '@mui/material'
-import CheckRounded from '@mui/icons-material/CheckRounded'
+import { CheckRounded } from '@mui/icons-material'
 import { AMENITY_OPTIONS, type AmenityKey } from '../lodging'
 
 interface AmenityPickerProps {
@@ -17,7 +17,7 @@ export function AmenityPicker({ value, onChange, disabled }: AmenityPickerProps)
 
   return (
     <Box>
-      <Typography variant="subtitle2" color="text.secondary" sx={{ mb: 1 }}>
+      <Typography variant="subtitle2" color="textSecondary" sx={{ mb: 1 }}>
         Amenidades
       </Typography>
       <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
