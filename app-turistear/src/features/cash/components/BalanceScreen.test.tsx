@@ -295,8 +295,11 @@ describe('BalanceScreen — the capability line', () => {
   })
 
   // S-21 / D17 — the FOURTH gate, and the one deliberately added to D4's list of three. Once
-  // «Caja» means MY caja for the admin too, their oversight work needs a door, and their own
-  // screen is where they already are.
+  // «Caja» means MY caja for the admin too, their oversight work needs a door.
+  //
+  // BUG-041: that door used to be gated on `teamPending > 0`, so with nothing pending — the normal
+  // state — the team's caja was reachable only by typing the URL. These two tests are the pair
+  // that would have caught it: the alert, AND the quiet card.
   it('shows the team’s pending work to the admin, and to nobody else', async () => {
     withTeamPending(3)
     withBalance()
@@ -317,13 +320,23 @@ describe('BalanceScreen — the capability line', () => {
     )
   })
 
-  // Nothing waiting is not a thing to announce.
-  it('hides that block when the team owes the admin nothing', async () => {
+  // The door stays, quietly, when there is nothing waiting — this is the regression.
+  it('still leads to the team’s caja when nothing is pending', async () => {
     withTeamPending(0)
     withBalance()
     renderScreen('admin')
-    await screen.findByRole('heading', { level: 2, name: 'Efectivo por entregar' })
+    expect(await screen.findByRole('heading', { level: 2, name: 'Caja del equipo' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /Abrir/ })).toHaveAttribute('href', '/cash')
+    // Quiet, not alarming: no call to confirm anything.
     expect(screen.queryByText(/confirmación/)).not.toBeInTheDocument()
+  })
+
+  it('offers a seller no door to a caja that is not theirs', async () => {
+    withTeamPending(0)
+    withBalance()
+    renderScreen('self')
+    await screen.findByRole('heading', { level: 2, name: 'Efectivo por entregar' })
+    expect(screen.queryByRole('heading', { level: 2, name: 'Caja del equipo' })).not.toBeInTheDocument()
   })
 
   // An admin's own drop is born `confirmed`, so there is never a pending one to cancel.

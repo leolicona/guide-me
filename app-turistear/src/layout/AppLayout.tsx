@@ -120,7 +120,6 @@ export function AppLayout() {
     // their own. Same entry, same meaning — «what is waiting for you» — different source.
     if (to === ROUTES.BALANCE) return user.role === 'admin' ? pendingDropCount : pendingAckCount
     if (to === ROUTES.FOLIOS) return pendingCancellationCount + pendingVerificationCount
-    if (to === ROUTES.CASH) return pendingDropCount
     if (to === ROUTES.HISTORY) return pendingDeliveryCount
     return 0
   }

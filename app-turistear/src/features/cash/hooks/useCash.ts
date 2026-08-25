@@ -104,8 +104,8 @@ export const usePendingAckCount = (enabled: boolean) =>
 // --- Admin surface ---
 
 // US-A19 — outstanding balances per agent (company cash exposure).
-export const useBalances = () =>
-  useQuery({ queryKey: BALANCES_KEY, queryFn: listBalances })
+export const useBalances = (enabled = true) =>
+  useQuery({ queryKey: BALANCES_KEY, queryFn: listBalances, enabled })
 
 // US-UX06 — badge feed for the admin nav (admins only — pass `enabled: role === 'admin'`).
 // The count of cash drops awaiting the admin's confirmation, summed across the org's agents.
