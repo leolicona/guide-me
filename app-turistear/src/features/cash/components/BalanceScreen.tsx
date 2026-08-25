@@ -1,5 +1,4 @@
 import { useState } from 'react'
-import { Link as RouterLink } from 'react-router-dom'
 import {
   Box,
   Typography,
@@ -21,9 +20,9 @@ import {
   useCreateDrop,
   useCancelDrop,
   useRegisterPayout,
-  usePendingDropCount,
 } from '../hooks'
 import { PendingAcknowledgments } from './PendingAcknowledgments'
+import { TeamCajaDoor } from './TeamCajaDoor'
 import { useOrgDateFormatter } from '../../organization'
 import { AckChip } from './AckChip'
 import { DropStatusChip } from './DropStatusChip'
@@ -35,7 +34,6 @@ import {
   MoneyText,
   StatusChip,
   InfoPopover,
-  AlertCard,
   FormSheet,
   ConfirmSheet,
 } from '../../../components'
@@ -43,7 +41,6 @@ import {
 import { ServiceError } from '../../../services/authService'
 import { formatMoney, amountToCents, centsToAmount } from '../../catalog/types'
 import { useCurrentUser } from '../../auth/CurrentUserContext'
-import { ROUTES } from '../../../config/routes'
 
 const DATE_FMT: Intl.DateTimeFormatOptions = {
   month: 'short',
@@ -88,10 +85,6 @@ export function BalanceScreen({ surface }: { surface: CajaSurface }) {
   const createDrop = useCreateDrop()
   const cancelDrop = useCancelDrop()
   const payout = useRegisterPayout()
-  // D17 — the FOURTH thing `surface` gates: whether the TEAM's pending work is surfaced. Written
-  // into the list in D4's comment above, not smuggled in: a rule you quietly extend is a rule you
-  // have stopped enforcing.
-  const { data: teamPending = 0 } = usePendingDropCount(isAdmin)
 
   const [description, setDescription] = useState('')
   const [expenseAmount, setExpenseAmount] = useState('')
@@ -173,22 +166,11 @@ export function BalanceScreen({ surface }: { surface: CajaSurface }) {
             {!isAdmin && <PendingAcknowledgments items={balance.pending_acknowledgments} />}
 
             {/* D17 — once «Caja» means MY caja for the admin too, their oversight work needs a
-                door, and their own screen is where they already are. */}
-            {isAdmin && teamPending > 0 && (
-              <AlertCard
-                tone="warning"
-                title={
-                  teamPending === 1
-                    ? 'Una entrega del equipo espera tu confirmación'
-                    : `${teamPending} entregas del equipo esperan tu confirmación`
-                }
-                actions={
-                  <Button component={RouterLink} to={ROUTES.CASH} size="small" variant="contained">
-                    Ver caja del equipo
-                  </Button>
-                }
-              />
-            )}
+                door, and their own screen is where they already are. UNCONDITIONAL: gating it on
+                pending work left the team's caja unreachable whenever nothing was pending, which
+                is the normal state (BUG-041). `TeamCajaDoor` changes its tone, never its
+                presence. */}
+            {isAdmin && <TeamCajaDoor />}
 
             {/* D5 — self-authorization is STATED, not implied. A screen that looks identical to
                 the seller's while behaving differently is worse than two screens; this badge is

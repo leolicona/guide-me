@@ -6,6 +6,65 @@ Tracks confirmed bugs, root causes, and fixes. Each entry is immutable once clos
 
 ---
 
+## BUG-041 — The Team's Caja Became Unreachable Whenever Nothing Was Pending — ✅ FIXED
+
+**Found:** 2026-08-25, by the admin using the product. *«He estado vagando en caja y no veo ningún
+enlace.»* Not by a test, not by a review — by someone who could no longer do their job.
+
+**Affected:** `features/cash/components/BalanceScreen.tsx` — the admin surface, shipped in #141.
+
+### Symptom
+
+An admin could not reach **Caja del equipo** at all: not the team's balances, not *Registrar cobro
+directo*, not *Registrar pago*, not the hand-in history. `/cash` was reachable only by typing the
+URL.
+
+### Cause
+
+US-A98 (D2′) moved the admin's own caja to `/balance` and collapsed the nav's two «Caja» entries
+into one pointing there. That part was right — the word meant two things. The replacement door was
+D17's block on the admin's own screen, and it was written:
+
+```tsx
+{isAdmin && teamPending > 0 && <AlertCard … />}
+```
+
+**Gated on pending work, and it was the only door.** With nothing pending — the *normal* state, and
+the state an org is in most of the time — every entry point to the team's caja disappeared at once.
+The two remaining links to `ROUTES.CASH` are the *back* buttons on `/cash/drops/:id` and
+`/cash/entregas`, both of which live behind the door they lead back to.
+
+The nav badge branch `if (to === ROUTES.CASH)` also survived in `AppLayout`, matching no nav item —
+dead code that made the loss look accounted for.
+
+### Why the tests did not catch it
+
+Both tests written for D17 asserted the state where work exists: the block renders for an admin, and
+does not for a seller. **Neither asserted the empty state**, which is the one that broke. An absence
+test on the surface that never had the block passes whether or not the block works.
+
+### Fix — 2026-08-25
+
+`features/cash/components/TeamCajaDoor.tsx` — **unconditional**; only its TONE follows the work:
+
+- pending > 0 → the warning `AlertCard` with *Ver caja del equipo* (unchanged)
+- otherwise → a quiet `SectionCard`: **«Caja del equipo · $X en la calle · N personas»** with
+  *Abrir*.
+
+The quiet card is not a placeholder. It carries the figure an admin opens this section for anyway,
+and it costs no request: `useBalances` shares the `['cash','balances']` cache the nav badge already
+fills. `useBalances(enabled)` gained the flag so a seller never fires the admin-only read.
+
+The dead `ROUTES.CASH` badge branch is deleted.
+
+**Pinned by** three cases in `BalanceScreen.test.tsx` — the alert state, **the quiet state**, and a
+seller getting no door at all. The middle one is the regression.
+
+**Verified in the browser** with every drop confirmed (the reported state): the door renders,
+`/cash` is one tap away, and re-seeding one pending hand-in swaps the card back to the alert.
+
+---
+
 ## BUG-040 — The Caja's Money Is Not the Money Primitive, and Its Regions Have No Headings — ✅ FIXED
 
 **Found:** 2026-08-22, in the `/design-review` pass over `/balance`
