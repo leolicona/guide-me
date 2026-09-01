@@ -255,6 +255,7 @@ Every handler that reads or writes tenant-scoped data MUST follow these rules. V
 | 4 | **Every UPDATE/DELETE includes the org filter:** `and(eq(table.id, input.id), eq(table.organizationId, user.organizationId))`. A non-matching row silently returns 0 rows → handler returns `404`. |
 | 5 | **Every new tenant-scoped migration** declares `organization_id TEXT NOT NULL REFERENCES organizations(id)`. Tables scoped transitively (e.g. via `user_id`) are exempt and must say so in the migration. |
 | 6 | **Index `organization_id`** on every tenant-scoped table — standalone or as the leading column in a composite index. |
+| 7 | **A correlated subquery keyed by a child column needs its own index, led by that key.** `… from folio_lines fl where fl.folio_id = folios.id` cannot enter `(organization_id, folio_id)` — SQLite only uses a composite index when its leading column is constrained, and D1 never runs `ANALYZE`, so there is no skip-scan. Either name the org in the correlation or add a single-column index on the child key (BUG-042 chose the index: one migration, zero query edits). Check with `EXPLAIN QUERY PLAN`: a `SCAN` inside a `CORRELATED SCALAR SUBQUERY` is a full-table read per outer row. |
 
 ### Architectural decision
 
