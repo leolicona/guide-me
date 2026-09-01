@@ -2,6 +2,42 @@
 
 This document tracks known technical debt, deferred tasks, and architectural improvements that are planned for future phases.
 
+## 31. D1 Rows-Read Headroom: the Free Tier Is Shared and the Hoy Poll Is the Next Meter to Watch — ⚠️ OPEN
+
+**Context:** BUG-042 (2026-09-01) exhausted the account's D1 free-tier quota — **5 M rows read per
+day, per account**, shared by dev, prod and every other database on it. Migrations 0067/0068 cut
+the folio list from ~1.1 M rows read per request to ~7,000 on 240 folios, and the pending-work
+counts from ~100 K to under 2,000. That fix makes the cost *linear* in the folios of the load
+window (about 45 rows per folio per list request); it does not make it small forever.
+
+What `wrangler d1 insights` shows remains after the fix, at this week's usage:
+
+| Consumer | Rows / run | Runs / day (dev + prod, observed) | Rows / day |
+|---|---:|---:|---:|
+| Hoy dashboard poll (`getDashboardDay`, every 60 s per open tab) | ~4,300 | ~470 | **~2.0 M** |
+| Folio list (admin + seller) | ~7,000 · grows with the window | ~120 | ~0.85 M |
+| Expiry sweep + reminder crons (scan the org's lines by `booking_expires_at`, unindexed) | ~600 | ~180 | ~0.1 M |
+| Everything else | — | — | ~0.3 M |
+
+≈ 3.3 M/day against a 5 M line — with **one** live org, whose window holds a few hundred folios.
+The dashboard poll is the one that scales with *people*, not data: each admin who leaves «Hoy» open
+for an 8-hour shift adds ~2 M rows/day on its own. Two of them and the account is back at the limit
+with every other query perfect.
+
+**Why deferred:** BUG-042 was a hot fix under an exhausted quota; changing the polling contract
+(US-A90's 60 s) or the plan is a product/cost decision, not a query-plan one.
+
+**Action required:**
+- **Who:** whoever next touches the Hoy dashboard, or the first time the daily rows-read figure
+  passes ~4 M on the D1 dashboard.
+- **What (any of):** move the account to Workers Paid (25 B rows/month included — the only option
+  that removes the ceiling); pause the poll when the tab is hidden (`visibilitychange`) and back off
+  to 5 min after 15 min idle; or cut the poll's own cost — it is ~4,300 rows because it correlates
+  `deriveStatusSql` per line and re-reads the org's lines each tick, where a `since` cursor on
+  `folio_events` would read only what changed.
+- **Reference:** `docs/BUGS.md` BUG-042 · `ARCHITECTURE.md` § Multitenancy rule 7 ·
+  `docs/dashboard/occupancy-dashboard.spec.md` D3 (the 60 s polling convention).
+
 ## 30. Heading Levels Are Fixed at the Default, Not Yet Swept Per Screen — ⚠️ OPEN
 
 **Context:** MUI maps `subtitle1`/`subtitle2` to `<h6>`, so for as long as the app has existed every

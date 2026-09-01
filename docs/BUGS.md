@@ -91,6 +91,46 @@ touching `folio_lines` or an allocations alias is a `SCAN`. It is a plan test, n
 an index that exists but is unusable — the shape of this bug — fails it. Verified red without
 0067 (seven `SCAN` lines), green with it.
 
+### Second half — 2026-09-01, same day
+
+The first cut was incomplete, and the test let it through because it selected every roll-up **but
+one**. The list row also carries `displayMethodSql` (US-AG41, `utils/folioPayments.ts`):
+
+```sql
+… from folio_payments fp where fp.folio_id = folios.id and fp.entry_type = 'payment'
+```
+
+and `folio_payments_folio_idx` (0049) is `(organization_id, folio_id)` — the same shape, the same
+scan per folio. Measured with `meta.rows_read` on a seeded D1 (240 folios · 480 lines · 480
+allocations · 480 payments):
+
+| Query | Before | 0067 only | 0067 + 0068 |
+|---|---:|---:|---:|
+| Admin/seller list row | 1,114,080 | 121,433 | **6,952** |
+| List, `status=booking` facet | 633,760 | 41,833 | **3,672** |
+| `readListLines` money mark | 231,360 | 1,919 | 1,919 |
+| Pending-refunds count | 115,440 | 959 | 959 |
+| Hoy dashboard poll | 692,160 | 4,316 | 4,316 |
+
+Migration **`0068_folio_payments_folio_idx.sql`** adds `folio_payments (folio_id)`. The test now
+selects the handler's full row — joins and `paymentMethod` included — and names `fp` among the
+aliases that may never `SCAN`. Red without 0068 (`SCAN fp`), green with it.
+
+**Production was a different bug wearing the same shape.** While diagnosing, `wrangler d1 insights`
+showed prod still running the 2026-08-07 release (#84): the two releases since (#108, #144) sit in
+the deploy workflow **waiting for environment approval**, so prod predates 0065 and never ran the
+line-derived roll-ups at all. Its top query — 144 M of its 147 M rows read in seven days — was the
+**seller's list**, whose only correlation is this `folio_payments` one: ~200,000 rows per request
+on a few hundred folios. 0068 is the index that fixes prod; 0067 is the one that stops the newer
+code from doing worse.
+
+**What the fix does not change:** the cost is now linear in the folios of the load window (about
+45 rows read per folio per list request) instead of folios × lines × payments. The D1 free tier
+allows 5 M rows read per day **per account**, and dev and prod share the account with every other
+project on it. At this week's usage both environments together land near 4 M/day after the fix —
+under the line, not far from it. The next consumer in line is the Hoy dashboard's 60-second poll
+(~4,300 rows per tick, ~1.2 M/day per open tab-day). Tracked as TECH_DEBT #31.
+
 **Rule added:** `ARCHITECTURE.md` § Multitenancy rule 7 — a correlated subquery keyed by a child
 column needs an index whose *leading* column is that key; rule 6's org-leading composite does not
 serve it.
