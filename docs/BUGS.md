@@ -6,6 +6,97 @@ Tracks confirmed bugs, root causes, and fixes. Each entry is immutable once clos
 
 ---
 
+## BUG-042 — Every Folio Roll-Up Scanned Two Tables in Full, Once Per Folio, and Exhausted the D1 Quota — ✅ FIXED
+
+**Found:** 2026-09-01, by the D1 dashboard: the production database hit its rows-read quota.
+The offender was the folio list — **~930,000 rows read per request** at an efficiency of 0.0003
+(3 rows returned per 10,000 touched), run 27 times. The pending-work `count(*)` had the same
+shape at ~133,000 rows per call.
+
+**Affected:** `utils/folioStatus.ts` (`deriveStatusSql`, `anyLineStatusSql`,
+`deriveBookingExpiresAtSql`, `deriveRefundStatusSql`, `deriveRefundAmountSql`) ·
+`utils/folioListRows.ts` (`readListLines`) · `utils/folioPendingWork.ts` — and through them
+**35 correlations in 11 files**: the folio list and detail, the portal, the POS, reports, the
+dashboard, tickets and the sweep. Shipped in #90 (0062) and widened by TECH_DEBT #25 (0065, #100).
+
+### Symptom
+
+Nothing wrong on screen. Every folio surface answered correctly and, on a small org, fast enough
+that nobody noticed. The cost showed up only as a quota — the one meter nobody watches until it
+reads zero.
+
+### Cause
+
+Since 0065 every folio roll-up **derives from its lines**, as a correlated subquery of the form
+
+```sql
+… from folio_lines fl where fl.folio_id = folios.id
+… from folio_payment_allocations a2 where a2.folio_line_id = fl.id
+```
+
+Both tables *had* an index on those columns — but as the **second** column of a composite led by
+`organization_id`: `folio_lines_org_folio_idx (organization_id, folio_id)` from 0011, and
+`folio_payment_allocations_line_idx (organization_id, folio_line_id)` from 0062. SQLite can only
+enter a composite index when its **leading** column is constrained, and the correlations never
+name the org. With no `sqlite_stat1` (D1 does not `ANALYZE`) there is no skip-scan either.
+
+So `EXPLAIN QUERY PLAN` on the list read:
+
+```
+SEARCH folios USING INDEX folios_org_created_idx (organization_id=?)
+CORRELATED SCALAR SUBQUERY
+  SCAN fl                        ← every line in the org, per folio
+  CORRELATED SCALAR SUBQUERY
+    SCAN a2                      ← every allocation, per line, per folio
+```
+
+Five such correlations per list row (status, hold clock ×2, refund status, refund amount), plus
+one per line for the money mark. Rows read grew as **folios × lines × allocations** — cubic in
+the size of the org, on the busiest read in the product, unpaginated by design (TECH_DEBT #23).
+
+Rule 6 of `ARCHITECTURE.md` § Multitenancy asked for `organization_id` as the leading column of
+every index, and both migrations obeyed it. The rule was written for the org-scoped **joins** the
+handlers make. It said nothing about the child-keyed **correlations** the derivation later
+introduced, and an index that satisfies the rule is exactly the one these queries cannot use.
+
+### Why the tests did not catch it
+
+The suite asserts *answers*, and every answer was right. No test looked at a query plan, and the
+fixtures hold a handful of rows, where a scan and a seek cost the same. A cost bug on a small
+fixture is invisible by construction.
+
+### Fix — 2026-09-01
+
+Migration **`0067_folio_correlation_indexes.sql`** — two single-column indexes on the correlated
+keys, `folio_lines (folio_id)` and `folio_payment_allocations (folio_line_id)`. **No query
+changes**: all 35 correlations pick the indexes up as-is, and the `ON DELETE CASCADE` from lines to
+allocations stops scanning too. The org-leading indexes stay for the joins they were built for.
+
+The plan after:
+
+```
+CORRELATED SCALAR SUBQUERY
+  SEARCH fl USING INDEX folio_lines_folio_idx (folio_id=?)
+  CORRELATED SCALAR SUBQUERY
+    SEARCH a2 USING INDEX folio_payment_allocations_line_only_idx (folio_line_id=?)
+```
+
+The alternative — adding `fl.organization_id = folios.organization_id` to every correlation so
+the existing composites apply — was discarded: 35 edits, each one a place to forget, for the same
+plan.
+
+**Pinned by** `test/folios/correlation-indexes.test.ts`, which renders the real drizzle fragments
+to SQL, runs `EXPLAIN QUERY PLAN` against the migrated test D1, and asserts that no plan line
+touching `folio_lines` or an allocations alias is a `SCAN`. It is a plan test, not an index test:
+an index that exists but is unusable — the shape of this bug — fails it. Verified red without
+0067 (seven `SCAN` lines), green with it.
+
+**Rule added:** `ARCHITECTURE.md` § Multitenancy rule 7 — a correlated subquery keyed by a child
+column needs an index whose *leading* column is that key; rule 6's org-leading composite does not
+serve it.
+
+---
+
 ## BUG-041 — The Team's Caja Became Unreachable Whenever Nothing Was Pending — ✅ FIXED
 
 **Found:** 2026-08-25, by the admin using the product. *«He estado vagando en caja y no veo ningún
