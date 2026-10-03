@@ -1,0 +1,153 @@
+{
+  "$comment": "Agent skills vendored into .claude/skills/. Every skill lives here as a real directory (no symlinks, no .agents/ mirror) and the commit it came from is recorded below. The original copy came by hand from leolicona/miabot@ae37d82 on 2026-09-08. To update a skill, fetch it again from its upstream at a newer commit and record the commit here: either copy the directory by hand, or run the upstream's installer in a scratch dir (e.g. `npx skills add <repo>`), copy only the skills listed here out of it, and delete what the installer left behind (.agents/, skills-lock.json, symlinks in .claude/skills/). The selection is deliberate: an installer that adds a whole catalog brings skills this project does not use, and every skill description costs context in every session.",
+  "sources": {
+    "cloudflare": {
+      "repo": "https://github.com/cloudflare/skills.git",
+      "ref": "main",
+      "commit": "b052c32bab7dd493513260228a36c88294f343f1",
+      "synced_at": "2026-09-09T00:25:50Z",
+      "license": "Apache-2.0",
+      "official": true,
+      "skills": [
+        {
+          "name": "wrangler",
+          "path": "skills/wrangler"
+        },
+        {
+          "name": "workers-best-practices",
+          "path": "skills/workers-best-practices"
+        },
+        {
+          "name": "durable-objects",
+          "path": "skills/durable-objects"
+        },
+        {
+          "name": "agents-sdk",
+          "path": "skills/agents-sdk"
+        }
+      ],
+      "note": "Upstream publishes 14 skills; only these four are vendored. wrangler and workers-best-practices back the Workers convention in the constitution's stack table; durable-objects and agents-sdk are kept as reference for Workers primitives Devolada does not use yet and are deliberately NOT in that table — they name no convention, so no task is required to load them. Deliberately left out: cloudflare (product chooser), cloudflare-one, cloudflare-one-migrations, cloudflare-email-service, nextjs-on-cloudflare, sandbox-stable, sandbox-next, sandbox-migrate-to-next, turnstile-spin, web-perf."
+    },
+    "hono": {
+      "repo": "https://github.com/honojs/skills.git",
+      "ref": "main",
+      "commit": "b53a71865bcfbcec721a9a902df2a3620d33096a",
+      "synced_at": "2026-09-06T20:41:19Z",
+      "license": "MIT",
+      "official": true,
+      "skills": [
+        {
+          "name": "hono",
+          "path": "skills/hono"
+        }
+      ]
+    },
+    "shadcn": {
+      "repo": "https://github.com/shadcn-ui/ui.git",
+      "ref": "main",
+      "commit": "5c7072da672b0048bc6771e3204063a2537df91a",
+      "synced_at": "2026-09-06T20:41:21Z",
+      "license": "MIT",
+      "official": true,
+      "skills": [
+        {
+          "name": "shadcn",
+          "path": "skills/shadcn"
+        }
+      ]
+    },
+    "vercel": {
+      "repo": "https://github.com/vercel-labs/agent-skills.git",
+      "ref": "main",
+      "commit": "063bee94c3f4df8453406c830b0a7df0f2860278",
+      "synced_at": "2026-09-06T20:41:22Z",
+      "license": "see upstream (no LICENSE file on 2026-09-06)",
+      "official": true,
+      "skills": [
+        {
+          "name": "vercel-react-best-practices",
+          "path": "skills/react-best-practices"
+        },
+        {
+          "name": "web-design-guidelines",
+          "path": "skills/web-design-guidelines",
+          "assets": [
+            {
+              "url": "https://raw.githubusercontent.com/vercel-labs/web-interface-guidelines/main/command.md",
+              "file": "guidelines.md"
+            }
+          ],
+          "overlay": "SKILL.md is a devolada overlay, not upstream's: it reads the vendored guidelines.md instead of fetching at runtime, defers to constitution Principle VI and the CI gates, and exempts es-MX copy from the English Content & Copy rules. Re-vendoring replaces guidelines.md only — never overwrite SKILL.md with upstream's."
+        }
+      ],
+      "note": "Devolada's frontends are Vite SPAs: the React rules apply, the server/Next.js rules (server-*, hydration) do not. web-design-guidelines was ported from leolicona/miabot on 2026-09-09 at the same upstream commit; guidelines.md is the vendored asset and SKILL.md carries the overlay described on that skill."
+    },
+    "antfu": {
+      "repo": "https://github.com/antfu/skills.git",
+      "ref": "main",
+      "commit": "a74f281a27dadc02397bc1a174b0f2c97531b6ae",
+      "synced_at": "2026-09-06T20:41:24Z",
+      "license": "MIT",
+      "official": false,
+      "note": "Maintained by a Vite/Vitest core team member; generated from official docs",
+      "skills": [
+        {
+          "name": "vite",
+          "path": "skills/vite"
+        },
+        {
+          "name": "vitest",
+          "path": "skills/vitest"
+        },
+        {
+          "name": "pnpm",
+          "path": "skills/pnpm"
+        }
+      ]
+    },
+    "anthropic": {
+      "repo": "https://github.com/anthropics/skills.git",
+      "ref": "main",
+      "commit": "41bbe19d1a1a7eaab5e7bb9050a417e5c6cffc8f",
+      "synced_at": "2026-09-06T20:41:27Z",
+      "license": "see upstream (no LICENSE file on 2026-09-06)",
+      "official": true,
+      "skills": [
+        {
+          "name": "webapp-testing",
+          "path": "skills/webapp-testing"
+        }
+      ]
+    },
+    "secondsky": {
+      "repo": "https://github.com/secondsky/claude-skills.git",
+      "ref": "main",
+      "commit": "ac5905b4f0545461034885bb385645b4c7a5562a",
+      "synced_at": "2026-09-06T20:41:28Z",
+      "license": "MIT",
+      "official": false,
+      "note": "Community collection; taken because Drizzle on D1 has no official skill",
+      "skills": [
+        {
+          "name": "drizzle-orm-d1",
+          "path": "plugins/drizzle-orm-d1/skills/drizzle-orm-d1"
+        }
+      ]
+    },
+    "leolicona": {
+      "repo": "https://github.com/leolicona/agents-skills.git",
+      "ref": "main",
+      "commit": "0041f4d6875474c146882eae5e8f2d4bc78fca8b",
+      "synced_at": "2026-09-09T17:01:48Z",
+      "license": "MIT",
+      "official": false,
+      "skills": [
+        {
+          "name": "project-brief",
+          "path": "skills/project-brief"
+        }
+      ],
+      "note": "Own catalog. The package name is @leolicona/agent-skills but it is NOT published to npm, so `npx @leolicona/agent-skills` returns 404: run the CLI from a clone instead (`node bin/cli.mjs add project-brief --target claude --dir <project>`). Installed with --target claude, which writes only .claude/skills/<skill>/ and leaves no .agents/ mirror, symlinks or lockfile of its own. Of the two skills in the catalog only project-brief is vendored; tech-feasibility is deliberately left out. project-brief names no stack convention, so no task is required to load it: it is the discovery step that produces the brief feeding /speckit-constitution and /speckit-specify."
+    }
+  }
+}
