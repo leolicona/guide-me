@@ -9,7 +9,6 @@ on:
     # Docs-only changes don't affect the workers — skip the deploy for them.
     paths-ignore:
       - '**.md'
-      - 'docs/**'
 
 permissions:
   contents: read

@@ -9,7 +9,10 @@ entirely on Cloudflare. A `pnpm` monorepo with two deployables:
 | [`app-turistear`](./app-turistear) | React 18 + MUI single-page app | Cloudflare Worker (serves the SPA) |
 
 > **Architecture, folder rules, and the design system** live in [`CLAUDE.md`](./CLAUDE.md).
-> **CI/CD, environments, and deploys** live in [`docs/ci-cd.md`](./docs/ci-cd.md).
+> **Specs, process, and the rest of the documentation** live in their own repository,
+> [`leolicona/guide-me-docs`](https://github.com/leolicona/guide-me-docs) (private). Its paths match
+> the ones cited here and in code comments: `docs/…` and `.design/…` mean that repository.
+> **CI/CD, environments, and deploys** live in [`docs/ci-cd.md`](https://github.com/leolicona/guide-me-docs/blob/main/docs/ci-cd.md).
 
 ---
 
@@ -86,7 +89,7 @@ transaction, so a half-applied deploy must still be safe. After changing binding
 ## Environments & the release flow
 
 Deploys run in **GitHub Actions** — you normally never deploy from your laptop. Full detail in
-[`docs/ci-cd.md`](./docs/ci-cd.md).
+[`docs/ci-cd.md`](https://github.com/leolicona/guide-me-docs/blob/main/docs/ci-cd.md).
 
 | Env | Branch | Workers | Domains | Database |
 |---|---|---|---|---|
@@ -120,14 +123,18 @@ app-turistear/
     components/          shared design-system primitives
     features/<name>/     feature modules (components · hooks · types)
     store/ services/ config/ styles/
-docs/                    ci-cd.md, ARCHITECTURE.md, TESTING.md, SPEC.md, …
-.design/design-system/   design tokens & brief
 ```
+
+Documentation (`docs/`, `.design/`) is not in this repository — see
+[`leolicona/guide-me-docs`](https://github.com/leolicona/guide-me-docs).
 
 ## Further reading
 
 - [`CLAUDE.md`](./CLAUDE.md) — architecture, backend/frontend folder rules, design system.
-- [`docs/ci-cd.md`](./docs/ci-cd.md) — pipeline, environments, one-time setup runbook.
-- [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md) — multitenancy & data-isolation model.
-- [`docs/TESTING.md`](./docs/TESTING.md) — what is tested where, and the merge gate.
-- [`docs/SPEC.md`](./docs/SPEC.md) — product spec and user stories.
+- [`docs/DEVELOPMENT.md`](https://github.com/leolicona/guide-me-docs/blob/main/docs/DEVELOPMENT.md) — running the app locally, step by step.
+- [`docs/ci-cd.md`](https://github.com/leolicona/guide-me-docs/blob/main/docs/ci-cd.md) — pipeline, environments, one-time setup runbook.
+- [`docs/ARCHITECTURE.md`](https://github.com/leolicona/guide-me-docs/blob/main/docs/ARCHITECTURE.md) — multitenancy & data-isolation model.
+- [`docs/TESTING.md`](https://github.com/leolicona/guide-me-docs/blob/main/docs/TESTING.md) — what is tested where, and the merge gate.
+- [`docs/SPEC.md`](https://github.com/leolicona/guide-me-docs/blob/main/docs/SPEC.md) — product spec and user stories.
+- [`docs/PROCESS.md`](https://github.com/leolicona/guide-me-docs/blob/main/docs/PROCESS.md) — how a feature is specified, built and closed across the
+  two repositories.

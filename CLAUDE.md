@@ -10,9 +10,28 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 The project uses `pnpm` workspaces. Commands can be run from the root.
 
+## The documentation lives in another repository
+
+Specs, process, architecture, bugs, tech debt and the design system live in
+**[`leolicona/guide-me-docs`](https://github.com/leolicona/guide-me-docs)** (private), split out of
+this repo with their history. Their paths were kept identical, so **every `docs/…` or `.design/…`
+path in this repo — in this file, in code comments, tests, migrations — is a path in
+`guide-me-docs`.** There is no `docs/` folder here.
+
+To read one, prefer the local clone, a sibling of the main `guide-me` checkout (also from a worktree):
+
+```bash
+DOCS="$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")/../guide-me-docs"
+[ -d "$DOCS" ] || gh repo clone leolicona/guide-me-docs "$DOCS"
+git -C "$DOCS" pull --ff-only
+```
+
+For a single file without a clone:
+`gh api repos/leolicona/guide-me-docs/contents/docs/SPEC.md -H "Accept: application/vnd.github.raw"`.
+
 ## Commands
 
-> **Running the app locally for the first time in a worktree: read `docs/DEVELOPMENT.md`.**
+> **Running the app locally for the first time in a worktree: read `docs/DEVELOPMENT.md`** (in `guide-me-docs`).
 > `pnpm dev` alone is not enough — without `.dev.vars` the login returns **200 and no session**,
 > because `wrangler.jsonc` pins the cookie to `.turistearya.com` and auth lives in an external
 > Worker reached by a service binding that does not exist locally. `pnpm db:migrate:local` also
@@ -63,16 +82,18 @@ Additional directories:
 
 ## Documentation — spec-driven development
 
-This repo is spec-driven. `docs/SPEC.md` is the index of the product: every shipped capability has
-a numbered user story there **and** a line in *Features by Phase* linking to its feature spec.
+This product is spec-driven. `docs/SPEC.md` is the index of the product: every shipped capability
+has a numbered user story there **and** a line in *Features by Phase* linking to its feature spec.
+(All `docs/…` paths here are in `guide-me-docs` — see above.)
 
 Before adding a feature, read **`docs/PROCESS.md`** — it defines the four documentation layers,
-the naming/ID/migration rules, the seven steps, and the required sections of a spec. Start a new
-spec from `docs/_templates/feature.spec.md`.
+the naming/ID/migration rules, the seven steps, the required sections of a spec, and how a feature
+lands across the two repositories. Start a new spec from `docs/_templates/feature.spec.md`.
 
 Two rules worth repeating here, because breaking them is how the index rotted before:
 - A feature's `SPEC.md` registration (stories + Features-by-Phase line + glossary terms) ships in
-  **the feature's own PR**, not "later".
+  **the feature's paired docs PR** in `guide-me-docs` — same branch name, base `main`, linked from
+  this repo's PR (the PR template asks), and merged **right after** the code PR. Not "later".
 - A `docs/…md` path written in `SPEC.md` means the file exists. A feature with no spec yet reads
   **"spec not written yet"**.
 
@@ -90,8 +111,10 @@ git worktree add .claude/worktrees/<name> -b feat/<slug> origin/develop
 Branch `feat/` · `fix/` · `docs/`; commits are Conventional with the domain as scope
 (`feat(cancellation):`); PRs target **`develop`** and are squash-merged, so the PR title becomes the
 commit on `develop`. A release is a PR `develop → main` titled `release: … → prod`. The `verify` CI
-job must pass. Full detail and the two hard rules (never bare `git stash`; register in `SPEC.md`
-inside the feature's own PR) are in `docs/PROCESS.md`.
+job must pass. A feature also opens its **paired docs PR** in `guide-me-docs` on the same
+`feat/<slug>` branch (base `main`). A change that is only to specs or docs goes to `guide-me-docs`
+alone. Full detail and the hard rules (never bare `git stash`; register in `SPEC.md` in the paired
+docs PR) are in `docs/PROCESS.md`.
 
 ## Multitenancy
 
@@ -116,8 +139,8 @@ outdoor, one-handed, cash-in-hand field use. A trustworthy field instrument — 
 clarity. Three laws, in priority order: **legible in sunlight · one confident accent · reach &
 repetition.**
 
-> **Canonical source of truth:** `.design/design-system/DESIGN_TOKENS.md` (every value AA-verified
-> there) → implemented in `app-turistear/src/config/theme.ts` + `src/styles/tokens.css`. The full
+> **Canonical source of truth:** `.design/design-system/DESIGN_TOKENS.md` in `guide-me-docs` (every
+> value AA-verified there) → implemented in `app-turistear/src/config/theme.ts` + `src/styles/tokens.css`. The full
 > rationale lives in `.design/design-system/DESIGN_BRIEF.md`. *(This supersedes the old indigo
 > "Luminous SaaS" system; `docs/DESING.md` is retired.)*
 >

@@ -19,6 +19,15 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # Specs and the design system live in leolicona/guide-me-docs (docs/PROCESS.md § Two
+      # repositories, one unit of work). Fail loudly if a docs/ or .design/ folder creeps back in.
+      - name: Docs live in guide-me-docs
+        run: |
+          if [ -e docs ] || [ -e .design ]; then
+            echo "::error::docs/ and .design/ belong in leolicona/guide-me-docs, not here."
+            exit 1
+          fi
+
       - uses: pnpm/action-setup@v6
         with:
           version: 10
