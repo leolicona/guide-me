@@ -10,15 +10,20 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 The project uses `pnpm` workspaces. Commands can be run from the root.
 
-## The documentation lives in another repository
+## The pre-Spec-Kit corpus is archived
 
-Specs, process, architecture, bugs, tech debt and the design system live in
-**[`leolicona/guide-me-docs`](https://github.com/leolicona/guide-me-docs)** (private), split out of
-this repo with their history. Their paths were kept identical, so **every `docs/…` or `.design/…`
-path in this repo — in this file, in code comments, tests, migrations — is a path in
-`guide-me-docs`.** There is no `docs/` folder here.
+**The documentation corpus left this repo on 2026-10-03**, when the project moved to GitHub Spec
+Kit: `docs/` (the `SPEC.md` index, `PROCESS.md`, `ARCHITECTURE.md`, `TESTING.md`, `BUGS.md`,
+`TECH_DEBT.md`, every feature spec and plan), `.design/` (the design system and its reviews) and
+`api-turistear/specs/`. It lives, with its history, in the read-only archive
+**[`leolicona/guide-me-docs`](https://github.com/leolicona/guide-me-docs)** (private).
 
-To read one, prefer the local clone, a sibling of the main `guide-me` checkout (also from a worktree):
+Comments across `api-turistear/`, `app-turistear/` and `.github/` — and this file — still cite it by
+its old paths (`docs/TESTING.md D10`, `.design/design-system/DESIGN_TOKENS.md`). Those paths do not
+exist here; they resolve in the archive **at the same path**. The archive is history, not law —
+leave the citations intact, and re-specify anything you rebuild.
+
+To read it, prefer the local clone, a sibling of the main `guide-me` checkout (also from a worktree):
 
 ```bash
 DOCS="$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")/../guide-me-docs"
@@ -31,7 +36,7 @@ For a single file without a clone:
 
 ## Commands
 
-> **Running the app locally for the first time in a worktree: read `docs/DEVELOPMENT.md`** (in `guide-me-docs`).
+> **Running the app locally for the first time in a worktree: read `docs/DEVELOPMENT.md`** (in the archive).
 > `pnpm dev` alone is not enough — without `.dev.vars` the login returns **200 and no session**,
 > because `wrangler.jsonc` pins the cookie to `.turistearya.com` and auth lives in an external
 > Worker reached by a service binding that does not exist locally. `pnpm db:migrate:local` also
@@ -80,25 +85,35 @@ Additional directories:
 - `src/types/` — TypeScript interfaces for data models
 - `src/bindings.d.ts` — Cloudflare env binding type declarations
 
-## Documentation — spec-driven development
+## Spec-driven development — GitHub Spec Kit
 
-This product is spec-driven. `docs/SPEC.md` is the index of the product: every shipped capability
-has a numbered user story there **and** a line in *Features by Phase* linking to its feature spec.
-(All `docs/…` paths here are in `guide-me-docs` — see above.)
+Work is **spec-driven** with GitHub Spec Kit 1.0.4 (`.specify/`, skills in `.claude/skills/speckit-*`),
+using its core templates unmodified — the same setup as `leolicona/devolada`:
 
-Before adding a feature, read **`docs/PROCESS.md`** — it defines the four documentation layers,
-the naming/ID/migration rules, the seven steps, the required sections of a spec, and how a feature
-lands across the two repositories. Start a new spec from `docs/_templates/feature.spec.md`.
+- Feature → `/speckit-specify` → `/speckit-plan` → `/speckit-tasks` → `/speckit-implement`, all
+  committed under `specs/NNN-slug/`. Never start at the code. Optional gates: `/speckit-clarify`
+  before plan, `/speckit-checklist` after it, `/speckit-analyze` before implement, and
+  `/speckit-converge` to append what is still unbuilt as tasks.
+- Bug → the lite path `/speckit-bug-assess` → `-fix` → `-test` under `.specify/bugs/<slug>/`
+  (`assess` and `test` never edit source).
+- Deliberate shortcut → `/speckit-debt-log` under `.specify/debt/<slug>/`, closed only by
+  `/speckit-debt-pay` with evidence.
 
-Two rules worth repeating here, because breaking them is how the index rotted before:
-- A feature's `SPEC.md` registration (stories + Features-by-Phase line + glossary terms) ships in
-  **the feature's paired docs PR** in `guide-me-docs` — same branch name, base `main`, linked from
-  this repo's PR (the PR template asks), and merged **right after** the code PR. Not "later".
-- A `docs/…md` path written in `SPEC.md` means the file exists. A feature with no spec yet reads
-  **"spec not written yet"**.
+`/speckit-specify` does not create a branch (the `git` extension is not installed): the spec folder
+`specs/NNN-slug/` and the worktree branch `feat/<slug>` below are independent — keep both.
 
-Contracts for services we do not own (Agnostic Auth, Resend, the QR image service) live in
-**`docs/integrations/`** — never inside a feature spec, since we do not decide what they do.
+**`.specify/memory/constitution.md` is not written yet** — it is still Spec Kit's template.
+Writing it with `/speckit-constitution` comes before the first `/speckit-specify` (`/project-brief`
+can interview first). Distil it from this file and from the archive's `docs/ARCHITECTURE.md`,
+`docs/TESTING.md`, `docs/PROCESS.md` and `.design/design-system/DESIGN_TOKENS.md`; when the design
+extension then offers `/speckit-design-foundations`, point it at that existing design system rather
+than inventing one. Once written, the constitution is the law of this repo and supersedes every
+other practice document, this file included. Until then, this file stands in.
+
+The pre-Spec-Kit process — `docs/PROCESS.md`, with `docs/SPEC.md` as the product index — is archived
+with the corpus (above): read it for what exists and why, never write into it. The archive's
+`docs/integrations/` still records the contracts of the services we do not own (Agnostic Auth,
+Resend, the QR image service) and what breaks when they are down.
 
 ### Local workflow — one worktree, one PR per unit of work
 
@@ -111,10 +126,9 @@ git worktree add .claude/worktrees/<name> -b feat/<slug> origin/develop
 Branch `feat/` · `fix/` · `docs/`; commits are Conventional with the domain as scope
 (`feat(cancellation):`); PRs target **`develop`** and are squash-merged, so the PR title becomes the
 commit on `develop`. A release is a PR `develop → main` titled `release: … → prod`. The `verify` CI
-job must pass. A feature also opens its **paired docs PR** in `guide-me-docs` on the same
-`feat/<slug>` branch (base `main`). A change that is only to specs or docs goes to `guide-me-docs`
-alone. Full detail and the hard rules (never bare `git stash`; register in `SPEC.md` in the paired
-docs PR) are in `docs/PROCESS.md`.
+job must pass. Two hard rules: **never bare `git stash`** (the stack is shared across worktrees), and
+**squash `feature → develop`, merge-commit `release → main`** — the archived `docs/PROCESS.md`
+records why.
 
 ## Multitenancy
 
@@ -139,7 +153,7 @@ outdoor, one-handed, cash-in-hand field use. A trustworthy field instrument — 
 clarity. Three laws, in priority order: **legible in sunlight · one confident accent · reach &
 repetition.**
 
-> **Canonical source of truth:** `.design/design-system/DESIGN_TOKENS.md` in `guide-me-docs` (every
+> **Canonical source of truth:** `.design/design-system/DESIGN_TOKENS.md` in the archive (every
 > value AA-verified there) → implemented in `app-turistear/src/config/theme.ts` + `src/styles/tokens.css`. The full
 > rationale lives in `.design/design-system/DESIGN_BRIEF.md`. *(This supersedes the old indigo
 > "Luminous SaaS" system; `docs/DESING.md` is retired.)*

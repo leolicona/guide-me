@@ -26,7 +26,10 @@ dist-ssr/
 # Antigravity CLI
 .antigravitycli/
 .playwright-cli/
-.claude/
+# Claude Code: skills and settings.json are shared (Spec Kit lives in .claude/skills);
+# personal settings and the worktrees of this checkout are not.
+.claude/settings.local.json
+.claude/worktrees/
 # Playwright e2e artifacts
 app-turistear/e2e/.report/
 app-turistear/test-results/

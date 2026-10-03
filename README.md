@@ -9,9 +9,10 @@ entirely on Cloudflare. A `pnpm` monorepo with two deployables:
 | [`app-turistear`](./app-turistear) | React 18 + MUI single-page app | Cloudflare Worker (serves the SPA) |
 
 > **Architecture, folder rules, and the design system** live in [`CLAUDE.md`](./CLAUDE.md).
-> **Specs, process, and the rest of the documentation** live in their own repository,
-> [`leolicona/guide-me-docs`](https://github.com/leolicona/guide-me-docs) (private). Its paths match
-> the ones cited here and in code comments: `docs/…` and `.design/…` mean that repository.
+> **The pre-Spec-Kit documentation** (specs, process, design system) is archived in
+> [`leolicona/guide-me-docs`](https://github.com/leolicona/guide-me-docs) (private) — history, not
+> law. Its paths match the ones cited here and in code comments: `docs/…` and `.design/…` mean the
+> archive.
 > **CI/CD, environments, and deploys** live in [`docs/ci-cd.md`](https://github.com/leolicona/guide-me-docs/blob/main/docs/ci-cd.md).
 
 ---
@@ -123,18 +124,25 @@ app-turistear/
     components/          shared design-system primitives
     features/<name>/     feature modules (components · hooks · types)
     store/ services/ config/ styles/
+specs/NNN-slug/          Spec Kit features — spec · plan · tasks, one folder per feature
+.specify/                Spec Kit — constitution, templates, scripts, extensions (bug · debt · design)
+.claude/skills/          agent skills — speckit-* plus the vendored stack skills (skills.lock.json)
 ```
 
-Documentation (`docs/`, `.design/`) is not in this repository — see
+New work is spec-driven with GitHub Spec Kit — the workflow is in
+[`CLAUDE.md`](./CLAUDE.md) § *Spec-driven development*.
+
+The pre-Spec-Kit documentation (`docs/`, `.design/`) is archived in
 [`leolicona/guide-me-docs`](https://github.com/leolicona/guide-me-docs).
 
 ## Further reading
 
-- [`CLAUDE.md`](./CLAUDE.md) — architecture, backend/frontend folder rules, design system.
+The `docs/` entries below are in the archive.
+
+- [`CLAUDE.md`](./CLAUDE.md) — architecture, folder rules, design system, the Spec Kit workflow.
 - [`docs/DEVELOPMENT.md`](https://github.com/leolicona/guide-me-docs/blob/main/docs/DEVELOPMENT.md) — running the app locally, step by step.
 - [`docs/ci-cd.md`](https://github.com/leolicona/guide-me-docs/blob/main/docs/ci-cd.md) — pipeline, environments, one-time setup runbook.
 - [`docs/ARCHITECTURE.md`](https://github.com/leolicona/guide-me-docs/blob/main/docs/ARCHITECTURE.md) — multitenancy & data-isolation model.
 - [`docs/TESTING.md`](https://github.com/leolicona/guide-me-docs/blob/main/docs/TESTING.md) — what is tested where, and the merge gate.
 - [`docs/SPEC.md`](https://github.com/leolicona/guide-me-docs/blob/main/docs/SPEC.md) — product spec and user stories.
-- [`docs/PROCESS.md`](https://github.com/leolicona/guide-me-docs/blob/main/docs/PROCESS.md) — how a feature is specified, built and closed across the
-  two repositories.
+- [`docs/PROCESS.md`](https://github.com/leolicona/guide-me-docs/blob/main/docs/PROCESS.md) — the spec-driven process before Spec Kit.
