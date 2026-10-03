@@ -3,7 +3,7 @@
 Playwright drives a real browser against a **deployed** environment (defaults to `app-dev`). These
 journeys cross the browser/API boundary in ways the Vitest tiers structurally cannot — cookies,
 redirects, SPA navigation, the camera path. Everything else belongs one tier down; see
-[`docs/TESTING.md`](../../docs/TESTING.md).
+[`docs/TESTING.md`](https://github.com/leolicona/guide-me-docs/blob/main/docs/TESTING.md) (in `guide-me-docs`).
 
 **Not a merge gate.** `verify` runs `test:app` (Vitest) on every PR in seconds. This suite runs
 nightly, on demand, and on any PR labelled `e2e` — `.github/workflows/e2e.yml`.
