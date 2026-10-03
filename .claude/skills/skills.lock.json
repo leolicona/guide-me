@@ -1,5 +1,5 @@
 {
-  "$comment": "Agent skills vendored into .claude/skills/. Every skill lives here as a real directory (no symlinks, no .agents/ mirror) and the commit it came from is recorded below. The original copy came by hand from leolicona/miabot@ae37d82 on 2026-09-08. To update a skill, fetch it again from its upstream at a newer commit and record the commit here: either copy the directory by hand, or run the upstream's installer in a scratch dir (e.g. `npx skills add <repo>`), copy only the skills listed here out of it, and delete what the installer left behind (.agents/, skills-lock.json, symlinks in .claude/skills/). The selection is deliberate: an installer that adds a whole catalog brings skills this project does not use, and every skill description costs context in every session.",
+  "$comment": "Agent skills vendored into .claude/skills/. Every skill lives here as a real directory (no symlinks, no .agents/ mirror) and the commit it came from is recorded below. The original copy came by hand from leolicona/miabot@ae37d82 on 2026-09-08; guide-me took this set from leolicona/devolada@d033435 on 2026-10-03, dropping shadcn (guide-me's UI is MUI v9), durable-objects and agents-sdk (Workers primitives guide-me does not use). To update a skill, fetch it again from its upstream at a newer commit and record the commit here: either copy the directory by hand, or run the upstream's installer in a scratch dir (e.g. `npx skills add <repo>`), copy only the skills listed here out of it, and delete what the installer left behind (.agents/, skills-lock.json, symlinks in .claude/skills/). The selection is deliberate: an installer that adds a whole catalog brings skills this project does not use, and every skill description costs context in every session.",
   "sources": {
     "cloudflare": {
       "repo": "https://github.com/cloudflare/skills.git",
@@ -16,17 +16,9 @@
         {
           "name": "workers-best-practices",
           "path": "skills/workers-best-practices"
-        },
-        {
-          "name": "durable-objects",
-          "path": "skills/durable-objects"
-        },
-        {
-          "name": "agents-sdk",
-          "path": "skills/agents-sdk"
         }
       ],
-      "note": "Upstream publishes 14 skills; only these four are vendored. wrangler and workers-best-practices back the Workers convention in the constitution's stack table; durable-objects and agents-sdk are kept as reference for Workers primitives Devolada does not use yet and are deliberately NOT in that table — they name no convention, so no task is required to load them. Deliberately left out: cloudflare (product chooser), cloudflare-one, cloudflare-one-migrations, cloudflare-email-service, nextjs-on-cloudflare, sandbox-stable, sandbox-next, sandbox-migrate-to-next, turnstile-spin, web-perf."
+      "note": "Upstream publishes 14 skills; only these two are vendored. wrangler and workers-best-practices back both of guide-me's Workers (api-turistear, app-turistear) and their D1 bindings. Deliberately left out: durable-objects and agents-sdk (guide-me uses neither primitive), cloudflare (product chooser), cloudflare-one, cloudflare-one-migrations, cloudflare-email-service, nextjs-on-cloudflare, sandbox-stable, sandbox-next, sandbox-migrate-to-next, turnstile-spin, web-perf."
     },
     "hono": {
       "repo": "https://github.com/honojs/skills.git",
@@ -39,20 +31,6 @@
         {
           "name": "hono",
           "path": "skills/hono"
-        }
-      ]
-    },
-    "shadcn": {
-      "repo": "https://github.com/shadcn-ui/ui.git",
-      "ref": "main",
-      "commit": "5c7072da672b0048bc6771e3204063a2537df91a",
-      "synced_at": "2026-09-06T20:41:21Z",
-      "license": "MIT",
-      "official": true,
-      "skills": [
-        {
-          "name": "shadcn",
-          "path": "skills/shadcn"
         }
       ]
     },
@@ -80,7 +58,7 @@
           "overlay": "SKILL.md is a devolada overlay, not upstream's: it reads the vendored guidelines.md instead of fetching at runtime, defers to constitution Principle VI and the CI gates, and exempts es-MX copy from the English Content & Copy rules. Re-vendoring replaces guidelines.md only — never overwrite SKILL.md with upstream's."
         }
       ],
-      "note": "Devolada's frontends are Vite SPAs: the React rules apply, the server/Next.js rules (server-*, hydration) do not. web-design-guidelines was ported from leolicona/miabot on 2026-09-09 at the same upstream commit; guidelines.md is the vendored asset and SKILL.md carries the overlay described on that skill."
+      "note": "guide-me's frontend (app-turistear) is a Vite SPA: the React rules apply, the server/Next.js rules (server-*, hydration) do not. web-design-guidelines was ported from leolicona/miabot on 2026-09-09 at the same upstream commit; guidelines.md is the vendored asset and SKILL.md carries the overlay described on that skill (rewritten for guide-me's design system and gates)."
     },
     "antfu": {
       "repo": "https://github.com/antfu/skills.git",

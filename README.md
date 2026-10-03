@@ -124,7 +124,13 @@ app-turistear/
     components/          shared design-system primitives
     features/<name>/     feature modules (components · hooks · types)
     store/ services/ config/ styles/
+specs/NNN-slug/          Spec Kit features — spec · plan · tasks, one folder per feature
+.specify/                Spec Kit — constitution, templates, scripts, extensions (bug · debt · design)
+.claude/skills/          agent skills — speckit-* plus the vendored stack skills (skills.lock.json)
 ```
+
+New work is spec-driven with GitHub Spec Kit — the workflow is in
+[`CLAUDE.md`](./CLAUDE.md) § *Spec-driven development*.
 
 The pre-Spec-Kit documentation (`docs/`, `.design/`) is archived in
 [`leolicona/guide-me-docs`](https://github.com/leolicona/guide-me-docs).
@@ -133,7 +139,7 @@ The pre-Spec-Kit documentation (`docs/`, `.design/`) is archived in
 
 The `docs/` entries below are in the archive.
 
-- [`CLAUDE.md`](./CLAUDE.md) — architecture, backend/frontend folder rules, design system.
+- [`CLAUDE.md`](./CLAUDE.md) — architecture, folder rules, design system, the Spec Kit workflow.
 - [`docs/DEVELOPMENT.md`](https://github.com/leolicona/guide-me-docs/blob/main/docs/DEVELOPMENT.md) — running the app locally, step by step.
 - [`docs/ci-cd.md`](https://github.com/leolicona/guide-me-docs/blob/main/docs/ci-cd.md) — pipeline, environments, one-time setup runbook.
 - [`docs/ARCHITECTURE.md`](https://github.com/leolicona/guide-me-docs/blob/main/docs/ARCHITECTURE.md) — multitenancy & data-isolation model.

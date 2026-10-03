@@ -1,0 +1,51 @@
+{
+  "schema_version": "1.0",
+  "extensions": {
+    "bug": {
+      "version": "1.0.0",
+      "source": "local",
+      "manifest_hash": "sha256:1d0da5458f3c18ff08cf1602d88cecc33fad07068208951fb7128090cfa90c90",
+      "enabled": true,
+      "priority": 10,
+      "registered_commands": {
+        "claude": [
+          "speckit.bug.assess",
+          "speckit.bug.fix",
+          "speckit.bug.test"
+        ]
+      },
+      "registered_skills": [],
+      "installed_at": "2026-10-03T17:06:55.794126+00:00"
+    },
+    "debt": {
+      "version": "1.0.0",
+      "source": "local",
+      "manifest_hash": "sha256:59a0049481c8d620f64bb81dbe6e2c8930d7acce9b88dd51334475e1d211d4e4",
+      "enabled": true,
+      "priority": 10,
+      "registered_commands": {
+        "claude": [
+          "speckit.debt.log",
+          "speckit.debt.review",
+          "speckit.debt.pay"
+        ]
+      },
+      "registered_skills": [],
+      "installed_at": "2026-10-03T17:06:55.804775+00:00"
+    },
+    "design": {
+      "version": "0.1.0",
+      "source": "local",
+      "manifest_hash": "sha256:9d8732623dc7c85bbeab360b5d4440776012e6630ed029ee6a52c66b6741a65e",
+      "enabled": true,
+      "priority": 10,
+      "registered_commands": {
+        "claude": [
+          "speckit.design.foundations"
+        ]
+      },
+      "registered_skills": [],
+      "installed_at": "2026-10-03T17:06:55.810815+00:00"
+    }
+  }
+}

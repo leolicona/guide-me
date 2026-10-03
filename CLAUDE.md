@@ -85,15 +85,35 @@ Additional directories:
 - `src/types/` — TypeScript interfaces for data models
 - `src/bindings.d.ts` — Cloudflare env binding type declarations
 
-## Documentation — spec-driven development
+## Spec-driven development — GitHub Spec Kit
 
-This product has been spec-driven since the MVP. Until 2026-10-03 the process was `docs/PROCESS.md`
-with `docs/SPEC.md` as the product index; both are archived with the corpus (above). Read them for
-what exists and why — **do not write new specs into the archive**. New work is specified in this
-repo with GitHub Spec Kit, under `specs/NNN-slug/`.
+Work is **spec-driven** with GitHub Spec Kit 1.0.4 (`.specify/`, skills in `.claude/skills/speckit-*`),
+using its core templates unmodified — the same setup as `leolicona/devolada`:
 
-The archive's `docs/integrations/` still records the contracts of the services we do not own
-(Agnostic Auth, Resend, the QR image service) and what breaks when they are down.
+- Feature → `/speckit-specify` → `/speckit-plan` → `/speckit-tasks` → `/speckit-implement`, all
+  committed under `specs/NNN-slug/`. Never start at the code. Optional gates: `/speckit-clarify`
+  before plan, `/speckit-checklist` after it, `/speckit-analyze` before implement, and
+  `/speckit-converge` to append what is still unbuilt as tasks.
+- Bug → the lite path `/speckit-bug-assess` → `-fix` → `-test` under `.specify/bugs/<slug>/`
+  (`assess` and `test` never edit source).
+- Deliberate shortcut → `/speckit-debt-log` under `.specify/debt/<slug>/`, closed only by
+  `/speckit-debt-pay` with evidence.
+
+`/speckit-specify` does not create a branch (the `git` extension is not installed): the spec folder
+`specs/NNN-slug/` and the worktree branch `feat/<slug>` below are independent — keep both.
+
+**`.specify/memory/constitution.md` is not written yet** — it is still Spec Kit's template.
+Writing it with `/speckit-constitution` comes before the first `/speckit-specify` (`/project-brief`
+can interview first). Distil it from this file and from the archive's `docs/ARCHITECTURE.md`,
+`docs/TESTING.md`, `docs/PROCESS.md` and `.design/design-system/DESIGN_TOKENS.md`; when the design
+extension then offers `/speckit-design-foundations`, point it at that existing design system rather
+than inventing one. Once written, the constitution is the law of this repo and supersedes every
+other practice document, this file included. Until then, this file stands in.
+
+The pre-Spec-Kit process — `docs/PROCESS.md`, with `docs/SPEC.md` as the product index — is archived
+with the corpus (above): read it for what exists and why, never write into it. The archive's
+`docs/integrations/` still records the contracts of the services we do not own (Agnostic Auth,
+Resend, the QR image service) and what breaks when they are down.
 
 ### Local workflow — one worktree, one PR per unit of work
 
