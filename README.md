@@ -9,7 +9,11 @@ entirely on Cloudflare. A `pnpm` monorepo with two deployables:
 | [`app-turistear`](./app-turistear) | React 18 + MUI single-page app | Cloudflare Worker (serves the SPA) |
 
 > **Architecture, folder rules, and the design system** live in [`CLAUDE.md`](./CLAUDE.md).
-> **CI/CD, environments, and deploys** live in [`docs/ci-cd.md`](./docs/ci-cd.md).
+> **The pre-Spec-Kit documentation** (specs, process, design system) is archived in
+> [`leolicona/guide-me-docs`](https://github.com/leolicona/guide-me-docs) (private) — history, not
+> law. Its paths match the ones cited here and in code comments: `docs/…` and `.design/…` mean the
+> archive.
+> **CI/CD, environments, and deploys** live in [`docs/ci-cd.md`](https://github.com/leolicona/guide-me-docs/blob/main/docs/ci-cd.md).
 
 ---
 
@@ -86,7 +90,7 @@ transaction, so a half-applied deploy must still be safe. After changing binding
 ## Environments & the release flow
 
 Deploys run in **GitHub Actions** — you normally never deploy from your laptop. Full detail in
-[`docs/ci-cd.md`](./docs/ci-cd.md).
+[`docs/ci-cd.md`](https://github.com/leolicona/guide-me-docs/blob/main/docs/ci-cd.md).
 
 | Env | Branch | Workers | Domains | Database |
 |---|---|---|---|---|
@@ -120,14 +124,25 @@ app-turistear/
     components/          shared design-system primitives
     features/<name>/     feature modules (components · hooks · types)
     store/ services/ config/ styles/
-docs/                    ci-cd.md, ARCHITECTURE.md, TESTING.md, SPEC.md, …
-.design/design-system/   design tokens & brief
+specs/NNN-slug/          Spec Kit features — spec · plan · tasks, one folder per feature
+.specify/                Spec Kit — constitution, templates, scripts, extensions (bug · debt · design)
+.claude/skills/          agent skills — speckit-* plus the vendored stack skills (skills.lock.json)
 ```
+
+New work is spec-driven with GitHub Spec Kit — the workflow is in
+[`CLAUDE.md`](./CLAUDE.md) § *Spec-driven development*.
+
+The pre-Spec-Kit documentation (`docs/`, `.design/`) is archived in
+[`leolicona/guide-me-docs`](https://github.com/leolicona/guide-me-docs).
 
 ## Further reading
 
-- [`CLAUDE.md`](./CLAUDE.md) — architecture, backend/frontend folder rules, design system.
-- [`docs/ci-cd.md`](./docs/ci-cd.md) — pipeline, environments, one-time setup runbook.
-- [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md) — multitenancy & data-isolation model.
-- [`docs/TESTING.md`](./docs/TESTING.md) — what is tested where, and the merge gate.
-- [`docs/SPEC.md`](./docs/SPEC.md) — product spec and user stories.
+The `docs/` entries below are in the archive.
+
+- [`CLAUDE.md`](./CLAUDE.md) — architecture, folder rules, design system, the Spec Kit workflow.
+- [`docs/DEVELOPMENT.md`](https://github.com/leolicona/guide-me-docs/blob/main/docs/DEVELOPMENT.md) — running the app locally, step by step.
+- [`docs/ci-cd.md`](https://github.com/leolicona/guide-me-docs/blob/main/docs/ci-cd.md) — pipeline, environments, one-time setup runbook.
+- [`docs/ARCHITECTURE.md`](https://github.com/leolicona/guide-me-docs/blob/main/docs/ARCHITECTURE.md) — multitenancy & data-isolation model.
+- [`docs/TESTING.md`](https://github.com/leolicona/guide-me-docs/blob/main/docs/TESTING.md) — what is tested where, and the merge gate.
+- [`docs/SPEC.md`](https://github.com/leolicona/guide-me-docs/blob/main/docs/SPEC.md) — product spec and user stories.
+- [`docs/PROCESS.md`](https://github.com/leolicona/guide-me-docs/blob/main/docs/PROCESS.md) — the spec-driven process before Spec Kit.

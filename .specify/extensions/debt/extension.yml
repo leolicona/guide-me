@@ -1,0 +1,31 @@
+schema_version: "1.0"
+
+extension:
+  id: debt
+  name: "Technical Debt Register"
+  version: "1.0.0"
+  description: "Record, review and pay down technical debt, one entry per debt under .specify/debt/<slug>/"
+  author: leolicona
+  repository: https://github.com/leolicona/devolada
+  homepage: https://github.com/leolicona/devolada/tree/main/tools/spec-kit-debt
+
+requires:
+  speckit_version: ">=0.9.0"
+
+provides:
+  commands:
+    - name: speckit.debt.log
+      file: commands/speckit.debt.log.md
+      description: "Record a technical debt as an entry under .specify/debt/<slug>/"
+    - name: speckit.debt.review
+      file: commands/speckit.debt.review.md
+      description: "Check the register against the codebase and report which debts are still real, already gone, or grown"
+    - name: speckit.debt.pay
+      file: commands/speckit.debt.pay.md
+      description: "Verify a debt is gone from the code and close its entry with the evidence"
+
+tags:
+  - "tech-debt"
+  - "register"
+  - "workflow"
+  - "maintenance"
