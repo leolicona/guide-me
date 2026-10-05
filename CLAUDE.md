@@ -102,13 +102,14 @@ using its core templates unmodified — the same setup as `leolicona/devolada`:
 `/speckit-specify` does not create a branch (the `git` extension is not installed): the spec folder
 `specs/NNN-slug/` and the worktree branch `feat/<slug>` below are independent — keep both.
 
-**`.specify/memory/constitution.md` is not written yet** — it is still Spec Kit's template.
-Writing it with `/speckit-constitution` comes before the first `/speckit-specify` (`/project-brief`
-can interview first). Distil it from this file and from the archive's `docs/ARCHITECTURE.md`,
-`docs/TESTING.md`, `docs/PROCESS.md` and `.design/design-system/DESIGN_TOKENS.md`; when the design
-extension then offers `/speckit-design-foundations`, point it at that existing design system rather
-than inventing one. Once written, the constitution is the law of this repo and supersedes every
-other practice document, this file included. Until then, this file stands in.
+**[`.specify/memory/constitution.md`](.specify/memory/constitution.md) is the law of this repo**
+(v1.0.0, ratified 2026-10-04): eight principles — spec-driven and cited, money law, tenant
+isolation, the server decides, capacity guarded by the database, tests where the rule is enforced,
+Elegant Field Minimalism, external services never undo a sale — plus the stack, the gates and how
+it is amended. It supersedes every other practice document, this file included; where they
+disagree, the constitution wins. Amend it with `/speckit-constitution`, never by hand. When the
+design extension offers `/speckit-design-foundations`, point it at the existing design system
+(below) rather than inventing one.
 
 The pre-Spec-Kit process — `docs/PROCESS.md`, with `docs/SPEC.md` as the product index — is archived
 with the corpus (above): read it for what exists and why, never write into it. The archive's
