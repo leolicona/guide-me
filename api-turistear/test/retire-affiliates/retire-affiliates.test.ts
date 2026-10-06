@@ -5,11 +5,11 @@ import { buildFakeJwt } from '../helpers/jwt'
 
 // retire-affiliates US1–US3 — specs/001-retire-affiliates/spec.md.
 //
-// The affiliate program and its shift operators are gone from the code, but their rows are not
-// gone from D1 (D1): prod still holds companies, commission rows, invitations and one affiliate
-// user with a cash sale. Every legacy row here is seeded in raw SQL — the code no longer maps the
-// tables (D2) — and each test proves the code behaves as if the feature never existed, without
-// losing a peso that was already recorded.
+// The affiliate program and its shift operators are gone from the code, and since migration 0069
+// (drop-affiliate-tables) their tables and columns are gone from D1 too. What can still exist is a
+// `users` row stored with role `affiliate` — prod kept one, with a cash sale — until the developer
+// settles it outside the product. Each test proves the code treats such a row as if the feature
+// never existed, without losing a peso that was already recorded.
 
 const ADMIN_EMAIL = 'admin@empresa.com'
 const AGENT_EMAIL = 'agent@empresa.com'
@@ -26,15 +26,11 @@ interface LegacyAffiliate {
   adminId: string
   agentId: string
   legacyUserId: string
-  companyId: string
-  operatorAccessToken: string
-  invitationToken: string
   folioId: string
 }
 
-// The prod shape, reduced: an org with its admin and an agent, plus one affiliate company with its
-// manager (role `affiliate`), a pending invitation, a shift operator, and the manager's one cash
-// sale (MXN 360.00), stamped with the company and the operator as the retired code stamped it.
+// The prod shape, reduced: an org with its admin and an agent, plus the user row still stored with
+// role `affiliate` and its one cash sale (MXN 360.00).
 const seedLegacyAffiliate = async (
   organizationId?: string,
   emails = { admin: ADMIN_EMAIL, agent: AGENT_EMAIL, legacy: LEGACY_EMAIL },
@@ -43,48 +39,24 @@ const seedLegacyAffiliate = async (
   const org = admin.organizationId
   const agent = await seedUser({ email: emails.agent, role: 'agent', organizationId: org })
 
-  const companyId = crypto.randomUUID()
-  await env.DB.prepare(
-    `INSERT INTO affiliate_companies (id, organization_id, name, status) VALUES (?, ?, 'Hotel Maya', 'active')`,
-  )
-    .bind(companyId, org)
-    .run()
-
   const legacyUserId = crypto.randomUUID()
   await env.DB.prepare(
-    `INSERT INTO users (id, organization_id, name, email, password_hash, password_salt, role, status, plan, affiliate_company_id, position)
-     VALUES (?, ?, 'Gerente Maya', ?, 'H', 'S', 'affiliate', 'active', 'free', ?, 'Gerente')`,
+    `INSERT INTO users (id, organization_id, name, email, password_hash, password_salt, role, status, plan)
+     VALUES (?, ?, 'Gerente Maya', ?, 'H', 'S', 'affiliate', 'active', 'free')`,
   )
-    .bind(legacyUserId, org, emails.legacy, companyId)
-    .run()
-
-  const invitationToken = crypto.randomUUID()
-  await env.DB.prepare(
-    `INSERT INTO affiliate_invitations (id, organization_id, affiliate_company_id, identity, token, invited_by, status, expires_at)
-     VALUES (?, ?, ?, 'nuevo@hotelmaya.com', ?, ?, 'pending', ?)`,
-  )
-    .bind(crypto.randomUUID(), org, companyId, invitationToken, admin.userId, nowSec() + 86_400)
-    .run()
-
-  const operatorId = crypto.randomUUID()
-  const operatorAccessToken = crypto.randomUUID()
-  await env.DB.prepare(
-    `INSERT INTO affiliate_operators (id, organization_id, affiliate_company_id, manager_id, name, phone, access_token)
-     VALUES (?, ?, ?, ?, 'Cajera Turno A', '5215512345678', ?)`,
-  )
-    .bind(operatorId, org, companyId, legacyUserId, operatorAccessToken)
+    .bind(legacyUserId, org, emails.legacy)
     .run()
 
   const folioId = crypto.randomUUID()
   const ts = nowSec()
   await env.DB.prepare(
     `INSERT INTO folios
-       (id, organization_id, agent_id, affiliate_company_id, operator_id, customer_name, status,
+       (id, organization_id, agent_id, customer_name, status,
         subtotal, discount_total, total, amount_paid, commission_amount,
         cancellation_clawback, cancelled_at, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, 'Huésped', 'paid', 36000, 0, 36000, 36000, 0, 0, NULL, ?, ?)`,
+     VALUES (?, ?, ?, 'Huésped', 'paid', 36000, 0, 36000, 36000, 0, 0, NULL, ?, ?)`,
   )
-    .bind(folioId, org, legacyUserId, companyId, operatorId, ts, ts)
+    .bind(folioId, org, legacyUserId, ts, ts)
     .run()
   await seedFolioLedgerRows({
     folioId,
@@ -99,47 +71,20 @@ const seedLegacyAffiliate = async (
     adminId: admin.userId,
     agentId: agent.userId,
     legacyUserId,
-    companyId,
-    operatorAccessToken,
-    invitationToken,
     folioId,
   }
 }
 
-const seedService = async (organizationId: string): Promise<string> => {
-  const id = crypto.randomUUID()
-  await env.DB.prepare(
-    `INSERT INTO services
-       (id, organization_id, name, description, base_price, minimum_price, default_capacity, commission_type, commission_value, status, created_at, updated_at)
-     VALUES (?, ?, 'Tour sin vender', NULL, 150000, 100000, 12, 'percent', 0, 'active', ?, ?)`,
-  )
-    .bind(id, organizationId, nowSec(), nowSec())
-    .run()
-  return id
-}
-
-// The shared wipe knows nothing of the retired tables, so release them first: null the child keys
-// that point at them, then delete them, then hand over to clearFullDb.
-const clearLegacyAndAll = async () => {
-  await env.DB.exec('DELETE FROM affiliate_invitations')
-  await env.DB.exec('DELETE FROM affiliate_commissions')
-  await env.DB.exec('UPDATE folios SET operator_id = NULL, affiliate_company_id = NULL')
-  await env.DB.exec('UPDATE folio_payments SET operator_id = NULL')
-  await env.DB.exec('UPDATE folio_events SET operator_id = NULL')
-  await env.DB.exec('DELETE FROM affiliate_operators')
-  await env.DB.exec('UPDATE users SET affiliate_company_id = NULL')
-  await env.DB.exec('DELETE FROM affiliate_companies')
-  await clearFullDb()
-}
-
-beforeEach(clearLegacyAndAll)
+beforeEach(clearFullDb)
 
 // ---------------------------------------------------------------------------
 // US1 — the product has two roles again
 // ---------------------------------------------------------------------------
 describe('retire-affiliates US1 — no affiliate or operator surface remains', () => {
   it('every retired address answers 404 (D11)', async () => {
-    const { companyId, operatorAccessToken } = await seedLegacyAffiliate()
+    await seedLegacyAffiliate()
+    const companyId = crypto.randomUUID()
+    const operatorAccessToken = crypto.randomUUID()
 
     const retired: Array<[string, string, string]> = [
       ['GET', '/affiliates', ADMIN_EMAIL],
@@ -206,23 +151,6 @@ describe('retire-affiliates US2 — the legacy account and the shift session are
     expect(res.status).toBe(200)
     expect(((await res.json()) as any).user.userId).toBe(agentId)
   })
-
-  it('treats a pending affiliate invitation as an invalid one (FR-004)', async () => {
-    const { invitationToken } = await seedLegacyAffiliate()
-    const lookup = await SELF.fetch(`${API}/auth/invite/accept?token=${invitationToken}`)
-    expect(lookup.status).toBe(400)
-    expect(errCode(await lookup.json())).toBe('INVALID_TOKEN')
-
-    const complete = await SELF.fetch(`${API}/auth/invite/complete`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ token: invitationToken, name: 'Nuevo', password: 'password123' }),
-    })
-    expect(complete.status).toBe(400)
-    expect(errCode(await complete.json())).toBe('INVALID_TOKEN')
-    const users = await env.DB.prepare(`SELECT count(*) AS n FROM users WHERE email = 'nuevo@hotelmaya.com'`).first<{ n: number }>()
-    expect(users!.n).toBe(0)
-  })
 })
 
 // ---------------------------------------------------------------------------
@@ -279,29 +207,6 @@ describe('retire-affiliates US3 — legacy money stays readable and settleable',
       'seller,role,folios_sold,sales_total,cash_collected,electronic_total,commission_earned,confirmed_drops,payouts,net_owed',
     )
     expect(csv).toContain('Gerente Maya,affiliate,1,360.00,360.00')
-  })
-
-  it('a legacy commission row does not block deleting an unsold service (D7)', async () => {
-    const { organizationId, companyId } = await seedLegacyAffiliate()
-    const serviceId = await seedService(organizationId)
-    await env.DB.prepare(
-      `INSERT INTO affiliate_commissions (id, organization_id, affiliate_company_id, service_id, commission_type, commission_value)
-       VALUES (?, ?, ?, ?, 'percent', 1500)`,
-    )
-      .bind(crypto.randomUUID(), organizationId, companyId, serviceId)
-      .run()
-
-    const res = await SELF.fetch(`${API}/services/${serviceId}`, {
-      method: 'DELETE',
-      headers: auth(ADMIN_EMAIL),
-    })
-    expect(res.status).toBe(200)
-    const left = await env.DB.prepare(
-      'SELECT (SELECT count(*) FROM services WHERE id = ?1) AS svc, (SELECT count(*) FROM affiliate_commissions WHERE service_id = ?1) AS rows_left',
-    )
-      .bind(serviceId)
-      .first<{ svc: number; rows_left: number }>()
-    expect(left).toEqual({ svc: 0, rows_left: 0 })
   })
 
   it('isolation: another org never sees, reports or settles the legacy seller (constitution III)', async () => {
