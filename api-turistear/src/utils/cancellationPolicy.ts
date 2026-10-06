@@ -22,8 +22,8 @@ const tierSchema = z.object({
   refund_pct: z.number().int().min(0).max(100),
   // Share of the line's commission the seller keeps (before the D8 cap).
   agent_commission_pct: z.number().int().min(0).max(100),
-  // retire-affiliates D8 — the optional `affiliate_commission_pct` (US-A72) is gone with the
-  // affiliate role. A document still carrying it parses: the key is stripped, as for D20 below.
+  // retire-affiliates D8 — the optional affiliate commission share (US-A72) is gone with the
+  // affiliate role. A document still carrying its key parses: the key is stripped, as for D20 below.
 })
 
 // D20 — the ladder is the WHOLE document. There is no deposit clause, because an apartado is not a

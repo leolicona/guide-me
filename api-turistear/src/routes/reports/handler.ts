@@ -11,7 +11,7 @@ import {
   payouts,
   users,
 } from '../../db/schema'
-import type { AppVariables } from '../../types/context'
+import type { AppVariables, UserRole } from '../../types/context'
 import type { CommissionReportQuery } from './schema'
 import { fulfillmentResolution, lineFulfillment } from '../../utils/folioFulfillment'
 
@@ -33,9 +33,7 @@ const resolveRange = (from: string, to: string) => ({
 export interface CommissionReportRow {
   seller_id: string
   name: string
-  // retire-affiliates D6 — the stored role, as-is: a seller still stored with a retired role keeps
-  // their row (the report reads the ledger; dropping them would make the totals disagree with it).
-  role: string
+  role: UserRole
   folios_sold: number
   sales_total: number
   cash_collected: number
@@ -223,7 +221,7 @@ export const getCommissionReport = async (c: ReportsContext) => {
   return c.json(report)
 }
 
-const ROLE_LABEL: Record<string, string> = {
+const ROLE_LABEL: Record<UserRole, string> = {
   admin: 'Administrador',
   agent: 'Agente',
 }
@@ -262,8 +260,7 @@ export const exportCommissionReport = async (c: ReportsContext) => {
     rows.push(
       [
         csvCell(s.name),
-        // retire-affiliates D6 — a retired role prints as stored rather than as a wrong label.
-        csvCell(ROLE_LABEL[s.role] ?? s.role),
+        csvCell(ROLE_LABEL[s.role]),
         String(s.folios_sold),
         money(s.sales_total),
         money(s.cash_collected),
