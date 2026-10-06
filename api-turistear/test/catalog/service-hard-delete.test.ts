@@ -9,8 +9,7 @@ import { buildFakeJwt } from '../helpers/jwt'
 
 // US-A58 — guarded hard-delete of a service (docs/catalog/service-catalog.spec.md rev.
 // 2026-06-23). Blocked (409 SERVICE_HAS_FOLIOS) when any folio line references the service;
-// otherwise removes the service + its slots / schedules / extras. (Legacy affiliate commission
-// rows are cleaned too — retire-affiliates D7, proven in test/retire-affiliates.)
+// otherwise removes the service + its slots / schedules / extras.
 
 const ADMIN_EMAIL = 'admin@empresa.com'
 const AGENT_EMAIL = 'agent@empresa.com'

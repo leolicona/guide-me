@@ -822,16 +822,6 @@ export const accommodationReservations = sqliteTable('accommodation_reservations
     .default(sql`(unixepoch())`),
 })
 
-// ── Retired: affiliates and their shift operators (specs/001-retire-affiliates) ─────────────
-// retire-affiliates D2 — still in D1, deliberately unmapped so nothing reads or writes them by
-// accident: the tables `affiliate_companies`, `affiliate_commissions`, `affiliate_invitations`,
-// `affiliate_operators` (migrations 0034, 0048) and the nullable columns
-// `users.affiliate_company_id`, `users.position`, `folios.affiliate_company_id`,
-// `folios.operator_id`, `folio_payments.operator_id`, `folio_events.operator_id` (0034, 0048,
-// 0049, 0061). Inserts leave the columns NULL. The one statement that still touches them is the
-// service hard-delete's cleanup, through a mapping local to routes/services/handler.ts (D7).
-// Dropping them is debt `.specify/debt/affiliate-tables/`.
-
 // US-LG01 (docs/paid-ledger/paid-ledger.spec.md) — per-payment money-movement ledger. One SIGNED row per
 // movement on a folio; the cash engine's source of truth (later steps re-home cash_collected /
 // by-method sales / commissions onto it). `entry_type` separates money movements (payment/refund,

@@ -181,8 +181,7 @@ export const logout = async (c: AuthContext) => {
   return c.json({ message: 'Sesión cerrada correctamente.' }, 200)
 }
 
-// retire-affiliates (FR-004) — only agent invitations exist. A token from the retired
-// `affiliate_invitations` table is not looked up, so it answers INVALID_TOKEN like any unknown one.
+// retire-affiliates (FR-004) — only agent invitations exist; any other token answers INVALID_TOKEN.
 interface ResolvedInvitation {
   id: string
   organizationId: string
