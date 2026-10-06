@@ -42,6 +42,12 @@
   - The spec was renumbered `001-passkey-auth` → `003-passkey-auth`, because `develop` already holds 001 and 002.
 
   All items still pass.
+- Iteration 4 (2026-10-06): the developer chose **Better Auth** to implement authentication.
+  - The choice is recorded in Clarifications and in the "Built on Better Auth" assumption. Every FR and SC stays technology-agnostic and unchanged. Naming the library is a constraint the developer set, not leaked implementation.
+  - The fit-gap was read against Better Auth v1.7.7, its latest stable release (2026-09-30).
+  - Two constitution decisions go to the plan: Principle IV's route structure and error envelope, and the stack row with the `nodejs_compat` flag.
+
+  All items still pass.
 - Some references to the code base and the constitution are deliberate, not leaked implementation. The constitution requires them:
   - The scope boundary names test suites and the shared session helper, because Principle I requires a mechanical test.
   - The error codes are declared in FR-070, because Principle IV says they must exist in the spec before they exist in code.

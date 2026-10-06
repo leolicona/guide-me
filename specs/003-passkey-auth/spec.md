@@ -15,6 +15,7 @@
 - Q: After a sign-in by email code, is creating a llave de acceso optional or mandatory, and do admins get a stricter rule? → A: **Mandatory for every role alike.** The user must create one before continuing, except on a device that cannot. The email code is only for recovery (FR-007, FR-008, FR-009).
 - Q: Shift operators (affiliate cashiers with no email) open shifts with a link and a 4-digit PIN. Do they move to llaves de acceso? → A: **Out of scope.** *Superseded the same day.* Affiliates and their shift operators were retired from the code (`specs/001-retire-affiliates`, #154). No operator flow remains, so no PIN depends on Agnostic Auth any more, and this feature retires Agnostic Auth entirely (FR-062). The withdrawn requirement that kept the operator flow unchanged was FR-050.
 - Q: Which roles does this feature cover? → A: **Only the roles that exist: `admin` and `agent`.** The `affiliate` role is retired (constitution III, `retire-affiliates D3`). A user row still stored with a retired role stays refused at authentication, whichever way it signs in.
+- Q: What implements the authentication? → A: **Better Auth** (developer's decision). It is an authentication library that runs inside the API Worker, not a service we call. The requirements below stay the contract. Better Auth is configured and extended to meet them, and where its defaults fall short, the requirement wins. The "Built on Better Auth" assumption lists those gaps for `/speckit-plan`.
 
 ## Context — what is broken today
 
@@ -25,7 +26,7 @@ Staff (admins and agents) sign in with an email and a password. Everything that 
 - **The secret is a password**: typed on a phone, outdoors, one-handed, phishable and reusable. Forgetting it opens an 8-scenario recovery flow by email (`test/auth/password-recovery.test.ts`). In practice the email already is the root of trust. The password only adds friction on top of it.
 - **Local development cannot sign in** without the external worker: CLAUDE.md warns that a fresh worktree gets "200 and no session".
 
-This feature retires passwords and Agnostic Auth. Staff sign in with a **passkey**, the WebAuthn/FIDO2 credential their phone or security key protects with a fingerprint, face or device PIN. Holding one is mandatory. An **email code**, a one-time code sent to the user's address, is the recovery path. It is the everyday path only on a device that cannot hold a passkey. The API itself issues, verifies, renews and revokes every session.
+This feature retires passwords and Agnostic Auth. Staff sign in with a **passkey**, the WebAuthn/FIDO2 credential their phone or security key protects with a fingerprint, face or device PIN. Holding one is mandatory. An **email code**, a one-time code sent to the user's address, is the recovery path. It is the everyday path only on a device that cannot hold a passkey. The API itself issues, verifies, renews and revokes every session, using Better Auth, which runs in-process.
 
 **UI vocabulary** (constitution VII, one word per concept): the UI says **llave de acceso**, never "passkey" or "FIDO". That is the term Android and iOS use in their own system prompts in Spanish, so the app's word matches the dialog the phone shows. The recovery path is **código por correo**.
 
@@ -283,9 +284,36 @@ This feature changes how admins and agents prove who they are. Nothing about wha
 - **Supported devices**: agents' phones are recent enough to hold passkeys (Android 9+ with current Google Play services, iOS 16+). Older devices keep working on the email code (FR-009) and are not locked out.
 - **No attestation requirement**: any FIDO2-certified or platform authenticator is accepted. The product does not restrict authenticator makes or models.
 - **End-to-end journeys** (`app-turistear/e2e/setup/auth.setup.ts` signs in with a password today) move to the new sign-in, using a virtual authenticator or the email code read in a test environment.
+- **Built on Better Auth** (Clarifications). Its current stable release is 1.7.7 (2026-09-30), with email OTP in core and passkeys in the separate `@better-auth/passkey` package. Read against that release, it already covers:
+  - username-less passkey sign-in, and passkey creation for a user with no session yet (for invitations)
+  - list, rename and delete for passkeys
+  - email OTP sign-in that answers the same for unknown emails when sign-up is off (FR-013)
+  - sessions stored in the database and revocable, with a signed token that is not rotated on renewal (FR-021, FR-023, BUG-014)
+  - D1 without interactive transactions
+
+  Its defaults fall short of these requirements, which `/speckit-plan` must close with configuration, hooks or our own routes:
+
+  | Requirement | Better Auth by default |
+  |---|---|
+  | FR-002, user verification required | Only "preferred", never enforced |
+  | FR-003, passkeys bound to their environment | Depends on the rpID chosen per environment |
+  | FR-005, 15-minute step-up for add and remove | Freshness is 1 day and checked on add only |
+  | FR-007, FR-008 and FR-009, mandatory passkey and never removing the last one | None |
+  | FR-010 and FR-011, 10-minute codes and 5 attempts | 5 minutes and 3 attempts |
+  | FR-012, per-email send limits | None. Its limiter keys on IP and path, keeps its counts per isolate on Workers in memory storage, and does not apply to server-side `auth.api` calls |
+  | FR-016, codes stored unreadable | Stored as plain text |
+  | FR-022, 60-day idle window | 7 days |
+  | FR-023 and FR-025, revocation effective at the next request | The session cookie cache must stay off |
+  | FR-042, a tenant-scoped access restore | The admin plugin is global, so it is not used. Neither is the organization plugin. Organizations and roles stay ours |
+  | FR-025, retired-role refusal | Needs a session-creation hook that throws |
+  | FR-070, the `{ error: { code, message } }` envelope | Its errors answer `{ code, message }` at the top level |
+
+  It also needs the Workers `nodejs_compat` flag, an `account` table even though nothing writes to it, and cookie names that differ between dev and prod, because both share `.turistearya.com`.
 - **The constitution must be amended in the same pull request** (`/speckit-constitution`, a MINOR bump from v1.1.0). The amendment covers:
-  - Principle IV: the API, not Agnostic Auth, issues the session tokens.
+  - Principle IV: the API, not Agnostic Auth, issues the session tokens. The cookie names `gm_access` and `gm_refresh` give way to Better Auth's session cookie.
   - Principle VI: the `AGNOSTIC_AUTH_API` stand-in leaves the list of services stubbed in tests.
   - Principle VIII: Agnostic Auth leaves the list of services we do not own, and Resend's place on the recovery path is recorded.
-  - The Technology Stack "Auth" row.
+  - The Technology Stack "Auth" row becomes Better Auth with its passkey and email OTP plugins, plus the `nodejs_compat` flag.
+
+  Principle IV says every route lives in `src/routes/<resource>/` behind `zValidator` and answers the `ApiError` envelope. `/speckit-plan` must decide between two options. One is to wrap Better Auth's calls (`auth.api.*`) in our own `routes/auth/` and keep Principle IV whole. The other is to mount Better Auth's handler directly and propose the amendment.
 - **Archived stories replaced**: admin registration, verification and login, the auth middleware scenarios, agent invitation acceptance and password recovery (today's `test/auth/` suites). Their citations stay intact in the archive (constitution I).
