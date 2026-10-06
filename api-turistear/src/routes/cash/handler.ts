@@ -838,8 +838,7 @@ export const listBalances = async (c: CashContext) => {
   const db = getDb(c.env)
 
   // A balance row is emitted for every cash-holding user, even one with no activity (→ all
-  // zeros). retire-affiliates D5 — a cash holder is every non-admin user, not a list of roles, so a
-  // seller still stored with a retired role keeps an open balance the admin can see and settle.
+  // zeros). retire-affiliates D5 — a cash holder is every non-admin user, not a list of roles.
   const agents = await db
     .select({ id: users.id, name: users.name })
     .from(users)

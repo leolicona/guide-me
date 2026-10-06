@@ -1,5 +1,5 @@
-// retire-affiliates D3 — the product knows two roles. A user row still stored as `affiliate` is
-// refused by authMiddleware before any handler sees it.
+// The product knows two roles (retire-affiliates); delete-legacy-affiliates D1 removed the last
+// user row stored with another.
 export type UserRole = 'admin' | 'agent'
 
 export interface UserPayload {

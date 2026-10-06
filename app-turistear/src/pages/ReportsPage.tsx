@@ -59,12 +59,10 @@ function buildPresets(today: string): Preset[] {
   ]
 }
 
-const ROLE_LABEL: Record<string, string> = {
+const ROLE_LABEL: Record<CommissionReportRow['role'], string> = {
   admin: 'Administrador',
   agent: 'Agente',
 }
-// retire-affiliates D6 — a retired role prints as stored rather than as a wrong label.
-const roleLabel = (role: string) => ROLE_LABEL[role] ?? role
 
 const SORT_OPTIONS: { key: ReportSortKey; label: string }[] = [
   { key: 'sales_total', label: 'Ventas' },
@@ -271,7 +269,7 @@ function SellerCard({ s, sortKey }: { s: CommissionReportRow; sortKey: ReportSor
                 {s.name}
               </Typography>
               <Typography variant="caption" color="textSecondary">
-                {roleLabel(s.role)}
+                {ROLE_LABEL[s.role]}
               </Typography>
               <MetricsLine s={s} sortKey={sortKey} />
             </Box>
@@ -372,7 +370,7 @@ function SellerRow({ s }: { s: CommissionReportRow }) {
                 {s.name}
               </Typography>
               <Typography variant="caption" color="textSecondary">
-                {roleLabel(s.role)}
+                {ROLE_LABEL[s.role]}
               </Typography>
             </Box>
           </Stack>

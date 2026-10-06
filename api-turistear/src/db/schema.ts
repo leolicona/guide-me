@@ -99,7 +99,6 @@ export const users = sqliteTable('users', {
   passwordHash: text('password_hash').notNull(),
   passwordSalt: text('password_salt').notNull(),
   phone: text('phone'),
-  // retire-affiliates D3 — a stored `affiliate` survives in prod and is refused by authMiddleware.
   role: text('role', { enum: ['admin', 'agent'] }).notNull(),
   status: text('status', { enum: ['unverified', 'active', 'suspended'] })
     .notNull()
