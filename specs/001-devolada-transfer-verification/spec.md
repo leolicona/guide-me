@@ -46,15 +46,29 @@ both as the fallback when Devolada is unavailable and as the admin's override.
 `api-turistear/test/pos/optional-payment-reference.test.ts` and
 `api-turistear/test/paid-ledger/settle-method.test.ts` MUST pass unedited.
 
+## Clarifications
+
+### Session 2026-10-06
+
+- Q: When a payment ends *invalid* or *expired*, or its link expires unpaid, does the sale stay in
+  Por verificar or is it cancelled automatically? → A: Cancelled automatically when the link
+  expires unpaid or the payment ends *expired*; an *invalid* payment goes to the admin (FR-016).
+- Q: What does the seller give the customer — the link only, or also the CLABE and the 7-digit
+  payer reference? → A: The link, sent by WhatsApp; the customer confirms the transfer through
+  Devolada's link page. Turistear shows neither the CLABE nor the reference (FR-008).
+- Q: With Devolada connected, may the seller still record a transfer by hand? → A: No. The link
+  replaces the seller's manual recording; the manual path is used only when no link can be
+  created, and the admin can always verify by hand (FR-009, FR-010, FR-018).
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - A transfer sale clears itself when Banxico confirms the money (Priority: P1)
 
 An admin connects the organization's Devolada account once. From then on, when a seller (agent,
 affiliate or shift operator) completes a sale by Transferencia, the sale gets its own Devolada
-payment link for exactly the amount due. The seller shows the link to the customer as a QR on their
-screen or sends it by WhatsApp. The customer transfers from their bank and confirms on the link's
-page. When Devolada reports that Banxico confirms the money, the system verifies the sale: the
+payment link for exactly the amount due. The seller sends the link to the customer by WhatsApp. The
+customer transfers from their bank and confirms the transfer on Devolada's link page. When
+Devolada reports that Banxico confirms the money, the system verifies the sale: the
 tickets are signed, the email goes out if there is an address, and the seller's WhatsApp send
 unlocks. No admin is involved.
 
@@ -73,8 +87,9 @@ observe the sale verified by «Sistema» with its tickets released and no admin 
    again except as a masked hint, and the organization's transfer sales start using payment links.
 2. **Given** a connected organization, **When** a seller completes a full sale by Transferencia,
    **Then** the sale is created as today (paid, awaiting verification, no tickets) **and** a payment
-   link for exactly the sale's amount is attached and offered to the seller as a QR and a WhatsApp
-   share, with the sale shown as «Validando pago».
+   link for exactly the sale's amount is attached, the seller can send it to the customer by
+   WhatsApp in one tap, and the sale shows as «Validando pago». The seller is not offered a field to
+   type a bank reference.
 3. **Given** that sale, **When** Devolada reports the payment *confirmed*, **Then** the sale is
    verified with the system as the actor, its tickets are signed, the ticket email is sent if the
    customer has one, the seller's WhatsApp send unlocks, Devolada's receipt number is recorded as
@@ -96,35 +111,44 @@ observe the sale verified by «Sistema» with its tickets released and no admin 
 Some verdicts are not a clean *confirmed*: the money fell short, Banxico contradicts the receipt,
 the transfer was never found, money arrived for a link already closed, the customer must supply
 the tracking key, or the organization's validation credit ran out. In every one of these cases
-the sale is never released and never silently stuck. It lands in Por verificar, or in front of
-the seller, labelled with what happened, and the admin decides with the evidence in hand.
+the sale is never released and never silently stuck. When no money arrived at all, the sale is
+cancelled automatically so its seats go back on sale. Every other case lands in Por verificar, or
+in front of the seller, labelled with what happened, and the admin decides with the evidence in
+hand.
 
 **Why this priority**: without it, Story 1 works only on the happy path and every exception
 becomes an invisible pending sale — the failure the production numbers already show.
 
-**Independent Test**: with test credentials, move test payments to *partial*, *invalid*, *expired*
-and *unapplied*. Observe each sale in Por verificar with its label and amounts, then verify one by
-hand and reject another.
+**Independent Test**: with test credentials, move test payments to *partial*, *invalid* and
+*unapplied* and observe each in Por verificar with its label and amounts; verify one by hand and
+reject another. Then move a full sale's test payment to *expired* and observe the sale cancelled
+by «Sistema» with its seats released.
 
 **Acceptance Scenarios**:
 
 1. **Given** a transfer sale whose payment ends *partial*, **When** the admin opens Por verificar,
    **Then** the sale shows «Pago incompleto» with the amount asked and the amount received, and its
    tickets stay unreleased until the admin verifies or rejects it.
-2. **Given** a payment that ends *invalid*, **Then** the sale shows «Banxico no confirma la
-   transferencia» and its tickets are not released (what happens next: FR-016).
-3. **Given** a payment that ends *expired*, or a link that expires with no payment, **Then** the
-   sale shows «No se recibió la transferencia» and its tickets are not released (what happens next:
-   FR-016).
-4. **Given** money that arrives for a link already closed (*unapplied*), **Then** the admin is
-   alerted that money arrived for a sale that no longer takes it, with the amount, so they can
-   return it.
-5. **Given** a payment waiting for the customer's tracking key, **Then** the seller sees «Pide al
+2. **Given** a payment that ends *invalid*, **Then** the sale stays in Por verificar labelled
+   «Banxico no confirma la transferencia», its tickets are not released, and the admin verifies or
+   rejects it.
+3. **Given** a full sale or an apartado deposit whose payment ends *expired*, or whose link expires
+   with no payment, **Then** the sale is cancelled automatically, the way an admin's Rechazar
+   cancels it today (seats released, the seller's commission reversed), with «Sistema» as the
+   actor and «No se recibió la transferencia» as the reason.
+4. **Given** an apartado's settlement whose payment ends *expired*, or whose link expires with no
+   payment, **Then** the settlement is withdrawn and the sale goes back to being an apartado, with
+   its deposit and its own hold rules intact. A sale is never cancelled automatically while it
+   holds money that was cleared.
+5. **Given** money that arrives for a link already closed (*unapplied*) — including a sale
+   cancelled under scenario 3 whose customer paid late — **Then** the admin is alerted that money
+   arrived for a sale that no longer takes it, with the amount, so they can return it.
+6. **Given** a payment waiting for the customer's tracking key, **Then** the seller sees «Pide al
    cliente su clave de rastreo» on the sale, and the sale keeps waiting without expiring.
-6. **Given** the organization's validation credit at Devolada has run out, **Then** the admin sees
+7. **Given** the organization's validation credit at Devolada has run out, **Then** the admin sees
    that validations are paused until they top up, and the affected sales keep waiting.
-7. **Given** any of these sales, **When** the admin taps Verificar or Rechazar, **Then** both behave
-   as today and the record shows the admin, not the system, as the actor.
+8. **Given** any sale still awaiting its verdict, **When** the admin taps Verificar or Rechazar,
+   **Then** both behave as today and the record shows the admin, not the system, as the actor.
 
 ---
 
@@ -233,14 +257,13 @@ closed; then advance a test payment to *unapplied* and observe the admin alert.
 - **FR-007**: For a connected organization, every electronic payment recorded at checkout or at
   settlement (full sale, apartado deposit, settlement) MUST get its own one-time Devolada payment
   link for exactly the amount that payment covers.
-- **FR-008**: The seller MUST be able to show the link as a scannable QR on their screen and share
-  it by WhatsApp. [NEEDS CLARIFICATION: when the organization has Devolada's pay-by-reference on,
-  should the seller's screen also show the CLABE and the customer's 7-digit «Referencia numérica»,
-  so the customer can pay from their banking app without opening the link — and does Devolada
-  validate such a transfer without the customer confirming on the link's page?]
-- **FR-009**: When Devolada is connected, [NEEDS CLARIFICATION: may the seller still record a
-  transfer by hand (typed reference, cleared by an admin), or is the manual path only the fallback
-  when no link can be created (FR-010)?]
+- **FR-008**: The seller MUST be able to send the link to the customer by WhatsApp in one tap from
+  the sale, as a pre-filled message from the seller's own number. The customer confirms the
+  transfer on Devolada's link page; Turistear shows neither the CLABE nor the payer reference —
+  the link's page carries them. *(Clarified 2026-10-06.)*
+- **FR-009**: When Devolada is connected, the seller MUST NOT be offered the manual recording of a
+  transfer (the typed bank reference, cleared by an admin). The link replaces it; the manual path
+  exists for the seller only as the FR-010 fallback. *(Clarified 2026-10-06.)*
 - **FR-010**: If a link cannot be created (Devolada unreachable or refusing, or the business
   suspended), the sale MUST still complete on today's manual path and the seller MUST be told. A
   sale is never lost or blocked by Devolada, and never delayed beyond SC-006. *(constitution VIII)*
@@ -263,12 +286,20 @@ closed; then advance a test payment to *unapplied* and observe the admin alert.
   Devolada's receipt number recorded as the payment's reference. Applying the same verdict again
   MUST have no further effect.
 - **FR-015**: Each of the following MUST be surfaced with its own label and the amounts involved
-  (asked, claimed, received): *partial*, *invalid*, *expired* and *unapplied* verdicts, a link that
-  expires unpaid, a payment waiting on the customer's tracking key, and paused validation credit.
-  They go to the admin in Por verificar; the tracking-key case also goes to the seller.
-- **FR-016**: When a payment ends *invalid* or *expired*, or its link expires unpaid, the sale MUST
-  [NEEDS CLARIFICATION: stay in Por verificar for the admin to verify or reject, as today — or be
-  cancelled automatically, releasing its seats, for some or all of these outcomes?]
+  (asked, claimed, received): *partial*, *invalid* and *unapplied* verdicts, a payment waiting on
+  the customer's tracking key, and paused validation credit. They go to the admin in Por verificar;
+  the tracking-key case also goes to the seller. An *expired* verdict or an unpaid link expiry is
+  not queued — FR-016 resolves it — and its reason shows on the sale and in its timeline.
+- **FR-016**: When a payment ends *expired*, or its link expires unpaid, no money arrived. The
+  system MUST then withdraw that payment without waiting for an admin:
+  - for a full sale or an apartado deposit, cancel the sale the way an admin's Rechazar does
+    (seats released, the seller's commission reversed), with «Sistema» as the actor and «No se
+    recibió la transferencia» as the reason;
+  - for a settlement, withdraw only the settlement and return the sale to an apartado with its
+    deposit and hold rules intact. A sale holding cleared money is never cancelled automatically.
+
+  A payment that ends *invalid* MUST stay in Por verificar for the admin to verify or reject.
+  *(Clarified 2026-10-06.)*
 - **FR-017**: A *superseded* payment MUST be ignored in favour of its correction. While a payment
   is *validating*, the sale MUST show «Validando pago» and release nothing.
 - **FR-018**: The admin's manual Verificar and Rechazar MUST remain available for every awaiting
@@ -294,8 +325,8 @@ closed; then advance a test payment to *unapplied* and observe the admin alert.
   (real or test), its status (connected · broken · disconnected), the health of its notification
   address, and who connected it and when.
 - **Payment link** — one per electronic payment of a sale: the sale and which payment it collects
-  (sale · deposit · settlement), the amount asked, the link's address, the customer's payment
-  reference when Devolada provides one, its expiry, and its state (open · paid · expired · closed).
+  (sale · deposit · settlement), the amount asked, the link's address, its expiry, and its state
+  (open · paid · expired · closed).
 - **Devolada payment (verdict)** — what Devolada reports for a link: its id, status, the amounts
   asked, claimed and received, the match (exact · short · over), Devolada's receipt number, the
   verdict's time, and what it awaits from the customer, if anything.
@@ -323,6 +354,8 @@ closed; then advance a test payment to *unapplied* and observe the admin alert.
   scope-boundary suites (Context) pass unedited.
 - **SC-008**: *(the Context hypothesis, to be measured)* Within 60 days of connecting, transfers
   make up more than 5% of the organization's payments (today 0.5%).
+- **SC-009**: Seats held by a sale whose transfer never arrives go back on sale within 30 minutes
+  of its link expiring or its payment ending *expired*, with no admin action.
 
 ## Assumptions
 
@@ -333,7 +366,9 @@ closed; then advance a test payment to *unapplied* and observe the admin alert.
 - One one-time link per electronic payment. The customer identity Devolada sees is the sale, so all
   the links of one sale share the customer's payment reference.
 - A link stays open until whichever comes first: 24 hours after it is issued, or the start of the
-  sale's first service. FR-016 decides what happens when it closes unpaid.
+  sale's first service. FR-016 decides what happens when it closes unpaid. Because closing unpaid
+  now cancels the sale, this window is a product decision; the plan may tune it, but never past the
+  first service.
 - The organization's «Referencia obligatoria en transferencias» switch (US-A88) applies only to the
   manual path. A linked payment's reference is Devolada's receipt number.
 - A fee the organization configures in Devolada is charged to the customer on top of the amount
@@ -344,7 +379,7 @@ closed; then advance a test payment to *unapplied* and observe the admin alert.
   (FR-015), and transfers are 0.5% of payments today.
 - The express sale is cash-only and is untouched.
 - Customer messages travel as today: email is sent automatically, WhatsApp by the seller's tap.
-  Turistear sends no WhatsApp itself.
+  Turistear sends no WhatsApp itself — the payment link included (FR-008).
 - Devolada behaves as its v1 contract states (`contracts/devolada-collections-v1.openapi.yaml`).
   The plan records what breaks when it is down (constitution VIII). Its rate limit, 120 requests a
   minute per business, is far above any organization's sales rate.

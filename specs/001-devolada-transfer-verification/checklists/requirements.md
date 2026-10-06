@@ -13,7 +13,7 @@
 
 ## Requirement Completeness
 
-- [ ] No [NEEDS CLARIFICATION] markers remain
+- [x] No [NEEDS CLARIFICATION] markers remain
 - [x] Requirements are testable and unambiguous
 - [x] Success criteria are measurable
 - [x] Success criteria are technology-agnostic (no implementation details)
@@ -34,10 +34,14 @@
 - **Iteration 1** failed *All functional requirements have clear acceptance criteria*: FR-021
   (organization isolation) had no scenario, and constitution III requires one. Fixed in iteration 2
   by adding User Story 1, scenario 6 (two connected organizations, `seedTwoOrgs`).
-- **Open: three [NEEDS CLARIFICATION] markers** — FR-008 (pay-by-reference on the seller's screen),
-  FR-009 (does the manual path remain a seller choice), FR-016 (automatic cancellation on
-  *invalid* / *expired* / unpaid expiry). They block `/speckit-plan`; answer them, or run
-  `/speckit-clarify`.
+- **Iteration 3 (2026-10-06)** — the three [NEEDS CLARIFICATION] markers were answered and recorded
+  under `## Clarifications`: FR-008 (the link travels by WhatsApp; the customer confirms on
+  Devolada's page; no CLABE or reference on Turistear's screens), FR-009 (the link replaces the
+  seller's manual recording), FR-016 (an unpaid expiry or *expired* verdict cancels automatically;
+  *invalid* stays with the admin). Applying FR-016 changed FR-015 and Story 2's scenarios and added
+  SC-009. One default was added in the same pass: an unpaid **settlement** returns the sale to an
+  apartado instead of cancelling it, because a sale holding cleared money is never cancelled
+  automatically. All items pass; the spec is ready for `/speckit-plan`.
 - **Accepted exception to "no implementation details"**: Context names three test files as the
   scope boundary. Constitution I requires the boundary as a mechanical test naming the suites that
   must pass unedited, and the constitution supersedes the template's guidance. Nothing else in the
