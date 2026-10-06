@@ -26,7 +26,7 @@ import {
   sendCancellationEmail,
   type CancellationEmailInput,
 } from '../../services/resend'
-import { generateRefundPin } from '../../utils/portal'
+import { generateRefundPin, hasPortalTokenSql } from '../../utils/portal'
 import { folioFulfillment } from '../../utils/folioFulfillment'
 import {
   anyLineStatusSql,
@@ -398,15 +398,21 @@ export const markTicketsSentAdmin = async (c: FoliosContext) => {
   const id = c.req.param('id')
   const db = getDb(c.env)
   const now = new Date()
+  const scope = and(eq(folios.id, id), eq(folios.organizationId, admin.organizationId))
 
   const updated = await db
     .update(folios)
     .set({ ticketsSentAt: now, ticketsSentBy: admin.userId, updatedAt: now })
-    .where(and(eq(folios.id, id), eq(folios.organizationId, admin.organizationId)))
+    // verify-send-empty-link — only a folio with a portal token has tickets to have sent.
+    .where(and(scope, hasPortalTokenSql))
     .returning({ sentAt: folios.ticketsSentAt, viewedAt: folios.ticketsViewedAt })
 
   const row = updated[0]
-  if (!row) throw new ApiError('NOT_FOUND', 404, 'Folio not found')
+  if (!row) {
+    const exists = await db.select({ id: folios.id }).from(folios).where(scope).limit(1)
+    if (!exists[0]) throw new ApiError('NOT_FOUND', 404, 'Folio not found')
+    throw new ApiError('CONFLICT', 409, 'This folio has no tickets to deliver yet')
+  }
   // US-A24 — EACH send appends a row (the column is last-write-wins; the narrative is not).
   await folioEventRow(db, {
     organizationId: admin.organizationId,

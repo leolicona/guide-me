@@ -7,6 +7,8 @@
 // whole purpose is proving the tourist was PRESENT to receive cash, so it lives only in the
 // portal page (never in any email).
 
+import { sql } from 'drizzle-orm'
+
 const bytesToB64url = (bytes: Uint8Array): string => {
   let binary = ''
   for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i])
@@ -51,3 +53,13 @@ export const portalTokenExpiry = (slotDates: string[], now = new Date()): Date =
   const target = latest + POST_TRIP_GRACE_DAYS * DAY_SECONDS * 1000
   return new Date(Math.min(target, cap))
 }
+
+// verify-send-empty-link — a folio is on the delivery axis only once it holds a portal token (minted
+// when the money clears: a paid sale, a settle, a verified transfer on a paid folio). An apartado has
+// none until it settles, so there is nothing to have "sent". The mark-sent endpoints AND this into
+// their guarded UPDATE so a client that skips the check can never stamp `tickets_sent_at` on a
+// delivery that did not happen. Raw correlation on the outer `folios` row, like the sweep's.
+export const hasPortalTokenSql = sql`exists (
+  select 1 from folio_access_tokens t
+  where t.folio_id = folios.id and t.organization_id = folios.organization_id
+)`

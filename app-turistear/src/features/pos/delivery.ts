@@ -107,15 +107,37 @@ export function fillTemplate(template: string, ctx: TemplateContext): string {
     '{folio_ref}': f.id.slice(0, 8),
     '{total}': formatMoney(f.total),
     '{pending_balance}': formatMoney(f.pending_balance ?? f.total - f.amount_paid),
+    '{amount_paid}': formatMoney(f.amount_paid),
     '{portal_link}': ctx.portalLink,
     '{itinerary}': renderItinerary(f.lines),
   }
   return template.replace(/\{[a-z_]+\}/g, (m) => (m in map ? map[m] : m))
 }
 
-/** Build the wa.me deep link for a paid folio's ticket delivery. Null when the phone is unusable. */
-export function ticketWhatsAppUrl(template: string, ctx: TemplateContext): string | null {
-  const phone = normalizePhone(ctx.folio.customer_phone).e164
+const whatsAppUrl = (rawPhone: string | null, text: string): string | null => {
+  const phone = normalizePhone(rawPhone).e164
   if (!phone) return null
-  return `https://wa.me/${phone}?text=${encodeURIComponent(fillTemplate(template, ctx))}`
+  return `https://wa.me/${phone}?text=${encodeURIComponent(text)}`
+}
+
+/** Build the wa.me deep link for a paid folio's ticket delivery. Null when the phone is unusable —
+ *  or when there is no portal link: a ticket message without its link tells the customer their
+ *  tickets are "aquí:" and then nothing (verify-send-empty-link). */
+export function ticketWhatsAppUrl(template: string, ctx: TemplateContext): string | null {
+  if (!ctx.portalLink) return null
+  return whatsAppUrl(ctx.folio.customer_phone, fillTemplate(template, ctx))
+}
+
+// verify-send-empty-link — what an apartado's transfer verification says. The deposit cleared; the
+// tickets do not exist until the balance settles. Shipped default, not org-editable (only the
+// ticket and reminder templates are).
+export const DEPOSIT_VERIFIED_TEMPLATE =
+  'Hola {customer_name}, te escribe {agent_name} de {org_name}. Confirmamos tu anticipo de {amount_paid}. Tu saldo pendiente es {pending_balance}; tus boletos se envían al liquidarlo.'
+
+/** The wa.me link confirming an apartado's verified deposit. Null when the phone is unusable. */
+export function depositVerifiedWhatsAppUrl(ctx: Omit<TemplateContext, 'portalLink'>): string | null {
+  return whatsAppUrl(
+    ctx.folio.customer_phone,
+    fillTemplate(DEPOSIT_VERIFIED_TEMPLATE, { ...ctx, portalLink: '' }),
+  )
 }
