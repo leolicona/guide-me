@@ -46,28 +46,17 @@ export default function InviteAcceptPage() {
     );
   }
 
-  const { identity, organization_name, invitation_type, company_name } = data.invitation;
-  const isAffiliate = invitation_type === 'affiliate';
+  const { identity, organization_name } = data.invitation;
 
   return (
     <AuthLayout title="Aceptar invitación">
       <Paper variant="outlined" sx={{ p: 2, mb: 3, bgcolor: 'background.default' }}>
         <Typography variant="body2" color="textSecondary">
-          {isAffiliate ? 'Vender los servicios de' : 'Unirse a la organización'}
+          Unirse a la organización
         </Typography>
         <Typography variant="subtitle1" sx={{ fontWeight: 500 }} gutterBottom>
           {organization_name}
         </Typography>
-        {isAffiliate && company_name && (
-          <>
-            <Typography variant="body2" color="textSecondary">
-              Como afiliado de
-            </Typography>
-            <Typography variant="subtitle1" sx={{ fontWeight: 500 }} gutterBottom>
-              {company_name}
-            </Typography>
-          </>
-        )}
         <Typography variant="body2" color="textSecondary">
           Correo electrónico
         </Typography>
@@ -76,7 +65,7 @@ export default function InviteAcceptPage() {
         </Typography>
       </Paper>
 
-      <InviteCompleteForm token={token} isAffiliate={isAffiliate} />
+      <InviteCompleteForm token={token} />
     </AuthLayout>
   );
 }

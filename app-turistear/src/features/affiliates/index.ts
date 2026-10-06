@@ -1,5 +1,0 @@
-export { AffiliateWizard } from './components/AffiliateWizard'
-export { AffiliateRow } from './components/AffiliateRow'
-export { CommissionCatalogEditor } from './components/CommissionCatalogEditor'
-export * from './hooks/useAffiliates'
-export * from './types'

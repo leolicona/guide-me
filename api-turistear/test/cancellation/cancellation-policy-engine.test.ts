@@ -57,7 +57,6 @@ const compute = (over: Partial<Parameters<typeof computeCancellationRefund>[0]> 
     amountPaid: 100_000,
     nowEpoch: hoursBefore(200),
     timezone: TZ,
-    sellerKind: 'agent',
     ...over,
   })
 
@@ -251,7 +250,7 @@ describe('apartados follow the ladder (D20)', () => {
 })
 
 // ---------------------------------------------------------------------------
-// Commission: the D8 cap, and the D12 affiliate split
+// Commission: the D8 cap, and the retired affiliate share
 // ---------------------------------------------------------------------------
 describe('commission', () => {
   it('percent commission mirrors the sale (basis points of the line total)', () => {
@@ -308,49 +307,28 @@ describe('commission', () => {
     expect(out.reversedCommission).toBe(5_000)
   })
 
-  describe('US-A72 / D12 — the affiliate split', () => {
-    const split = cancellationPolicySchema.parse({
+  // retire-affiliates US3 (D8) — the affiliate share (US-A72) left with the role. A ladder stored
+  // while it existed must still parse, and a sale must price by the agent share — which is what
+  // `affiliate_commission_pct ?? agent_commission_pct` produced for every stored ladder (none
+  // carried the key).
+  describe('retire-affiliates US3 — a ladder that still carries the retired affiliate share', () => {
+    const legacy = cancellationPolicySchema.parse({
       version: 1,
       tiers: [
         { min_hours: 0, refund_pct: 50, agent_commission_pct: 100, affiliate_commission_pct: 50 },
         { min_hours: null, refund_pct: 0, agent_commission_pct: 100, affiliate_commission_pct: 100 },
       ],
-      booking_deposit_retained_pct: 100,
     })
 
-    it('pays an in-house agent and a reseller differently on the SAME tier', () => {
-      const asAgent = compute({ policy: split, nowEpoch: hoursBefore(20), sellerKind: 'agent' })
-      const asAffiliate = compute({
-        policy: split,
-        nowEpoch: hoursBefore(20),
-        sellerKind: 'affiliate',
-      })
-      expect(asAgent.keptCommission).toBe(10_000)
-      expect(asAgent.reversedCommission).toBe(0)
-      expect(asAffiliate.keptCommission).toBe(5_000)
-      expect(asAffiliate.reversedCommission).toBe(5_000)
-      // The split touches commission only — the customer's money is identical.
-      expect(asAgent.refund).toBe(asAffiliate.refund)
+    it('parses, with the retired key stripped', () => {
+      expect(legacy.tiers[0]).not.toHaveProperty('affiliate_commission_pct')
+      expect(legacy.tiers[1]).not.toHaveProperty('affiliate_commission_pct')
     })
 
-    it('falls back to the agent percentage when the affiliate one is absent', () => {
-      // LADDER has no affiliate_commission_pct at all — a policy written before US-A72.
-      const asAgent = compute({ nowEpoch: hoursBefore(20), sellerKind: 'agent' })
-      const asAffiliate = compute({ nowEpoch: hoursBefore(20), sellerKind: 'affiliate' })
-      expect(asAffiliate.keptCommission).toBe(asAgent.keptCommission)
-    })
-
-    it('the D8 cap applies to affiliates too', () => {
-      const generous = cancellationPolicySchema.parse({
-        version: 1,
-        tiers: [
-          { min_hours: 0, refund_pct: 100, agent_commission_pct: 0, affiliate_commission_pct: 100 },
-          { min_hours: null, refund_pct: 0, agent_commission_pct: 100 },
-        ],
-        booking_deposit_retained_pct: 100,
-      })
-      const out = compute({ policy: generous, nowEpoch: hoursBefore(20), sellerKind: 'affiliate' })
-      expect(out.keptCommission).toBe(0)
+    it('prices commission by the agent share', () => {
+      const out = compute({ policy: legacy, nowEpoch: hoursBefore(20) })
+      expect(out.keptCommission).toBe(10_000)
+      expect(out.reversedCommission).toBe(0)
     })
   })
 })

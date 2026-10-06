@@ -10,20 +10,14 @@ import { ROUTES } from '../../../config/routes';
 import { ServiceError } from '../../../services/authService';
 import { PasswordInput } from './PasswordInput';
 
-export function InviteCompleteForm({
-  token,
-  isAffiliate = false,
-}: {
-  token: string
-  isAffiliate?: boolean
-}) {
+export function InviteCompleteForm({ token }: { token: string }) {
   const navigate = useNavigate();
   const inviteCompleteMutation = useInviteComplete();
   const queryClient = useQueryClient();
 
   const { control, handleSubmit, setError, formState: { errors } } = useForm<InviteCompleteFormData>({
     resolver: zodResolver(inviteCompleteSchema),
-    defaultValues: { name: '', password: '', confirmPassword: '', position: '' }
+    defaultValues: { name: '', password: '', confirmPassword: '' }
   });
 
   const onSubmit = (data: InviteCompleteFormData) => {
@@ -32,15 +26,13 @@ export function InviteCompleteForm({
         token,
         name: data.name,
         password: data.password,
-        // Only meaningful (and only collected) for an affiliate invite.
-        ...(isAffiliate && data.position?.trim() ? { position: data.position.trim() } : {}),
       },
       {
-        onSuccess: (res) => {
+        onSuccess: () => {
           queryClient.invalidateQueries({ queryKey: ['me'] });
-          // An affiliate lands on the POS (Vender); an agent on the dashboard.
-          const dest = res.user.role === 'affiliate' ? ROUTES.POS : ROUTES.DASHBOARD;
-          navigate(dest, { replace: true });
+          // Only agents are invited; an agent's landing is Vender (US-UX01) — the dashboard they
+          // used to be sent to bounced them there anyway.
+          navigate(ROUTES.POS, { replace: true });
         },
         onError: (error) => {
           if (error instanceof ServiceError && error.status === 400) {
@@ -74,24 +66,6 @@ export function InviteCompleteForm({
           />
         )}
       />
-
-      {isAffiliate && (
-        <Controller
-          name="position"
-          control={control}
-          render={({ field }) => (
-            <TextField
-              {...field}
-              fullWidth
-              label="Puesto (opcional)"
-              margin="normal"
-              disabled={inviteCompleteMutation.isPending}
-              error={!!errors.position}
-              helperText={errors.position?.message}
-            />
-          )}
-        />
-      )}
 
       <PasswordInput
         name="password"

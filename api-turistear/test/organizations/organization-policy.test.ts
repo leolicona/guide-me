@@ -291,7 +291,7 @@ describe('US-A69 — cancellation policy ladder', () => {
     version: 1,
     tiers: [
       { min_hours: 120, refund_pct: 100, agent_commission_pct: 0 },
-      { min_hours: 0, refund_pct: 50, agent_commission_pct: 100, affiliate_commission_pct: 50 },
+      { min_hours: 0, refund_pct: 50, agent_commission_pct: 100 },
       { min_hours: null, refund_pct: 0, agent_commission_pct: 100 },
     ],
   }
@@ -311,7 +311,7 @@ describe('US-A69 — cancellation policy ladder', () => {
     expect(json.organization.cancellation_policy.tiers).toHaveLength(3)
     // Round-trips through the column, not just the response.
     const reread = (await get('admin@empresa.com')).json.organization.cancellation_policy
-    expect(reread.tiers[1]).toMatchObject({ refund_pct: 50, affiliate_commission_pct: 50 })
+    expect(reread.tiers[1]).toMatchObject({ refund_pct: 50, agent_commission_pct: 100 })
   })
 
   // D20 — an admin (or an older client build) may still send the retired deposit floor. The endpoint
@@ -328,6 +328,21 @@ describe('US-A69 — cancellation policy ladder', () => {
     const reread = (await get('admin@empresa.com')).json.organization.cancellation_policy
     expect(reread).not.toHaveProperty('booking_deposit_retained_pct')
     expect(reread.tiers).toHaveLength(3)
+  })
+
+  // retire-affiliates US3 (FR-007) — the affiliate share left with the role. A stale client may
+  // still send it; the endpoint accepts the ladder and stores it without, exactly as for D20.
+  it('accepts a ladder carrying the retired affiliate share, and stores it without', async () => {
+    await seedUser({ email: 'admin@empresa.com', role: 'admin' })
+    const legacy = {
+      ...LADDER,
+      tiers: LADDER.tiers.map((t) => ({ ...t, affiliate_commission_pct: 50 })),
+    }
+    const { status } = await put('admin@empresa.com', { cancellation_policy: legacy })
+    expect(status).toBe(200)
+    const reread = (await get('admin@empresa.com')).json.organization.cancellation_policy
+    expect(reread.tiers).toHaveLength(3)
+    for (const tier of reread.tiers) expect(tier).not.toHaveProperty('affiliate_commission_pct')
   })
 
   it('null CLEARS the policy — the rollback (D1)', async () => {

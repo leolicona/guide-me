@@ -3,15 +3,14 @@ import { env, SELF } from 'cloudflare:test'
 import { materializeSeededFolio,
   seedUser,
   seedTwoOrgs,
-  seedAffiliateCompany,
-  clearAffiliateDb,
+  clearFullDb,
   seedFolioLedgerRows,
 } from '../helpers/tenancy'
 import { buildFakeJwt } from '../helpers/jwt'
 
 // Commission & settlement report by period — US-A17/A18/A20.
 // Spec: docs/reports/commission-report.spec.md. Read-only date-range aggregate over
-// folios + confirmed cash drops + payouts, per seller (agent + affiliate + admin), with
+// folios + confirmed cash drops + payouts, per seller (agent + admin), with
 //   net_owed = cash_collected − commission_earned − confirmed_drops + payouts.
 
 const ADMIN_EMAIL = 'admin@empresa.com'
@@ -28,7 +27,6 @@ const nowSec = () => Math.floor(Date.now() / 1000)
 interface SeedFolioOptions {
   organizationId: string
   agentId: string
-  affiliateCompanyId?: string
   status?: 'paid' | 'booking' | 'cancelled'
   total?: number
   amountPaid: number
@@ -41,7 +39,6 @@ interface SeedFolioOptions {
 const seedFolio = async ({
   organizationId,
   agentId,
-  affiliateCompanyId,
   status = 'paid',
   total,
   amountPaid,
@@ -54,16 +51,15 @@ const seedFolio = async ({
   const ts = createdAt ?? nowSec()
   await env.DB.prepare(
     `INSERT INTO folios
-       (id, organization_id, agent_id, affiliate_company_id, customer_name, status,
+       (id, organization_id, agent_id, customer_name, status,
         subtotal, discount_total, total, amount_paid, commission_amount,
         cancellation_clawback, cancelled_at, created_at, updated_at)
-     VALUES (?, ?, ?, ?, 'John Diver', ?, ?, 0, ?, ?, ?, ?, ?, ?, ?)`,
+     VALUES (?, ?, ?, 'John Diver', ?, ?, 0, ?, ?, ?, ?, ?, ?, ?)`,
   )
     .bind(
       id,
       organizationId,
       agentId,
-      affiliateCompanyId ?? null,
       status,
       total ?? amountPaid,
       total ?? amountPaid,
@@ -141,8 +137,7 @@ const seedOrgWithStaff = async () => {
 interface ReportRow {
   seller_id: string
   name: string
-  role: 'admin' | 'agent' | 'affiliate'
-  affiliate_company: string | null
+  role: string
   folios_sold: number
   sales_total: number
   cash_collected: number
@@ -154,7 +149,7 @@ interface ReportRow {
 }
 interface ReportBody {
   period: { from: string; to: string }
-  totals: Omit<ReportRow, 'seller_id' | 'name' | 'role' | 'affiliate_company'>
+  totals: Omit<ReportRow, 'seller_id' | 'name' | 'role'>
   sellers: ReportRow[]
 }
 
@@ -164,10 +159,10 @@ const getReport = (qs: string, email = ADMIN_EMAIL) =>
   SELF.fetch(`${REPORTS}/commissions?${qs}`, { headers: auth(email) })
 
 beforeEach(async () => {
-  await clearAffiliateDb()
+  await clearFullDb()
 })
 afterEach(async () => {
-  await clearAffiliateDb()
+  await clearFullDb()
 })
 
 describe('US-A17 — per-seller settlement math', () => {
@@ -238,50 +233,19 @@ describe('US-A17 — date-range boundaries (half-open [from, to+1d))', () => {
   })
 })
 
-describe('US-A18 — affiliates + admin appear as sellers; ranked', () => {
-  it('tags affiliate rows with role + company and includes the admin as a seller', async () => {
+describe('US-A18 — the admin appears as a seller; ranked', () => {
+  it('includes the admin as a seller and ranks by sales_total', async () => {
     const { organizationId, adminId, agentId } = await seedOrgWithStaff()
-    const { companyId } = await seedAffiliateCompany({ organizationId, name: 'Hotel Maya' })
-    const { userId: affId } = await seedUser({
-      email: 'aff@maya.com',
-      role: 'affiliate',
-      organizationId,
-      affiliateCompanyId: companyId,
-    })
     await seedFolio({ organizationId, agentId, amountPaid: 100000 })
     await seedFolio({ organizationId, agentId: adminId, amountPaid: 500000 }) // admin sells
-    await seedFolio({ organizationId, agentId: affId, affiliateCompanyId: companyId, amountPaid: 300000, commissionAmount: 60000 })
 
     const body = (await (await getReport(WINDOW)).json()) as ReportBody
-    expect(body.sellers).toHaveLength(3)
+    expect(body.sellers).toHaveLength(2)
     // Ranked by sales_total desc → admin (500k) first.
     expect(body.sellers[0].seller_id).toBe(adminId)
     expect(body.sellers[0].role).toBe('admin')
-
-    const aff = body.sellers.find((s) => s.role === 'affiliate')!
-    expect(aff.affiliate_company).toBe('Hotel Maya')
-    expect(aff.commission_earned).toBe(60000)
-    expect(aff.net_owed).toBe(240000) // 300000 − 60000
-  })
-})
-
-describe('US-A53 — per-affiliate drill-down via affiliate_company_id', () => {
-  it('returns only the requested company sellers', async () => {
-    const { organizationId, agentId } = await seedOrgWithStaff()
-    const { companyId } = await seedAffiliateCompany({ organizationId, name: 'Hotel Maya' })
-    const { userId: affId } = await seedUser({
-      email: 'aff@maya.com',
-      role: 'affiliate',
-      organizationId,
-      affiliateCompanyId: companyId,
-    })
-    await seedFolio({ organizationId, agentId, amountPaid: 100000 }) // in-house — should NOT appear
-    await seedFolio({ organizationId, agentId: affId, affiliateCompanyId: companyId, amountPaid: 300000 })
-
-    const body = (await (await getReport(`${WINDOW}&affiliate_company_id=${companyId}`)).json()) as ReportBody
-    expect(body.sellers).toHaveLength(1)
-    expect(body.sellers[0].seller_id).toBe(affId)
-    expect(body.sellers[0].sales_total).toBe(300000)
+    expect(body.sellers[1].seller_id).toBe(agentId)
+    expect(body.sellers[1].role).toBe('agent')
   })
 })
 
@@ -350,7 +314,7 @@ describe('US-A20 — CSV export', () => {
     expect(res.headers.get('Content-Type')).toContain('text/csv')
     expect(res.headers.get('Content-Disposition')).toContain('attachment')
     const csv = await res.text()
-    expect(csv).toContain('seller,role,affiliate_company')
+    expect(csv).toContain('seller,role,folios_sold')
     expect(csv).toContain('TOTALS')
     // The "=cmd()" name is neutralized with a leading quote (no CSV-quoting needed — no comma).
     expect(csv).toContain(`'=cmd()`)

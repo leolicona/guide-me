@@ -5,7 +5,6 @@ import {
   accommodationReservations,
   accommodationSeasons,
   accommodationUnitTypes,
-  affiliateCommissions,
   organizations,
   services,
 } from '../../db/schema'
@@ -25,7 +24,7 @@ import {
 import type { PosContext } from './handler'
 
 // docs/lodging/accommodation-stays.spec.md §4.2 (v2 — unit-type inventory) — POS availability
-// reads (agent/affiliate/admin). A stay occupies nights [check_in, check_out); availability is
+// reads (agent/admin). A stay occupies nights [check_in, check_out); availability is
 // per-night COUNT math (remaining = inventory_count − reserved − blocked) via the shared engine,
 // so what's shown here can never drift from what confirmSale enforces.
 
@@ -45,7 +44,7 @@ const orgWeekendDays = async (db: Db, org: string): Promise<number[]> => {
   return parseCsvInts(rows[0]?.v ?? '5,6')
 }
 
-// Verify a lodging service is active + in the caller's org (+ on an affiliate's allow-list).
+// Verify a lodging service is active + in the caller's org.
 const requireLodgingService = async (db: Db, c: PosContext, serviceId: string) => {
   const agent = c.get('user')
   const rows = await db
@@ -56,21 +55,6 @@ const requireLodgingService = async (db: Db, c: PosContext, serviceId: string) =
   const svc = rows[0]
   if (!svc || svc.status !== 'active' || svc.category !== 'lodging') {
     throw new ApiError('NOT_FOUND', 404, 'Service not found')
-  }
-  if (agent.role === 'affiliate') {
-    const allowed = await db
-      .select({ id: affiliateCommissions.id })
-      .from(affiliateCommissions)
-      .where(
-        and(
-          eq(affiliateCommissions.affiliateCompanyId, agent.affiliateCompanyId ?? ''),
-          eq(affiliateCommissions.serviceId, serviceId),
-        ),
-      )
-      .limit(1)
-    if (allowed.length === 0) {
-      throw new ApiError('NOT_FOUND', 404, 'Service not found')
-    }
   }
 }
 
@@ -311,7 +295,7 @@ export const getUnitTypeCalendar = async (c: PosContext) => {
   if (!unitType || unitType.status !== 'active') {
     throw new ApiError('NOT_FOUND', 404, 'Unit type not found')
   }
-  // Affiliate allow-list (the type's parent service must be curated for them).
+  // The type's parent service must be an active lodging service in the caller's org.
   await requireLodgingService(db, c, unitType.serviceId)
 
   const weekendDays = await orgWeekendDays(db, org)

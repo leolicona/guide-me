@@ -13,15 +13,13 @@ const DEFAULT_ORG_NAME = 'Empresa S.A.'
 interface SeedUserOptions {
   email: string
   name?: string
-  role?: 'admin' | 'agent' | 'affiliate'
+  role?: 'admin' | 'agent'
   status?: 'unverified' | 'active' | 'suspended'
   /** Agent base commission as a whole-number percentage (default 0). */
   baseCommission?: number
   /** Reuse an existing org instead of creating a new one. */
   organizationId?: string
   organizationName?: string
-  /** Link an `affiliate` user to its company (affiliate-setup-commissions.spec.md D4). */
-  affiliateCompanyId?: string
 }
 
 export const seedUser = async ({
@@ -32,7 +30,6 @@ export const seedUser = async ({
   baseCommission = 0,
   organizationId,
   organizationName = DEFAULT_ORG_NAME,
-  affiliateCompanyId,
 }: SeedUserOptions): Promise<{ userId: string; organizationId: string }> => {
   const orgId = organizationId ?? crypto.randomUUID()
   const userId = crypto.randomUUID()
@@ -49,8 +46,8 @@ export const seedUser = async ({
   }
 
   await env.DB.prepare(
-    `INSERT INTO users (id, organization_id, name, email, password_hash, password_salt, phone, role, status, base_commission, plan, affiliate_company_id)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO users (id, organization_id, name, email, password_hash, password_salt, phone, role, status, base_commission, plan)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   )
     .bind(
       userId,
@@ -64,83 +61,30 @@ export const seedUser = async ({
       status,
       baseCommission,
       'free',
-      affiliateCompanyId ?? null,
     )
     .run()
 
   return { userId, organizationId: orgId }
 }
 
-/** Seeds an affiliate company (the partner) in the given org. */
-export const seedAffiliateCompany = async ({
-  organizationId,
-  name = 'Hotel Maya',
-  status = 'active',
-}: {
-  organizationId: string
-  name?: string
-  status?: 'active' | 'suspended'
-}): Promise<{ companyId: string }> => {
-  const companyId = crypto.randomUUID()
-  await env.DB.prepare(
-    'INSERT INTO affiliate_companies (id, organization_id, name, status) VALUES (?, ?, ?, ?)',
-  )
-    .bind(companyId, organizationId, name, status)
-    .run()
-  return { companyId }
-}
-
-/** Seeds one allow-list row (enables a service for an affiliate at a rate). */
-export const seedAffiliateCommission = async ({
-  organizationId,
-  affiliateCompanyId,
-  serviceId,
-  commissionType = 'percent',
-  commissionValue = 1500,
-}: {
-  organizationId: string
-  affiliateCompanyId: string
-  serviceId: string
-  commissionType?: 'percent' | 'fixed'
-  commissionValue?: number
-}): Promise<void> => {
-  await env.DB.prepare(
-    `INSERT INTO affiliate_commissions (id, organization_id, affiliate_company_id, service_id, commission_type, commission_value)
-     VALUES (?, ?, ?, ?, ?, ?)`,
-  )
-    .bind(
-      crypto.randomUUID(),
-      organizationId,
-      affiliateCompanyId,
-      serviceId,
-      commissionType,
-      commissionValue,
-    )
-    .run()
-}
-
 export const clearTenancyDb = async () => {
-  // FK-safe order: drop the affiliate child rows before the companies they reference, and the
-  // companies before the organizations + after the users that link to them.
+  // FK-safe order: children before the organizations they reference.
   // TECH_DEBT #25 — materializeSeededFolio leaves `__fixture__` services (and possibly lines on
   // them) behind; purge them here so `DELETE FROM organizations` doesn't trip their FK.
   await env.DB.exec(
     `DELETE FROM folio_lines WHERE service_id IN (SELECT id FROM services WHERE name = '__fixture__')`,
   )
   await env.DB.exec(`DELETE FROM services WHERE name = '__fixture__'`)
-  await env.DB.exec('DELETE FROM affiliate_commissions')
-  await env.DB.exec('DELETE FROM affiliate_invitations')
   await env.DB.exec('DELETE FROM invitations')
   await env.DB.exec('DELETE FROM users')
-  await env.DB.exec('DELETE FROM affiliate_companies')
   await env.DB.exec('DELETE FROM organizations')
 }
 
 /**
- * Full FK-safe wipe for suites that also seed services / slots / folios / cash drops alongside
- * affiliates. Deletes every dependent table before the organizations they reference.
+ * Full FK-safe wipe for suites that seed services / slots / folios / cash drops. Deletes every
+ * dependent table before the organizations they reference.
  */
-export const clearAffiliateDb = async () => {
+export const clearFullDb = async () => {
   for (const table of [
     'cash_drops',
     'payouts',
@@ -153,8 +97,6 @@ export const clearAffiliateDb = async () => {
     'folio_payments',
     'notifications',
     'folios',
-    'affiliate_commissions',
-    'affiliate_invitations',
     'slots',
     'schedules',
     'service_extras',
@@ -162,7 +104,6 @@ export const clearAffiliateDb = async () => {
     'invitations',
     'password_reset_tokens',
     'users',
-    'affiliate_companies',
     'organizations',
   ]) {
     await env.DB.exec(`DELETE FROM ${table}`)

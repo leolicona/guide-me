@@ -53,23 +53,15 @@ const admin = requireRole('admin')
 // any caller — an admin only ever touches their OWN drawer. The admin uses it for the "Tu
 // caja" section (US-A35): read their own balance and file a self-authorized hand-in (US-A34).
 const agentOrAdmin = requireRole('agent', 'admin')
-// Affiliate parity (affiliate-portal.spec.md D5/D9): an affiliate carries the same running
-// balance and settles via the same cash-drop → admin-confirm flow as an agent. But expenses
-// (US-AG13) are DENIED to an affiliate (D4) — those routes are `agentOrAdmin`, so an affiliate
-// hits 403 there.
-const selfActor = requireRole('agent', 'admin', 'affiliate')
-const agentOrAffiliate = requireRole('agent', 'affiliate')
 
 // Self surface (/me/*) — scoped to the caller.
-cash.get('/me', selfActor, getMyBalance)
+cash.get('/me', agentOrAdmin, getMyBalance)
 // US-A99 — an admin records their OWN operating expenses, exactly as an agent does: same
 // self-scoped route, same balance arithmetic (`deriveBalance` already subtracts `expense_total`
 // for any caller), same delete guard. The `agent`-only guard here was never a decision — the route
 // was written for agents while the admin's caja was a separate screen that simply never offered
 // the card, and the omission surfaced only when the two screens became one
 // (`caja-surface-parity.spec.md`, its Open question, now answered).
-//
-// An AFFILIATE stays denied: that one IS a decision (affiliate-portal D4).
 cash.post(
   '/me/expenses',
   agentOrAdmin,
@@ -79,16 +71,16 @@ cash.post(
 cash.delete('/me/expenses/:id', agentOrAdmin, deleteExpense)
 cash.post(
   '/me/drops',
-  selfActor,
+  agentOrAdmin,
   zValidator('json', createDropSchema, validationHook),
   createDrop,
 )
-cash.delete('/me/drops/:id', agentOrAffiliate, cancelDrop)
+cash.delete('/me/drops/:id', agent, cancelDrop)
 // US-AG27/AG28 — sign or dispute a unilateral admin money-move (acknowledgment, non-blocking).
-cash.post('/me/drops/:id/acknowledge', agentOrAffiliate, acknowledgeDrop)
+cash.post('/me/drops/:id/acknowledge', agent, acknowledgeDrop)
 cash.post(
   '/me/drops/:id/dispute',
-  agentOrAffiliate,
+  agent,
   zValidator('json', disputeSchema, validationHook),
   disputeDrop,
 )

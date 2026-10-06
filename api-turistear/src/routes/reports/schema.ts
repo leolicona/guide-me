@@ -2,8 +2,7 @@ import { z } from 'zod'
 
 // Commission & settlement report by period (US-A17/A18/A20). Spec:
 // docs/reports/commission-report.spec.md. `from`/`to` are inclusive calendar days
-// (YYYY-MM-DD, UTC reporting model — POS precedent). `seller_id` narrows to one seller;
-// `affiliate_company_id` is the US-A53 per-affiliate drill-down.
+// (YYYY-MM-DD, UTC reporting model — POS precedent). `seller_id` narrows to one seller.
 const ymd = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'date must be YYYY-MM-DD')
 
 export const commissionReportQuerySchema = z
@@ -11,7 +10,6 @@ export const commissionReportQuerySchema = z
     from: ymd,
     to: ymd,
     seller_id: z.string().min(1).optional(),
-    affiliate_company_id: z.string().min(1).optional(),
   })
   .refine((q) => q.from <= q.to, {
     message: 'from must be on or before to',
@@ -24,7 +22,6 @@ export const commissionExportQuerySchema = z
     from: ymd,
     to: ymd,
     seller_id: z.string().min(1).optional(),
-    affiliate_company_id: z.string().min(1).optional(),
     format: z.enum(['csv']).default('csv'),
   })
   .refine((q) => q.from <= q.to, {

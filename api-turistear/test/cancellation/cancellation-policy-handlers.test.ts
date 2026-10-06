@@ -80,23 +80,21 @@ interface SeedFolio {
   amountPaid?: number
   commissionAmount?: number
   policySnapshot?: unknown
-  affiliateCompanyId?: string | null
 }
 
 const seedFolio = async (o: SeedFolio) => {
   const id = crypto.randomUUID()
   const total = o.total ?? 100_000
   await env.DB.prepare(
-    `INSERT INTO folios (id, organization_id, agent_id, affiliate_company_id, customer_name, status,
+    `INSERT INTO folios (id, organization_id, agent_id, customer_name, status,
         subtotal, discount_total, total, amount_paid, commission_amount,
         cancellation_policy_snapshot, created_at, updated_at)
-     VALUES (?, ?, ?, ?, 'Cliente', ?, ?, 0, ?, ?, ?, ?, ?, ?)`,
+     VALUES (?, ?, ?, 'Cliente', ?, ?, 0, ?, ?, ?, ?, ?, ?)`,
   )
     .bind(
       id,
       o.organizationId,
       o.agentId,
-      o.affiliateCompanyId ?? null,
       o.status ?? 'paid',
       total,
       total,

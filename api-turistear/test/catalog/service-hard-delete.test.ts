@@ -3,15 +3,14 @@ import { env, SELF } from 'cloudflare:test'
 import {
   seedUser,
   seedTwoOrgs,
-  seedAffiliateCompany,
-  seedAffiliateCommission,
-  clearAffiliateDb,
+  clearFullDb,
 } from '../helpers/tenancy'
 import { buildFakeJwt } from '../helpers/jwt'
 
 // US-A58 — guarded hard-delete of a service (docs/catalog/service-catalog.spec.md rev.
 // 2026-06-23). Blocked (409 SERVICE_HAS_FOLIOS) when any folio line references the service;
-// otherwise removes the service + its slots / schedules / extras / affiliate_commissions.
+// otherwise removes the service + its slots / schedules / extras. (Legacy affiliate commission
+// rows are cleaned too — retire-affiliates D7, proven in test/retire-affiliates.)
 
 const ADMIN_EMAIL = 'admin@empresa.com'
 const AGENT_EMAIL = 'agent@empresa.com'
@@ -92,18 +91,16 @@ const countWhereService = async (table: string, serviceId: string): Promise<numb
 
 const api = (id: string) => `http://api.local/api/services/${id}`
 
-beforeEach(clearAffiliateDb)
+beforeEach(clearFullDb)
 afterEach(() => vi.restoreAllMocks())
 
 describe('US-A58 — hard-delete a service', () => {
-  it('deletes an unused service and cascades slots / schedules / extras / affiliate_commissions', async () => {
+  it('deletes an unused service and cascades slots / schedules / extras', async () => {
     const { organizationId } = await seedUser({ email: ADMIN_EMAIL, role: 'admin' })
     const serviceId = await seedService(organizationId)
     await seedSlot(organizationId, serviceId)
     await seedSchedule(organizationId, serviceId)
     await seedExtra(organizationId, serviceId)
-    const { companyId } = await seedAffiliateCompany({ organizationId })
-    await seedAffiliateCommission({ organizationId, affiliateCompanyId: companyId, serviceId })
 
     const res = await SELF.fetch(api(serviceId), { method: 'DELETE', headers: auth(ADMIN_EMAIL) })
     expect(res.status).toBe(200)
@@ -116,7 +113,6 @@ describe('US-A58 — hard-delete a service', () => {
     expect(await countWhereService('slots', serviceId)).toBe(0)
     expect(await countWhereService('schedules', serviceId)).toBe(0)
     expect(await countWhereService('service_extras', serviceId)).toBe(0)
-    expect(await countWhereService('affiliate_commissions', serviceId)).toBe(0)
   })
 
   it('is rejected with 409 SERVICE_HAS_FOLIOS when a folio references the service', async () => {

@@ -5,7 +5,7 @@ import {
   seedFolioLedgerRows,
   seedTwoOrgs,
   seedUser,
-  clearAffiliateDb,
+  clearFullDb,
 } from '../helpers/tenancy'
 import { buildFakeJwt } from '../helpers/jwt'
 
@@ -179,7 +179,7 @@ const getDay = async (email = ADMIN, qs = '') => {
 
 // Full wipe: this suite seeds services, slots, folio_lines and folio_payments, which
 // clearTenancyDb does not reach.
-beforeEach(clearAffiliateDb)
+beforeEach(clearFullDb)
 
 describe('US-A14/US-A15 — occupancy rows', () => {
   it('S-1/S-4 — chronological rows with remaining and the vendidos/apartados split', async () => {

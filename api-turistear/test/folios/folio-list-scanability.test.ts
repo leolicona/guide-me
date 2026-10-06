@@ -302,7 +302,8 @@ describe('US-A82 — identify a sale from the list', () => {
     const keys = Object.keys(row)
 
     // The scope boundary of this feature, asserted rather than asserted-about: no field was
-    // removed or renamed to make room for the three new ones.
+    // removed or renamed to make room for the three new ones. (`operator_name` left later, with the
+    // shift operators — retire-affiliates D9.)
     for (const field of [
       'id',
       'agent',
@@ -321,7 +322,6 @@ describe('US-A82 — identify a sale from the list', () => {
       'deliverable',
       'tickets_sent_at',
       'tickets_viewed_at',
-      'operator_name',
       'refund_status',
       'refund_amount',
     ]) {

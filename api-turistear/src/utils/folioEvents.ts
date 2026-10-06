@@ -1,6 +1,6 @@
 import { and, asc, eq, sql } from 'drizzle-orm'
 import type { Db } from '../db/client'
-import { affiliateOperators, folioEvents, users } from '../db/schema'
+import { folioEvents, users } from '../db/schema'
 
 // US-A24 / US-AG53 (docs/folios/folio-timeline.spec.md) — builder that RETURNS a Drizzle insert
 // statement for a folio_events row, so a caller adds it to its own `db.batch(...)` and the
@@ -29,8 +29,6 @@ interface FolioEventInput {
   type: FolioEventType
   // NULL = the system (the expiry sweep) or the tourist (the Visto beacon).
   actorId?: string | null
-  // The PIN shift that acted (US-A68); null for an in-house (agent/admin) action.
-  operatorId?: string | null
   // US-A22 (line-autonomy D13) — the line this event is about; omit for a folio-scoped event.
   // The payload should still NAME the line (service_name, slot_date) so the timeline renders
   // without a join and survives the line's own columns changing.
@@ -52,7 +50,6 @@ export const folioEventRow = (db: Db, input: FolioEventInput) =>
     folioId: input.folioId,
     eventType: input.type,
     actorId: input.actorId ?? null,
-    operatorId: input.operatorId ?? null,
     folioLineId: input.folioLineId ?? null,
     payload: input.payload ? JSON.stringify(prune(input.payload)) : null,
     createdAt: input.at,
@@ -74,13 +71,11 @@ export const readFolioEvents = async (db: Db, org: string, folioId: string) => {
       at: folioEvents.createdAt,
       actorId: folioEvents.actorId,
       actorName: users.name,
-      operatorName: affiliateOperators.name,
       backfilled: folioEvents.backfilled,
       payload: folioEvents.payload,
     })
     .from(folioEvents)
     .leftJoin(users, eq(users.id, folioEvents.actorId))
-    .leftJoin(affiliateOperators, eq(affiliateOperators.id, folioEvents.operatorId))
     .where(and(eq(folioEvents.folioId, folioId), eq(folioEvents.organizationId, org)))
     .orderBy(asc(folioEvents.createdAt), sql`folio_events.rowid asc`)
   return rows.map((r) => ({
@@ -88,7 +83,6 @@ export const readFolioEvents = async (db: Db, org: string, folioId: string) => {
     type: r.type,
     at: Math.floor(r.at.getTime() / 1000),
     actor: r.actorId ? { id: r.actorId, name: r.actorName } : null,
-    operator_name: r.operatorName,
     backfilled: r.backfilled,
     payload: r.payload ? (JSON.parse(r.payload) as Record<string, unknown>) : null,
   }))
