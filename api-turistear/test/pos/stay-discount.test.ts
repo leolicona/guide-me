@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { env, SELF } from 'cloudflare:test'
-import { seedUser, seedTwoOrgs, clearAffiliateDb } from '../helpers/tenancy'
+import { seedUser, seedTwoOrgs, clearFullDb } from '../helpers/tenancy'
 import { buildFakeJwt } from '../helpers/jwt'
 import { stayFloor } from '../../src/utils/lodging'
 
@@ -8,13 +8,12 @@ import { stayFloor } from '../../src/utils/lodging'
 //
 // A stay becomes discountable for the first time: the agent edits the line's WHOLE-LINE total in
 // pesos, bounded below by `ceil(quote.total × (1 − max_discount_pct/100))` and above by the quote
-// itself. Covers the admin ceiling (S-1…S-3), the sale (S-4…S-13) including the three defects the
+// itself. Covers the admin ceiling (S-1…S-3), the sale (S-4…S-12) including the three defects the
 // feature had to fix to be correct at all — the snapshotted floor (D8), the discount counted once
 // rather than per room (D9), the fixed commission clamped to the discounted line (D10) — and
 // cross-org isolation on both sides (S-14, S-15).
 
 const ADMIN_EMAIL = 'admin@empresa.com'
-const AFF_EMAIL = 'aff@hotel.com'
 
 const auth = (email: string) => ({ Cookie: `gm_access=${buildFakeJwt(email)}` })
 const jsonAuth = (email: string) => ({ ...auth(email), 'Content-Type': 'application/json' })
@@ -88,11 +87,11 @@ const CHECK_OUT = '2026-07-16'
 const sellStay = (
   typeId: string,
   unitPrice?: number,
-  opts: { quantity?: number; guests?: number; email?: string } = {},
+  opts: { quantity?: number; guests?: number } = {},
 ) =>
   SELF.fetch('http://api.local/api/pos/folios', {
     method: 'POST',
-    headers: jsonAuth(opts.email ?? ADMIN_EMAIL),
+    headers: jsonAuth(ADMIN_EMAIL),
     body: JSON.stringify({
       customer_name: 'Cliente',
       customer_phone: '5512345678',
@@ -146,7 +145,7 @@ beforeEach(async () => {
   ]) {
     await env.DB.exec(`DELETE FROM ${t}`)
   }
-  await clearAffiliateDb()
+  await clearFullDb()
   const seeded = await seedUser({ email: ADMIN_EMAIL, role: 'admin' })
   orgId = seeded.organizationId
 })
@@ -409,36 +408,6 @@ describe('US-AG57 — discounting a stay', () => {
     // At 0 % the two numbers coincide — which is how the cart knows to render text, not a field.
     const b = body.unit_types.find((t) => t.unit_type_id === fixedPrice)!
     expect(b.min_total).toBe(b.total)
-  })
-
-  it('S-13 — an affiliate is bound by the same floor, code and status', async () => {
-    const serviceId = await seedLodgingService(orgId)
-    const typeId = await seedUnitType({ organizationId: orgId, serviceId, maxDiscountPct: 10 })
-
-    const companyId = crypto.randomUUID()
-    await env.DB.prepare(
-      `INSERT INTO affiliate_companies (id, organization_id, name, status)
-       VALUES (?, ?, 'Hotel Aliado', 'active')`,
-    )
-      .bind(companyId, orgId)
-      .run()
-    await seedUser({
-      email: AFF_EMAIL,
-      role: 'affiliate',
-      organizationId: orgId,
-      affiliateCompanyId: companyId,
-    })
-    await env.DB.prepare(
-      `INSERT INTO affiliate_commissions
-         (id, organization_id, affiliate_company_id, service_id, commission_type, commission_value)
-       VALUES (?, ?, ?, ?, 'percent', 1000)`,
-    )
-      .bind(crypto.randomUUID(), orgId, companyId, serviceId)
-      .run()
-
-    const res = await sellStay(typeId, FLOOR - 1, { email: AFF_EMAIL })
-    expect(res.status).toBe(400)
-    expect(JSON.stringify(await res.json())).toContain('PRICE_BELOW_MINIMUM')
   })
 })
 

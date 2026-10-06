@@ -188,7 +188,7 @@ Prefer these over ad-hoc `Card`/`Paper`/`Chip` usage:
 - **`AlertCard`** — top-of-screen attention card (warning/error semantics).
 - **`BottomSheet`** — the canonical overlay (solid white, real upward shadow; centered ≤640px on desktop).
 - **`FormSheet`** / **`ConfirmSheet`** — the BottomSheet hosts for ALL entity editing and confirmations (no MUI Dialogs for these): FormSheet = title + form scroll region + fixed submit footer; ConfirmSheet = question + stacked confirm/cancel.
-- **`WizardShell`** / **`WizardPage`** — multi-step wizard chrome (shared `WizardChrome`): the Dialog host (affiliate wizard) and the full-page host (service wizard at `/catalog/new`).
+- **`WizardShell`** / **`WizardPage`** — multi-step wizard chrome (shared `WizardChrome`): the Dialog host (no consumer today — `specs/001-retire-affiliates` D12) and the full-page host (service wizard at `/catalog/new`).
 
 Feature-specific shared pieces follow the same idea (e.g. `FolioStatusChip` in `features/folios`).
 

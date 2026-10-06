@@ -8,9 +8,6 @@ export const ROUTES = {
   DASHBOARD: '/dashboard',
   AGENTS: '/agents',
   INVITE_AGENT: '/agents/invite',
-  AFFILIATES: '/affiliates', // admin — affiliate companies list (US-A48)
-  AFFILIATE_NEW: '/affiliates/new', // admin — full-page affiliate setup wizard (US-A54–A57)
-  AFFILIATE_DETAIL: '/affiliates/:id', // admin — affiliate detail/edit (US-A48/A50/A52)
   CATALOG: '/catalog',
   CATALOG_NEW: '/catalog/new', // admin — full-page service creation wizard (US-A38–A44)
   CATALOG_DETAIL: '/catalog/:id',
@@ -26,13 +23,11 @@ export const ROUTES = {
   // US-A86 — the admin's outbox: the clock-produced half of the notifications, plus failures.
   OUTBOX: '/mensajes',
   FOLIO_DETAIL: '/folios/:id',
-  // Every role's OWN caja — agent, affiliate and admin alike. «Caja» means one thing
+  // Every role's OWN caja — agent and admin alike. «Caja» means one thing
   // (caja-surface-parity D2′); the admin's oversight of everyone else's lives at CASH.
   BALANCE: '/balance',
   CASH: '/cash', // admin — CAJA DEL EQUIPO: who holds company cash + what needs confirming
   CASH_DROPS: '/cash/entregas', // admin — the drop history, faceted (D15)
   CASH_DROP_DETAIL: '/cash/drops/:id', // admin — one drop's detail
   REPORTS: '/reports', // admin — commission & settlement report by period (US-A17/A18/A20)
-  OPERATORS: '/operators', // affiliate manager — shift-cashier operators panel (US-AF10–AF12)
-  OPERATOR_ACCESS: '/o/:token', // public — operator saved link: set PIN / unlock shift (US-OP01/OP02)
 } as const

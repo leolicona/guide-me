@@ -33,7 +33,6 @@ interface FolioEventOut {
   type: string
   at: number
   actor: { id: string; name: string | null } | null
-  operator_name: string | null
   backfilled: boolean
   payload: Record<string, unknown> | null
 }

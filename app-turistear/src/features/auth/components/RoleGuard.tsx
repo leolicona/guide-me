@@ -3,7 +3,7 @@ import { Navigate } from 'react-router-dom'
 import { useCurrentUser } from '../CurrentUserContext'
 import { ROUTES } from '../../../config/routes'
 
-type Role = 'admin' | 'agent' | 'affiliate'
+type Role = 'admin' | 'agent'
 
 interface RoleGuardProps {
   /** One role or a set — the guard passes when the caller's role is allowed. */
@@ -11,7 +11,7 @@ interface RoleGuardProps {
   children: ReactNode
 }
 
-// US-UX01 — each role's landing (first daily action): admin → Hoy; agent + affiliate → Vender.
+// US-UX01 — each role's landing (first daily action): admin → Hoy; agent → Vender.
 const landingFor = (role: Role) => (role === 'admin' ? ROUTES.DASHBOARD : ROUTES.POS)
 
 // Composes inside AuthGuard, which guarantees the current user is available.

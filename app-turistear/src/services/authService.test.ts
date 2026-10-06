@@ -224,19 +224,8 @@ describe('request — a suspended account (US-A08)', () => {
 })
 
 describe('getMe', () => {
-  it('folds the operator claim into the session user (US-OP01/OP02)', async () => {
-    fetchMock.mockResolvedValue(
-      jsonOk({ user: { id: 'u1', role: 'affiliate' }, operator: { id: 'op1', name: 'Caja 2' } }),
-    )
-    await expect(getMe()).resolves.toMatchObject({
-      id: 'u1',
-      role: 'affiliate',
-      operator: { id: 'op1', name: 'Caja 2' },
-    })
-  })
-
-  it('normalises a missing operator to null, never undefined', async () => {
+  it('returns the session user as /api/me sends it — no operator claim (retire-affiliates D9)', async () => {
     fetchMock.mockResolvedValue(jsonOk({ user: { id: 'u1', role: 'admin' } }))
-    await expect(getMe()).resolves.toMatchObject({ operator: null })
+    await expect(getMe()).resolves.toEqual({ id: 'u1', role: 'admin' })
   })
 })

@@ -6,8 +6,6 @@ import {
   accommodationReservations,
   accommodationSeasons,
   accommodationUnitTypes,
-  affiliateCommissions,
-  affiliateOperators,
   folioAccessTokens,
   folioLineExtras,
   folioLines,
@@ -238,10 +236,6 @@ export const listPosServices = async (c: PosContext) => {
     ? (c.req.query('to') ?? from)
     : addDays(today, AVAILABILITY_WINDOW_DAYS)
 
-  // Curated catalog (affiliate-portal.spec.md §4.2): for an `affiliate` caller, INNER JOIN the
-  // allow-list so the list collapses to exactly the services the admin enabled for their company
-  // (a non-enabled service has no row and is absent). Agent/admin skip the join — full active
-  // catalog, unchanged. Single source of truth; no view.
   const serviceCols = {
     id: services.id,
     name: services.name,
@@ -258,21 +252,11 @@ export const listPosServices = async (c: PosContext) => {
     eq(services.organizationId, agent.organizationId),
     eq(services.status, 'active'),
   )
-  const serviceRows =
-    agent.role === 'affiliate'
-      ? await db
-          .select(serviceCols)
-          .from(services)
-          .innerJoin(
-            affiliateCommissions,
-            and(
-              eq(affiliateCommissions.serviceId, services.id),
-              eq(affiliateCommissions.affiliateCompanyId, agent.affiliateCompanyId ?? ''),
-            ),
-          )
-          .where(baseWhere)
-          .orderBy(asc(services.name))
-      : await db.select(serviceCols).from(services).where(baseWhere).orderBy(asc(services.name))
+  const serviceRows = await db
+    .select(serviceCols)
+    .from(services)
+    .where(baseWhere)
+    .orderBy(asc(services.name))
 
   // US-A36 — availability is the Σ EFFECTIVE remaining: each slot's raw remaining plus its
   // flexible margin (floor(capacity × pct / 100)) for a Soft Cap service. pct is constant per
@@ -531,25 +515,6 @@ export const getPosService = async (c: PosContext) => {
   const service = serviceRows[0]
   if (!service) {
     throw new ApiError('NOT_FOUND', 404, 'Service not found')
-  }
-
-  // Defense in depth (affiliate-portal.spec.md §4.2): an affiliate may only open a service on
-  // their allow-list. A hand-crafted request for a non-curated id → 404, even though it never
-  // appeared in their catalog.
-  if (agent.role === 'affiliate') {
-    const allowed = await db
-      .select({ id: affiliateCommissions.id })
-      .from(affiliateCommissions)
-      .where(
-        and(
-          eq(affiliateCommissions.affiliateCompanyId, agent.affiliateCompanyId ?? ''),
-          eq(affiliateCommissions.serviceId, id),
-        ),
-      )
-      .limit(1)
-    if (allowed.length === 0) {
-      throw new ApiError('NOT_FOUND', 404, 'Service not found')
-    }
   }
 
   const extras = await db
@@ -1010,39 +975,9 @@ export const confirmSale = async (c: PosContext) => {
     }
   }
 
-  // Affiliate sale (affiliate-portal.spec.md D2/D3): the seller may only sell allow-list
-  // services, and the commission resolves from the per-affiliate rate — NOT services.commission_*.
-  // Pre-fetch the company's allow-list once (serviceId → rate) so the validate loop both guards
-  // membership (SERVICE_NOT_ALLOWED) and overrides each line's commission snapshot.
-  const isAffiliate = agent.role === 'affiliate'
-  const affiliateCompanyId = isAffiliate ? agent.affiliateCompanyId : null
-
   // D2 (whatsapp-qr-delivery) — email is no longer a required delivery channel. WhatsApp (the
   // agent-sent portal link, name + phone required by the schema) is now primary; email is an
   // optional copy for any role. The schema still validates the address format when present.
-  const affiliateRates = new Map<string, { type: 'percent' | 'fixed'; value: number }>()
-  if (isAffiliate) {
-    if (!affiliateCompanyId) {
-      throw new ApiError('FORBIDDEN', 403, 'Affiliate is not linked to a company')
-    }
-    const rateRows = await db
-      .select({
-        serviceId: affiliateCommissions.serviceId,
-        commissionType: affiliateCommissions.commissionType,
-        commissionValue: affiliateCommissions.commissionValue,
-      })
-      .from(affiliateCommissions)
-      .where(
-        and(
-          eq(affiliateCommissions.organizationId, org),
-          eq(affiliateCommissions.affiliateCompanyId, affiliateCompanyId),
-        ),
-      )
-    for (const r of rateRows) {
-      affiliateRates.set(r.serviceId, { type: r.commissionType, value: r.commissionValue })
-    }
-  }
-
   // Org name (for the email) + booking policy (US-A46 / US-AG07.1) — read once up front.
   const orgRows = await db
     .select({
@@ -1204,25 +1139,12 @@ export const confirmSale = async (c: PosContext) => {
         )
       }
 
-      // Commission waterfall (US-A12): type override ?? service base; affiliate's per-affiliate
-      // rate still wins over both (its own allow-list-gated system, unchanged).
-      let stayCommType = unitType.typeCommissionType ?? unitType.svcCommissionType
-      let stayCommValue =
+      // Commission waterfall (US-A12): type override ?? service base.
+      const stayCommType = unitType.typeCommissionType ?? unitType.svcCommissionType
+      const stayCommValue =
         unitType.typeCommissionType != null
           ? (unitType.typeCommissionValue ?? 0)
           : unitType.svcCommissionValue
-      if (isAffiliate) {
-        const rate = affiliateRates.get(unitType.serviceId)
-        if (!rate) {
-          throw new ApiError(
-            'SERVICE_NOT_ALLOWED',
-            403,
-            'This service is not enabled for your affiliate account',
-          )
-        }
-        stayCommType = rate.type
-        stayCommValue = rate.value
-      }
 
       prepared.push({
         id: crypto.randomUUID(),
@@ -1386,23 +1308,9 @@ export const confirmSale = async (c: PosContext) => {
       extrasTotal += extra.price * ex.quantity
     }
 
-    // Commission source (D3): an affiliate line snapshots the per-affiliate rate (and must be on
-    // the allow-list — defense in depth even though the catalog never showed a non-curated id);
-    // an agent/admin line keeps the service's seller-independent rate.
-    let commissionType = slot.commissionType
-    let commissionValue = slot.commissionValue
-    if (isAffiliate) {
-      const rate = affiliateRates.get(slot.serviceId)
-      if (!rate) {
-        throw new ApiError(
-          'SERVICE_NOT_ALLOWED',
-          403,
-          'This service is not enabled for your affiliate account',
-        )
-      }
-      commissionType = rate.type
-      commissionValue = rate.value
-    }
+    // Commission source: the service's seller-independent rate, for every caller (FR-005).
+    const commissionType = slot.commissionType
+    const commissionValue = slot.commissionValue
 
     const lineTotal = line.unit_price * line.quantity + extrasTotal
     prepared.push({
@@ -1579,10 +1487,6 @@ export const confirmSale = async (c: PosContext) => {
       id: folioId,
       organizationId: org,
       agentId: agent.userId,
-      // D5 — stamp the seller's company on an affiliate sale; null for in-house (agent/admin).
-      affiliateCompanyId,
-      // US-AF13 — the shift operator who made the sale (null unless this is an operator session).
-      operatorId: c.get('operator')?.operatorId ?? null,
       customerName: input.customer_name ?? null,
       customerEmail: input.customer_email ?? null,
       customerPhone: input.customer_phone ?? null,
@@ -1902,7 +1806,6 @@ export const confirmSale = async (c: PosContext) => {
       reference: needsVerification ? (input.payment_reference ?? null) : null,
       verification: paymentVerification,
       collectedBy: agent.userId,
-      operatorId: c.get('operator')?.operatorId ?? null,
     }),
     ...allocationRows(db, {
       organizationId: org,
@@ -1933,7 +1836,6 @@ export const confirmSale = async (c: PosContext) => {
       folioId,
       type: 'created',
       actorId: agent.userId,
-      operatorId: c.get('operator')?.operatorId ?? null,
       payload: { sale_mode: isExpress ? 'express' : 'standard', initial_status: status },
       at: saleNow,
     }),
@@ -1942,7 +1844,6 @@ export const confirmSale = async (c: PosContext) => {
       folioId,
       type: 'payment',
       actorId: agent.userId,
-      operatorId: c.get('operator')?.operatorId ?? null,
       payload: { amount: amountPaid, method, kind: status === 'booking' ? 'deposit' : 'full' },
       at: saleNow,
     }),
@@ -1963,8 +1864,7 @@ export const confirmSale = async (c: PosContext) => {
 
   // Ticket/QR delivery is customer-direct for EVERY role now (whatsapp-qr-delivery D9): the tourist
   // (name + phone captured) gets the WhatsApp portal link, and email — when a customer email was
-  // captured — is an optional copy. An affiliate no longer receives a self-addressed copy; they
-  // re-open the sale from their own /history.
+  // captured — is an optional copy.
   const ticketRecipients = [
     ...new Set([input.customer_email].filter((e): e is string => !!e)),
   ]
@@ -2069,8 +1969,6 @@ export const confirmSale = async (c: PosContext) => {
         customer_name: input.customer_name ?? null,
         customer_email: input.customer_email ?? null,
         customer_phone: input.customer_phone ?? null,
-        // US-AF13 — the shift operator who made the sale (null unless this is an operator session).
-        operator_name: c.get('operator')?.name ?? null,
         // Delivery axis (whatsapp-qr-delivery) — the receipt CTA sends this portal link; a fresh
         // sale is "pendiente de enviar" (nothing sent/viewed yet).
         portal_link: portalLink ?? null,
@@ -2385,7 +2283,6 @@ export const settleBooking = async (c: PosContext) => {
           reference: balanceNeedsVerification ? (body.payment_reference ?? null) : null,
           verification: balanceNeedsVerification ? 'pending' : 'not_required',
           collectedBy: agent.userId,
-          operatorId: c.get('operator')?.operatorId ?? null,
         }),
         ...allocationRows(db, {
           organizationId: org,
@@ -2441,7 +2338,6 @@ export const settleBooking = async (c: PosContext) => {
         folioId: id,
         type: 'payment',
         actorId: agent.userId,
-        operatorId: c.get('operator')?.operatorId ?? null,
         payload: { amount: balanceAmount, method: settleMethod, kind: 'settlement' },
         at: settledNow,
       }),
@@ -2491,7 +2387,6 @@ export const settleBooking = async (c: PosContext) => {
       folioId: id,
       type: 'payment',
       actorId: agent.userId,
-      operatorId: c.get('operator')?.operatorId ?? null,
       payload: { amount: balanceAmount, method: settleMethod, kind: 'settlement' },
       at: settledNow,
     }),
@@ -2720,7 +2615,6 @@ export const settleFolioLine = async (c: PosContext) => {
       reference: balanceNeedsVerification ? (body.payment_reference ?? null) : null,
       verification: balanceNeedsVerification ? 'pending' : 'not_required',
       collectedBy: agent.userId,
-      operatorId: c.get('operator')?.operatorId ?? null,
     }),
     ...allocationRows(db, {
       organizationId: org,
@@ -2750,7 +2644,6 @@ export const settleFolioLine = async (c: PosContext) => {
       folioId: id,
       type: 'payment',
       actorId: agent.userId,
-      operatorId: c.get('operator')?.operatorId ?? null,
       folioLineId: lineId,
       payload: {
         amount: lineRemaining,
@@ -3685,9 +3578,6 @@ export const listAgentFolios = async (c: PosContext) => {
   // hours of a beach counter. It had no call sites, so there is nothing to deprecate.
   const fromQ = asDay(c.req.query('from'))
   const toQ = asDay(c.req.query('to'))
-  // US-AF13 — the manager filters the hotel's folios by shift operator; an operator session may
-  // narrow to its own sales. Ignored for a plain agent (no operators exist under them).
-  const operatorQ = c.req.query('operator')
 
   const filters = [
     eq(folios.organizationId, org),
@@ -3696,9 +3586,6 @@ export const listAgentFolios = async (c: PosContext) => {
   if (statusQ === 'paid' || statusQ === 'booking' || statusQ === 'cancelled') {
     // D15 (line-autonomy) — any-line facet semantics, mirroring the admin list.
     filters.push(anyLineStatusSql(statusQ))
-  }
-  if (operatorQ) {
-    filters.push(eq(folios.operatorId, operatorQ))
   }
 
   // The org's zone decides every calendar boundary on this route, exactly as it does on the
@@ -3732,7 +3619,6 @@ export const listAgentFolios = async (c: PosContext) => {
       paymentMethod: displayMethodSql,
       paymentVerification: folios.paymentVerification,
       paymentReference: folios.paymentReference,
-      operatorName: affiliateOperators.name,
       // US-AG58 — the debt and the credit. The seller's row never carried these, so the shared
       // FolioCard picked a degraded money reading for their own cancelled sale — the list-level
       // twin of BUG-034.
@@ -3746,7 +3632,6 @@ export const listAgentFolios = async (c: PosContext) => {
     })
     .from(folios)
     .innerJoin(users, eq(folios.agentId, users.id))
-    .leftJoin(affiliateOperators, eq(folios.operatorId, affiliateOperators.id))
     .where(and(...filters))
     .orderBy(desc(folios.createdAt))
     // US-AG58 (D5) — a safety cap, read one over so the response can SAY it capped. The seller's

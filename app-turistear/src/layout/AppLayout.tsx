@@ -27,7 +27,7 @@ import { AccountMenu } from './AccountMenu'
 import { TopBar } from './TopBar'
 import { TopBarActionsSetterContext } from './TopBarContext'
 
-type Role = 'admin' | 'agent' | 'affiliate'
+type Role = 'admin' | 'agent'
 
 interface NavItem {
   label: string
@@ -43,15 +43,12 @@ interface NavItem {
 // exactly the agent nav plus "Hoy". Array order is the render order; the role filter preserves
 // it, yielding agent [Vender, Escáner, Ventas, Caja] and admin [Hoy, Vender, Escáner, Ventas,
 // Caja]. Occasional admin tools (Agentes, Catálogo, …) live in the account surface, not here.
-// Affiliate (affiliate-portal.spec.md D7) joins as a third role in the SAME shell with a trimmed
-// nav: [Vender, Ventas, Caja] — the agent set MINUS Escáner (no QR validation for this role, D4).
-// It reuses the agent's own /history (Ventas) and /balance (Caja) surfaces.
 const NAV_ITEMS: NavItem[] = [
   { label: 'Hoy', to: ROUTES.DASHBOARD, icon: TodayRounded, role: 'admin' },
   // US-AG07.3 — Apartados is no longer a nav destination; it's a tab inside Vender.
   { label: 'Vender', to: ROUTES.POS, icon: PointOfSaleRounded },
   { label: 'Escáner', to: ROUTES.SCAN, icon: QrCodeScannerRounded, role: ['agent', 'admin'] },
-  { label: 'Ventas', to: ROUTES.HISTORY, icon: ReceiptLongRounded, role: ['agent', 'affiliate'] },
+  { label: 'Ventas', to: ROUTES.HISTORY, icon: ReceiptLongRounded, role: 'agent' },
   { label: 'Ventas', to: ROUTES.FOLIOS, icon: ReceiptLongRounded, role: 'admin' },
   // ONE «Caja» for every role: your own cash drawer (caja-surface-parity D2′). The admin's
   // oversight of the team's cajas is a different thing with a different name — «Caja del equipo»,
@@ -94,7 +91,7 @@ export function AppLayout() {
   // Admins only; the admin's own (self-authorized) drops never count.
   const { data: pendingDropCount = 0 } = usePendingDropCount(user.role === 'admin')
   // US-A80 — the seller's paid folios whose tickets never reached the customer, surfaced on the
-  // agent/affiliate Ventas destination ("Sin entregar" filter clears them).
+  // agent's Ventas destination ("Sin entregar" filter clears them).
   const { data: pendingDeliveryCount = 0 } = usePendingDeliveryCount(user.role !== 'admin')
 
   // US-UX01 — both roles land on their first daily action; the monogram links there too.

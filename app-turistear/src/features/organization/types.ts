@@ -15,10 +15,8 @@ export interface CancellationTier {
   min_hours: number | null
   /** 0–100. Share of the LINE's total the customer gets back. The company retains the rest. */
   refund_pct: number
-  /** 0–100. Share of the line's commission an in-house agent keeps (capped by what was retained). */
+  /** 0–100. Share of the line's commission the seller keeps (capped by what was retained). */
   agent_commission_pct: number
-  /** 0–100. Same, for an affiliate reseller. Omitted ⇒ affiliates are treated like agents. */
-  affiliate_commission_pct?: number
 }
 
 // D20 — the ladder is the whole document. There is no deposit clause: an apartado is the same sale

@@ -136,7 +136,6 @@ describe('US-LG02 — confirmSale dual-writes payment + commission rows', () => 
       reference: null,
       verification: 'not_required',
       collected_by: userId,
-      operator_id: null,
     })
     expect(commissions).toHaveLength(1)
     expect(commissions[0]).toMatchObject({ amount: 30000, method: 'cash', verification: 'not_required' })

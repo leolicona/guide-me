@@ -19,7 +19,7 @@ export interface WizardShellProps {
   open: boolean
   /** Close (X) handler — the parent owns any discard-confirm logic. */
   onClose: () => void
-  /** Modal title, e.g. "Nuevo servicio" / "Nuevo afiliado". */
+  /** Modal title, e.g. "Nuevo servicio". */
   title: string
   /** 1-based current step and the total. */
   step: number
@@ -158,8 +158,10 @@ export function WizardChrome({
 
 /**
  * The multi-step modal host (Elegant Field Minimalism): `WizardChrome` inside a Dialog —
- * full-screen on mobile (90vh, rounded top edges), centered on desktop. Used by the Affiliate
- * Setup wizard (US-A54–A57); the Service Creation wizard now lives on a page (`WizardPage`).
+ * full-screen on mobile (90vh, rounded top edges), centered on desktop. No consumer today: the
+ * Service Creation wizard lives on a page (`WizardPage`), and so did the retired affiliate wizard
+ * that this comment used to name. Kept as the modal host constitution VII names
+ * (retire-affiliates D12).
  */
 export function WizardShell({ open, onClose, ...chrome }: WizardShellProps) {
   return (

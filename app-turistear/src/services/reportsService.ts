@@ -11,7 +11,6 @@ const toQuery = (p: CommissionReportParams): string => {
   params.set('from', p.from)
   params.set('to', p.to)
   if (p.seller_id) params.set('seller_id', p.seller_id)
-  if (p.affiliate_company_id) params.set('affiliate_company_id', p.affiliate_company_id)
   return params.toString()
 }
 

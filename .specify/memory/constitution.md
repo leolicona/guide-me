@@ -1,74 +1,42 @@
 <!--
-Sync Impact Report (v1.0.0, 2026-10-04)
-- Version change: template (unversioned) → 1.0.0 — first ratification. Every
-  placeholder of Spec Kit 1.0.4's constitution template is filled; no bracket
-  token is left.
-- Sources: distilled from CLAUDE.md (develop@b456de8) and from the archive
-  leolicona/guide-me-docs@9cc59d0 — docs/PROCESS.md, docs/ARCHITECTURE.md,
-  docs/TESTING.md, docs/ci-cd.md, docs/SPEC.md § Key Business Rules,
-  docs/TECH_DEBT.md, .design/design-system/DESIGN_TOKENS.md and
-  DESIGN_BRIEF.md. Where the archive had aged, the code was read instead
-  (stack versions, cookie names, test layers, money and date storage, the
-  deploy workflows). The shape follows leolicona/devolada's constitution
-  (v1.11.0), which this repo's Spec Kit setup was copied from.
-- Principles added (all new):
-  I. Spec-Driven, Every Decision Cited
-  II. Money Law
-  III. Tenant Isolation (NON-NEGOTIABLE)
-  IV. The Server Decides
-  V. Capacity Is Guarded by the Database
-  VI. A Rule Is Proven Where It Is Enforced
-  VII. Elegant Field Minimalism (NON-NEGOTIABLE)
-  VIII. A Service We Do Not Own Never Undoes a Sale
-- Added sections: Technology Stack & Constraints; Development Workflow &
-  Quality Gates; Governance. Removed sections: none.
-- Where this departs from the archive:
-  · docs/PROCESS.md's four layers (the SPEC.md index, US-* story series,
-    docs/<domain>/<feature>.spec.md) give way to Spec Kit (Principle I). The
-    habits that earned their keep stay, as rules: the scope boundary stated
-    as a mechanical test, numbered decisions with a why, amend in place.
-  · The design system's authority moves into this repo: theme.ts and
-    tokens.css are the law (Principle VII). CLAUDE.md said the archived
-    DESIGN_TOKENS.md "wins any disagreement"; a document nobody may edit
-    cannot keep winning, so it stays the record of why each value is what it
-    is and of its AA verification.
-  · CLAUDE.md's frontend line (React 18, a Chrome extension built with
-    CRXJS, TailwindCSS) is stale. The stack table records what package.json
-    pins: React 19, Vite 8, MUI 9, no CRXJS, no Tailwind.
-- Templates: .specify/templates/plan-template.md ✅ (its Constitution Check is
-  filled at plan time, one gate per principle); spec-template.md ✅;
-  tasks-template.md ✅; checklist-template.md ✅. No template changed.
-- Follow-up TODOs — known gaps between the code and this text, each to be
-  registered with /speckit-debt-log:
-  · TODO(CONTRACT-MIRROR): API response shapes are hand-mirrored in
-    app-turistear/src/features/*/types.ts (archived TECH_DEBT #21).
-    Principle IV holds the mirror by discipline until a contracts package
-    exists.
-  · TODO(TOKEN-FALLBACKS): 41 `var(--token, #hex)` fallbacks in app
-    components restate token values outside theme.ts and tokens.css
-    (Principle VII), and features/catalog/types.ts keeps a second money
-    formatter beside components/money.ts (Principle II).
-  · TODO(EMAIL-PALETTE): transactional email HTML
-    (api-turistear/src/services/resend.ts) uses a palette that matches no
-    token (archived TECH_DEBT #20).
-  · TODO(TEST-CITATIONS): 6 of 76 API test files and 7 of 46 app test files
-    cite no story or bug (Principle VI); nothing in CI enforces the citation
-    yet.
-  · TODO(DESIGN-FOUNDATIONS): the design extension offers
-    /speckit-design-foundations after this command. Run against the existing
-    system, it may refine Principle VII; that is a MINOR amendment.
-  · Items still open in the archived TECH_DEBT.md (#4, #6–#10, #15, #16,
-    #19–#23, #27–#31) are re-registered with /speckit-debt-log when a
-    feature touches them.
+Sync Impact Report (v1.1.0, 2026-10-06)
+- Version change: 1.0.0 → 1.1.0 — MINOR. The affiliate role and its shift
+  operators are retired (specs/001-retire-affiliates). Guidance that named
+  them changes materially; no principle is removed or redefined, and
+  Principle III's isolation rule is untouched — hence not MAJOR.
+- Modified sections (titles unchanged):
+  · Preamble — the sellers are an organization's agents; affiliates (hotels,
+    travel agencies) and their shift cashiers are gone.
+  · III. Tenant Isolation — the authorization bullet names two roles, admin
+    and agent; a user row stored with a retired role is refused at
+    authentication (retire-affiliates D3). The `affiliate` and shift
+    `operator` sentences are removed.
+  · IV. The Server Decides — `gm_op` leaves the session-cookie list
+    (retire-affiliates D4).
+  · Technology Stack & Constraints — the Auth row loses "shift operators by
+    signed link + 4-digit PIN".
+- Added sections: none. Removed sections: none.
+- Templates: .specify/templates/plan-template.md ✅, spec-template.md ✅,
+  tasks-template.md ✅, checklist-template.md ✅ — none names a role; no
+  template changed.
+- Follow-up TODOs:
+  · TODO(AFFILIATE-TABLES): the retired tables (affiliate_companies,
+    affiliate_commissions, affiliate_invitations, affiliate_operators) and six
+    nullable columns stay in D1, unmapped (retire-affiliates D1/D2);
+    registered as debt `.specify/debt/affiliate-tables/`.
+  · Carried from v1.0.0, still open: TODO(CONTRACT-MIRROR),
+    TODO(TOKEN-FALLBACKS), TODO(EMAIL-PALETTE), TODO(TEST-CITATIONS),
+    TODO(DESIGN-FOUNDATIONS), and the archived TECH_DEBT.md items to
+    re-register when a feature touches them (see the v1.0.0 report in git
+    history, develop@33b3609).
 -->
 
 # Turistear Ya! Constitution
 
 Turistear Ya! sells tourism — tours, transfers and stays — for Mexican
-operators who sell in the field. An organization's agents, its affiliates
-(hotels, travel agencies) and their shift cashiers sell on a phone, often
-outdoors and with cash in hand. The tourist receives a signed QR ticket by
-WhatsApp or email. The admin controls the catalog, the inventory, the
+operators who sell in the field. An organization's agents sell on a phone,
+often outdoors and with cash in hand. The tourist receives a signed QR ticket
+by WhatsApp or email. The admin controls the catalog, the inventory, the
 commissions and the cash that comes back. Every organization is isolated from
 every other (Principle III). It is built by one developer working with AI
 agents; that developer decides. Ask for decisions, not approvals.
@@ -154,10 +122,9 @@ reconstruct — instead of testing for each one.
   proven in the API; a frontend test never satisfies this rule.
 - Authorization is enforced in the API, by `requireRole(...)` and by the
   scope of each query. An `agent` sees and sells only its organization's
-  services. An `affiliate` sells only what the admin curated for its company
-  and sees only its own sales and balance. A shift `operator` is not a
-  `users` row: a signed link plus a PIN open a 24-hour session (`gm_op`)
-  bounded by its affiliate company. Hiding a button is presentation, never
+  services. The product has two roles, `admin` and `agent`; a user row stored
+  with any other role (the retired `affiliate`) is refused at authentication
+  (`retire-affiliates D3`). Hiding a button is presentation, never
   authorization.
 
 Rationale: in a shared schema a missing filter leaks another business's sales
@@ -172,7 +139,7 @@ it keep isolation auditable with grep.
   the frontend enforces is not a rule.
 - The UI talks only to `api-turistear` and never holds a credential. Sessions
   live in HttpOnly cookies on `.turistearya.com` (`gm_access`; `gm_refresh`,
-  restricted to `/api/auth/refresh`; `gm_op`), every request is sent with
+  restricted to `/api/auth/refresh`), every request is sent with
   `credentials: 'include'`, and the tokens Agnostic Auth issues are written
   as cookies by the API, never returned in a body.
 - Every route lives in `src/routes/<resource>/`: `index.ts` is the router
@@ -316,7 +283,7 @@ Complexity Tracking.
 | Runtime | Cloudflare Workers, `compatibility_date` 2025-08-03. The API's one cron trigger (`*/15 * * * *`) runs the bookings auto-expiry sweep |
 | API | `api-turistear`: Hono 4 + `@hono/zod-validator` (Zod 4), JSX through `hono/jsx`, built and served by Vite 6 with `@cloudflare/vite-plugin` and `vite-ssr-components`. Middleware in `src/middleware/`, helpers in `src/utils/`, providers in `src/services/` |
 | Data | Cloudflare D1 through Drizzle ORM (`sqlite`); migrations `NNNN_snake_case.sql` in `api-turistear/migrations/`, applied with `wrangler d1 migrations` |
-| Auth | Agnostic Auth over the `AGNOSTIC_AUTH_API` service binding (app id `guide-me`); HttpOnly session cookies on `.turistearya.com`; shift operators by signed link + 4-digit PIN |
+| Auth | Agnostic Auth over the `AGNOSTIC_AUTH_API` service binding (app id `guide-me`); HttpOnly session cookies on `.turistearya.com` |
 | Frontend | `app-turistear`: React 19, Vite 8, MUI 9 (`cssVariables: true`), TanStack Query 5, Zustand 5, React Hook Form 7 + Zod 4, React Router 7; served as a Worker. Layers: `pages/` (route assembly only) · `layout/` · `components/` (shared primitives) · `features/<Name>/{components,hooks,types.ts,index.ts}` · `store/` · `services/` · `styles/` · `config/` |
 | Language | TypeScript, ESM; Node 22; pnpm workspace (pnpm 10 in CI) |
 | Tests | Vitest 4 — `@cloudflare/vitest-pool-workers` for the API; jsdom, Testing Library, MSW 2 and axe-core for the app; Playwright 1.62 for journeys |
@@ -385,4 +352,4 @@ Additional constraints:
 - The developer decides. When a principle blocks a feature, the plan says so
   and proposes the amendment; it does not route around it.
 
-**Version**: 1.0.0 | **Ratified**: 2026-10-04 | **Last Amended**: 2026-10-04
+**Version**: 1.1.0 | **Ratified**: 2026-10-04 | **Last Amended**: 2026-10-06

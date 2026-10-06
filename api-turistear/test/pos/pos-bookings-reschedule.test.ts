@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest'
 import { env, SELF } from 'cloudflare:test'
-import { materializeSeededFolio, seedUser, seedTwoOrgs, clearAffiliateDb } from '../helpers/tenancy'
+import { materializeSeededFolio, seedUser, seedTwoOrgs, clearFullDb } from '../helpers/tenancy'
 import { buildFakeJwt } from '../helpers/jwt'
 
 // US-AG52 — reagendar mientras el lugar es tuyo.
@@ -111,7 +111,7 @@ const line = (id: string) =>
     .bind(id).first<any>()
 
 beforeEach(async () => {
-  await clearAffiliateDb()
+  await clearFullDb()
   vi.useFakeTimers()
   vi.setSystemTime(NOW)
 })

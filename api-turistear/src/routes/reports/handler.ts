@@ -3,7 +3,6 @@ import { and, eq, gte, inArray, lt, lte, ne, sql } from 'drizzle-orm'
 import { getDb, type Db } from '../../db/client'
 import { deriveStatusSql } from '../../utils/folioStatus'
 import {
-  affiliateCompanies,
   cashDrops,
   folioLines,
   folioPayments,
@@ -31,13 +30,12 @@ const resolveRange = (from: string, to: string) => ({
   toExclusive: new Date(Date.parse(`${to}T00:00:00Z`) + 86_400_000),
 })
 
-type SellerRole = 'admin' | 'agent' | 'affiliate'
-
 export interface CommissionReportRow {
   seller_id: string
   name: string
-  role: SellerRole
-  affiliate_company: string | null
+  // retire-affiliates D6 — the stored role, as-is: a seller still stored with a retired role keeps
+  // their row (the report reads the ledger; dropping them would make the totals disagree with it).
+  role: string
   folios_sold: number
   sales_total: number
   cash_collected: number
@@ -50,11 +48,11 @@ export interface CommissionReportRow {
 
 export interface CommissionReport {
   period: { from: string; to: string }
-  totals: Omit<CommissionReportRow, 'seller_id' | 'name' | 'role' | 'affiliate_company'>
+  totals: Omit<CommissionReportRow, 'seller_id' | 'name' | 'role'>
   sellers: CommissionReportRow[]
 }
 
-// The core read (US-A17/A18/A53). Three grouped aggregates (folios, confirmed drops, payouts),
+// The core read (US-A17/A18). Three grouped aggregates (folios, confirmed drops, payouts),
 // each keyed by agent_id, stitched against the org's user roster in JS — constant in the number
 // of sellers (no per-seller derivation; this report needs no shift watermark). All money is
 // integer minor units; every query is org-scoped (organization_id from the session).
@@ -74,9 +72,6 @@ export const buildCommissionReport = async (
     gte(folios.createdAt, fromDate),
     lt(folios.createdAt, toExclusive),
     ...(q.seller_id ? [eq(folios.agentId, q.seller_id)] : []),
-    ...(q.affiliate_company_id
-      ? [eq(folios.affiliateCompanyId, q.affiliate_company_id)]
-      : []),
   ]
 
   const folioAgg = await db
@@ -154,48 +149,34 @@ export const buildCommissionReport = async (
     return emptyReport(q)
   }
 
-  // Roster — org-scoped (no cross-org leak) + role/company for labelling. The org filter is the
+  // Roster — org-scoped (no cross-org leak) + role for labelling. The org filter is the
   // multitenancy backstop even though the aggregates were already org-scoped.
   const roster = await db
-    .select({
-      id: users.id,
-      name: users.name,
-      role: users.role,
-      affiliateCompany: affiliateCompanies.name,
-      affiliateCompanyId: users.affiliateCompanyId,
-    })
+    .select({ id: users.id, name: users.name, role: users.role })
     .from(users)
-    .leftJoin(affiliateCompanies, eq(affiliateCompanies.id, users.affiliateCompanyId))
     .where(and(eq(users.organizationId, org), inArray(users.id, [...sellerIds])))
 
-  const sellers: CommissionReportRow[] = roster
-    // For the per-affiliate (US-A53) drill-down, drops/payouts carry no company column — keep
-    // only sellers belonging to the requested company so the settlement totals stay scoped.
-    .filter((u) =>
-      q.affiliate_company_id ? u.affiliateCompanyId === q.affiliate_company_id : true,
-    )
-    .map((u) => {
-      const f = folioBySeller.get(u.id)
-      const p = paymentBySeller.get(u.id)
-      const cashCollected = Number(p?.cashCollected ?? 0)
-      const commission = Number(f?.commission ?? 0)
-      const confirmedDrops = dropBySeller.get(u.id) ?? 0
-      const payoutsTotal = payoutBySeller.get(u.id) ?? 0
-      return {
-        seller_id: u.id,
-        name: u.name,
-        role: u.role as SellerRole,
-        affiliate_company: u.affiliateCompany ?? null,
-        folios_sold: Number(f?.foliosSold ?? 0),
-        sales_total: Number(f?.salesTotal ?? 0),
-        cash_collected: cashCollected,
-        electronic_total: Number(p?.electronicTotal ?? 0),
-        commission_earned: commission,
-        confirmed_drops: confirmedDrops,
-        payouts: payoutsTotal,
-        net_owed: cashCollected - commission - confirmedDrops + payoutsTotal,
-      }
-    })
+  const sellers: CommissionReportRow[] = roster.map((u) => {
+    const f = folioBySeller.get(u.id)
+    const p = paymentBySeller.get(u.id)
+    const cashCollected = Number(p?.cashCollected ?? 0)
+    const commission = Number(f?.commission ?? 0)
+    const confirmedDrops = dropBySeller.get(u.id) ?? 0
+    const payoutsTotal = payoutBySeller.get(u.id) ?? 0
+    return {
+      seller_id: u.id,
+      name: u.name,
+      role: u.role,
+      folios_sold: Number(f?.foliosSold ?? 0),
+      sales_total: Number(f?.salesTotal ?? 0),
+      cash_collected: cashCollected,
+      electronic_total: Number(p?.electronicTotal ?? 0),
+      commission_earned: commission,
+      confirmed_drops: confirmedDrops,
+      payouts: payoutsTotal,
+      net_owed: cashCollected - commission - confirmedDrops + payoutsTotal,
+    }
+  })
 
   sellers.sort((a, b) => b.sales_total - a.sales_total)
 
@@ -242,10 +223,9 @@ export const getCommissionReport = async (c: ReportsContext) => {
   return c.json(report)
 }
 
-const ROLE_LABEL: Record<SellerRole, string> = {
+const ROLE_LABEL: Record<string, string> = {
   admin: 'Administrador',
   agent: 'Agente',
-  affiliate: 'Afiliado',
 }
 
 // CSV-injection guard: a cell starting with a formula trigger is prefixed with a quote so a
@@ -259,7 +239,6 @@ const csvCell = (value: string): string => {
 const HEADER = [
   'seller',
   'role',
-  'affiliate_company',
   'folios_sold',
   'sales_total',
   'cash_collected',
@@ -283,8 +262,8 @@ export const exportCommissionReport = async (c: ReportsContext) => {
     rows.push(
       [
         csvCell(s.name),
-        csvCell(ROLE_LABEL[s.role]),
-        csvCell(s.affiliate_company ?? ''),
+        // retire-affiliates D6 — a retired role prints as stored rather than as a wrong label.
+        csvCell(ROLE_LABEL[s.role] ?? s.role),
         String(s.folios_sold),
         money(s.sales_total),
         money(s.cash_collected),
@@ -300,7 +279,6 @@ export const exportCommissionReport = async (c: ReportsContext) => {
   rows.push(
     [
       csvCell('TOTALS'),
-      '',
       '',
       String(t.folios_sold),
       money(t.sales_total),

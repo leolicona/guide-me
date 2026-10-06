@@ -15,7 +15,6 @@ import { buildFakeJwt } from '../helpers/jwt'
 
 const ADMIN_EMAIL = 'admin@empresa.com'
 const AGENT_EMAIL = 'agent@empresa.com'
-const AFFILIATE_EMAIL = 'hotel@empresa.com'
 
 const auth = (email: string) => ({ Cookie: `gm_access=${buildFakeJwt(email)}` })
 const CASH = 'http://api.local/api/cash'
@@ -211,8 +210,7 @@ describe('GET /api/cash/drops — the team’s history is capped at 500', () => 
 
 // US-A99 — an admin records their OWN operating expenses. The `agent`-only guard on
 // `/me/expenses` was never a decision: the route was written for agents while the admin's caja was
-// a separate screen that never offered the card. The affiliate exclusion IS a decision
-// (affiliate-portal D4) and stays.
+// a separate screen that never offered the card.
 describe('POST /api/cash/me/expenses — who may record one', () => {
   const addExpense = async (email: string, body: unknown) => {
     const res = await SELF.fetch(`${CASH}/me/expenses`, {
@@ -252,18 +250,6 @@ describe('POST /api/cash/me/expenses — who may record one', () => {
     await seedOrgWithStaff()
     const { status } = await addExpense(AGENT_EMAIL, { description: 'Estacionamiento', amount: 6_000 })
     expect(status).toBe(201)
-  })
-
-  // The one exclusion that IS a decision, and the reason this test is here rather than implied.
-  it('still denies an affiliate — that exclusion is a decision, not an oversight', async () => {
-    const { organizationId } = await seedOrgWithStaff()
-    await seedUser({ organizationId, email: AFFILIATE_EMAIL, role: 'affiliate' })
-
-    const { status } = await addExpense(AFFILIATE_EMAIL, {
-      description: 'Lo que sea',
-      amount: 10_000,
-    })
-    expect(status).toBe(403)
   })
 
   it('lets an admin delete their own', async () => {

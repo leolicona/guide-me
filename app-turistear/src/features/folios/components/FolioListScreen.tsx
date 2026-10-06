@@ -324,9 +324,10 @@ export function FolioListScreen({ surface }: FolioListScreenProps) {
                     ? ROUTES.FOLIO_DETAIL.replace(':id', f.id)
                     : ROUTES.HISTORY_DETAIL.replace(':id', f.id)
                 }
-                // US-A82 D13 — the byline follows the AUDIENCE: the admin reconciles by agent, the
-                // seller sees the shift operator who took the sale (null ⇒ the line collapses).
-                byline={isAdmin ? f.agent.name : f.operator_name}
+                // US-A82 D13 — the byline follows the AUDIENCE: the admin reconciles by agent; the
+                // seller's own list is all theirs, so the line collapses (retire-affiliates D9 took
+                // the shift operator it used to name).
+                byline={isAdmin ? f.agent.name : null}
                 soldAt={soldAt(f.created_at)}
                 nowSeconds={now}
                 surface={surface}
