@@ -18,15 +18,11 @@ columns were unmapped from Drizzle instead (D2), so nothing reads or writes them
 
 ## Where it lives
 
-- `api-turistear/migrations/0034_add_affiliates.sql` — creates `affiliate_companies`,
-  `affiliate_commissions`, `affiliate_invitations` and adds `users.affiliate_company_id`,
-  `users.position`, `folios.affiliate_company_id`.
-- `api-turistear/migrations/0048_affiliate_operators.sql` — creates `affiliate_operators` and adds
-  `folios.operator_id`.
-- `api-turistear/migrations/0049_folio_payments.sql` — `folio_payments.operator_id`
-  ("`operator_id TEXT REFERENCES affiliate_operators(id)`").
-- `api-turistear/migrations/0061_folio_events.sql` — `folio_events.operator_id`
-  ("`operator_id TEXT REFERENCES affiliate_operators(id)`").
+- The tables `affiliate_companies`, `affiliate_commissions`, `affiliate_invitations`,
+  `affiliate_operators` and the columns `users.affiliate_company_id`, `users.position`,
+  `folios.affiliate_company_id`, `folios.operator_id`, `folio_payments.operator_id`,
+  `folio_events.operator_id`, in `guideme-db` (dev) and `guideme-db-prod` (prod) — confirmed by the
+  environment query under *Paying it*. *(Amended 2026-10-06 — see Notes.)*
 - `api-turistear/src/db/schema.ts` — the "Retired: affiliates and their shift operators" note
   (`retire-affiliates D2`) that names every unmapped table and column.
 - `api-turistear/src/routes/services/handler.ts::legacyAffiliateCommissions` — the two-column
@@ -78,3 +74,13 @@ Confirm afterwards:
 - Decisions: `specs/001-retire-affiliates/plan.md` D1, D2, D3, D6, D7; the measurements and the
   SQLite constraints are in `research.md` R1, R2 and R4.
 - Constitution v1.1.0 lists this as TODO(AFFILIATE-TABLES) in its Sync Impact Report.
+- **Amended 2026-10-06, on the developer's authorization** (after the first `/speckit-debt-pay`
+  returned `partial`). The entry first anchored four migration files as where the debt lived:
+  `api-turistear/migrations/0034_add_affiliates.sql` (creates the three affiliate tables and adds
+  `users.affiliate_company_id`, `users.position`, `folios.affiliate_company_id`),
+  `0048_affiliate_operators.sql` (creates `affiliate_operators`, adds `folios.operator_id`),
+  `0049_folio_payments.sql` (`folio_payments.operator_id`) and `0061_folio_events.sql`
+  (`folio_events.operator_id`). Migrations are immutable history and can never be removed, so those
+  anchors could never read `gone`. The debt was the objects they create. Those objects are now the
+  anchor, and the files stay here as the record of where the objects came from. The body above is
+  otherwise unchanged.
