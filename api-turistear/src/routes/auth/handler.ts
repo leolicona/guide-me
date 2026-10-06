@@ -1,15 +1,8 @@
 import type { Context } from 'hono'
-import { and, eq } from 'drizzle-orm'
+import { eq } from 'drizzle-orm'
 import { getCookie } from 'hono/cookie'
 import { getDb } from '../../db/client'
-import {
-  affiliateCompanies,
-  affiliateInvitations,
-  invitations,
-  organizations,
-  passwordResetTokens,
-  users,
-} from '../../db/schema'
+import { invitations, organizations, passwordResetTokens, users } from '../../db/schema'
 import {
   hashPassword,
   initiateMagicLink,
@@ -188,26 +181,13 @@ export const logout = async (c: AuthContext) => {
   return c.json({ message: 'Sesión cerrada correctamente.' }, 200)
 }
 
-// Resolves a token across BOTH invite tables (D8 parallel flow). An agent invite lives in
-// `invitations`; an affiliate invite in `affiliate_invitations` and carries the company link.
-// Tokens are crypto-random UUIDs, so there is no cross-table collision; the agent path is
-// checked first and is byte-identical to before for an agent token.
-type ResolvedInvitation =
-  | {
-      kind: 'agent'
-      id: string
-      organizationId: string
-      identity: string
-      identityType: 'email'
-    }
-  | {
-      kind: 'affiliate'
-      id: string
-      organizationId: string
-      identity: string
-      identityType: 'email'
-      affiliateCompanyId: string
-    }
+// retire-affiliates (FR-004) — only agent invitations exist; any other token answers INVALID_TOKEN.
+interface ResolvedInvitation {
+  id: string
+  organizationId: string
+  identity: string
+  identityType: 'email'
+}
 
 const expiredOrMissing = (
   status: string | undefined,
@@ -218,7 +198,7 @@ const expiredOrMissing = (
   return ms <= Date.now()
 }
 
-const findAnyValidPendingInvitation = async (
+const findValidPendingInvitation = async (
   c: AuthContext,
   token: string,
 ): Promise<ResolvedInvitation> => {
@@ -239,36 +219,10 @@ const findAnyValidPendingInvitation = async (
   const agent = agentRows[0]
   if (agent && !expiredOrMissing(agent.status, agent.expiresAt)) {
     return {
-      kind: 'agent',
       id: agent.id,
       organizationId: agent.organizationId,
       identity: agent.identity,
       identityType: agent.identityType,
-    }
-  }
-
-  const affRows = await db
-    .select({
-      id: affiliateInvitations.id,
-      organizationId: affiliateInvitations.organizationId,
-      affiliateCompanyId: affiliateInvitations.affiliateCompanyId,
-      identity: affiliateInvitations.identity,
-      identityType: affiliateInvitations.identityType,
-      status: affiliateInvitations.status,
-      expiresAt: affiliateInvitations.expiresAt,
-    })
-    .from(affiliateInvitations)
-    .where(eq(affiliateInvitations.token, token))
-    .limit(1)
-  const aff = affRows[0]
-  if (aff && !expiredOrMissing(aff.status, aff.expiresAt)) {
-    return {
-      kind: 'affiliate',
-      id: aff.id,
-      organizationId: aff.organizationId,
-      identity: aff.identity,
-      identityType: aff.identityType,
-      affiliateCompanyId: aff.affiliateCompanyId,
     }
   }
 
@@ -278,7 +232,7 @@ const findAnyValidPendingInvitation = async (
 export const acceptInvite = async (c: AuthContext) => {
   const { token } = c.req.query() as AcceptInviteQuery
 
-  const invitation = await findAnyValidPendingInvitation(c, token)
+  const invitation = await findValidPendingInvitation(c, token)
 
   const db = getDb(c.env)
   const org = await db
@@ -287,26 +241,12 @@ export const acceptInvite = async (c: AuthContext) => {
     .where(eq(organizations.id, invitation.organizationId))
     .limit(1)
 
-  // For an affiliate invite, surface the (admin-created) company name so the acceptance form
-  // can show it read-only ("Te unes a: …", US-AF01).
-  let companyName: string | null = null
-  if (invitation.kind === 'affiliate') {
-    const co = await db
-      .select({ name: affiliateCompanies.name })
-      .from(affiliateCompanies)
-      .where(eq(affiliateCompanies.id, invitation.affiliateCompanyId))
-      .limit(1)
-    companyName = co[0]?.name ?? null
-  }
-
   return c.json(
     {
       invitation: {
         identity: invitation.identity,
         identity_type: invitation.identityType,
         organization_name: org[0]?.name ?? '',
-        invitation_type: invitation.kind,
-        company_name: companyName,
       },
     },
     200,
@@ -316,38 +256,14 @@ export const acceptInvite = async (c: AuthContext) => {
 export const completeInvite = async (c: AuthContext) => {
   const input = (await c.req.json()) as CompleteInviteInput
 
-  const invitation = await findAnyValidPendingInvitation(c, input.token)
+  const invitation = await findValidPendingInvitation(c, input.token)
 
   const db = getDb(c.env)
 
   const { hash, salt } = await hashPassword(c.env, input.password)
 
   const userId = crypto.randomUUID()
-  const isAffiliate = invitation.kind === 'affiliate'
-  const role = isAffiliate ? 'affiliate' : 'agent'
-
-  // D13 (docs/affiliate-operators/affiliate-operators.spec.md) — at most ONE affiliate (the manager) per company. Guard
-  // the accept path too (a race where a stale second invite is redeemed): if a manager already
-  // exists for this company, refuse. Extra sellers are added as PIN operators (US-AF10).
-  if (isAffiliate) {
-    const existingManager = await db
-      .select({ id: users.id })
-      .from(users)
-      .where(
-        and(
-          eq(users.affiliateCompanyId, invitation.affiliateCompanyId),
-          eq(users.role, 'affiliate'),
-        ),
-      )
-      .limit(1)
-    if (existingManager.length > 0) {
-      throw new ApiError(
-        'AFFILIATE_MANAGER_EXISTS',
-        409,
-        'Esta empresa ya tiene un gerente registrado.',
-      )
-    }
-  }
+  const role = 'agent'
 
   await db.insert(users).values({
     id: userId,
@@ -359,22 +275,12 @@ export const completeInvite = async (c: AuthContext) => {
     role,
     status: 'active',
     plan: 'free',
-    // US-AF01 — link the affiliate user to its company + optional job title. Null for an agent.
-    affiliateCompanyId: isAffiliate ? invitation.affiliateCompanyId : null,
-    position: isAffiliate ? input.position?.trim() || null : null,
   })
 
-  if (isAffiliate) {
-    await db
-      .update(affiliateInvitations)
-      .set({ status: 'accepted', updatedAt: new Date() })
-      .where(eq(affiliateInvitations.id, invitation.id))
-  } else {
-    await db
-      .update(invitations)
-      .set({ status: 'accepted', updatedAt: new Date() })
-      .where(eq(invitations.id, invitation.id))
-  }
+  await db
+    .update(invitations)
+    .set({ status: 'accepted', updatedAt: new Date() })
+    .where(eq(invitations.id, invitation.id))
 
   const { jwt, refreshToken } = await verifyPassword(c.env, {
     password: input.password,

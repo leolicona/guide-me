@@ -1,8 +1,7 @@
 import type { Context } from 'hono'
-import { and, desc, eq, gt, inArray, isNotNull, lte, or, sql } from 'drizzle-orm'
+import { and, desc, eq, gt, inArray, isNotNull, lte, ne, or, sql } from 'drizzle-orm'
 import { getDb, type Db } from '../../db/client'
 import {
-  affiliateCompanies,
   agentExpenses,
   cashDrops,
   folioPayments,
@@ -839,27 +838,18 @@ export const listBalances = async (c: CashContext) => {
   const db = getDb(c.env)
 
   // A balance row is emitted for every cash-holding user, even one with no activity (→ all
-  // zeros). Affiliates (external resellers) carry the same running balance + cash-drop flow as
-  // agents (affiliate-portal D5), so they fold into the same roster — tagged with their role and
-  // company so the admin can tell an in-house agent from a partner at a glance.
+  // zeros). retire-affiliates D5 — a cash holder is every non-admin user, not a list of roles, so a
+  // seller still stored with a retired role keeps an open balance the admin can see and settle.
   const agents = await db
-    .select({
-      id: users.id,
-      name: users.name,
-      role: users.role,
-      affiliateCompany: affiliateCompanies.name,
-    })
+    .select({ id: users.id, name: users.name })
     .from(users)
-    .leftJoin(affiliateCompanies, eq(affiliateCompanies.id, users.affiliateCompanyId))
-    .where(and(eq(users.organizationId, org), inArray(users.role, ['agent', 'affiliate'])))
+    .where(and(eq(users.organizationId, org), ne(users.role, 'admin')))
 
   const balances = await Promise.all(
     agents.map(async (agent) => {
       const derived = await deriveBalance(db, org, agent.id)
       return {
         agent: { id: agent.id, name: agent.name },
-        role: agent.role,
-        affiliate_company: agent.affiliateCompany ?? null,
         cash_collected: derived.cashCollected,
         commission_total: derived.commissionTotal,
         expense_total: derived.expenseTotal,
@@ -1081,9 +1071,9 @@ export const registerPayout = async (c: CashContext) => {
       and(
         eq(users.id, input.agent_id),
         eq(users.organizationId, org),
-        // Otherwise the target must be an agent in the admin's org; self bypasses the role
-        // filter so the admin can clear their own balance.
-        ...(isSelf ? [] : [inArray(users.role, ['agent', 'affiliate'])]),
+        // Otherwise the target must be a cash holder in the admin's org (retire-affiliates D5);
+        // self bypasses the role filter so the admin can clear their own balance.
+        ...(isSelf ? [] : [ne(users.role, 'admin')]),
       ),
     )
     .limit(1)
@@ -1137,7 +1127,7 @@ export const registerCollection = async (c: CashContext) => {
       and(
         eq(users.id, input.agent_id),
         eq(users.organizationId, org),
-        inArray(users.role, ['agent', 'affiliate']),
+        ne(users.role, 'admin'), // retire-affiliates D5 — every cash holder
       ),
     )
     .limit(1)

@@ -159,7 +159,7 @@ describe('Caja del equipo — confirming a hand-in', () => {
 })
 
 // The balances list keeps its anatomy — the scope boundary says so — but the row's name may not
-// clip: at 375px «Sofía Reyes» beside the affiliate chip rendered as «So…», which is not a name.
+// clip: at 375px «Sofía Reyes» rendered as «So…», which is not a name.
 describe('Caja del equipo — the team list', () => {
   it('renders each holder with their money', async () => {
     withDrops()
@@ -168,18 +168,13 @@ describe('Caja del equipo — the team list', () => {
         HttpResponse.json({
           balances: [
             aBalanceRow(),
-            aBalanceRow({
-              agent: { id: 'aff-1', name: 'Sofía Reyes', email: 's@x.com' },
-              role: 'affiliate',
-              affiliate_company: 'Hotel Riviera Maya',
-            }),
+            aBalanceRow({ agent: { id: 'agent-2', name: 'Sofía Reyes', email: 's@x.com' } }),
           ],
         }),
       ),
     )
     renderWithProviders(<CashBalancesPage />)
     expect(await screen.findByText('Sofía Reyes')).toBeInTheDocument()
-    expect(screen.getByText('Hotel Riviera Maya')).toBeInTheDocument()
   })
 })
 

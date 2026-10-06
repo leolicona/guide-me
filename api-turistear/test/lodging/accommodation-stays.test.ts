@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { env, SELF } from 'cloudflare:test'
-import { materializeSeededFolio, seedUser, seedTwoOrgs, clearAffiliateDb , readDerivedFolio} from '../helpers/tenancy'
+import { materializeSeededFolio, seedUser, seedTwoOrgs, clearFullDb , readDerivedFolio} from '../helpers/tenancy'
 import { buildFakeJwt } from '../helpers/jwt'
 import {
   quoteStay,
@@ -186,7 +186,7 @@ const seedReservation = async (
 let orgId: string
 
 beforeEach(async () => {
-  // Clear the accommodation tables FIRST — they reference services/folios, which clearAffiliateDb
+  // Clear the accommodation tables FIRST — they reference services/folios, which clearFullDb
   // deletes (FK order). folio_lines carries unit_type_id → accommodation_unit_types, so folio
   // lines must be cleared before the types. Order: reservations → folio line rows →
   // seasons/blockouts → unit types.
@@ -200,7 +200,7 @@ beforeEach(async () => {
   ]) {
     await env.DB.exec(`DELETE FROM ${t}`)
   }
-  await clearAffiliateDb()
+  await clearFullDb()
   const seeded = await seedUser({ email: ADMIN_EMAIL, role: 'admin' })
   orgId = seeded.organizationId
   await seedUser({ email: AGENT_EMAIL, role: 'agent', organizationId: orgId })

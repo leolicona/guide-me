@@ -49,8 +49,6 @@ export interface FolioListItem {
   payment_method?: PaymentMethod
   payment_reference?: string | null
   payment_verification?: PaymentVerification
-  // US-A68 — the affiliate shift operator who took the sale; null if sold directly.
-  operator_name?: string | null
   // US-A78 — the debt. 'pending' = cancelled, money owed, nobody confirmed the hand-back.
   refund_status?: RefundStatus
   /** US-A87 — what a closed apartado left the customer, and until when. */
@@ -131,8 +129,6 @@ export interface FolioDetail {
   /** US-A85 (D7) — the worst of the folio's lines. */
   fulfillment?: Fulfillment
   agent: FolioAgent
-  // US-A68 — the affiliate shift operator who took the sale; null if sold directly.
-  operator_name?: string | null
   status: FolioStatus
   customer_name: string | null
   customer_email: string | null
@@ -226,7 +222,6 @@ export interface FolioEvent {
   at: number
   /** Resolved at read (D10). null ⇒ Sistema (the sweep) — or Cliente on `tickets_viewed`. */
   actor: { id: string; name: string | null } | null
-  operator_name: string | null
   backfilled: boolean
   /** Shape per event type (spec § Data Model); amounts in minor units. Backfilled rows may omit
    * keys that were unknowable retroactively (a payment's `kind`, a reschedule's `origin`). */

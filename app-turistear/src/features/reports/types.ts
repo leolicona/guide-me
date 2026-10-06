@@ -4,8 +4,9 @@
 export interface CommissionReportRow {
   seller_id: string
   name: string
-  role: 'admin' | 'agent' | 'affiliate'
-  affiliate_company: string | null
+  // retire-affiliates D6 — the seller's STORED role: a seller still stored with a retired role keeps
+  // their row, so this is not narrowed to the roles the product has today.
+  role: string
   folios_sold: number
   sales_total: number
   cash_collected: number
@@ -19,7 +20,7 @@ export interface CommissionReportRow {
 
 export type CommissionReportTotals = Omit<
   CommissionReportRow,
-  'seller_id' | 'name' | 'role' | 'affiliate_company'
+  'seller_id' | 'name' | 'role'
 >
 
 export interface CommissionReport {
@@ -32,7 +33,6 @@ export interface CommissionReportParams {
   from: string // YYYY-MM-DD (inclusive)
   to: string // YYYY-MM-DD (inclusive)
   seller_id?: string
-  affiliate_company_id?: string
 }
 
 // Client-side ranking key for the US-A18 performance comparison.

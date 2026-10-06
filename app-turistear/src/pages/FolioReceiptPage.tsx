@@ -226,13 +226,6 @@ export default function FolioReceiptPage() {
                     <Typography color="textSecondary">Método de pago</Typography>
                     <Typography>{PAYMENT_METHOD_LABEL[folio.payment_method]}</Typography>
                   </Stack>
-                  {/* US-AF13 — who took the sale (only when an operator, not the manager, sold it). */}
-                  {folio.operator_name && (
-                    <Stack direction="row" sx={{ justifyContent: 'space-between' }}>
-                      <Typography color="textSecondary">Vendido por</Typography>
-                      <Typography>{folio.operator_name}</Typography>
-                    </Stack>
-                  )}
                 </Stack>
 
                 {/* US-LG08 — the per-payment breakdown (deposit vs balance, each method), when the

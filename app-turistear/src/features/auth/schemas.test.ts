@@ -105,9 +105,8 @@ describe('resetPasswordSchema', () => {
 describe('inviteCompleteSchema', () => {
   const valid = { name: 'Ana', password: 'contrasena8', confirmPassword: 'contrasena8' }
 
-  it('accepts an invite without a position — the field is affiliate-only (US-AF01)', () => {
+  it('accepts a name and a matching pair — no job title (retire-affiliates FR-004)', () => {
     expect(inviteCompleteSchema.safeParse(valid).success).toBe(true)
-    expect(inviteCompleteSchema.safeParse({ ...valid, position: 'Recepción' }).success).toBe(true)
   })
 
   it('requires a name', () => {

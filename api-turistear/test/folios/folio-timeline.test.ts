@@ -33,7 +33,6 @@ interface FolioEventOut {
   type: string
   at: number
   actor: { id: string; name: string | null } | null
-  operator_name: string | null
   backfilled: boolean
   payload: Record<string, unknown> | null
 }
@@ -344,6 +343,9 @@ describe('US-A24 — the backfill recovers a pre-migration history (S-5)', () =>
       .split(';')
       .map((s) => s.trim())
       .filter((s) => s.startsWith('INSERT INTO folio_events'))
+      // drop-affiliate-tables D5 — 0069 dropped `operator_id` from folios, folio_payments and
+      // folio_events. The historical SQL still names it; the mapping this replay proves is the rest.
+      .map((s) => s.replace(', operator_id, payload', ', payload').replace(/, [fp]\.operator_id,/, ','))
     expect(inserts.length).toBeGreaterThanOrEqual(8)
     for (const stmt of inserts) {
       await env.DB.prepare(stmt).run()

@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { env, SELF } from 'cloudflare:test'
-import { materializeSeededFolio, seedUser, seedTwoOrgs, clearAffiliateDb } from '../helpers/tenancy'
+import { materializeSeededFolio, seedUser, seedTwoOrgs, clearFullDb } from '../helpers/tenancy'
 import { buildFakeJwt } from '../helpers/jwt'
 
 // US-A85 — the wasted seat, end to end.
@@ -97,7 +97,7 @@ const getFolios = async (email = ADMIN) => {
 
 // The full wipe: this suite seeds services and folio_lines, which `clearTenancyDb` does not
 // reach — deleting users first then trips their foreign keys.
-beforeEach(clearAffiliateDb)
+beforeEach(clearFullDb)
 
 describe('US-A85 — a folio carries its fulfilment', () => {
   it('S-4 — nobody boarded and the departure has passed', async () => {
