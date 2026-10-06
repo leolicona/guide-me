@@ -3,7 +3,7 @@ slug: affiliate-tables
 status: open
 kind: deliberate
 severity: low
-effort: days
+effort: hours
 opened: 2026-10-06
 ---
 
@@ -53,20 +53,16 @@ columns were unmapped from Drizzle instead (D2), so nothing reads or writes them
 
 ## Paying it
 
-Two parts, payable separately:
-
-1. **The tables** — once this change is in prod: a migration nulls the child keys
-   (`folios.affiliate_company_id`, `folios.operator_id`, `folio_payments.operator_id`,
-   `folio_events.operator_id`, `users.affiliate_company_id`) and drops `affiliate_invitations`,
-   `affiliate_commissions`, `affiliate_operators`, `affiliate_companies`, in that order. The same
-   change removes `legacyAffiliateCommissions` and its delete from
-   `routes/services/handler.ts`, and the D7 case of
-   `api-turistear/test/retire-affiliates/retire-affiliates.test.ts`. Deciding what becomes of the
-   prod `affiliate` user row (role rewritten, or left and still refused) decides whether D3/D6 can go
-   too.
-2. **The columns** — SQLite's `ALTER TABLE … DROP COLUMN` refuses a column used in a foreign key,
-   so each of the six needs the twelve-step table rebuild — three of them on the ledger tables. This
-   part may never be worth paying on its own.
+One migration, once this change is in prod, in this order (`specs/001-retire-affiliates`
+research R4, measured): `ALTER TABLE … DROP COLUMN` for the six columns, then
+`DROP TABLE affiliate_invitations`, `affiliate_commissions`, `affiliate_operators`,
+`affiliate_companies`. **Never a parent table first**: once a parent is gone, every `INSERT` or
+`DELETE` on a child table that still declares `REFERENCES` to it fails with `no such table`, even
+with the key `NULL` — it would stop every sale. The same change removes `legacyAffiliateCommissions`
+and its delete from `routes/services/handler.ts`, and the cases of
+`api-turistear/test/retire-affiliates/retire-affiliates.test.ts` that seed the dropped objects. What
+becomes of the prod `affiliate` user row (role rewritten, or left and still refused) decides whether
+D3/D6 can go too.
 
 Confirm afterwards:
 
@@ -75,9 +71,7 @@ Confirm afterwards:
 - Against each environment: `SELECT name FROM sqlite_master WHERE name LIKE 'affiliate_%'` returns
   no rows.
 
-**Trigger**: this change verified in prod (nothing left to roll back to) — or any migration that
-rebuilds `folios`, `folio_payments` or `folio_events` for another reason, which should drop the
-retired columns in the same rebuild.
+**Trigger**: this change verified in prod (nothing left to roll back to).
 
 ## Notes
 

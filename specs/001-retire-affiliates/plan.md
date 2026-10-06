@@ -20,8 +20,8 @@ Code cites these decisions as `retire-affiliates D<n>`.
 *Why*: a migration runs before the code it ships with and must stay compatible with the code
 already deployed (constitution, Additional constraints). A `DROP` would break the running Worker
 for the window between the migration and the deploy, and cannot be undone. Dropping is registered
-as debt `affiliate-tables` (see [research.md](./research.md) R4 for why the six columns need a table
-rebuild and are likely to stay forever).
+as debt `affiliate-tables`; [research.md](./research.md) R4 records the order the drop must follow
+(the six child columns before their parent tables — measured in build).
 
 **D2 — Drizzle stops mapping the retired tables and columns**: `affiliate_companies`,
 `affiliate_commissions`, `affiliate_invitations`, `affiliate_operators`; `users.affiliate_company_id`,

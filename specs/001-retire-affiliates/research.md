@@ -40,13 +40,23 @@ rewrite → D8.
 
 ## R4 — What dropping the data later will take
 
-- The four tables can be dropped once no non-null child key references them: with foreign keys
-  enforced, `DROP TABLE` on a parent runs an implicit delete that fails while a child row points at
-  it (prod: 1 folio carries an `affiliate_company_id`, which must be nulled first).
-- The six columns each carry a `REFERENCES` clause; SQLite's `ALTER TABLE … DROP COLUMN` refuses a
-  column used in a foreign key, so each needs the twelve-step table rebuild — on `folios`,
-  `folio_payments` and `folio_events`, the ledger tables. That cost is why the drop is its own
-  change, recorded as debt `affiliate-tables` rather than done here (D1).
+*Corrected in build, 2026-10-06.* The first version of this finding was written from memory of the
+SQLite documentation and had both halves backwards: it said the tables could go once their child
+keys were nulled, and that the six columns would need a table rebuild. Measured instead — in the
+workerd D1 the API tests run on, against seeded legacy rows, and in SQLite 3.50:
+
+- **A parent cannot go first.** `DROP TABLE` on a parent succeeds, but afterwards every `INSERT`
+  or `DELETE` on a child table that still declares `REFERENCES` to it fails with
+  `no such table` — even when every child key is `NULL`. Dropping `affiliate_operators` or
+  `affiliate_companies` before their child columns would stop every sale, payment, timeline event
+  and user insert.
+- **The columns go cheaply.** `ALTER TABLE … DROP COLUMN` accepts a column declared with a
+  column-level `REFERENCES`; none of the six is indexed or named by a view or trigger. Each row
+  keeps its other values, and `PRAGMA foreign_key_check` stays clean. No table rebuild.
+- **So the drop is one migration, in this order**: the six columns, then `affiliate_invitations`
+  and `affiliate_commissions`, then `affiliate_operators`, then `affiliate_companies`. It removes
+  what the code deployed before this change still writes, so it ships in a later release (D1) —
+  debt `affiliate-tables`.
 
 ## R5 — Where authentication can refuse a role
 
