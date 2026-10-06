@@ -1,10 +1,11 @@
 ---
 slug: affiliate-tables
-status: open
+status: paid
 kind: deliberate
 severity: low
 effort: hours
 opened: 2026-10-06
+paid: 2026-10-06
 ---
 
 # Technical Debt: the retired affiliate data still lives in D1
