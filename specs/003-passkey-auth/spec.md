@@ -12,21 +12,20 @@
 
 ### Session 2026-10-06
 
-- Q: After a sign-in by email code, is creating a llave de acceso optional or mandatory, and do admins get a stricter rule? → A: **Mandatory for everyone, every role alike.** The user must create one before continuing, except on a device that cannot. The email code is only for recovery (FR-007, FR-008, FR-009).
-- Q: Shift operators (affiliate cashiers with no email) open shifts with a link and a 4-digit PIN. Do they move to llaves de acceso? → A: **Out of scope.** The operator flow is not touched, including its PIN check, which still runs through Agnostic Auth. So Agnostic Auth leaves the staff path but stays bound for operator PINs until a follow-up feature retires it (FR-050, FR-062).
+- Q: After a sign-in by email code, is creating a llave de acceso optional or mandatory, and do admins get a stricter rule? → A: **Mandatory for every role alike.** The user must create one before continuing, except on a device that cannot. The email code is only for recovery (FR-007, FR-008, FR-009).
+- Q: Shift operators (affiliate cashiers with no email) open shifts with a link and a 4-digit PIN. Do they move to llaves de acceso? → A: **Out of scope.** *Superseded the same day.* Affiliates and their shift operators were retired from the code (`specs/001-retire-affiliates`, #154). No operator flow remains, so no PIN depends on Agnostic Auth any more, and this feature retires Agnostic Auth entirely (FR-062). The withdrawn requirement that kept the operator flow unchanged was FR-050.
+- Q: Which roles does this feature cover? → A: **Only the roles that exist: `admin` and `agent`.** The `affiliate` role is retired (constitution III, `retire-affiliates D3`). A user row still stored with a retired role stays refused at authentication, whichever way it signs in.
 
 ## Context — what is broken today
 
-Staff (admins, agents and affiliates) sign in with an email and a password. Everything that proves who they are goes through Agnostic Auth, a service we do not own (constitution VIII):
+Staff (admins and agents) sign in with an email and a password. Everything that proves who they are goes through Agnostic Auth, a service we do not own (constitution VIII):
 
-- **Six of its operations sit on our critical path**: password hashing, password verification, magic-link issue and verification, session renewal and session revocation. **Eight staff entry points** call it directly: register, verify (GET and POST), login, logout, invite completion, password reset and session renewal. Every authenticated request needs it once its 10-minute access token has expired. When it is unreachable nobody can sign in, sign up, accept an invitation or reset a password, and no session renews. A sale cannot start without a session, so its outage stops sales.
+- **Six of its operations sit on our critical path**: password hashing, password verification, magic-link issue and verification, session renewal and session revocation. **Eight entry points** call it directly: register, verify (GET and POST), login, logout, invite completion, password reset and session renewal. Every authenticated request needs it once its 10-minute access token has expired. When it is unreachable nobody can sign in, sign up, accept an invitation or reset a password, and no session renews. A sale cannot start without a session, so its outage stops sales.
 - **Dev and prod share one auth realm.** `api-turistear/wrangler.jsonc` points both environments at the production service with the same app id ("Shared auth realm"). This contradicts constitution VIII ("no two environments share a signing secret").
 - **The secret is a password**: typed on a phone, outdoors, one-handed, phishable and reusable. Forgetting it opens an 8-scenario recovery flow by email (`test/auth/password-recovery.test.ts`). In practice the email already is the root of trust. The password only adds friction on top of it.
 - **Local development cannot sign in** without the external worker: CLAUDE.md warns that a fresh worktree gets "200 and no session".
 
-This feature retires passwords and takes Agnostic Auth off every staff path. Staff sign in with a **passkey**, the WebAuthn/FIDO2 credential their phone or security key protects with a fingerprint, face or device PIN. Holding one is mandatory. An **email code**, a one-time code sent to the user's address, is the recovery path, and it is the everyday path only on a device that cannot hold a passkey. The API itself issues, verifies, renews and revokes every staff session.
-
-Shift operators are out of scope (Clarifications). Their link + PIN flow, and the Agnostic Auth calls behind their PIN, stay exactly as they are.
+This feature retires passwords and Agnostic Auth. Staff sign in with a **passkey**, the WebAuthn/FIDO2 credential their phone or security key protects with a fingerprint, face or device PIN. Holding one is mandatory. An **email code**, a one-time code sent to the user's address, is the recovery path. It is the everyday path only on a device that cannot hold a passkey. The API itself issues, verifies, renews and revokes every session.
 
 **UI vocabulary** (constitution VII, one word per concept): the UI says **llave de acceso**, never "passkey" or "FIDO". That is the term Android and iOS use in their own system prompts in Spanish, so the app's word matches the dialog the phone shows. The recovery path is **código por correo**.
 
@@ -34,9 +33,9 @@ Shift operators are out of scope (Clarifications). Their link + PIN flow, and th
 
 ### User Story 1 - Sign in with an email code (Priority: P1)
 
-A staff member (admin, agent or affiliate) who cannot use a llave de acceso right now types their email and taps "Recibir código". Maybe they have none yet, lost their phone, or are on a device that cannot hold one. They receive a 6-digit code by email, type it in, and are signed in. On cutover day this is how every existing user gets back in. Afterwards it is the recovery path. On a device that can hold a llave de acceso, the user goes straight to creating one (Story 2) before seeing any other screen.
+A staff member (admin or agent) who cannot use a llave de acceso right now types their email and taps "Recibir código". Maybe they have none yet, lost their phone, or are on a device that cannot hold one. They receive a 6-digit code by email, type it in, and are signed in. On cutover day this is how every existing user gets back in. Afterwards it is the recovery path. On a device that can hold a llave de acceso, the user goes straight to creating one (Story 2) before seeing any other screen.
 
-**Why this priority**: It is the bridge that locks nobody out at cutover, and the only recovery once passwords are gone. With Story 2 it forms the MVP that lets passwords and the staff side of Agnostic Auth go.
+**Why this priority**: It is the bridge that locks nobody out at cutover, and the only recovery once passwords are gone. With Story 2 it forms the MVP that lets passwords and Agnostic Auth go.
 
 **Independent Test**: An existing active agent with no llave de acceso, using a browser without passkey support, requests a code, enters it, and reaches their home screen. Their session renews while they stay active and ends when they sign out.
 
@@ -49,7 +48,8 @@ A staff member (admin, agent or affiliate) who cannot use a llave de acceso righ
 5. **Given** a code older than 10 minutes, **When** it is entered, **Then** sign-in is refused and the user is offered a new code.
 6. **Given** an admin who registered before cutover but never verified their email, **When** they sign in with an email code, **Then** their email counts as verified and the account becomes active.
 7. **Given** a suspended account, **When** its user enters a correct code, **Then** sign-in is refused with the suspended-account message, as today.
-8. **Given** a signed-in user, **When** they sign out, **Then** that session ends on the server, and its cookies cannot be replayed to renew it.
+8. **Given** a user row still stored with a retired role (`affiliate`), **When** a correct code is entered for its email, **Then** sign-in is refused and no session is issued (`retire-affiliates D3`).
+9. **Given** a signed-in user, **When** they sign out, **Then** that session ends on the server, and its cookies cannot be replayed to renew it.
 
 ---
 
@@ -93,21 +93,20 @@ An operator who wants to sell with Turistear Ya! signs up. They enter their name
 
 ---
 
-### User Story 4 - An invited agent or affiliate joins without a password (Priority: P2)
+### User Story 4 - An invited agent joins without a password (Priority: P2)
 
-An agent, or an affiliate's manager, opens the invitation link the admin sent. They see the organization (and, for an affiliate, the company) as today. They enter their name (and, for an affiliate, an optional job title) and create their llave de acceso. They are signed in.
+An agent opens the invitation link the admin sent and sees the organization's name, as today. They enter their name and create their llave de acceso, and they are signed in.
 
-**Why this priority**: It is the only way staff join an organization, and it cannot keep a password field once passwords are gone.
+**Why this priority**: It is the only way an agent joins an organization, and it cannot keep a password field once passwords are gone.
 
 **Independent Test**: An admin invites an agent. The agent opens the link, enters their name, and creates a llave de acceso. They land signed in as an agent of that organization, and the invitation is marked accepted.
 
 **Acceptance Scenarios**:
 
-1. **Given** a valid pending invitation, **When** the invitee enters their name and creates a llave de acceso, **Then** their account is created with the invited role, the invitation is accepted, and they are signed in.
+1. **Given** a valid pending invitation, **When** the invitee enters their name and creates a llave de acceso, **Then** their account is created as an agent of the inviting organization, the invitation is accepted, and they are signed in.
 2. **Given** a valid pending invitation opened in a browser that cannot create a llave de acceso (for example an in-app browser opened from WhatsApp or a mail app), **When** the invitee enters their name, **Then** the account is still created and they are signed in. The app explains that they will create their llave de acceso the next time they sign in from a full browser (Story 2, scenario 4).
 3. **Given** an invitation that was sent before cutover and has not expired, **When** it is opened after cutover, **Then** it works with the new flow. Nobody needs to be re-invited.
 4. **Given** an expired, used or unknown invitation, **When** it is opened, **Then** it is refused as today.
-5. **Given** an affiliate company that already has a manager, **When** a second invitation for it is completed, **Then** it is refused as today (US-AF01, D13 of the archived affiliate-operators spec).
 
 ---
 
@@ -130,7 +129,7 @@ From their account surface, a staff member sees every llave de acceso on their a
 
 ---
 
-### User Story 6 - An admin restores a staff member's access (Priority: P3)
+### User Story 6 - An admin restores an agent's access (Priority: P3)
 
 An agent's phone is stolen. The admin opens that agent in the team list and taps "Restablecer acceso". This removes every llave de acceso of that agent and ends all of their sessions. The agent signs in again by email code from their new phone, and the mandatory creation step gives them a new llave de acceso.
 
@@ -140,9 +139,9 @@ An agent's phone is stolen. The admin opens that agent in the team list and taps
 
 **Acceptance Scenarios**:
 
-1. **Given** an admin and an agent or affiliate of the same organization, **When** the admin restores that member's access, **Then** all of the member's llaves de acceso are removed, all of their sessions end, and they receive an email notice.
-2. **Given** an admin of organization A, **When** they try to restore access for a member of organization B, **Then** the answer is "not found" and nothing changes (constitution III, proven with `seedTwoOrgs`).
-3. **Given** an agent or an affiliate, **When** they try to restore someone else's access, **Then** it is forbidden.
+1. **Given** an admin and an agent of the same organization, **When** the admin restores that agent's access, **Then** all of the agent's llaves de acceso are removed, all of their sessions end, and they receive an email notice.
+2. **Given** an admin of organization A, **When** they try to restore access for an agent of organization B, **Then** the answer is "not found" and nothing changes (constitution III, proven with `seedTwoOrgs`).
+3. **Given** an agent, **When** they try to restore someone else's access, **Then** it is forbidden.
 
 ---
 
@@ -153,7 +152,7 @@ An agent's phone is stolen. The admin opens that agent in the team list and taps
 - **Email provider down**: users with a llave de acceso and users already signed in are unaffected. Users who need a code cannot sign in until it recovers, and the screen says the code could not be sent rather than claiming success. This is the "what breaks when it is down" record constitution VIII requires.
 - **Code requested repeatedly**: a new code can be requested once a minute, at most 5 times per hour per email. Beyond that the user waits, and the screen says how long.
 - **Old links after cutover**: a magic-link verification link (`/verify`) or a password-reset link (`/reset-password`) sent before cutover opens a page that explains that passwords are gone and offers the email code. A deep link never breaks into a blank screen.
-- **Operator session open in the same browser**: a staff sign-in still supersedes it, and starting a shift still supersedes a staff session. The two never coexist, as today.
+- **A user row with a retired role**: production keeps one `affiliate` row (`specs/001-retire-affiliates`). No sign-in path, whether llave de acceso, email code or invitation, issues it a session (`retire-affiliates D3`).
 - **Many parallel requests when a session needs renewal**: renewal never signs the user out because two requests raced (BUG-014).
 - **Account suspended or deleted while a session is live**: the next request is refused, as today.
 - **A llave de acceso shows signs of being cloned** (the authenticator reports fewer uses than the server has already seen): the sign-in is refused, and the user is told to use an email code.
@@ -171,7 +170,7 @@ An agent's phone is stolen. The admin opens that agent in the team list and taps
 - **FR-003**: A llave de acceso MUST belong to the environment where it was created. One registered in local or dev MUST NOT sign into prod, and the reverse.
 - **FR-004**: An account MUST be able to hold several llaves de acceso, up to 10. Each one MUST have a user-editable name, a creation date and a last-used date.
 - **FR-005**: A user MUST be able to add or remove a llave de acceso only from a signed-in session, and only if they authenticated within the last 15 minutes. Otherwise they first re-confirm with an existing llave de acceso or a fresh email code.
-- **FR-006**: The system MUST refuse a llave de acceso that is unknown, was removed, belongs to a suspended account, or whose use count, when the device reports one, runs behind what the server last recorded (a sign of cloning).
+- **FR-006**: The system MUST refuse a llave de acceso that is unknown, was removed, belongs to a suspended account or to a retired role, or whose use count, when the device reports one, runs behind what the server last recorded (a sign of cloning).
 - **FR-007**: After every email-code sign-in from a device that can hold a llave de acceso, the user MUST create one before doing anything else, whatever their role. The server MUST enforce this: until a llave de acceso is created, that session MUST be refused for every request except creating one, reading the signed-in user's own identity, and signing out.
 - **FR-008**: A user MUST NOT be able to remove their own last llave de acceso. An admin's restore (FR-042) is the only way an account goes from one to none.
 - **FR-009**: When the device reports that it cannot hold a llave de acceso, an email-code session MUST proceed without the creation step. The session MUST record that report.
@@ -188,36 +187,32 @@ An agent's phone is stolen. The admin opens that agent in the team list and taps
 
 **Sessions**
 
-- **FR-020**: The API MUST issue, renew and revoke every staff session itself, without any external authentication service. Sessions MUST stay in HttpOnly cookies and never appear in a response body (constitution IV).
+- **FR-020**: The API MUST issue, renew and revoke every session itself, without any external authentication service. Sessions MUST stay in HttpOnly cookies and never appear in a response body (constitution IV).
 - **FR-021**: A session MUST be honored only after the API verifies that it issued it, using a signing key unique to each environment (constitution VIII). A session that was altered, was minted elsewhere, or comes from another environment MUST be refused with `UNAUTHORIZED`.
 - **FR-022**: A session MUST stay valid for as long as the user keeps using it, within the current idle window of 60 days of inactivity, and MUST renew silently. Parallel requests during a renewal MUST never end a valid session (BUG-014).
 - **FR-023**: Signing out MUST end the session on the server, so the same cookies can never be renewed again.
 - **FR-024**: Users MUST be able to end all of their sessions at once.
-- **FR-025**: A suspended or deleted account MUST be refused at its next request, as today. Ending a session (sign-out, sign-out everywhere, access restore) MUST take effect at that session's next request.
+- **FR-025**: A suspended or deleted account, or one stored with a retired role, MUST be refused at its next request, as today (`retire-affiliates D3`). Ending a session (sign-out, sign-out everywhere, access restore) MUST take effect at that session's next request.
 
 **Registration and invitations**
 
 - **FR-030**: A new admin MUST register with name, email, company name and phone, with no password. The account MUST become active when an email code sent to that address is confirmed, and FR-007 then applies. The new organization MUST be born with the default cancellation policy (D17), as today.
-- **FR-031**: An invitee MUST complete an invitation with their name (and, for an affiliate, an optional job title) and a llave de acceso. Opening the invitation link sent to their email counts as proof of that address. If the browser cannot create a llave de acceso, the invitee MUST be able to complete the invitation without one, and FR-009 applies.
+- **FR-031**: An invited agent MUST complete an invitation with their name and a llave de acceso. Opening the invitation link sent to their email counts as proof of that address. If the browser cannot create a llave de acceso, the invitee MUST be able to complete the invitation without one, and FR-009 applies.
 - **FR-032**: Invitations issued before cutover MUST stay valid until their existing expiry.
 
 **Management and recovery**
 
 - **FR-040**: Users MUST be able to list, add, rename and remove their own llaves de acceso, within FR-004, FR-005 and FR-008.
 - **FR-041**: The system MUST email the account when a llave de acceso is added or removed and when an admin restores the account's access. The email MUST be sent after the change succeeds, and its failure MUST NOT undo the change (constitution VIII).
-- **FR-042**: An admin MUST be able to restore access for any agent or affiliate of their own organization: remove all of that member's llaves de acceso and end all of their sessions. For a member of another organization the answer MUST be "not found" (constitution III).
-
-**Shift operators (out of scope)**
-
-- **FR-050**: The shift operator flow MUST keep working exactly as today: the saved link, the 4-digit PIN, the 24-hour shift session, and the PIN's protection and check through Agnostic Auth. This feature does not change it.
+- **FR-042**: An admin MUST be able to restore access for any agent of their own organization: remove all of that agent's llaves de acceso and end all of their sessions. For an agent of another organization the answer MUST be "not found" (constitution III).
 
 **Retirement**
 
 - **FR-060**: No screen MUST ask for a password: registration, invitation, sign-in and recovery. The forgot-password and reset-password flows MUST be removed.
-- **FR-061**: Stored staff password material MUST be erased after cutover and never written again.
-- **FR-062**: No staff flow MUST call Agnostic Auth: sign-up, verification, sign-in, invitation, session renewal or sign-out. No token Agnostic Auth issued MUST be honored as a staff session after cutover. The binding stays in each environment only for operator PINs (FR-050).
+- **FR-061**: Stored password material MUST be erased after cutover and never written again.
+- **FR-062**: Every environment (local, dev, prod) MUST run with no binding to, configuration for, or call to Agnostic Auth. No token it issued MUST be honored after cutover.
 - **FR-063**: Links issued before cutover for email verification or password reset MUST land on a page that explains the change and offers the email code.
-- **FR-064**: A fresh local checkout MUST be able to sign in as staff without any external service. In local development the email code MUST be readable without a real mailbox.
+- **FR-064**: A fresh local checkout MUST be able to sign in without any external service. In local development the email code MUST be readable without a real mailbox.
 
 **Error outcomes** (constitution IV declares each code here before it exists in code)
 
@@ -232,11 +227,11 @@ An agent's phone is stolen. The admin opens that agent in the team list and taps
   - `OTP_RATE_LIMITED` (429): the request limit was reached. The response carries the retry time.
   - `OTP_DELIVERY_FAILED` (503): the email provider refused the send. The user is told the code was not sent.
   - `REAUTH_REQUIRED` (403): the step-up from FR-005 is needed.
-- **FR-071**: The staff codes `INVALID_CREDENTIALS` and `EMAIL_NOT_VERIFIED` MUST be retired, because no password exists to be wrong and email-code sign-in verifies the address. The operator PIN flow keeps whatever codes it answers today (FR-050).
+- **FR-071**: The codes `INVALID_CREDENTIALS` and `EMAIL_NOT_VERIFIED` MUST be retired, because no password exists to be wrong and email-code sign-in verifies the address.
 
 ### Key Entities *(include if feature involves data)*
 
-- **Account (user)**: an existing staff member (admin, agent or affiliate) identified by a globally unique email. It loses its password material and gains llaves de acceso and sessions. It is tenant-scoped by `organization_id`, as today.
+- **Account (user)**: an existing staff member, admin or agent, identified by a globally unique email. It loses its password material and gains llaves de acceso and sessions. It is tenant-scoped by `organization_id`, as today.
 - **Llave de acceso (credential)**: a public-key credential that belongs to one account. It records the credential's identifier and public key, a user-editable name, its kind (synced passkey or security key, when the device reports it), its use count, and its creation and last-used dates. It is tenant-scoped transitively through its account, and the migration says so (constitution III).
 - **Email code**: a pending sign-in code for one email address. It records the code in a non-readable form, its expiry, its wrong-attempt count and whether it was used. It is looked up by a globally unique key (the email), so it is exempt from organization filtering, as `users.email` is today.
 - **Sign-in challenge**: a single-use, short-lived random value the server issues for each llave de acceso ceremony (creation or sign-in) and consumes when it verifies the answer.
@@ -254,45 +249,43 @@ An agent's phone is stolen. The admin opens that agent in the team list and taps
 
 - **SC-001**: A returning staff member with a llave de acceso on their phone goes from the sign-in screen to their home screen in under 10 seconds, with one tap plus the phone's biometric or PIN.
 - **SC-002**: A staff member recovering by email code is signed in, with their new llave de acceso created, in under 3 minutes, and 95% of codes reach the inbox within 1 minute.
-- **SC-003**: After cutover, zero staff requests (sign-up, sign-in, invitation, renewal, sign-out) reach Agnostic Auth. Its only remaining callers are the operator PIN set, enter and change requests.
-- **SC-004**: Staff sign-up, sign-in, invitation acceptance, session renewal and sign-out keep working with Agnostic Auth unreachable. A test suite runs them all against a stub that refuses every call.
+- **SC-003**: Zero requests reach Agnostic Auth after cutover, and no environment's configuration references it.
+- **SC-004**: Sign-up, sign-in, invitation acceptance, session renewal and sign-out all work with no external authentication service. A test suite runs them all with no Agnostic Auth binding configured.
 - **SC-005**: 100% of altered sessions, sessions minted elsewhere and sessions from another environment are refused.
-- **SC-006**: No staff password is stored and no screen asks for one on cutover day.
-- **SC-007**: On cutover day every active staff account can sign in by email code, and every operator opens a shift exactly as the day before. Nobody needs a new invitation or a new operator link.
+- **SC-006**: No password is stored and no screen asks for one on cutover day.
+- **SC-007**: On cutover day every active admin and agent can sign in by email code. Nobody needs a new invitation.
 - **SC-008**: 100% of email-code sign-ins on a device able to hold a llave de acceso end with one created before any other screen is reached.
 - **SC-009**: Within 30 days of cutover, at least 90% of staff sign-ins use a llave de acceso rather than an email code.
 - **SC-010**: Guessing an email code succeeds with probability no greater than 5 in 1,000,000 per code issued, and no more than 5 codes per hour can be issued for one address.
-- **SC-011**: A fresh worktree signs in locally as staff with no `.dev.vars` auth setup and no external worker.
+- **SC-011**: A fresh worktree signs in locally with no `.dev.vars` auth setup and no external worker.
 
 ## Scope Boundary
 
-This feature changes how staff prove who they are. Nothing about what they may do once signed in changes, and shift operators do not change at all. The mechanical test:
+This feature changes how admins and agents prove who they are. Nothing about what they may do once signed in changes. The mechanical test:
 
-- **API suites outside `api-turistear/test/auth/` MUST pass with no business assertion edited.** In those files, a diff may touch only the lines that obtain a staff session. Today 67 of 76 API test files get one from `test/helpers/jwt.ts`. Two files, `test/staff/staff-management.test.ts` and `test/affiliates/affiliate-portal.test.ts`, may also drop the parts of their Agnostic Auth stub that serve staff sessions.
-- **`api-turistear/test/operators/affiliate-operators.test.ts`** (US-AF10–AF13, US-OP01–OP02, US-A68) MUST pass with only its staff-session setup changed. Its Agnostic Auth stub for PINs stays as it is.
-- **`api-turistear/test/auth/`** is rewritten for the new flows. Each retired password scenario is recorded as withdrawn, with its replacement.
-- **App suites outside `app-turistear/src/features/auth/`** and the auth pages MUST pass unedited. That includes the operator access flow.
+- **API suites outside `api-turistear/test/auth/` MUST pass with no business assertion edited.** In those files, a diff may touch only the lines that obtain a session. Today 65 of 75 API test files get one from `test/helpers/jwt.ts`. One file, `test/staff/staff-management.test.ts`, may also drop its Agnostic Auth stub.
+- **`api-turistear/test/auth/`** is rewritten for the new flows. Each retired password scenario is recorded as withdrawn, with its replacement. The retired-role refusal (`retire-affiliates D3`) keeps a test on every new sign-in path.
+- **App suites outside `app-turistear/src/features/auth/`** and the auth pages MUST pass unedited.
 - **Out of scope**:
-  - shift operators: their link, PIN and shift session, and their Agnostic Auth dependency
-  - roles and permissions
+  - roles and permissions, including bringing back any role retired by `specs/001-retire-affiliates`
+  - the retired affiliate tables (debt `affiliate-tables`)
   - letting users change their email
   - social sign-in (Google or Apple accounts)
   - SMS or WhatsApp codes
 
 ## Assumptions
 
-- **Hard cutover, no password grace period.** Existing password hashes can only be checked by Agnostic Auth, so staff passwords stop working at cutover. Existing users cross over by email code (Story 1) and create their llave de acceso there (Story 2). Their email is already the root of trust for today's password recovery.
+- **Hard cutover, no password grace period.** Existing password hashes can only be checked by Agnostic Auth, so passwords stop working at cutover. Existing users cross over by email code (Story 1) and create their llave de acceso there (Story 2). Their email is already the root of trust for today's password recovery.
 - **Device capability is reported by the client.** The server cannot prove that a device lacks passkey support. It records the client's report (FR-009). A client that falsely reports no support gains nothing beyond what the email code already granted: it only skips the creation step.
 - **The UI term is "llave de acceso"**, matching what Android and iOS show in Spanish. "Passkey" and "FIDO" appear only in code and docs.
-- **The session idle window stays at 60 days of inactivity**, the value configured today (`SESSION_REFRESH_TTL_SECONDS` = 5,184,000). Session cookies keep their HttpOnly, `.turistearya.com` scope (constitution IV). The operator `gm_op` session is untouched.
+- **The session idle window stays at 60 days of inactivity**, the value configured today (`SESSION_REFRESH_TTL_SECONDS` = 5,184,000). Session cookies keep their HttpOnly, `.turistearya.com` scope (constitution IV).
 - **Resend stays the email provider.** It moves onto the recovery path. What breaks when it is down is recorded in Edge Cases (constitution VIII).
-- **Supported devices**: agents' and affiliates' phones are recent enough to hold passkeys (Android 9+ with current Google Play services, iOS 16+). Older devices keep working on the email code (FR-009) and are not locked out.
+- **Supported devices**: agents' phones are recent enough to hold passkeys (Android 9+ with current Google Play services, iOS 16+). Older devices keep working on the email code (FR-009) and are not locked out.
 - **No attestation requirement**: any FIDO2-certified or platform authenticator is accepted. The product does not restrict authenticator makes or models.
 - **End-to-end journeys** (`app-turistear/e2e/setup/auth.setup.ts` signs in with a password today) move to the new sign-in, using a virtual authenticator or the email code read in a test environment.
-- **The constitution must be amended in the same pull request** (`/speckit-constitution`, a MINOR bump). The amendment covers:
-  - Principle IV: the API, not Agnostic Auth, issues staff session tokens.
-  - Principle VI: the `AGNOSTIC_AUTH_API` stand-in remains only for operator PINs.
-  - Principle VIII: Agnostic Auth stays in the list of services we do not own, narrowed to operator PINs.
+- **The constitution must be amended in the same pull request** (`/speckit-constitution`, a MINOR bump from v1.1.0). The amendment covers:
+  - Principle IV: the API, not Agnostic Auth, issues the session tokens.
+  - Principle VI: the `AGNOSTIC_AUTH_API` stand-in leaves the list of services stubbed in tests.
+  - Principle VIII: Agnostic Auth leaves the list of services we do not own, and Resend's place on the recovery path is recorded.
   - The Technology Stack "Auth" row.
-- **Follow-up debt**: Agnostic Auth cannot be unbound from any environment while operator PINs depend on it. When this feature lands, that remaining dependency is registered with `/speckit-debt-log`, so that retiring it entirely becomes its own feature.
 - **Archived stories replaced**: admin registration, verification and login, the auth middleware scenarios, agent invitation acceptance and password recovery (today's `test/auth/` suites). Their citations stay intact in the archive (constitution I).

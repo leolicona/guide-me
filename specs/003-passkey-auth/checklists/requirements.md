@@ -35,6 +35,13 @@
 - Iteration 2 (2026-10-06): both were answered (spec § Clarifications), and all items pass.
   - Creating a llave de acceso is **mandatory for every role**, and the server enforces it: FR-007–FR-009, `PASSKEY_ENROLLMENT_REQUIRED` and `PASSKEY_LAST_ONE`.
   - Shift operators are **out of scope**. Story 7 and the old FR-050/FR-051 were withdrawn. FR-050 now guards that the operator flow stays unchanged, and FR-062 and SC-003 were narrowed: Agnostic Auth leaves every staff path but stays bound for operator PINs.
+- Iteration 3 (2026-10-06): the scope was narrowed to the existing roles. Affiliates and their shift operators were retired on `develop` (`specs/001-retire-affiliates`, #154), so:
+  - The spec covers `admin` and `agent` only. The affiliate story details are gone, and the retired-role refusal (`retire-affiliates D3`) holds on every new sign-in path.
+  - The operator clarification is superseded, and FR-050 is withdrawn.
+  - FR-062 and SC-003 are back to the full retirement of Agnostic Auth, and no follow-up debt is needed for it.
+  - The spec was renumbered `001-passkey-auth` → `003-passkey-auth`, because `develop` already holds 001 and 002.
+
+  All items still pass.
 - Some references to the code base and the constitution are deliberate, not leaked implementation. The constitution requires them:
   - The scope boundary names test suites and the shared session helper, because Principle I requires a mechanical test.
   - The error codes are declared in FR-070, because Principle IV says they must exist in the spec before they exist in code.
