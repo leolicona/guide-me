@@ -137,9 +137,9 @@ by «Sistema» with its seats released.
    cancels it today (seats released, the seller's commission reversed), with «Sistema» as the
    actor and «No se recibió la transferencia» as the reason.
 4. **Given** an apartado's settlement whose payment ends *expired*, or whose link expires with no
-   payment, **Then** the settlement is withdrawn and the sale goes back to being an apartado, with
-   its deposit and its own hold rules intact. A sale is never cancelled automatically while it
-   holds money that was cleared.
+   payment, **Then** the settlement is never recorded and the sale stays an apartado, with its
+   deposit and its own hold rules intact. A sale is never cancelled automatically while it holds
+   money that was cleared. *(Amended by plan D8: a settlement is recorded only once confirmed.)*
 5. **Given** money that arrives for a link already closed (*unapplied*) — including a sale
    cancelled under scenario 3 whose customer paid late — **Then** the admin is alerted that money
    arrived for a sale that no longer takes it, with the amount, so they can return it.
@@ -184,7 +184,7 @@ its test payment (no tickets). Then settle by transfer and confirm the settlemen
 
 When a sale is cancelled, rejected, expires, or what it owes changes, its open link stops accepting
 payment. A customer cannot pay for something that no longer exists, and money that was already on
-its way is flagged (Story 2, scenario 4) instead of lost.
+its way is flagged (Story 2, scenario 5) instead of lost.
 
 **Why this priority**: rare, but each occurrence is real money owed back to a customer; preventing
 it is cheaper than chasing it.
@@ -295,8 +295,9 @@ closed; then advance a test payment to *unapplied* and observe the admin alert.
   - for a full sale or an apartado deposit, cancel the sale the way an admin's Rechazar does
     (seats released, the seller's commission reversed), with «Sistema» as the actor and «No se
     recibió la transferencia» as the reason;
-  - for a settlement, withdraw only the settlement and return the sale to an apartado with its
-    deposit and hold rules intact. A sale holding cleared money is never cancelled automatically.
+  - for a settlement, leave the sale an apartado with its deposit and hold rules intact: a
+    settlement by link is recorded only once confirmed, so an unpaid one has nothing to withdraw.
+    A sale holding cleared money is never cancelled automatically. *(Amended by plan D8.)*
 
   A payment that ends *invalid* MUST stay in Por verificar for the admin to verify or reject.
   *(Clarified 2026-10-06.)*
