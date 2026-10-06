@@ -17,6 +17,11 @@
 - Q: Which roles does this feature cover? → A: **Only the roles that exist: `admin` and `agent`.** The `affiliate` role is retired (constitution III, `retire-affiliates D3`). A user row still stored with a retired role stays refused at authentication, whichever way it signs in.
 - Q: What implements the authentication? → A: **Better Auth** (developer's decision). It is an authentication library that runs inside the API Worker, not a service we call. The requirements below stay the contract. Better Auth is configured and extended to meet them, and where its defaults fall short, the requirement wins. The "Built on Better Auth" assumption lists those gaps for `/speckit-plan`.
 
+### Amended by the plan (2026-10-06)
+
+- **FR-061 and SC-006: when the passwords go.** Password material is removed by the deploy that follows cutover, not by cutover itself. The cutover's migration runs before its code, and the code it replaces still reads the columns (`passkey-auth D16`, the same path as `specs/001-retire-affiliates` → `specs/002-drop-affiliate-tables`).
+- **FR-070: a cloned passkey.** It answers `PASSKEY_VERIFICATION_FAILED`, not `PASSKEY_NOT_RECOGNIZED`. The use-count check sits inside the WebAuthn verifier and cannot be told apart from a bad signature (`passkey-auth` research R9). The user sees the same thing either way: an offer of the email code.
+
 ## Context — what is broken today
 
 Staff (admins and agents) sign in with an email and a password. Everything that proves who they are goes through Agnostic Auth, a service we do not own (constitution VIII):
@@ -210,7 +215,7 @@ An agent's phone is stolen. The admin opens that agent in the team list and taps
 **Retirement**
 
 - **FR-060**: No screen MUST ask for a password: registration, invitation, sign-in and recovery. The forgot-password and reset-password flows MUST be removed.
-- **FR-061**: Stored password material MUST be erased after cutover and never written again.
+- **FR-061**: Stored password material MUST stop being read at cutover, and MUST be removed by the deploy that follows it. A migration runs before the code it ships with, so the cutover deploy cannot remove what the code it replaces still reads (`passkey-auth D16`).
 - **FR-062**: Every environment (local, dev, prod) MUST run with no binding to, configuration for, or call to Agnostic Auth. No token it issued MUST be honored after cutover.
 - **FR-063**: Links issued before cutover for email verification or password reset MUST land on a page that explains the change and offers the email code.
 - **FR-064**: A fresh local checkout MUST be able to sign in without any external service. In local development the email code MUST be readable without a real mailbox.
@@ -218,8 +223,8 @@ An agent's phone is stolen. The admin opens that agent in the team list and taps
 **Error outcomes** (constitution IV declares each code here before it exists in code)
 
 - **FR-070**: Failures MUST answer `{ error: { code, message } }` with these codes. The existing ones are `UNAUTHORIZED` (401), `ACCOUNT_SUSPENDED` (403), `FORBIDDEN` (403), `VALIDATION_ERROR` (400), `INVALID_TOKEN` (400, invitations) and `EMAIL_ALREADY_EXISTS` (409). The new ones are:
-  - `PASSKEY_NOT_RECOGNIZED` (401): the llave de acceso is unknown, was removed or looks cloned.
-  - `PASSKEY_VERIFICATION_FAILED` (401): the challenge expired, the origin is wrong or the signature is invalid.
+  - `PASSKEY_NOT_RECOGNIZED` (401): the llave de acceso is unknown or was removed.
+  - `PASSKEY_VERIFICATION_FAILED` (401): the challenge expired, the origin is wrong, the signature is invalid, the device did not verify the user, or the use count went backwards (a sign of cloning).
   - `PASSKEY_ENROLLMENT_REQUIRED` (403): the session must create a llave de acceso first (FR-007).
   - `PASSKEY_LAST_ONE` (409): the user tried to remove their only llave de acceso (FR-008).
   - `PASSKEY_LIMIT_REACHED` (409): the account already has 10 llaves de acceso.
@@ -253,7 +258,7 @@ An agent's phone is stolen. The admin opens that agent in the team list and taps
 - **SC-003**: Zero requests reach Agnostic Auth after cutover, and no environment's configuration references it.
 - **SC-004**: Sign-up, sign-in, invitation acceptance, session renewal and sign-out all work with no external authentication service. A test suite runs them all with no Agnostic Auth binding configured.
 - **SC-005**: 100% of altered sessions, sessions minted elsewhere and sessions from another environment are refused.
-- **SC-006**: No password is stored and no screen asks for one on cutover day.
+- **SC-006**: No screen asks for a password on cutover day, and no password material remains in either database after the deploy that follows it.
 - **SC-007**: On cutover day every active admin and agent can sign in by email code. Nobody needs a new invitation.
 - **SC-008**: 100% of email-code sign-ins on a device able to hold a llave de acceso end with one created before any other screen is reached.
 - **SC-009**: Within 30 days of cutover, at least 90% of staff sign-ins use a llave de acceso rather than an email code.
