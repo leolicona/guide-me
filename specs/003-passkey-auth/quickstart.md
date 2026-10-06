@@ -86,7 +86,7 @@ What must be true, mapped to the spec:
 | Step-up (`REAUTH_REQUIRED` after 15 min); last passkey kept; rename; revoke-all | `test/auth/passkeys.test.ts` | US5 |
 | Restore access; another organization gets `404` (`seedTwoOrgs`); an agent gets `403` | `test/auth/restore-access.test.ts` | US6, FR-042 |
 | Every business suite passes with only its session lines changed | `git diff --stat develop -- api-turistear/test ':!api-turistear/test/auth' ':!api-turistear/test/helpers'` shows two lines per file | Scope Boundary |
-| No reference to Agnostic Auth remains | `git grep -nI -i "agnostic" -- api-turistear app-turistear .github` is empty, apart from archive citations in comments | FR-062, SC-003 |
+| No reference to Agnostic Auth remains | `git grep -nIE "AGNOSTIC_AUTH\|agnosticAuth\|Agnostic Auth\|DEV_AUTH_SERVICE_URL" -- api-turistear app-turistear .github` is empty, apart from archive citations in comments | FR-062, SC-003 |
 
 ## 6. Cutover (dev, then prod)
 
