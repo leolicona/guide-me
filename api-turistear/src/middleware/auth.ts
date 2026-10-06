@@ -49,13 +49,6 @@ const buildUserPayload = async (
   }
 }
 
-// retire-affiliates D3 — a row still stored with a retired role (prod keeps one `affiliate`) is
-// refused exactly like a suspended account: same code, same cleared cookies, so the app needs no
-// new branch. `role` is cast from the column above, so this is the check that keeps it honest.
-const isRefused = (resolved: ResolvedUser): boolean =>
-  resolved.status === 'suspended' ||
-  (resolved.payload.role !== 'admin' && resolved.payload.role !== 'agent')
-
 export const authMiddleware: MiddlewareHandler<AuthEnv> = async (c, next) => {
   const accessToken = getCookie(c, 'gm_access')
   const refreshToken = getCookie(c, 'gm_refresh')
@@ -81,7 +74,7 @@ export const authMiddleware: MiddlewareHandler<AuthEnv> = async (c, next) => {
       clearSessionCookies(c)
       throw new ApiError('UNAUTHORIZED', 401, 'User no longer exists')
     }
-    if (isRefused(resolved)) {
+    if (resolved.status === 'suspended') {
       clearSessionCookies(c)
       throw new ApiError('ACCOUNT_SUSPENDED', 403, 'Account suspended')
     }
@@ -118,7 +111,7 @@ export const authMiddleware: MiddlewareHandler<AuthEnv> = async (c, next) => {
     clearSessionCookies(c)
     throw new ApiError('UNAUTHORIZED', 401, 'User no longer exists')
   }
-  if (isRefused(resolved)) {
+  if (resolved.status === 'suspended') {
     clearSessionCookies(c)
     throw new ApiError('ACCOUNT_SUSPENDED', 403, 'Account suspended')
   }
