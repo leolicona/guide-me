@@ -28,6 +28,8 @@ and needs no table rebuild. One file so it applies as one unit.
 columns on every sale; 001's code names only `affiliate_commissions`, and only in the service
 hard-delete. So this change merges to `develop` only after 001 has been released to `main` and
 deployed — never in the same release.
+*Met*: 001 (#154) shipped in release #156, deployed to production by Deploy Prod run 15
+(`586ec5a`, 2026-10-06 16:02 UTC).
 
 **D3 — The service hard-delete's legacy cleanup leaves** (001 D7). The batch goes back to slot
 zones, slots, schedules, service zones, extras and the service.

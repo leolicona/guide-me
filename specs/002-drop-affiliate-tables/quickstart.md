@@ -17,6 +17,15 @@ The API suite applies every migration, `0069` included, to a fresh local D1.
 2. Only then does this branch merge to `develop` (dev migrates and deploys), and ship in the next
    release to `main`.
 
+## Baseline — before `0069` (read 2026-10-06 16:09 UTC, after release #156)
+
+| DB | users | folios | folio_payments | folio_events | `affiliate%` objects | last migration |
+| --- | ---: | ---: | ---: | ---: | ---: | --- |
+| dev `guideme-db` | 11 | 642 | 1,541 | 1,662 | 11 | `0068` |
+| prod `guideme-db-prod` | 10 | 1,009 | 1,420 | 3,826 | 11 | `0068` |
+
+The 11 objects are the four tables and their seven indexes.
+
 ## In each environment — right before and right after its deploy (SC-001, SC-002)
 
 ```sql
