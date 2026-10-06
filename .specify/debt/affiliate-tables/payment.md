@@ -3,22 +3,24 @@
 - **Slug**: affiliate-tables
 - **Checked**: 2026-10-06
 - **Verdict**: partial
-- **Paid by**: `specs/002-drop-affiliate-tables` — migration
-  `api-turistear/migrations/0069_drop_affiliate_tables.sql`, branch `feat/drop-affiliate-tables`,
-  commit `c47bff1` (not merged, not deployed)
+- **Paid by**: `specs/002-drop-affiliate-tables` — #155 (migration
+  `api-turistear/migrations/0069_drop_affiliate_tables.sql`), released to production in #157
+  (`main@3d54b6a`, Deploy Prod run 16, 2026-10-06 16:30 UTC); applied to dev by Deploy Dev run 114
+  (`develop@4164b15`, 16:20 UTC)
 
 ## Anchors
 
-- `api-turistear/migrations/0034_add_affiliates.sql` — present (migrations are immutable history;
-  every object it adds is dropped by `0069`)
-- `api-turistear/migrations/0048_affiliate_operators.sql` — present (same; dropped by `0069`)
+- `api-turistear/migrations/0034_add_affiliates.sql` — present (immutable history; every object it
+  adds is dropped by `0069`, in both environments)
+- `api-turistear/migrations/0048_affiliate_operators.sql` — present (same)
 - `api-turistear/migrations/0049_folio_payments.sql` — present (same; `folio_payments.operator_id`
-  dropped by `0069`)
+  dropped)
 - `api-turistear/migrations/0061_folio_events.sql` — present (same; `folio_events.operator_id`
-  dropped by `0069`)
+  dropped)
 - `api-turistear/src/db/schema.ts` "Retired: affiliates and their shift operators" note — gone
 - `api-turistear/src/routes/services/handler.ts::legacyAffiliateCommissions` — gone
-- `api-turistear/src/middleware/auth.ts::isRefused` — present (kept on purpose: 002 D4)
+- `api-turistear/src/middleware/auth.ts::isRefused` — present (kept on purpose: 002 D4; prod still
+  holds one `users` row with role `affiliate`)
 - `api-turistear/src/routes/reports/handler.ts::exportCommissionReport` (`ROLE_LABEL[s.role] ?? s.role`)
   — present (kept on purpose: 002 D4)
 - `app-turistear/src/pages/ReportsPage.tsx::roleLabel` — present (kept on purpose: 002 D4)
@@ -38,46 +40,53 @@
 > - Against each environment: `SELECT name FROM sqlite_master WHERE name LIKE 'affiliate_%'`
 >   returns no rows.
 
-Checked on the tree at `c47bff1`:
+Checked on `main@3d54b6a` (tree identical to `develop@4164b15`) and in both databases:
 
-- **The migration** — exists with exactly that order (`0069_drop_affiliate_tables.sql`). Holds.
-- **`legacyAffiliateCommissions` and its delete** — removed. Holds.
-- **The test cases seeding dropped objects** — `retire-affiliates.test.ts` now seeds only a bare
-  `users` row with role `affiliate`; its invitation and D7 cases are gone. Holds.
-- **D3/D6** — kept, as the entry allows: the prod `affiliate` user row is settled outside the product
-  by the developer (002 D4).
-- **`grep -rn "affiliate_" api-turistear/src`** — does NOT find nothing: one hit, a comment naming
-  the retired ladder key `affiliate_commission_pct` (not a table). Literally, the check fails.
+- **The migration, in that order, deployed after 001** — holds. `0069` is the last row of
+  `d1_migrations` in dev and in prod.
+- **`legacyAffiliateCommissions` removed; seeding test cases removed** — holds.
+- **D3/D6** — kept, as the entry allows: the prod `affiliate` user row still exists (1 row), and the
+  developer settles it outside the product.
+- **`grep -rn "affiliate_" api-turistear/src`** — does NOT find nothing: one hit, the D8 comment
+  naming the retired ladder key `affiliate_commission_pct` (a JSON key, not a table). Literally, the
+  check fails.
 - **`pnpm test:api`** — passes.
-- **Each environment** — not run: `0069` has not been applied to `guideme-db` or
-  `guideme-db-prod`, and must not be until 001 is deployed to production (002 D2).
+- **Each environment** — holds: no `affiliate%` object, none of the six columns, row counts
+  unchanged.
 
 ## Evidence
 
 ```text
-$ grep -rn "affiliate_" api-turistear/src
-api-turistear/src/utils/cancellationPolicy.ts:25:  // retire-affiliates D8 — the optional `affiliate_commission_pct` (US-A72) is gone with the
+$ git diff --stat 4372641 origin/main          # the tree verify passed on → empty
 
-$ pnpm test:api
+$ pnpm test:api                                 # on main@3d54b6a
  Test Files  75 passed (75)
       Tests  961 passed (961)
+
+$ grep -rn "affiliate_" api-turistear/src
+api-turistear/src/utils/cancellationPolicy.ts:25:  // retire-affiliates D8 — the optional `affiliate_commission_pct` (US-A72) is gone with the
 ```
 
-The suite applies `0001`–`0069` to a fresh local D1. The assertions covering the debt are in
-`api-turistear/test/retire-affiliates/drop-affiliate-tables.test.ts`: no `sqlite_master` object
-named `affiliate%`, none of the six columns in `PRAGMA table_info`, every `PRAGMA foreign_key_list`
-target exists, and `folios`/`folio_payments`/`folio_events` accept an insert and a delete.
+D1, read through the Cloudflare D1 API (`d1_database_query`), before and after `0069`:
+
+| DB | when (UTC) | users | folios | folio_payments | folio_events | `affiliate%` objects | retired columns | last migration |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| dev `guideme-db` | 16:09 before | 11 | 642 | 1,541 | 1,662 | 11 | 6 | `0068` |
+| dev `guideme-db` | 16:21 after | 11 | 642 | 1,541 | 1,662 | 0 | 0 | `0069` |
+| prod `guideme-db-prod` | 16:21 before | 10 | 1,009 | 1,420 | 3,826 | 11 | 6 | `0068` |
+| prod `guideme-db-prod` | 16:33 after | 10 | 1,009 | 1,420 | 3,826 | 0 | 0 | `0069` |
+
+`PRAGMA foreign_key_check` on prod after `0069`: no rows. The schema guard that keeps this true in
+code is `api-turistear/test/retire-affiliates/drop-affiliate-tables.test.ts` (no `affiliate%` object,
+none of the six columns, every foreign key resolves, the former child tables accept an insert and a
+delete).
 
 ## What remains
 
-1. **The environments.** After the release order in `specs/002-drop-affiliate-tables/quickstart.md`
-   completes (001 to production, then 002 merged and released), run in each of `guideme-db` and
-   `guideme-db-prod`: `SELECT name FROM sqlite_master WHERE name LIKE 'affiliate_%'` → no rows.
-   Who: the developer, or a session with the Cloudflare D1 connector.
-2. **The grep.** `api-turistear/src/utils/cancellationPolicy.ts:25` names `affiliate_commission_pct`
-   in the D8 comment. The entry's grep counts it; whether that comment should go (or the grep be
-   read as "no `affiliate_*` table") is the developer's call at the next payment attempt.
-3. **D3/D6** (`auth.ts::isRefused`, the stored-role labels) stay until the prod `affiliate` user
-   row is resolved outside the product — by the entry's own terms, that decides whether they go.
-
-Re-run `/speckit-debt-pay affiliate-tables` once 1 is done.
+1. **The grep.** `api-turistear/src/utils/cancellationPolicy.ts:25` names `affiliate_commission_pct`
+   in the D8 comment. Rewording it ("the optional affiliate commission share (US-A72)") makes the
+   entry's grep return nothing — a one-line source change through the normal flow, after which a
+   re-run of `/speckit-debt-pay affiliate-tables` can reach `verified`.
+2. **D3/D6** (`auth.ts::isRefused`, the stored-role labels) stay while the prod `affiliate` user row
+   exists — by the entry's own terms, settling that row decides whether they go. Not required for
+   `verified`.
