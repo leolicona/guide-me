@@ -51,6 +51,23 @@ const confirmSale = async (email: string, slotId: string) => {
   return { status: res.status, json: (await res.json()) as any }
 }
 
+// An apartado: a deposit below the total (org minimum defaults to 0%). `extra` carries the payment
+// method/reference for the transfer case.
+const confirmBooking = async (email: string, slotId: string, extra: Record<string, unknown> = {}) => {
+  const res = await SELF.fetch('http://api.local/api/pos/folios', {
+    method: 'POST',
+    headers: jsonAuth(email),
+    body: JSON.stringify({
+      customer_name: 'Cliente Apartado',
+      customer_phone: '5512345678',
+      down_payment: 50000,
+      lines: [{ slot_id: slotId, quantity: 1, unit_price: 150000 }],
+      ...extra,
+    }),
+  })
+  return { status: res.status, json: (await res.json()) as any }
+}
+
 const getPosFolio = async (email: string, id: string) => {
   const res = await SELF.fetch(`http://api.local/api/pos/folios/${id}`, { headers: auth(email) })
   return { status: res.status, json: (await res.json()) as any }
@@ -127,6 +144,51 @@ describe('whatsapp-qr-delivery — delivery tracking + Visto beacon', () => {
     // And the folio stays un-sent.
     const after = await getPosFolio('e2@org.com', json.folio.id)
     expect(after.json.folio.tickets_sent_at).toBeNull()
+  })
+
+  // verify-send-empty-link — an apartado has no portal token until it settles, so there is nothing
+  // to have "sent". Both mark-sent endpoints refuse it (409) and the stamp stays null.
+  it('an apartado cannot be marked sent by the seller or the admin (409)', async () => {
+    const { slotId } = await seedOrgWithSlot('h1@org.com', 'h2@org.com')
+    const { status, json } = await confirmBooking('h2@org.com', slotId)
+    expect(status, JSON.stringify(json)).toBe(201)
+    expect(json.folio.status).toBe('booking')
+    const id = json.folio.id
+
+    expect((await post('h2@org.com', `/api/pos/folios/${id}/ticket-delivery`)).status).toBe(409)
+    expect((await post('h1@org.com', `/api/folios/${id}/ticket-delivery`)).status).toBe(409)
+
+    const after = await getPosFolio('h2@org.com', id)
+    expect(after.json.folio.tickets_sent_at).toBeNull()
+  })
+
+  // The reported path: a deposit paid by transfer, verified by the admin. The verify mints no
+  // portal link (tickets wait for settle), so the follow-up mark-sent must not land.
+  it('a verified-transfer apartado still has no link and cannot be marked sent (409)', async () => {
+    const { slotId } = await seedOrgWithSlot('i1@org.com', 'i2@org.com')
+    const { status, json } = await confirmBooking('i2@org.com', slotId, {
+      payment_method: 'transfer',
+      payment_reference: 'SPEI-123',
+    })
+    expect(status, JSON.stringify(json)).toBe(201)
+    const id = json.folio.id
+
+    const verify = await post('i1@org.com', `/api/pos/folios/${id}/verify`)
+    expect(verify.status).toBe(200)
+    const verified = ((await verify.json()) as any).folio
+    expect(verified.status).toBe('booking')
+    expect(verified.portal_link ?? null).toBeNull()
+
+    expect((await post('i1@org.com', `/api/folios/${id}/ticket-delivery`)).status).toBe(409)
+    const after = await getPosFolio('i2@org.com', id)
+    expect(after.json.folio.tickets_sent_at).toBeNull()
+  })
+
+  it('an unknown folio is still a 404, not a 409', async () => {
+    await seedOrgWithSlot('j1@org.com', 'j2@org.com')
+    const missing = crypto.randomUUID()
+    expect((await post('j2@org.com', `/api/pos/folios/${missing}/ticket-delivery`)).status).toBe(404)
+    expect((await post('j1@org.com', `/api/folios/${missing}/ticket-delivery`)).status).toBe(404)
   })
 
   it('the portal "seen" beacon stamps tickets_viewed_at (first view); a bad token is a 204 no-op', async () => {
