@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { env } from 'cloudflare:test'
-import { materializeSeededFolio, seedUser, seedTwoOrgs, clearAffiliateDb } from '../helpers/tenancy'
+import { materializeSeededFolio, seedUser, seedTwoOrgs, clearFullDb } from '../helpers/tenancy'
 import { sweepDepartureReminders } from '../../src/routes/pos/reminders'
 
 // US-T08 — the departure reminder, and the review request.
@@ -76,7 +76,7 @@ const eventsFor = async (folioId: string): Promise<string[]> =>
     ).results as Array<{ event: string }>
   ).map((r) => r.event)
 
-beforeEach(clearAffiliateDb)
+beforeEach(clearFullDb)
 
 describe('US-T08 — the departure reminder', () => {
   it('fires at T−24h', async () => {

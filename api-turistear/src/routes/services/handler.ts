@@ -1,9 +1,9 @@
 import type { Context } from 'hono'
 import type { BatchItem } from 'drizzle-orm/batch'
 import { and, asc, eq, inArray } from 'drizzle-orm'
+import { sqliteTable, text } from 'drizzle-orm/sqlite-core'
 import { getDb } from '../../db/client'
 import {
-  affiliateCommissions,
   folioLines,
   schedules,
   serviceExtras,
@@ -20,6 +20,15 @@ import type {
   UpdateExtraInput,
   UpdateServiceInput,
 } from './schema'
+
+// retire-affiliates D7 — the retired affiliate program left rows (5 in prod) that reference
+// services with ON DELETE no action. The table is unmapped from the schema (D2); these two columns
+// are mapped HERE, for the hard-delete's cleanup alone, so the delete stays inside its atomic batch.
+// Leaves with the table (debt affiliate-tables).
+const legacyAffiliateCommissions = sqliteTable('affiliate_commissions', {
+  serviceId: text('service_id').notNull(),
+  organizationId: text('organization_id').notNull(),
+})
 
 export type ServicesContext = Context<{
   Bindings: CloudflareBindings
@@ -321,8 +330,7 @@ export const reactivateService = (c: ServicesContext) =>
 // stays clean. The snapshot guarantee (folios carry their own copies) is never at risk because
 // the delete is REJECTED (409 SERVICE_HAS_FOLIOS) whenever any folio line references the service.
 // Otherwise it removes the service and its dependent rows that hold no historical value —
-// affiliate_commissions (affiliate-setup-commissions.spec.md D12), slots, schedules, extras — in
-// one atomic batch (D1 has no automatic ON DELETE CASCADE). A zero-booking future slot does not
+// slots, schedules, extras, and legacy commission rows (below) — in one atomic batch (D1 has no automatic ON DELETE CASCADE). A zero-booking future slot does not
 // block (no folio references it); it is simply removed with the service.
 export const deleteService = async (c: ServicesContext) => {
   const admin = c.get('user')
@@ -350,9 +358,16 @@ export const deleteService = async (c: ServicesContext) => {
   // and `service_zones`, so they go FIRST; then slots/schedules, then the zone definitions, then
   // the service. Without this a zoned service could never be hard-deleted (FK on the slots delete).
   await db.batch([
+    // retire-affiliates D7 — without this an unsold service carrying a legacy row could never be
+    // hard-deleted (FK on the services delete).
     db
-      .delete(affiliateCommissions)
-      .where(and(eq(affiliateCommissions.serviceId, id), eq(affiliateCommissions.organizationId, org))),
+      .delete(legacyAffiliateCommissions)
+      .where(
+        and(
+          eq(legacyAffiliateCommissions.serviceId, id),
+          eq(legacyAffiliateCommissions.organizationId, org),
+        ),
+      ),
     db
       .delete(slotZones)
       .where(

@@ -35,8 +35,6 @@ export const anAgentBalance = (over: Record<string, unknown> = {}) => ({
 
 export const aBalanceRow = (over: Record<string, unknown> = {}) => ({
   agent: { id: 'agent-1', name: 'Ana', email: 'ana@example.com' },
-  role: 'agent',
-  affiliate_company: null,
   carry_forward: 0,
   cash_collected: 250_000,
   commission_total: 25_000,

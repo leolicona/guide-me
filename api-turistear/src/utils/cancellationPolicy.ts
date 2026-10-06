@@ -20,12 +20,10 @@ import { naiveEpoch } from './tz'
 const tierSchema = z.object({
   min_hours: z.number().int().min(0).nullable(),
   refund_pct: z.number().int().min(0).max(100),
-  // Share of the line's commission an IN-HOUSE agent keeps (before the D8 cap).
+  // Share of the line's commission the seller keeps (before the D8 cap).
   agent_commission_pct: z.number().int().min(0).max(100),
-  // US-A72 (D12) — same, for a sale made by an affiliate reseller. OPTIONAL: when absent the
-  // affiliate is treated exactly like an in-house agent, so a policy written (or snapshotted onto a
-  // folio) before this field existed keeps behaving as it did.
-  affiliate_commission_pct: z.number().int().min(0).max(100).optional(),
+  // retire-affiliates D8 — the optional `affiliate_commission_pct` (US-A72) is gone with the
+  // affiliate role. A document still carrying it parses: the key is stripped, as for D20 below.
 })
 
 // D20 — the ladder is the WHOLE document. There is no deposit clause, because an apartado is not a
@@ -150,8 +148,6 @@ export interface ComputeRefundInput {
   /** Seconds since epoch. Injected so the engine has no clock of its own. */
   nowEpoch: number
   timezone: string
-  /** D12 — decides which of the tier's two commission percentages applies. */
-  sellerKind: 'agent' | 'affiliate'
   /**
    * `folios.commission_amount` — the commission actually booked on the sale, which is what the cash
    * engine and the commission report read. Normally it equals the sum re-derived from the lines.
@@ -270,11 +266,6 @@ export const lineCommissions = (lines: PolicyLine[], bookedCommission?: number):
   return shares
 }
 
-const commissionPctOf = (tier: CancellationTier, sellerKind: 'agent' | 'affiliate'): number =>
-  sellerKind === 'affiliate'
-    ? (tier.affiliate_commission_pct ?? tier.agent_commission_pct)
-    : tier.agent_commission_pct
-
 // D20 — note what is NOT a parameter: the folio's status. The engine cannot tell an apartado from a
 // fully-paid sale, and that is the point. `amountPaid` is the only thing that differs between them.
 export const computeCancellationRefund = ({
@@ -283,7 +274,6 @@ export const computeCancellationRefund = ({
   amountPaid,
   nowEpoch,
   timezone,
-  sellerKind,
   bookedCommission,
 }: ComputeRefundInput): CancellationOutcome => {
   const commissions = lineCommissions(lines, bookedCommission)
@@ -310,7 +300,7 @@ export const computeCancellationRefund = ({
     // D8 — never let the seller keep more than the company retained on that line, or a full-refund
     // tier that also pays commission would end the cancellation with the company out of pocket.
     const kept = Math.min(
-      Math.floor((commission * commissionPctOf(tier, sellerKind)) / 100),
+      Math.floor((commission * tier.agent_commission_pct) / 100),
       retention,
     )
 

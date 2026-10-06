@@ -101,8 +101,6 @@ export interface CompleteInviteInput {
   token: string
   name: string
   password: string
-  /** US-AF01 — optional job title for an affiliate invite; ignored for an agent. */
-  position?: string
 }
 
 export interface AuthUserResponse {
@@ -118,10 +116,6 @@ export interface InviteResponse {
     identity: string
     identity_type: string
     organization_name: string
-    /** D8 — discriminates the parallel affiliate flow; absent on older responses. */
-    invitation_type?: 'agent' | 'affiliate'
-    /** The affiliate company the invitee is joining (shown read-only); null for agent. */
-    company_name?: string | null
   }
 }
 
@@ -167,9 +161,8 @@ export const completeInvite = (data: CompleteInviteInput) =>
   })
 
 export const getMe = async (): Promise<UserPayload> => {
-  const res = await request<{ user: UserPayload; operator?: UserPayload['operator'] }>('/api/me')
-  // Fold the operator claim (US-OP01/OP02) into the session user so useCurrentUser exposes it.
-  return { ...res.user, operator: res.operator ?? null }
+  const res = await request<{ user: UserPayload }>('/api/me')
+  return res.user
 }
 
 export const logout = () =>

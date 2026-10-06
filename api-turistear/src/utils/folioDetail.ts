@@ -15,7 +15,6 @@
 import { and, asc, desc, eq, sql } from 'drizzle-orm'
 import type { Db } from '../db/client'
 import {
-  affiliateOperators,
   folioAccessTokens,
   folioLineExtras,
   folioLines,
@@ -78,7 +77,6 @@ export const readFolioDetail = async (
       id: folios.id,
       agentId: folios.agentId,
       agentName: users.name,
-      operatorName: affiliateOperators.name,
       status: deriveStatusSql, // D11 — derived from the lines; equals the column by construction
       ticketsSentAt: folios.ticketsSentAt,
       ticketsViewedAt: folios.ticketsViewedAt,
@@ -118,7 +116,6 @@ export const readFolioDetail = async (
     })
     .from(folios)
     .innerJoin(users, eq(folios.agentId, users.id))
-    .leftJoin(affiliateOperators, eq(folios.operatorId, affiliateOperators.id))
     .where(
       and(
         eq(folios.id, folioId),
@@ -340,8 +337,6 @@ export const readFolioDetail = async (
   return {
     id: folio.id,
     agent: { id: folio.agentId, name: folio.agentName },
-    // US-A68 — the affiliate shift operator who took the sale (null ⇒ sold directly).
-    operator_name: folio.operatorName ?? null,
     status: folio.status,
     payment_method: folio.paymentMethod,
     // US-AG41/US-A67 — payment reference + verification gate for the admin detail + verify actions.

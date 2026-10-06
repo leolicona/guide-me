@@ -99,15 +99,11 @@ export const users = sqliteTable('users', {
   passwordHash: text('password_hash').notNull(),
   passwordSalt: text('password_salt').notNull(),
   phone: text('phone'),
-  role: text('role', { enum: ['admin', 'agent', 'affiliate'] }).notNull(),
+  // retire-affiliates D3 — a stored `affiliate` survives in prod and is refused by authMiddleware.
+  role: text('role', { enum: ['admin', 'agent'] }).notNull(),
   status: text('status', { enum: ['unverified', 'active', 'suspended'] })
     .notNull()
     .default('unverified'),
-  // Affiliate program (docs/affiliates/affiliate-setup-commissions.spec.md, D4). Set at invite
-  // acceptance for an `affiliate` user; null for admin/agent. `position` is the optional job
-  // title collected on the affiliate onboarding form (US-AF01).
-  affiliateCompanyId: text('affiliate_company_id').references(() => affiliateCompanies.id),
-  position: text('position'),
   // DEPRECATED (2026-06-11): commission is service-based now (services.commission_type/value —
   // docs/commissions/service-based-commission.spec.md). No code reads or writes this column;
   // it is kept only to avoid a users-table rebuild. A future migration may drop it.
@@ -343,10 +339,6 @@ export const folios = sqliteTable('folios', {
   agentId: text('agent_id')
     .notNull()
     .references(() => users.id),
-  // Affiliate sale attribution (docs/affiliates/affiliate-setup-commissions.spec.md, D5). Null for
-  // in-house (agent/admin) sales; stamped with the seller's company for an affiliate sale (US-A51)
-  // so in-house vs affiliate revenue stays separable. The seller is still `agentId`.
-  affiliateCompanyId: text('affiliate_company_id').references(() => affiliateCompanies.id),
   customerName: text('customer_name'),
   customerEmail: text('customer_email'),
   customerPhone: text('customer_phone'),
@@ -441,9 +433,6 @@ export const folios = sqliteTable('folios', {
   ticketsSentAt: integer('tickets_sent_at', { mode: 'timestamp' }),
   ticketsSentBy: text('tickets_sent_by').references(() => users.id),
   ticketsViewedAt: integer('tickets_viewed_at', { mode: 'timestamp' }),
-  // US-AF13 — the affiliate shift operator who made the sale (docs/affiliate-operators/affiliate-operators.spec.md).
-  // Null ⇒ the manager/agent sold directly. Pure attribution: agent_id still owns the caja/commission.
-  operatorId: text('operator_id').references((): any => affiliateOperators.id),
   createdAt: integer('created_at', { mode: 'timestamp' })
     .notNull()
     .default(sql`(unixepoch())`),
@@ -833,125 +822,15 @@ export const accommodationReservations = sqliteTable('accommodation_reservations
     .default(sql`(unixepoch())`),
 })
 
-// ── Affiliate program ────────────────────────────────────────────────────────────────────
-// docs/affiliates/affiliate-setup-commissions.spec.md. An affiliate is an external reseller
-// (hotel / agency / restaurant). The admin models the company, curates which services it may
-// sell and at what commission (the allow-list), and invites its logins.
-
-// The partner company (US-A48/A52/A55). Suspending it (status) cascades to its users at
-// authMiddleware — existing folios/QRs stay intact (D7).
-export const affiliateCompanies = sqliteTable('affiliate_companies', {
-  id: text('id').primaryKey(),
-  organizationId: text('organization_id')
-    .notNull()
-    .references(() => organizations.id),
-  name: text('name').notNull(),
-  contactEmail: text('contact_email'),
-  contactPhone: text('contact_phone'),
-  status: text('status', { enum: ['active', 'suspended'] })
-    .notNull()
-    .default('active'),
-  createdAt: integer('created_at', { mode: 'timestamp' })
-    .notNull()
-    .default(sql`(unixepoch())`),
-  updatedAt: integer('updated_at', { mode: 'timestamp' })
-    .notNull()
-    .default(sql`(unixepoch())`),
-})
-
-// The allow-list AND the per-service rate in one (D1/D2): a service is sellable by an affiliate
-// iff a row exists here. `percent` → commission_value is basis points (1500 = 15%); `fixed` →
-// minor units PER SPOT (× quantity), capped at the service's minimum_price (D10). UNIQUE per
-// (company, service). Rows survive a service deactivation (D12); removed only on hard-delete.
-export const affiliateCommissions = sqliteTable('affiliate_commissions', {
-  id: text('id').primaryKey(),
-  organizationId: text('organization_id')
-    .notNull()
-    .references(() => organizations.id),
-  affiliateCompanyId: text('affiliate_company_id')
-    .notNull()
-    .references(() => affiliateCompanies.id),
-  serviceId: text('service_id')
-    .notNull()
-    .references(() => services.id),
-  commissionType: text('commission_type', { enum: ['percent', 'fixed'] }).notNull(),
-  commissionValue: integer('commission_value').notNull(),
-  createdAt: integer('created_at', { mode: 'timestamp' })
-    .notNull()
-    .default(sql`(unixepoch())`),
-  updatedAt: integer('updated_at', { mode: 'timestamp' })
-    .notNull()
-    .default(sql`(unixepoch())`),
-})
-
-// Parallel invite flow (D8): a dedicated table so the affiliate invite carries role + company
-// explicitly and the agent `invitations` path stays untouched. Acceptance creates the
-// `affiliate` user linked to affiliateCompanyId (US-AF01).
-export const affiliateInvitations = sqliteTable('affiliate_invitations', {
-  id: text('id').primaryKey(),
-  organizationId: text('organization_id')
-    .notNull()
-    .references(() => organizations.id),
-  affiliateCompanyId: text('affiliate_company_id')
-    .notNull()
-    .references(() => affiliateCompanies.id),
-  identity: text('identity').notNull(),
-  identityType: text('identity_type', { enum: ['email'] })
-    .notNull()
-    .default('email'),
-  token: text('token').notNull().unique(),
-  invitedBy: text('invited_by')
-    .notNull()
-    .references(() => users.id),
-  status: text('status', { enum: ['pending', 'accepted', 'expired'] })
-    .notNull()
-    .default('pending'),
-  expiresAt: integer('expires_at', { mode: 'timestamp' }).notNull(),
-  createdAt: integer('created_at', { mode: 'timestamp' })
-    .notNull()
-    .default(sql`(unixepoch())`),
-  updatedAt: integer('updated_at', { mode: 'timestamp' })
-    .notNull()
-    .default(sql`(unixepoch())`),
-})
-
-// US-AF10–AF13 / US-OP01–OP02 (docs/affiliate-operators/affiliate-operators.spec.md). A shift cashier at an affiliate
-// company's register — NOT a `users` row (no email/password). Registered by the manager with name +
-// phone; identified by a durable access_token (the saved WhatsApp link) and unlocked by a 4-digit
-// PIN. Pure attribution: its sales roll into the owning manager's one caja (folios.agent_id stays
-// the manager); folios.operator_id only labels "Vendido por: {name}".
-export const affiliateOperators = sqliteTable('affiliate_operators', {
-  id: text('id').primaryKey(),
-  organizationId: text('organization_id')
-    .notNull()
-    .references(() => organizations.id),
-  affiliateCompanyId: text('affiliate_company_id')
-    .notNull()
-    .references(() => affiliateCompanies.id),
-  // The affiliate user who owns this operator — sales attribute to this manager's caja/balance
-  // (folios.agent_id) and it resolves the operator session's borrowed identity (D5).
-  managerId: text('manager_id')
-    .notNull()
-    .references(() => users.id),
-  name: text('name').notNull(),
-  phone: text('phone').notNull(), // MX-normalized; unique among the company's ACTIVE operators
-  pinHash: text('pin_hash'), // null until first-run PIN setup (US-OP01)
-  pinSalt: text('pin_salt'),
-  pinAttempts: integer('pin_attempts').notNull().default(0), // >= 5 ⇒ locked until a manager resets
-  accessToken: text('access_token').notNull().unique(), // the saved link's secret; rotated on remove/reset
-  status: text('status', { enum: ['active', 'removed'] })
-    .notNull()
-    .default('active'),
-  createdAt: integer('created_at', { mode: 'timestamp' })
-    .notNull()
-    .default(sql`(unixepoch())`),
-  updatedAt: integer('updated_at', { mode: 'timestamp' })
-    .notNull()
-    .default(sql`(unixepoch())`),
-})
-
-export type AffiliateOperator = typeof affiliateOperators.$inferSelect
-export type NewAffiliateOperator = typeof affiliateOperators.$inferInsert
+// ── Retired: affiliates and their shift operators (specs/001-retire-affiliates) ─────────────
+// retire-affiliates D2 — still in D1, deliberately unmapped so nothing reads or writes them by
+// accident: the tables `affiliate_companies`, `affiliate_commissions`, `affiliate_invitations`,
+// `affiliate_operators` (migrations 0034, 0048) and the nullable columns
+// `users.affiliate_company_id`, `users.position`, `folios.affiliate_company_id`,
+// `folios.operator_id`, `folio_payments.operator_id`, `folio_events.operator_id` (0034, 0048,
+// 0049, 0061). Inserts leave the columns NULL. The one statement that still touches them is the
+// service hard-delete's cleanup, through a mapping local to routes/services/handler.ts (D7).
+// Dropping them is debt `.specify/debt/affiliate-tables/`.
 
 // US-LG01 (docs/paid-ledger/paid-ledger.spec.md) — per-payment money-movement ledger. One SIGNED row per
 // movement on a folio; the cash engine's source of truth (later steps re-home cash_collected /
@@ -983,8 +862,6 @@ export const folioPayments = sqliteTable('folio_payments', {
   collectedBy: text('collected_by')
     .notNull()
     .references(() => users.id),
-  // The PIN shift that took it (US-A68); null for an in-house (agent/admin) collection.
-  operatorId: text('operator_id').references((): any => affiliateOperators.id),
   // US-A22 (line-autonomy D9) — which line an accrual or single-line reversal belongs to. NULL =
   // folio-scoped (every pre-feature row, and multi-line reversals whose split lives in the
   // allocations instead). SET NULL: a ledger row outlives its line, losing only the label.
@@ -1058,8 +935,6 @@ export const folioEvents = sqliteTable('folio_events', {
     ],
   }).notNull(),
   actorId: text('actor_id').references(() => users.id),
-  // The PIN shift that acted (US-A68); null for an in-house (agent/admin) action.
-  operatorId: text('operator_id').references((): any => affiliateOperators.id),
   // US-A22 (line-autonomy D13) — the line this event is about. NULL = folio-scoped (created,
   // tickets_sent…); set for line-scoped actions (a line's cancellation, payment, reschedule).
   // SET NULL: the narrative outlives its line.
@@ -1122,13 +997,6 @@ export type FolioPaymentAllocation = typeof folioPaymentAllocations.$inferSelect
 export type NewFolioPaymentAllocation = typeof folioPaymentAllocations.$inferInsert
 export type FolioPayment = typeof folioPayments.$inferSelect
 export type NewFolioPayment = typeof folioPayments.$inferInsert
-
-export type AffiliateCompany = typeof affiliateCompanies.$inferSelect
-export type NewAffiliateCompany = typeof affiliateCompanies.$inferInsert
-export type AffiliateCommission = typeof affiliateCommissions.$inferSelect
-export type NewAffiliateCommission = typeof affiliateCommissions.$inferInsert
-export type AffiliateInvitation = typeof affiliateInvitations.$inferSelect
-export type NewAffiliateInvitation = typeof affiliateInvitations.$inferInsert
 
 export type Organization = typeof organizations.$inferSelect
 export type NewOrganization = typeof organizations.$inferInsert

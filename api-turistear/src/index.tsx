@@ -4,14 +4,12 @@ import { renderer } from './renderer'
 import { errorHandler } from './middleware/errorHandler'
 import { authMiddleware } from './middleware/auth'
 import { requireRole } from './middleware/role'
-import affiliatesRouter from './routes/affiliates'
 import agentsRouter from './routes/agents'
 import authRouter from './routes/auth'
 import cashRouter from './routes/cash'
 import dashboardRouter from './routes/dashboard'
 import organizationsRouter from './routes/organizations'
 import foliosRouter from './routes/folios'
-import { managerOperatorsRouter, operatorAccessRouter } from './routes/operators'
 import portalRouter from './routes/portal'
 import posRouter from './routes/pos'
 import { sweepExpiredBookings } from './routes/pos/sweep'
@@ -42,7 +40,6 @@ app.use('/api/*', async (c, next) => {
 
 app.route('/api/auth', authRouter)
 app.route('/api/agents', agentsRouter)
-app.route('/api/affiliates', affiliatesRouter)
 app.route('/api/organizations', organizationsRouter)
 app.route('/api/services', servicesRouter)
 app.route('/api/pos', posRouter)
@@ -52,12 +49,8 @@ app.route('/api/cash', cashRouter)
 app.route('/api/reports', reportsRouter)
 app.route('/api/dashboard', dashboardRouter)
 app.route('/api/notifications', notificationsRouter)
-app.route('/api/affiliate/operators', managerOperatorsRouter)
-app.route('/api/operator', operatorAccessRouter)
 
-app.get('/api/me', authMiddleware, (c) =>
-  c.json({ user: c.get('user'), operator: c.get('operator') ?? null }),
-)
+app.get('/api/me', authMiddleware, (c) => c.json({ user: c.get('user') }))
 
 app.post('/api/admin-only', authMiddleware, requireRole('admin'), (c) =>
   c.json({ ok: true }),

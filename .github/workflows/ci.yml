@@ -19,6 +19,16 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # The pre-Spec-Kit corpus is archived in leolicona/guide-me-docs (CLAUDE.md). Old code
+      # comments still cite docs/… and .design/…, so it is easy to recreate them here by habit;
+      # new specs belong in specs/NNN-slug/ (Spec Kit). Fail loudly if either folder creeps back.
+      - name: Corpus stays archived
+        run: |
+          if [ -e docs ] || [ -e .design ]; then
+            echo "::error::docs/ and .design/ are archived in leolicona/guide-me-docs; new specs go in specs/NNN-slug/."
+            exit 1
+          fi
+
       - uses: pnpm/action-setup@v6
         with:
           version: 10

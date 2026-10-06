@@ -137,9 +137,6 @@ describe('Admin Login — POST /api/auth/login', () => {
     // ever deleted it mid-session and forced a re-login; the JWT's own `exp` is the real gate.
     expect(cookieHeader).not.toMatch(/Max-Age=900/)
     expect(setCookies.filter((s: string) => /Max-Age=5184000/.test(s))).toHaveLength(2)
-    // A real login SUPERSEDES any operator shift — it must clear gm_op (which authMiddleware
-    // checks first), else a stale operator cookie hijacks the session with its manager's identity.
-    expect(cookieHeader).toMatch(/gm_op=;/)
   })
 
   it('Scenario 2: returns 401 INVALID_CREDENTIALS when password is incorrect', async () => {

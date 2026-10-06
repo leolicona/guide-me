@@ -14,7 +14,7 @@ export interface ListPageHeaderProps {
  * The standard admin list-page header (Elegant Field Minimalism): the header row is reserved for
  * the page title and the shell's account control, never a competing action. A primary action, if
  * given, is placed so it never collides with the fixed mobile avatar — its own row on mobile,
- * inline at `md+`. Shared by the Catálogo / Agentes / Afiliados list pages so they read identically.
+ * inline at `md+`. Shared by the Catálogo / Agentes list pages so they read identically.
  */
 export function ListPageHeader({ title, action }: ListPageHeaderProps) {
   return (

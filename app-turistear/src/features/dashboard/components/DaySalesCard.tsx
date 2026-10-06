@@ -17,18 +17,12 @@ export function DaySalesCard({ sales }: { sales: DashboardSales | undefined }) {
         <Stack spacing={1.5} divider={<Divider flexItem />} sx={{ mt: 2.5 }}>
           {sales.per_seller.map((s) => (
             <Stack
-              key={`${s.user_id}:${s.operator_name ?? ''}`}
+              key={s.user_id}
               direction="row"
               sx={{ alignItems: 'center', justifyContent: 'space-between' }}
             >
               <Typography sx={{ fontWeight: 600, minWidth: 0 }} noWrap>
                 {s.name}
-                {s.operator_name && (
-                  <Typography component="span" variant="body2" color="textSecondary">
-                    {' '}
-                    — {s.operator_name}
-                  </Typography>
-                )}
               </Typography>
               {/* Neutral ink at body size: only the headline figure wears the money green, so the
                   eye lands there first (de-emphasize to emphasize). Red still marks a negative. */}

@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { env, SELF } from 'cloudflare:test'
-import { seedUser, seedTwoOrgs, clearAffiliateDb } from '../helpers/tenancy'
+import { seedUser, seedTwoOrgs, clearFullDb } from '../helpers/tenancy'
 import { buildFakeJwt } from '../helpers/jwt'
 
 // US-A86 / US-AG51 — the notification outbox.
@@ -72,7 +72,7 @@ const drain = (email: string, id: string) =>
     body: '{}',
   })
 
-beforeEach(clearAffiliateDb)
+beforeEach(clearFullDb)
 
 describe('US-A86 — the outbox records what was emitted', () => {
   it('S-13 — no address on file: the WhatsApp row is pending, the email row is SKIPPED', async () => {

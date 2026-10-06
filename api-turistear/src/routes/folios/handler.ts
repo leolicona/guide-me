@@ -4,7 +4,6 @@ import { and, desc, eq, inArray, isNull, ne, sql, type SQL } from 'drizzle-orm'
 import { getDb, type Db } from '../../db/client'
 import {
   accommodationReservations,
-  affiliateOperators,
   folioRequests,
   folioLines,
   folioPaymentAllocations,
@@ -26,7 +25,7 @@ import {
   sendCancellationEmail,
   type CancellationEmailInput,
 } from '../../services/resend'
-import { generateRefundPin } from '../../utils/portal'
+import { generateRefundPin, hasPortalTokenSql } from '../../utils/portal'
 import { folioFulfillment } from '../../utils/folioFulfillment'
 import {
   anyLineStatusSql,
@@ -218,7 +217,6 @@ export const listFolios = async (c: FoliosContext) => {
       paymentMethod: displayMethodSql,
       paymentReference: folios.paymentReference,
       paymentVerification: folios.paymentVerification,
-      operatorName: affiliateOperators.name,
       // US-A78 — the debt itself. The lean row never carried these, so the pending-refunds queue
       // could not show what is owed without a second read per folio.
       refundStatus: deriveRefundStatusSql,
@@ -230,7 +228,6 @@ export const listFolios = async (c: FoliosContext) => {
     })
     .from(folios)
     .innerJoin(users, eq(folios.agentId, users.id))
-    .leftJoin(affiliateOperators, eq(folios.operatorId, affiliateOperators.id))
     .where(and(...filters))
     .orderBy(order)
     // US-A83 D6 — a query is an unindexed scan over the whole history, so it gets a ceiling. One
@@ -398,15 +395,21 @@ export const markTicketsSentAdmin = async (c: FoliosContext) => {
   const id = c.req.param('id')
   const db = getDb(c.env)
   const now = new Date()
+  const scope = and(eq(folios.id, id), eq(folios.organizationId, admin.organizationId))
 
   const updated = await db
     .update(folios)
     .set({ ticketsSentAt: now, ticketsSentBy: admin.userId, updatedAt: now })
-    .where(and(eq(folios.id, id), eq(folios.organizationId, admin.organizationId)))
+    // verify-send-empty-link — only a folio with a portal token has tickets to have sent.
+    .where(and(scope, hasPortalTokenSql))
     .returning({ sentAt: folios.ticketsSentAt, viewedAt: folios.ticketsViewedAt })
 
   const row = updated[0]
-  if (!row) throw new ApiError('NOT_FOUND', 404, 'Folio not found')
+  if (!row) {
+    const exists = await db.select({ id: folios.id }).from(folios).where(scope).limit(1)
+    if (!exists[0]) throw new ApiError('NOT_FOUND', 404, 'Folio not found')
+    throw new ApiError('CONFLICT', 409, 'This folio has no tickets to deliver yet')
+  }
   // US-A24 — EACH send appends a row (the column is last-write-wins; the narrative is not).
   await folioEventRow(db, {
     organizationId: admin.organizationId,
@@ -647,7 +650,6 @@ export const quoteCancellation = async (
       amountPaid: folios.amountPaid,
       commissionAmount: folios.commissionAmount,
       snapshot: folios.cancellationPolicySnapshot,
-      affiliateCompanyId: folios.affiliateCompanyId,
     })
     .from(folios)
     .where(and(eq(folios.id, folioId), eq(folios.organizationId, org)))
@@ -686,9 +688,6 @@ export const quoteCancellation = async (
 
   const nowEpoch = Math.floor(now.getTime() / 1000)
   const timezone = orgRow?.timezone ?? 'America/Mexico_City'
-  // D12 — an affiliate sale is already stamped on the folio (US-A51), so which of the tier's two
-  // commission percentages applies needs no join.
-  const sellerKind = folio.affiliateCompanyId ? ('affiliate' as const) : ('agent' as const)
 
   if (lineIds === undefined) {
     return computeCancellationRefund({
@@ -697,7 +696,6 @@ export const quoteCancellation = async (
       amountPaid: folio.amountPaid,
       nowEpoch,
       timezone,
-      sellerKind,
       // The authoritative commission the sale booked. Only differs from the per-line sum for folios
       // sold before `0028` snapshotted commission onto lines; without it those would forfeit nothing.
       bookedCommission: folio.commissionAmount,
@@ -734,7 +732,6 @@ export const quoteCancellation = async (
     amountPaid: subsetPaid,
     nowEpoch,
     timezone,
-    sellerKind,
     bookedCommission: subsetBooked,
   })
 }
