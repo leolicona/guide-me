@@ -88,7 +88,7 @@ observe the sale verified by «Sistema» with its tickets released and no admin 
 2. **Given** a connected organization, **When** a seller completes a full sale by Transferencia,
    **Then** the sale is created as today (paid, awaiting verification, no tickets) **and** a payment
    link for exactly the sale's amount is attached, the seller can send it to the customer by
-   WhatsApp in one tap, and the sale shows as «Validando pago». The seller is not offered a field to
+   WhatsApp in one tap, and the sale shows as «Verificando pago». The seller is not offered a field to
    type a bank reference.
 3. **Given** that sale, **When** Devolada reports the payment *confirmed*, **Then** the sale is
    verified with the system as the actor, its tickets are signed, the ticket email is sent if the
@@ -209,7 +209,7 @@ closed; then advance a test payment to *unapplied* and observe the admin alert.
 - **A verdict's notification is lost** → the system finds the verdict by asking Devolada itself,
   within SC-003's window.
 - **A notification about a payment this organization does not own** (another Devolada business, a
-  forgery, or a test-mode verdict reaching production) → changes nothing, and is kept for diagnosis.
+  forgery, or a test-mode verdict reaching production) → changes nothing, and is logged for diagnosis.
 - **The customer corrects a misread receipt** (*superseded*) → the first payment is ignored and the
   corrected one is followed.
 - **The admin verifies by hand while Devolada is still validating** → the manual verification
@@ -302,7 +302,7 @@ closed; then advance a test payment to *unapplied* and observe the admin alert.
   A payment that ends *invalid* MUST stay in Por verificar for the admin to verify or reject.
   *(Clarified 2026-10-06.)*
 - **FR-017**: A *superseded* payment MUST be ignored in favour of its correction. While a payment
-  is *validating*, the sale MUST show «Validando pago» and release nothing.
+  is *validating*, the sale MUST show «Verificando pago» and release nothing.
 - **FR-018**: The admin's manual Verificar and Rechazar MUST remain available for every awaiting
   payment of a connected organization, behave as today, and record the admin as the actor and the
   verification as manual.
@@ -342,8 +342,10 @@ closed; then advance a test payment to *unapplied* and observe the admin alert.
 
 - **SC-001**: In a connected organization, at least 95% of the transfer payments Banxico confirms
   release the customer's tickets with no admin action.
-- **SC-002**: For 95% of confirmed payments, the tickets reach the customer within 2 minutes of
-  Devolada's verdict.
+- **SC-002**: For 95% of confirmed payments, the tickets are released within 2 minutes of
+  Devolada's verdict: the QR is signed, the email is sent when the customer has an address, and the
+  seller's WhatsApp send is unlocked. *(Amended by /speckit-analyze A1: delivery by WhatsApp waits
+  on the seller's tap, which the system does not control.)*
 - **SC-003**: A verdict whose notification was lost is reflected on the sale within 30 minutes.
 - **SC-004**: No transfer payment of a connected organization waits more than 24 hours without a
   labelled reason the admin can see (today one has waited 66 days with none).
@@ -356,7 +358,10 @@ closed; then advance a test payment to *unapplied* and observe the admin alert.
 - **SC-008**: *(the Context hypothesis, to be measured)* Within 60 days of connecting, transfers
   make up more than 5% of the organization's payments (today 0.5%).
 - **SC-009**: Seats held by a sale whose transfer never arrives go back on sale within 30 minutes
-  of its link expiring or its payment ending *expired*, with no admin action.
+  of its link expiring or its payment ending *expired*, with no admin action, while Devolada can be
+  reached. During a Devolada outage nothing is cancelled, and the seats return within 30 minutes of
+  it answering again. *(Amended by /speckit-analyze I1: a sale is never cancelled on the clock
+  alone — research D9.)*
 
 ## Assumptions
 

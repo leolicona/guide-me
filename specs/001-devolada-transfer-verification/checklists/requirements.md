@@ -50,3 +50,7 @@
   *superseded*, CLABE, CEP) is used deliberately: it is the provider's business language, which
   the admin will see, not an implementation choice. Its contract is kept verbatim in
   `contracts/devolada-collections-v1.openapi.yaml` (constitution VIII).
+- **/speckit-analyze (2026-10-06)** amended the spec in place: FR-017 and US1 scenario 2 now read
+  «Verificando pago» (constitution VII: the UI's existing word for the concept); the out-of-org
+  notification edge case says *logged*; SC-002 measures tickets *released*, not *received*; SC-009
+  holds while Devolada answers. All items still pass.

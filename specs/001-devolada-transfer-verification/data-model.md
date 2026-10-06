@@ -216,6 +216,9 @@ A sale or deposit with `partial` or `invalid` is attended through the sale's pen
 | A connected organization's transfer is collected by a link; any `payment_reference` sent is ignored | confirm, settle | FR-009 |
 | A link's amount equals the payment it collects | link issue | FR-007 |
 | One open settlement link per sale | partial unique index | D13 |
+| A settlement link records at most one settlement: its batch is claimed by `folio_payment_id IS NULL` and every other statement is gated on that claim | settlement core | D8 |
+| A verification releases tickets only in the call whose guarded row flip and rollup update both matched | verify core | D10 |
+| The system cancellation writes nothing unless its own guarded transition matched | `cancelForUnreceivedTransfer` | D11 |
 | A webhook acts only after the signature, the link lookup, the mode check and a re-read with the owning organization's credential | webhook | FR-013 |
 | A cancelled sale is never verified; a sale holding other money is never cancelled automatically | D9, D11 | FR-016 |
 | Every row read or written carries the organization filter beside the id | everywhere; the webhook resolves the organization from the link | constitution III |

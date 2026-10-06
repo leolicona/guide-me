@@ -66,12 +66,14 @@ none of the new response keys on checkout or settle.
 | `invalid` | payment `invalid` | Banxico no confirma la transferencia | error |
 | `not_received` | payment `expired`, or state `expired` | No se recibió la transferencia | error |
 | `closed` | state `closing` or `closed`, no payment | Liga cerrada | neutral |
-| `credit_paused` | payment `queued_for_credit` | Validación en pausa | warning |
+| `credit_paused` | payment `queued_for_credit` | Verificación en pausa | warning |
 | `needs_tracking_key` | payment `validating` with `awaiting` | Pide al cliente su clave de rastreo | warning |
-| `validating` | payment `validating` | Validando pago | pending |
+| `validating` | payment `validating` | Verificando pago | pending |
 | `awaiting_payment` | state `open`, no payment | Esperando pago | pending |
 
-Every chip pairs its colour with an icon and the text (constitution VII).
+Every chip pairs its colour with an icon and the text (constitution VII). The state of money being
+checked always uses the word the UI already has, *verificación*; «validar» never appears in the UI
+(research D16).
 
 ### `OrganizationDevoladaSummary` — on `GET /organizations/me`, every role
 
@@ -261,6 +263,8 @@ settlement and line-cancel responses.
 
 ## The WhatsApp message for a link (client-built `wa.me`, FR-008)
 
+The action that sends it is labelled **«Cobrar por WhatsApp»**: sending the link is collecting the
+payment, and *Cobrar* is the canonical verb for that (constitution VII, research D16).
 `paymentLinkWhatsAppUrl` in `app-turistear/src/features/pos/delivery.ts` builds it from
 `PaymentLinkView` and the sale, normalising the phone like `ticketWhatsAppUrl`. Default text:
 

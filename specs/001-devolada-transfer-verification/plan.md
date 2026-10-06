@@ -64,10 +64,10 @@ leaves the sale an apartado, rather than one "returned" to it (D8).
 
 | Goal | How it is met |
 |---|---|
-| SC-002: tickets reach the customer ≤ 2 min after the verdict | The webhook path is one re-read plus the release, a few seconds |
+| SC-002: tickets released ≤ 2 min after the verdict (QR signed, email sent, WhatsApp unlocked) | The webhook path is one re-read plus the release, a few seconds |
 | SC-006: checkout gains ≤ 5 s | Link creation has a 3 s timeout, then fallback |
 | SC-003: a lost verdict is applied ≤ 30 min later | The sweep runs every 15 min and re-checks a link after 10 min |
-| SC-009: seats back on sale ≤ 30 min after expiry | Same sweep |
+| SC-009: seats back on sale ≤ 30 min after expiry, while Devolada answers | Same sweep; during an outage nothing is cancelled (D9) |
 
 **Constraints**:
 - **Devolada rate limit**: 120 requests/min per business, shared by real and test traffic. The sweep spends at most 50 per organization per run.
@@ -91,8 +91,8 @@ leaves the sale an apartado, rather than one "returned" to it (D8).
 | I. Spec-Driven, Every Decision Cited | Spec, plan and numbered decisions with a why; a mechanical scope boundary; amended in place | PASS | PASS | Decisions D1–D20 ([research.md](./research.md)). Code cites `devolada-transfer-verification D<n>`; tests cite `US<n>`. The scope boundary is three named suites, unedited (spec Context; [quickstart.md](./quickstart.md) §1). FR-016 amended in place (D8) |
 | II. Money Law | Integer minor units; the ledger is the truth; no stored money state beside movements | PASS | PASS | Devolada's fee and received amount never touch the ledger (FR-020). Settlements are recorded when proven (D8). Attention is derived, never stored (data-model) |
 | III. Tenant Isolation (NON-NEGOTIABLE) | Org-scoped tables and indexes; the organization only from the actor, except globally unique keys; `seedTwoOrgs` on every new route | PASS | PASS | All four tables carry `organization_id` with a leading index. The public webhook resolves the organization by `paymentLinkId`, a globally unique key, the one exemption III allows. It then re-reads with that organization's own credential (D4). Isolation suites: `test/devolada/isolation.test.ts` and each route's file |
-| IV. The Server Decides | Rules server-side; routes in `src/routes/<resource>/`; error codes declared first; mirrors held | PASS | PASS | The server decides link issuance, mode policy, labels and resolution rules. Error codes are declared in [contracts/turistear-api.md](./contracts/turistear-api.md). Responses use named keys (`{connection}`, `{folio, payment_link}`). Types and MSW mirror the contracts |
-| V. Capacity Is Guarded by the Database | Guarded single statements; a request gives back what it took | PASS | PASS | No new capacity consumption. The system cancellation claims the link with a guarded `UPDATE … RETURNING` and releases seats only for live lines, in one batch (D11). Residual race with a concurrent manual Rechazar recorded (defect 3) |
+| IV. The Server Decides | Rules server-side; routes in `src/routes/<resource>/`; error codes declared first; mirrors held | PASS | PASS | The server decides link issuance, mode policy, labels and resolution rules. The public webhook is its own resource, `src/routes/webhooks/` (`index.ts` with the signature-and-schema middleware, `handler.ts`, `schema.ts`), so its input is validated before the handler runs (D4). Error codes are declared in [contracts/turistear-api.md](./contracts/turistear-api.md). Responses use named keys (`{connection}`, `{folio, payment_link}`). Types and MSW mirror the contracts |
+| V. Capacity Is Guarded by the Database | Guarded single statements; a request gives back what it took | PASS | PASS | No new capacity consumption. No read is ever the only guard: the system cancellation claims the link, then writes one batch whose every statement is gated on that batch's own guarded transition, releasing seats only for live lines (D11). A settlement or an admin *accept* is one batch gated on a single-row claim of the link (D8, D15). A verification releases tickets only in the call whose guarded flip matched (D10). Rechazar's own missing guard stays defect 3 |
 | VI. A Rule Is Proven Where It Is Enforced | API suites for rules and isolation; app tests for presentation only; axe; citations | PASS | PASS | D18. Transfer fields move out of `pages/` so they can be tested |
 | VII. Elegant Field Minimalism (NON-NEGOTIABLE) | Primitives, tokens, state icon-paired, «Venta» never "folio", es-MX copy | PASS | PASS | FormSheet, ConfirmSheet, StatusChip, AlertCard and MoneyText. Label copy table in the contracts. The receipt's «Pagado» on unverified money is fixed (D16) |
 | VIII. A Service We Do Not Own Never Undoes a Sale | One module; outside money writes; failure modes recorded; secrets per environment | PASS* | PASS* | Only `services/devolada.ts` calls Devolada, with timeouts and fallbacks (D5, D6). Failure modes: [contracts/devolada-integration.md](./contracts/devolada-integration.md). Secret per environment (D17). *Devolada must be added to the list of services we do not own: see Complexity Tracking |
@@ -141,11 +141,14 @@ api-turistear/
 │   └── routes/
 │       ├── devolada/
 │       │   ├── index.ts, handler.ts, schema.ts              NEW  admin: POST /payments/:id/resolve (D15)
-│       │   ├── webhook.ts                                   NEW  public router: POST /webhooks/devolada (D4)
 │       │   ├── connection.ts                                NEW  connect/disconnect/health logic (D1–D3)
 │       │   ├── links.ts                                     NEW  issue, close, replace links (D6, D7, D13)
 │       │   ├── apply.ts                                     NEW  applyDevoladaPayment state machine (D9)
 │       │   └── sweep.ts                                     NEW  sweepDevoladaPayments(env, now) (D12)
+│       ├── webhooks/
+│       │   ├── index.ts                                     NEW  public router + signature/schema middleware (D4)
+│       │   ├── handler.ts                                   NEW  link lookup, mode check, de-dup, re-read, apply (D4)
+│       │   └── schema.ts                                    NEW  Zod schema of Devolada's WebhookEvent
 │       ├── organizations/index.ts, handler.ts, schema.ts    + /me/devolada (admin); `devolada` summary on /me
 │       ├── pos/
 │       │   ├── handler.ts                                   confirm/settle issue links; verify/reject call the cores
@@ -183,7 +186,7 @@ app-turistear/src/
 ```
 
 **Structure Decision**:
-- **API layout**: the existing monorepo layout. The new Devolada resource lives in `api-turistear/src/routes/devolada/`, following constitution IV, with its non-route modules beside it as `routes/pos/sweep.ts` and `reminders.ts` already do. The provider client lives in `src/services/`, as `resend.ts` does.
+- **API layout**: the existing monorepo layout. The new Devolada resource lives in `api-turistear/src/routes/devolada/`, and the public webhook is its own resource in `api-turistear/src/routes/webhooks/`, both following constitution IV, with its non-route modules beside it as `routes/pos/sweep.ts` and `reminders.ts` already do. The provider client lives in `src/services/`, as `resend.ts` does.
 - **Extracted cores**: the cores pulled out of the POS handlers live next to them in `routes/pos/`, so `verifyPayment`, `settleBooking`, `settleFolioLine` and `rejectPayment` call the same code the webhook and sweep call.
 - **Frontend**: the work is a new `features/devolada/` module plus edits to the existing POS, bookings and folios features. `pages/` only assembles.
 

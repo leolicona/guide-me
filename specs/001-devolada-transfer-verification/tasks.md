@@ -66,9 +66,9 @@ Write each story's tests first and watch them fail.
   - `DEVOLADA_KEY_MODE: 'real' | 'test'`
   - `DEVOLADA_WEBHOOK_URL: string`
   - `DEVOLADA_CREDENTIAL_KEY: string` (secret)
-- [ ] T003 [P] Document the secret `DEVOLADA_CREDENTIAL_KEY` in `api-turistear/.dev.vars.example`:
+- [ ] T003 [P] Document the secret `DEVOLADA_CREDENTIAL_KEY` in `api-turistear/.dev.vars.example`, and provision it before PR 1 merges:
   - 32 random bytes, base64, generated with `openssl rand -base64 32`;
-  - set per environment with `wrangler secret put DEVOLADA_CREDENTIAL_KEY --env dev|production`;
+  - the developer sets it in each environment — `wrangler secret put DEVOLADA_CREDENTIAL_KEY --env dev`, then `--env production` — and confirms it with `wrangler secret list`. Without it, connecting Devolada fails at runtime;
   - never shared between environments (constitution VIII);
   - local dev reads it from `.dev.vars`.
 - [ ] T004 [P] Pin the Devolada bindings in the `miniflare.bindings` block of `api-turistear/vitest.config.ts` (lines 16-33):
@@ -84,6 +84,7 @@ Write each story's tests first and watch them fail.
   - add Devolada to Principle VIII's list of services we do not own: module `api-turistear/src/services/devolada.ts`; failure modes in `specs/001-devolada-transfer-verification/contracts/devolada-integration.md`;
   - add Devolada to the Integrations row of the Technology Stack table;
   - make the Runtime row's cron sentence name three sweeps: bookings expiry, departure reminders, Devolada recovery;
+  - state that Principle IV's error codes are "declared in the spec" through the spec folder's `contracts/`;
   - rewrite the Sync Impact Report.
 
 ---
@@ -142,7 +143,7 @@ Write each story's tests first and watch them fail.
   - sends `Authorization: Bearer <apiKey>`;
   - uses `AbortSignal.timeout(fast ? 3000 : 8000)`;
   - parses the `{success, data|error}` envelope;
-  - converts Devolada's millisecond instants to epoch seconds;
+  - converts instants at the boundary in both directions: callers pass and receive epoch seconds, Devolada sends and receives milliseconds, `expiresAt` included;
   - returns `{ok: true, data} | {ok: false, kind: 'refused' | 'retryable' | 'timeout', code, message, status, retryAfter?}` instead of throwing.
 
   Map errors per contracts/devolada-integration.md § Error mapping. Never log the API key.
@@ -176,7 +177,8 @@ Write each story's tests first and watch them fail.
 - [ ] T016 Extract the verification cores into `api-turistear/src/routes/pos/verifyCore.ts` (D10), with `deps = {db, env, waitUntil}` (precedent: `queueCancellationEmail`, `routes/folios/handler.ts:822`):
   - `verifyFolioPayment(deps, {organizationId, folioId, paymentId: string | 'all', actorId: string | null, reference?: string, at, refuseCancelled?: boolean})`:
     - flip rows with a guarded `UPDATE folio_payments SET verification='verified', verified_at, verified_by … WHERE organization_id = ? AND folio_id = ? AND verification = 'pending' [AND id = ?] RETURNING id`;
-    - roll `folios.payment_verification` up to `verified` (with `payment_verified_at` / `_by`) only when no pending payment row remains;
+    - roll `folios.payment_verification` up to `verified` (with `payment_verified_at` / `_by`) with a guarded `UPDATE folios … WHERE payment_verification = 'pending' AND NOT EXISTS (SELECT 1 FROM folio_payments WHERE folio_id = ? AND organization_id = ? AND verification = 'pending') RETURNING id`;
+    - return `{flipped, rollupVerified}`: whether this call's row flip and its rollup update matched;
     - write the `payment_verified` event;
     - with `refuseCancelled`, do nothing for a cancelled sale.
   - `releaseClearedFolio(deps, {organizationId, folioId, at})`:
@@ -185,7 +187,7 @@ Write each story's tests first and watch them fail.
     - issue the portal token (export `issuePortalLink` from `handler.ts:855`);
     - send the ticket email through `deps.waitUntil`;
     - emit `payment_verified` and `tickets_delivered`.
-  - Make `verifyPayment` (`handler.ts:2882`) call both with `paymentId: 'all'` and the admin as actor, keeping its behaviour identical. Its missing cancelled check is defect 1, out of scope. `payment-verification.test.ts` must pass unedited.
+  - Make `verifyPayment` (`handler.ts:2882`) call both with `paymentId: 'all'` and the admin as actor — releasing only when `flipped && rollupVerified` — keeping its behaviour identical. Its missing cancelled check is defect 1, out of scope. `payment-verification.test.ts` must pass unedited.
 
 **Checkpoint**: Foundation ready. The API suite and the scope-boundary suites pass, and the migration applies in tests.
 
@@ -308,23 +310,28 @@ Write each story's tests first and watch them fail.
     On `open` it writes a `payment_link_issued` event with the seller as actor. It returns `{link: PaymentLinkView} | {error: code}`.
 - [ ] T027 [US1] Change `confirmSale` in `api-turistear/src/routes/pos/handler.ts` (957-2121), citing D6:
   1. Load the organization's active Devolada connection next to the org row (1047-1063).
-  2. When connected and the method is `transfer`, skip the reference requirement (1496-1506) for both full sales and deposits, and store `payment_reference` NULL.
+  2. When connected and the method is `transfer` **for a full sale**, skip the reference requirement (1496-1506) and store `payment_reference` NULL. A transfer deposit keeps today's manual path, reference rule included, until T058 gives deposits their link.
   3. For a full sale, after the batch and the post-commit block (2008-2058), call `issuePaymentLink` with `kind: 'sale'`, `folioPaymentId` = the inserted payment row id and `amount` = total. Deposits get their link in T058.
   4. Add `payment_link` (and `payment_link_error`) to the 201 body (2059-2120) only for connected organizations.
 
   Unconnected organizations must keep byte-identical behaviour.
 - [ ] T028 [US1] Implement `api-turistear/src/routes/devolada/apply.ts` (D9, the Story 1 subset). `applyDevoladaPayment(deps, {link, payment})`:
-  - Upsert `devolada_payments` by `devolada_payment_id`; never overwrite a final status with a non-final one. Return early when `applied_status === status`.
+  - Upsert `devolada_payments` by `devolada_payment_id`; never overwrite a final status with a non-final one. Return early when `applied_status === status` — an optimization only: the guarantee against applying twice is each branch's guarded write (D9).
   - *validating*, `queued_for_credit`, or `awaiting`: snapshot only. `setCreditPaused(true)` on `queued_for_credit`, `false` on a later *validating*.
   - *confirmed* on a `sale` link with the sale not cancelled:
     1. `verifyFolioPayment({paymentId: link.folio_payment_id, actorId: null, reference: receipt_number, refuseCancelled: true})`;
-    2. `releaseClearedFolio` when the sale is paid and no pending row remains;
+    2. `releaseClearedFolio` only when step 1 returned `flipped && rollupVerified` and the sale is paid (D10);
     3. set `folios.payment_reference` = receipt number;
     4. link → `paid`;
     5. update the connection's `last_verdict_at`.
   - Every other status: snapshot only. Stories 2 and 3 complete them.
   - Always set `applied_status`, `applied_at` and `link.last_checked_at`.
-- [ ] T029 [US1] Implement the public router `api-turistear/src/routes/devolada/webhook.ts` (`POST /devolada`, no `authMiddleware`) and mount it with `app.route('/api/webhooks', devoladaWebhooks)` in `api-turistear/src/index.tsx` (43-56). It follows research D4 steps 1-8:
+- [ ] T029 [US1] Implement the public webhook as its own resource `api-turistear/src/routes/webhooks/` (D4, constitution IV) and mount it with `app.route('/api/webhooks', webhooks)` in `api-turistear/src/index.tsx` (43-56):
+  - `index.ts`: the router (`POST /devolada`, no `authMiddleware`) with one validation middleware that runs the *before parsing* and *parse* steps below and stores the parsed event in the context;
+  - `schema.ts`: the Zod schema of Devolada's `WebhookEvent`;
+  - `handler.ts`: the *route* and *re-read* steps.
+
+  It follows research D4 steps 1-8:
   - **Before parsing**:
     - check `content-length` and the raw text against 64 KiB → 400 `WEBHOOK_PAYLOAD_INVALID`;
     - verify with `verifyDevoladaSignature` → 401 `WEBHOOK_SIGNATURE_INVALID`.
@@ -335,7 +342,8 @@ Write each story's tests first and watch them fail.
     - insert into `devolada_events`, or bump `attempts` when the stored outcome is `failed`; skip when it is `applied` or `no_change`.
   - **Act on the re-read**:
     - `loadActiveCredential`, then `getPayment` (8 s) → `applyDevoladaPayment`;
-    - `DevoladaUnavailableError` or an unreachable re-read → 503 `DEVOLADA_UNAVAILABLE`, outcome `failed`.
+    - `DevoladaUnavailableError` or an unreachable re-read → 503 `DEVOLADA_UNAVAILABLE`, outcome `failed`;
+    - an `AUTHENTICATION_ERROR` or `BUSINESS_SUSPENDED` re-read → `markConnectionBroken`, outcome `failed`, 503 (Devolada retries; the sweep catches up once the admin fixes the key).
   - **Answer** 200 `{received: true}`.
 - [ ] T030 [US1] Add the read model in `api-turistear/src/utils/folioDetail.ts` and `api-turistear/src/utils/folioListRows.ts`:
   - `payment_links: PaymentLinkView[]` in `readFolioDetail` (`api-turistear/src/utils/folioDetail.ts`);
@@ -349,7 +357,8 @@ Write each story's tests first and watch them fail.
     - load the credential;
     - for each folio, `listPaymentsByCustomer(folioId)` → `applyDevoladaPayment` for every payment whose `paymentLinkId` is one of our links;
     - update `last_checked_at`;
-    - stop after 50 calls, or on `RATE_LIMITED`.
+    - stop after 50 calls, or on `RATE_LIMITED`;
+    - on `AUTHENTICATION_ERROR` or `BUSINESS_SUSPENDED`, call `markConnectionBroken` and stop that organization for this run.
   - **Fail-soft**: try/catch per folio, counting `failed`.
   - **Cleanup**: erase the `credential_ciphertext` and `credential_iv` of disconnected organizations with no unresolved link.
   - **Returns** `{checked, applied, failed}`.
@@ -367,7 +376,7 @@ Write each story's tests first and watch them fail.
   - fixtures `aConnection()` and `aPaymentLink(overrides)`, copying shapes asserted by T017-T019 (constitution IV);
   - register them in `app-turistear/src/test/server.ts`.
 - [ ] T036 [US1] Build the Ajustes surface in `app-turistear/src/features/devolada/components/`:
-  - **`DevoladaConnectionCard`**: `SectionCard` with a `StatusChip` + text for the status, the mode («Real» / «Prueba»), «Llave …abcd», and health («Avisos funcionando» / «Avisos con fallas» / «Validaciones en pausa»).
+  - **`DevoladaConnectionCard`**: `SectionCard` with a `StatusChip` + text for the status, the mode («Real» / «Prueba»), «Llave …abcd», health («Avisos funcionando» / «Avisos con fallas» / «Verificación en pausa»), and «Último veredicto: …» from `last_verdict_at` (FR-005).
   - **`ConnectDevoladaSheet`**: `FormSheet` with a «Llave de API» field and the submit «Conectar».
     - `DEVOLADA_WEBHOOK_CONFLICT` opens a `ConfirmSheet` «¿Reemplazar la dirección de avisos?» showing the current URL, then resends with `replace_webhook: true`.
     - Every error code maps to es-MX copy.
@@ -375,21 +384,21 @@ Write each story's tests first and watch them fail.
 
   Mount the card in `app-turistear/src/pages/SettingsPage.tsx` right after «Punto de venta» (after line 728). While connected, the «Referencia obligatoria en transferencias» switch (700-726) gets the helper «Con Devolada conectado, las transferencias se cobran con liga de pago».
 - [ ] T037 [US1] Extract `app-turistear/src/features/pos/components/TransferPaymentFields.tsx` from `app-turistear/src/pages/PosCheckoutPage.tsx` (the reference field 400-419 and the consequence line 421-440):
-  - **Connected** (`org.devolada.status === 'connected'`): no reference field, and the line «Se generará una liga de pago para enviar por WhatsApp».
+  - **Connected** (`org.devolada.status === 'connected'`) **on a full sale**: no reference field, and the line «Se generará una liga de pago para cobrar por WhatsApp». An apartado deposit keeps today's field until T058.
   - **Otherwise**: today's field and US-A88 rules, unchanged.
 
-  `PosCheckoutPage` renders the component and omits `payment_reference` when connected.
+  `PosCheckoutPage` renders the component and omits `payment_reference` for a connected full sale.
 - [ ] T038 [US1] Add `paymentLinkWhatsAppUrl(link, folio, org)` and `DEFAULT_PAYMENT_LINK_TEMPLATE` to `app-turistear/src/features/pos/delivery.ts`. The text comes from contracts/turistear-api.md § WhatsApp message; reuse `normalizePhone` and `fillTemplate` (101-121), and format the amount with `app-turistear/src/components/money.ts`.
 - [ ] T039 [US1] Build `PaymentLinkStatusChip` and `PaymentLinkCard` in `app-turistear/src/features/devolada/components/` and export them from `app-turistear/src/features/devolada/index.ts`:
   - **`PaymentLinkStatusChip`**: one chip per label code, each with icon + text per § Labels.
   - **`PaymentLinkCard`**:
     - `MoneyText` amount and «Vence a las HH:MM» in the organization's time zone;
-    - the chip, and a primary «Enviar liga por WhatsApp» that opens `paymentLinkWhatsAppUrl`;
+    - the chip, and a primary «Cobrar por WhatsApp» that opens `paymentLinkWhatsAppUrl` (the canonical verb, constitution VII);
     - for `link_failed`, an `AlertCard` «No se pudo crear la liga de pago; un administrador verificará la transferencia».
 - [ ] T040 [US1] Update `app-turistear/src/pages/FolioReceiptPage.tsx`:
   - render `PaymentLinkCard` for the sale's latest link (or the `payment_link_error` alert);
   - give `useFolio` (`app-turistear/src/features/pos/hooks/useFolio.ts`) `refetchInterval: 15000` while the label is `awaiting_payment`, `validating`, `needs_tracking_key` or `credit_paused`;
-  - while `payment_verification` is `pending`, show «Pago en validación» instead of «Venta confirmada» (74-82) and the «Pagado» chip (143-148);
+  - while `payment_verification` is `pending`, show «Pago en verificación» instead of «Venta confirmada» (74-82) and the «Pagado» chip (143-148);
   - drop «Folio {id}» (85) (constitution VII).
 - [ ] T041 [US1] Show the link status and fix the badge in `app-turistear/src/features/folios/components/FolioCard.tsx`, `FolioDetailScreen.tsx` and `app-turistear/src/layout/AppLayout.tsx`:
   - `PaymentLinkStatusChip` on sale rows in `app-turistear/src/features/folios/components/FolioCard.tsx`;
@@ -410,7 +419,7 @@ Write each story's tests first and watch them fail.
   - `app-turistear/src/features/pos/components/TransferPaymentFields.test.tsx`: connected hides the reference; unconnected keeps the US-A88 rules.
   - Extend `FolioTimeline.test.tsx` with the new event copy.
 
-**Checkpoint**: Story 1 works end to end (quickstart §1 for US1, §2 steps 1-4, 12, 13). This is PR 1 (D19). Exceptions still wait in Por verificar for the admin, exactly as today.
+**Checkpoint**: Story 1 works end to end (quickstart §1 for US1, §2 steps 1-4, 12, 13). This is PR 1 (D19). Exceptions still wait in Por verificar for the admin, exactly as today, and transfer deposits and settlements keep today's manual path, reference included, until PR 2.
 
 ---
 
@@ -460,11 +469,15 @@ Write each story's tests first and watch them fail.
 - [ ] T047 [US2] Implement `cancelForUnreceivedTransfer(deps, {organizationId, folioId, linkId, at})` in `api-turistear/src/routes/pos/unreceivedTransfer.ts` (D11):
   1. **Claim the link**: `UPDATE devolada_links SET state='expired' … WHERE id = ? AND organization_id = ? AND state = 'open' RETURNING id`; nothing returned → `'noop'`.
   2. **Check the sale**: if it is cancelled, or holds any positive payment row besides `link.folio_payment_id`, return `'attention'`.
-  3. **One `db.batch`**:
-     - the folio and its live lines cancelled `WHERE cancelled_at IS NULL`, with `cancellation_source 'payment_not_received'` and reason «No se recibió la transferencia»;
-     - the `buildCancellationReversal({clawback: true})` rows (`api-turistear/src/utils/folioPayments.ts:217`);
-     - `buildInventoryReleaseStatements` for live lines only;
-     - a `transfer_not_received` event with a NULL actor.
+  3. **One `db.batch`, every statement gated on its own transition** (constitution V — the read in step 2 is never the only guard):
+     - first, the folio cancelled `WHERE cancelled_at IS NULL`, stamping `cancelled_at = :at`, `cancellation_source 'payment_not_received'` and reason «No se recibió la transferencia»;
+     - every later statement carries `WHERE EXISTS (SELECT 1 FROM folios WHERE id = ? AND organization_id = ? AND cancelled_at = :at AND cancellation_source = 'payment_not_received')`, inserts written as `INSERT … SELECT … WHERE EXISTS`:
+       - its live lines cancelled `WHERE cancelled_at IS NULL`;
+       - the `buildCancellationReversal({clawback: true})` rows (`api-turistear/src/utils/folioPayments.ts:217`);
+       - `buildInventoryReleaseStatements` for live lines only;
+       - a `transfer_not_received` event with a NULL actor.
+
+     Test it: when the sale is cancelled between step 2 and the batch, the batch writes nothing.
   4. **After the batch**: `emitNotification(…, 'payment_rejected')`, then the new helper `closePaymentLinkRemote(deps, link)` in `api-turistear/src/routes/devolada/links.ts`. The helper is fail-soft, sends `PATCH close` with `Idempotency-Key 'close:' + id`, and treats `LINK_CLOSED` as closed.
 - [ ] T048 [US2] Complete `applyDevoladaPayment` in `api-turistear/src/routes/devolada/apply.ts` (D9 table, sale and deposit columns):
   - *partial* / *invalid*: snapshot plus a `payment_verdict` event (NULL actor).
@@ -480,7 +493,7 @@ Write each story's tests first and watch them fail.
 - [ ] T051 [US2] Create the admin router `api-turistear/src/routes/devolada/index.ts`, with `handler.ts` and `schema.ts`:
   - **Route**: `POST /payments/:id/resolve` behind `authMiddleware` and `requireRole('admin')`, validated with `zValidator`: `{action: 'accept' | 'dismiss' | 'returned', note?: string ≤ 500}`.
   - **Mount**: `app.route('/api/devolada', devolada)` in `api-turistear/src/index.tsx`.
-  - **`returned`**: for an unresolved *unapplied* payment, or a *confirmed* one on a cancelled sale; sets `resolution`, `resolved_by` and `resolved_at`.
+  - **`returned`**: for an unresolved *unapplied* payment, or a *confirmed* one on a cancelled sale; sets `resolution`, `resolved_by` and `resolved_at` with `… WHERE id = ? AND organization_id = ? AND resolution IS NULL RETURNING` — no row returned (a double tap) → 409 `DEVOLADA_PAYMENT_NOT_RESOLVABLE` (D15).
   - **Errors**: 404 for another organization's payment; 409 `DEVOLADA_PAYMENT_NOT_RESOLVABLE` for a wrong status or kind, or one already resolved.
   - **`accept` / `dismiss`**: answer 409 until T062.
   - **Response**: `{folio}`, the `readFolioDetail` shape.
@@ -491,7 +504,7 @@ Write each story's tests first and watch them fail.
   - an MSW handler for resolve in `app-turistear/src/test/handlers/devolada.ts`.
 - [ ] T053 [US2] Bring Devolada attention into Por verificar (`app-turistear/src/features/folios/`):
   - **Facet**: include attention items, cancelled sales with unapplied money among them, in the `por_verificar` facet (`app-turistear/src/features/folios/folioFacets.ts:69-76`) and in `folioAction` / `folioAttention` (`app-turistear/src/features/folios/folioCardState.ts:166-229`).
-  - **`FolioCard.tsx`**: shows the label and the asked/received amounts with `MoneyText`.
+  - **`FolioCard.tsx`**: shows the label and the asked, claimed and received amounts with `MoneyText` (FR-015).
   - **`FolioWorkActions.tsx`**: adds a Devolada rung with the label, «Comprobante Devolada {receipt}» and the amounts, plus «Ya lo devolví» (resolve `returned`) for unapplied money.
   - **Badge**: `app-turistear/src/layout/AppLayout.tsx` adds `devolada_attention`.
 - [ ] T054 [US2] Label money that never arrived in `app-turistear/src/features/pos/components/PaymentBreakdown.tsx`:
@@ -545,9 +558,12 @@ Write each story's tests first and watch them fail.
   - the `payment` event (kind `settlement`);
   - the cleared branch through `releaseClearedFolio`.
 
-  Both handlers then call it, with behaviour unchanged: `settle-method.test.ts` and `payment-verification.test.ts` pass unedited.
+  It takes an optional `claim` for Devolada callers (D8): a fresh payment-row id plus the settlement link to claim. The batch then opens with `UPDATE devolada_links SET folio_payment_id = :newId[, state = 'paid'] WHERE id = ? AND organization_id = ? AND kind = 'settlement' AND folio_payment_id IS NULL`, every later statement carries `WHERE EXISTS (SELECT 1 FROM devolada_links WHERE id = ? AND folio_payment_id = :newId)`, and it returns whether the claim matched. Release runs only if it did.
+
+  Both handlers then call it without a claim, with behaviour unchanged: `settle-method.test.ts` and `payment-verification.test.ts` pass unedited.
 - [ ] T058 [US3] Issue deposit links at checkout in `api-turistear/src/routes/pos/handler.ts` and `api-turistear/src/routes/devolada/links.ts`:
   - in `confirmSale` (`api-turistear/src/routes/pos/handler.ts`), call `issuePaymentLink` with `kind: 'deposit'`, `folioPaymentId` = the deposit row and `amount` = `down_payment` when the organization is connected and the deposit is a transfer;
+  - extend T027's skip of the reference requirement to transfer deposits, and T037's `TransferPaymentFields` to hide the field for an apartado deposit when connected;
   - make sure `computeLinkExpiry` in `api-turistear/src/routes/devolada/links.ts` caps `deposit` and `settlement` links at the earliest live `booking_expires_at`.
 - [ ] T059 [US3] Settle by link in `settleBooking` and `settleFolioLine` (`api-turistear/src/routes/pos/handler.ts`), citing D8, when the organization is connected and the method is `transfer`:
   1. run today's guards;
@@ -557,15 +573,14 @@ Write each story's tests first and watch them fail.
   5. if the link fails, fall back to today's manual transfer settlement, with no reference required, and add `payment_link_error`.
 - [ ] T060 [US3] Add the settlement branches to `api-turistear/src/routes/devolada/apply.ts` and `sweep.ts` (D8, D9):
   - ***confirmed* on a `settlement` link**:
-    1. `applySettlement` with method `transfer`, reference = receipt number, `verification 'verified'`, `verifiedBy` null, `collectedBy` and `settledBy` = `link.requested_by`, `operatorId` = `link.operator_id`, and `bypassExpiry` when the payment's `devolada_created_at` < `link.expires_at`;
-    2. store the new row id in `link.folio_payment_id`;
-    3. link → `paid`.
+    1. `applySettlement` with the link `claim` (state → `paid`), method `transfer`, reference = receipt number, `verification 'verified'`, `verifiedBy` null, `collectedBy` and `settledBy` = `link.requested_by`, `operatorId` = `link.operator_id`, and `bypassExpiry` when the payment's `devolada_created_at` < `link.expires_at`;
+    2. the claim itself records the new row id in `link.folio_payment_id` and moves the link to `paid`; a claim that does not match means another processor already recorded it — do nothing more.
   - ***partial* / *invalid***: `closePaymentLinkRemote`, link `closing` → `closed`, plus a `payment_verdict` event. This makes an attention item.
   - ***expired*, or an unpaid expiry in the sweep**: link `expired`, nothing else.
 - [ ] T061 [US3] Guard the apartado expiry sweep in `api-turistear/src/routes/pos/sweep.ts`. In the due-folio query (49-67), skip folios that have a `devolada_links` row in `creating` or `open`, or a `devolada_payments` row that is *validating* (awaiting included) or `queued_for_credit`. Cite D8. `test/pos/pos-bookings-sweep.test.ts` must still pass.
 - [ ] T062 [US3] Implement resolve `accept` and `dismiss` in `api-turistear/src/routes/devolada/handler.ts`:
-  - **`accept`**: allowed for a `settlement` link whose payment is *partial* or *invalid* and unresolved. On a sale that is not cancelled, call `applySettlement` with `verifiedBy` = the admin and `collectedBy` = `link.requested_by`. On a cancelled sale → 409 `FOLIO_CANCELLED`.
-  - **`dismiss`**: `closePaymentLinkRemote` (fail-soft), then `resolution 'dismissed'`.
+  - **`accept`**: allowed for a `settlement` link whose payment is *partial* or *invalid* and unresolved. On a sale that is not cancelled, call `applySettlement` with the link `claim`, `verifiedBy` = the admin and `collectedBy` = `link.requested_by`; the same claimed batch sets the payment's `resolution 'accepted'`. A claim that does not match (a double tap) → 409 `DEVOLADA_PAYMENT_NOT_RESOLVABLE`. On a cancelled sale → 409 `FOLIO_CANCELLED`.
+  - **`dismiss`**: set `resolution 'dismissed'` with `… WHERE resolution IS NULL RETURNING` (no row → 409), then `closePaymentLinkRemote` (fail-soft).
   - **Both**: set `resolved_by` / `resolved_at` and answer `{folio}`.
 - [ ] T063 [US3] Settle by link in the app (`app-turistear/src/features/bookings/components/SettleSheet.tsx`):
   - `app-turistear/src/features/bookings/components/SettleSheet.tsx` renders `TransferPaymentFields`;
@@ -641,7 +656,7 @@ Write each story's tests first and watch them fail.
   - the `verification_auto` and `devolada_attention` counts.
 
   Assert that no `SCAN` happens inside a correlated subquery (BUG-042, constitution § Additional constraints).
-- [ ] T075 [P] Run `/security-review` over `api-turistear/src/routes/devolada/webhook.ts`, `api-turistear/src/utils/devoladaSignature.ts`, `api-turistear/src/utils/devoladaCredential.ts` and `api-turistear/src/services/devolada.ts`. Confirm:
+- [ ] T075 [P] Run `/security-review` over `api-turistear/src/routes/webhooks/`, `api-turistear/src/utils/devoladaSignature.ts`, `api-turistear/src/utils/devoladaCredential.ts` and `api-turistear/src/services/devolada.ts`. Confirm:
   - no key or ciphertext in any log or response;
   - the signature is verified before parsing;
   - the organization is resolved only through `devolada_link_id`;
@@ -652,7 +667,7 @@ Write each story's tests first and watch them fail.
   - §1, including the scope-boundary `git diff --exit-code` check;
   - §2 steps 1-13 against a Devolada test business;
   - after deploying to dev, §3.
-- [ ] T077 [P] Register the ten defects of research.md § Defects found through `/speckit-bug-assess`, one entry each under `.specify/bugs/<slug>/`, without fixing them in this feature.
+- [ ] T077 [P] Register the eleven defects of research.md § Defects found through `/speckit-bug-assess`, one entry each under `.specify/bugs/<slug>/`, without fixing them in this feature.
 - [ ] T078 [P] Audit the citations. Every file in `api-turistear/test/devolada/` and every new app test cites `devolada-transfer-verification US<n>`. Every non-obvious rule under `api-turistear/src/routes/devolada/` and `api-turistear/src/routes/pos/{verifyCore,settleCore,unreceivedTransfer}.ts` cites `D<n>`. Each new route's suite has `seedTwoOrgs` cases.
 - [ ] T079 Amend `specs/001-devolada-transfer-verification/spec.md` and `research.md` in place with whatever the build changed: decisions added or withdrawn in build, scenarios rewritten (constitution I). Set the spec's Status to `Implemented` once PR 3 merges.
 - [ ] T080 [P] Add a §4 «Measuring the outcomes» to `specs/001-devolada-transfer-verification/quickstart.md`. Give the read-only aggregate SQL that measures, per organization and without customer data:

@@ -89,7 +89,7 @@ Devolada's rules this satisfies:
 | Its notifications stop (outage, address taken by another system) | Verdicts arrive late | Ajustes health: `consecutive_failures`, `is_ours = false` | The sweep re-reads every open link at least every 15 minutes (SC-003) |
 | Keys endpoint unreachable | The webhook answers 503 | — | Devolada retries for 4 h; the sweep needs no keys |
 | Credential revoked or business suspended | Connection `broken`; new transfers fall back | Admin, in Ajustes | The admin replaces the key, or Devolada lifts the suspension |
-| Validation credit exhausted | Payments wait as `queued_for_credit`; tickets wait with them | Admin: «Validaciones en pausa» in Ajustes | The business tops up at Devolada; validation resumes by itself |
+| Validation credit exhausted | Payments wait as `queued_for_credit`; tickets wait with them | Admin: «Verificación en pausa» in Ajustes | The business tops up at Devolada; validation resumes by itself |
 | Down longer than a link's lifetime | Nothing is cancelled: the unpaid branch needs a successful re-read showing no payment in flight (D9) | — | When Devolada answers again, the sweep applies whatever happened |
 | Devolada answers wrongly (a verdict a human disputes) | — | Admin | Verificar or Rechazar by hand remain available (FR-018) |
 

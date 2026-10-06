@@ -77,8 +77,8 @@ curl -s -X POST "https://api.devoladapago.com/v1/test/payments/<payment id>/adva
 | # | Do | Expect |
 |---|---|---|
 | 1 | Ajustes → «Cobro con Devolada» → Conectar, with the test key | «Conectada · Prueba · …abcd». An expired "Prueba de conexión — Turistear Ya!" link appears in Devolada's panel. A real key is refused (`DEVOLADA_MODE_NOT_ALLOWED`) |
-| 2 | POS → sell a full sale by Transferencia | No Referencia field. The receipt shows the «Liga de pago» card: amount, «Vence a las …», «Esperando pago». «Enviar liga por WhatsApp» opens `wa.me` with the link in the text |
-| 3 | Open the link and confirm a test transfer on Devolada's page; trigger the sweep | «Validando pago» |
+| 2 | POS → sell a full sale by Transferencia | No Referencia field. The receipt shows the «Liga de pago» card: amount, «Vence a las …», «Esperando pago». «Cobrar por WhatsApp» opens `wa.me` with the link in the text |
+| 3 | Open the link and confirm a test transfer on Devolada's page; trigger the sweep | «Verificando pago» |
 | 4 | Advance it to `confirmed`; trigger the sweep | Tickets appear (QR, portal link), «Pago confirmado». The timeline shows «Transferencia verificada · Sistema» with the Comprobante Devolada. The sale never appears in Por verificar |
 | 5 | Repeat 2–3, advance to `partial` with a lower `receivedCents` | Por verificar: «Pago incompleto» with asked and received amounts; Verificar and Rechazar work as today |
 | 6 | Repeat with `invalid` | Por verificar: «Banxico no confirma la transferencia» |

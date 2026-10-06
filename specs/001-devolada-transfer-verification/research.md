@@ -98,7 +98,12 @@ Paths are relative to `api-turistear/src/` unless prefixed `app:` (`app-turistea
 
 ### D4 — Trusting a webhook
 
-- **Decision**: `POST /api/webhooks/devolada` is a router with no auth middleware. It handles each request in this order:
+- **Decision**: `POST /api/webhooks/devolada` is its own resource, `src/routes/webhooks/`, following constitution IV's layout:
+  - `index.ts` is the router: no auth middleware, and one validation middleware that runs steps 1–3 below and stores the parsed event in the context, so the input is validated before the handler runs;
+  - `schema.ts` holds the Zod schema of Devolada's `WebhookEvent`;
+  - `handler.ts` runs steps 4–8.
+
+  It handles each request in this order:
   1. Refuse bodies over 64 KiB, then read the raw body with `c.req.text()`.
   2. Verify `Devolada-Signature` (`v1=`, base64url, raw `r‖s`): ECDSA P-256 / SHA-256 over `` `${Devolada-Timestamp}.${raw}` `` with the JWK whose `kid` equals `Devolada-Key-Id`.
      - The JWKS is cached per isolate by `kid`; an unknown `kid` refetches once, as the contract says.
@@ -200,6 +205,13 @@ Paths are relative to `api-turistear/src/` unless prefixed `app:` (`app-turistea
     | date | the verdict |
 
     It then runs the release core (D10) if the sale is now paid and cleared.
+  - **One batch, gated by a claim** (constitution V: a read is never the only guard). A settlement link records at most one settlement, so the link itself is the claim:
+    1. Generate the new payment row's id (`:newId`) first.
+    2. The batch's first statement is `UPDATE devolada_links SET folio_payment_id = :newId [, state = 'paid'] WHERE id = ? AND organization_id = ? AND kind = 'settlement' AND folio_payment_id IS NULL`.
+    3. Every later statement carries `WHERE EXISTS (SELECT 1 FROM devolada_links WHERE id = ? AND folio_payment_id = :newId)`: the payment row (as `INSERT … SELECT`), its allocations, the commission top-up, `settled_at`/`settled_by` and the event.
+    4. The release runs only if, after the batch, the link holds `:newId`.
+
+    A second processor — the webhook and the sweep at once, a Devolada retry, an admin's double tap on *accept* (D15) — matches nothing and writes nothing.
   - **An unpaid settlement link** simply closes.
   - **The expiry sweep** skips a sale with an open link or a payment in flight.
   - **One bypass**: a settlement whose payment was in flight when the apartado's clock ran out is still recorded. The `BOOKING_EXPIRED` pre-check is skipped for that case only.
@@ -217,13 +229,13 @@ Paths are relative to `api-turistear/src/` unless prefixed `app:` (`app-turistea
 
 - **Decision**:
   - The webhook and the sweep share one function, `applyDevoladaPayment(link, payment)`.
-  - It is keyed on `(devolada_payment_id, status)`, so applying it twice changes nothing and a final status never goes back.
+  - Applying it twice changes nothing, and a final status never goes back. `applied_status` lets a repeat skip early, but that read is an optimization, never the guarantee: the guarantee is the guarded write each branch makes (D8, D10, D11).
   - It never cancels on the clock alone. The unpaid branch requires a successful re-read showing no payment in flight.
 
   | Devolada status | Sale or deposit link | Settlement link |
   |---|---|---|
-  | `validating` | snapshot; the sale shows «Validando pago» | same |
-  | `queued_for_credit` | snapshot; connection health shows «Validaciones en pausa» | same |
+  | `validating` | snapshot; the sale shows «Verificando pago» | same |
+  | `queued_for_credit` | snapshot; the sale and the connection health show «Verificación en pausa» | same |
   | `validating` + `awaiting: payer_tracking_key` | snapshot; seller and admin see «Pide al cliente su clave de rastreo»; no expiry while it waits | same |
   | `confirmed` | verify that payment row (D10); the receipt number becomes its reference; link `paid` | record the settlement (D8); link `paid` |
   | `partial`, `invalid` | snapshot; the sale stays pending, so it shows in Por verificar with asked and received amounts and its label; the admin uses Verificar or Rechazar as today (FR-018) | link closed; an attention item the admin *accepts* (records the settlement as the admin) or *dismisses* (the apartado continues) (D15) |
@@ -244,8 +256,8 @@ Paths are relative to `api-turistear/src/` unless prefixed `app:` (`app-turistea
     - `verifyFolioPayment(deps, {organizationId, folioId, paymentId | 'all', actorId | null, reference?, at})`;
     - `releaseClearedFolio(deps, {organizationId, folioId, at})`, which signs the live slot lines, issues the portal token, sends the ticket email, and emits the `payment_verified` and `tickets_delivered` notifications.
   - Devolada verifies **one** row: its link's `folio_payment_id`, with a single guarded `UPDATE … WHERE verification = 'pending' RETURNING`.
-  - The sale's `payment_verification` becomes `verified` only when no pending row remains.
-  - Release runs when the sale is paid, cleared and not cancelled.
+  - The sale's `payment_verification` becomes `verified` through a guarded `UPDATE folios … WHERE payment_verification = 'pending' AND NOT EXISTS (<a pending payment row of the sale>) RETURNING`.
+  - `verifyFolioPayment` returns `{flipped, rollupVerified}`. The release runs only in the call that got **both** — its row flip and the rollup update matched — and only when the sale is paid and not cancelled. A second processor can therefore never sign the tickets again (which would invalidate QR codes already delivered) or send the email twice.
   - The admin endpoint calls the same cores with `'all'`, so its behaviour does not change.
   - `deps` = `{db, env, waitUntil}`, following the precedent of `queueCancellationEmail({env, executionCtx})` (`routes/folios/handler.ts:822`).
 - **Rationale**:
@@ -261,18 +273,22 @@ Paths are relative to `api-turistear/src/` unless prefixed `app:` (`app-turistea
 - **Decision**: `cancelForUnreceivedTransfer(deps, {organizationId, folioId, linkId, at})` runs four steps:
   1. **Claim the link**: `UPDATE devolada_links SET state = 'expired' WHERE id = ? AND state = 'open' RETURNING`. One worker wins.
   2. **Check the sale**: go on only if the sale is not cancelled **and** the link's row is its only positive money. Otherwise raise an attention item. A sale holding any other money is never cancelled automatically.
-  3. **One `db.batch`**:
-     - the sale and its live lines are cancelled (`WHERE cancelled_at IS NULL`), with `cancellation_source = 'payment_not_received'` (new value) and the reason «No se recibió la transferencia»;
-     - the reversal from `buildCancellationReversal`, with clawback;
-     - seats and reservations released **for live lines only**;
-     - the event `transfer_not_received`, with a NULL actor.
+  3. **One `db.batch`, every statement gated on the batch's own transition** (constitution V: the read in step 2 is never the only guard):
+     - first, the sale is cancelled `WHERE cancelled_at IS NULL`, stamping `cancelled_at = :at`, `cancellation_source = 'payment_not_received'` (new value) and the reason «No se recibió la transferencia»;
+     - every later statement carries `WHERE EXISTS (SELECT 1 FROM folios WHERE id = ? AND organization_id = ? AND cancelled_at = :at AND cancellation_source = 'payment_not_received')`, inserts written as `INSERT … SELECT … WHERE EXISTS`:
+       - its live lines cancelled (`WHERE cancelled_at IS NULL`);
+       - the reversal from `buildCancellationReversal`, with clawback;
+       - seats and reservations released **for live lines only**;
+       - the event `transfer_not_received`, with a NULL actor.
+
+     If anything cancelled the sale between step 2 and the batch, the first statement matches nothing and so does every other: nothing is reversed or released twice.
   4. **After the batch**: the `payment_rejected` notification, then the link is closed at Devolada (D13).
 
   The seat and reservation release statements are extracted from `rejectPayment` into a builder both use. The admin's Rechazar is otherwise untouched.
 - **Rationale**:
   - FR-016 says "the way Rechazar cancels", but without Rechazar's defects: it releases seats for lines already cancelled, has no not-cancelled guard, and would erase a cleared deposit (`routes/pos/handler.ts:3096-3221`).
   - A separate `cancellation_source` keeps these out of the expired-apartado counts (`system_expiry`).
-  - A concurrent manual Rechazar within the same instant remains a small race. That path has no guard of its own, and its fix is defect 3 below.
+  - A concurrent manual Rechazar cannot make this path write twice: whichever cancels first wins, and the gated batch above writes nothing if it was Rechazar. Rechazar itself still has no guard of its own when it runs second; that is defect 3 below.
 - **Alternatives considered**:
   - `cancelFolioPriced` prices by the cancellation policy, which is wrong for money that never arrived (the BUG-030 reasoning, `routes/folios/handler.ts:908-911`).
   - Calling `rejectPayment` as it is inherits its defects.
@@ -281,7 +297,7 @@ Paths are relative to `api-turistear/src/` unless prefixed `app:` (`app-turistea
 
 - **Decision**:
   - `sweepDevoladaPayments(env, now)` lives in `routes/devolada/sweep.ts` and runs as a third independent `ctx.waitUntil` in `scheduled()`, with `now = new Date(controller.scheduledTime)`.
-  - Each run covers every connected organization, plus every disconnected one that still has open links. It is fail-soft per sale and does four things:
+  - Each run covers every connected or broken organization, plus every disconnected one that still has open links. It is fail-soft per sale and does four things:
     1. Sales with a link that is `open` and either unchecked for 10 minutes or past `expires_at` get `GET /v1/payments?customerRef=<folioId>`, one call covering all the sale's links, and D9 for each payment.
     2. Links past expiry with no payment in flight or confirmed take D9's unpaid branch.
     3. Links in the remaining states are retried:
@@ -345,6 +361,12 @@ Paths are relative to `api-turistear/src/` unless prefixed `app:` (`app-turistea
   | `dismiss` | a settlement exception | closes it; the apartado continues |
   | `returned` | an `unapplied` payment | the admin returned the money outside the system |
 
+  Every action is claimed by a guarded write before it acts:
+  - `accept` records the settlement through D8's claimed batch, which also sets the payment's `resolution`;
+  - `dismiss` and `returned` set `resolution … WHERE resolution IS NULL RETURNING`.
+
+  A double tap answers 409 `DEVOLADA_PAYMENT_NOT_RESOLVABLE` the second time and writes nothing.
+
   Sale and deposit exceptions keep using today's Verificar and Rechazar. When those are used, the link is closed (D13).
 - **Rationale**:
   - FR-015 and FR-018: the admin can always decide by hand.
@@ -363,10 +385,13 @@ Paths are relative to `api-turistear/src/` unless prefixed `app:` (`app-turistea
     - The transfer fields move into `features/pos/components/TransferPaymentFields.tsx` so they can be tested. Constitution VI does not allow tests of `pages/`.
   - **Receipt, sale detail and BookingActions**: a `PaymentLinkCard` with:
     - the amount, «Vence a las HH:MM» and a status chip;
-    - the primary action «Enviar liga por WhatsApp» (`paymentLinkWhatsAppUrl` in `features/pos/delivery.ts`, with a default template);
+    - the primary action «Cobrar por WhatsApp» (`paymentLinkWhatsAppUrl` in `features/pos/delivery.ts`, with a default template);
     - polling every 15 s while the link waits.
 
-    The receipt stops saying «Venta confirmada» and «Pagado» while the money is unverified.
+    The receipt shows «Pago en verificación» instead of «Venta confirmada» and «Pagado» while the money is unverified.
+  - **One word per concept, one verb per action** (constitution VII):
+    - the state of money being checked keeps the word the UI already uses, **verificación**: «Verificando pago», «Pago en verificación», «Verificación en pausa». «Validar» never appears in the UI, even though Devolada calls its own check a validation;
+    - sending the link is collecting the payment, so its action uses the canonical verb **Cobrar**: «Cobrar por WhatsApp».
   - **Por verificar**: FolioCard and FolioWorkActions show the labels and amounts. The timeline adds the new event types to its three exhaustive records, and AppLayout uses the new badge sum.
   - **Copy**: the table in `contracts/turistear-api.md` § Labels.
 - **Rationale**:
@@ -447,3 +472,4 @@ Each should go through the lite path (`/speckit-bug-assess`). This feature guard
 8. `wa_reminder_template` is edited in Ajustes but never read. `app:features/bookings/components/BookingWhatsAppButton.tsx:39-51`.
 9. Nothing type-checks the API (no `tsc` in CI), and 27 error codes in use are missing from `ErrorCode`. `src/types/errors.ts:1-39`.
 10. Unstubbed outbound calls in API tests reach the real provider (Resend). For example, `test:pos/payment-verification.test.ts` has no stubs.
+11. The `payment_rejected` customer message, which D11 reuses, says «tu folio…» where constitution VII says «Venta». `src/utils/notifications.ts:80`.
