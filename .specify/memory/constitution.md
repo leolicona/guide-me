@@ -1,48 +1,41 @@
 <!--
-Sync Impact Report (v1.2.0, 2026-10-07)
-- Version change: 1.1.1 → 1.2.0 — MINOR. Authentication moves from Agnostic
-  Auth to Better Auth used the standard way (specs/004-passkey-auth, plan D18).
-  Principle IV gains a scoped exception: `/api/auth/*` follows Better Auth's
-  contract, and every other route keeps the rule unchanged. No principle is
-  removed, renumbered or redefined, and the server still decides, so this is
-  materially expanded guidance rather than a MAJOR change.
+Sync Impact Report (v1.2.1, 2026-10-07)
+- Version change: 1.2.0 → 1.2.1 — PATCH.
+  - Principle IV restores the backend-for-frontend invariant that v1.2.0
+    relaxed: no response body carries the session token.
+  - v1.2.0 has not merged into `develop`. Measured against `develop`'s v1.1.1,
+    this keeps that version's own rule ("never returned in a body"), so no
+    governance is added, removed or redefined net.
+  - Source: specs/004-passkey-auth, the developer's decision of 2026-10-07 to
+    keep the BFF.
 - Modified sections (titles unchanged):
-  · III. Tenant Isolation:
-    - Better Auth's tenant fields are declared `input: false`.
-    - Its lookups by a globally unique key, and its reads of the signed-in
-      user's own rows, join the exempt reads (specs/004-passkey-auth
-      /speckit-analyze, finding M2).
-  · IV. The Server Decides:
-    - Sessions are Better Auth's: one HttpOnly cookie per environment
-      prefix. Its sign-in answers may echo the token, which the app never
-      reads (this replaces "gm_access/gm_refresh … never returned in a
-      body").
-    - `/api/auth/*` is Better Auth's handler, with its own validation,
-      `{ code, message }` and success shapes.
-    - Codes the app branches on are still declared in the spec.
-    - MSW mirrors Better Auth's client under the same fixture rule (finding
-      M1).
-  · VI. A Rule Is Proven Where It Is Enforced:
-    - The `AGNOSTIC_AUTH_API` stand-in leaves, and the test config pins
-      `BETTER_AUTH_SECRET`.
-    - Better Auth runs for real; ceremonies come from a software
-      authenticator.
-  · VIII. A Service We Do Not Own Never Undoes a Sale:
-    - Agnostic Auth leaves the list.
-    - Resend's place on the sign-in path, and what breaks when it is down,
-      are recorded.
-    - The signing secrets are named.
-  · Technology Stack & Constraints: the Runtime row adds `nodejs_als`, and the
-    Auth row becomes Better Auth.
+  · IV. The Server Decides. The session bullet's "Better Auth's sign-in
+    answers may echo the session token in their body; the app never reads,
+    stores or sends it" becomes:
+    - the API strips the token from Better Auth's sign-in answers;
+    - `/get-session` and `/list-sessions` are not exposed over HTTP;
+    - the app reads its user from `/api/me`.
+- Carried from v1.2.0 (same pull request, still on this branch):
+  · Authentication moves to Better Auth (specs/004-passkey-auth, plan D18).
+  · III: Better Auth's tenant fields are `input: false`, and its lookups by
+    globally unique key join the exempt reads.
+  · IV: `/api/auth/*` is Better Auth's handler, with its own validation,
+    `{ code, message }` and success shapes. Its codes the app branches on
+    are declared in the spec. MSW mirrors its client under the fixture rule.
+  · VI: the `AGNOSTIC_AUTH_API` stand-in leaves, `BETTER_AUTH_SECRET` is
+    pinned, and ceremonies come from a software authenticator.
+  · VIII: Agnostic Auth leaves the list, Resend's place on the sign-in path is
+    recorded, and the signing secrets are named.
+  · Technology Stack & Constraints: the Runtime row gains `nodejs_als`; the
+    Auth row becomes Better Auth 1.7.7.
 - Added sections: none. Removed sections: none.
 - Templates: .specify/templates/plan-template.md ✅, spec-template.md ✅,
   tasks-template.md ✅, checklist-template.md ✅. None names an auth
-  provider, so no template changed.
+  provider or a token rule; no template changed.
 - Follow-up TODOs:
-  · The code catches up in the same pull request (specs/004-passkey-auth,
-    Governance: "lands in the pull request that needs it"). On this branch the
-    text leads the code until the feature's tasks complete. `develop` keeps
-    v1.1.1 until that PR merges.
+  · The code catches up in the same pull request (specs/004-passkey-auth).
+    On this branch the text leads the code until the feature's tasks
+    complete; `develop` keeps v1.1.1 until that PR merges.
   · TODO(PASSWORD-MATERIAL): `users.password_hash`, `users.password_salt` and
     `password_reset_tokens` stay in D1, unread, until the deploy that follows
     cutover (specs/004-passkey-auth D15). They are registered as debt at
@@ -171,9 +164,12 @@ it keep isolation auditable with grep.
     `__Secure-<AUTH_COOKIE_PREFIX>.session_token`, with a prefix per
     environment.
   - Every request is sent with `credentials: 'include'`.
-  - Better Auth's sign-in answers may echo the session token in their body.
-    The app never reads, stores or sends it; the cookie alone
-    authenticates.
+  - No response body carries the session token. The API strips it from
+    Better Auth's sign-in answers (`sign-in/email-otp`,
+    `passkey/verify-authentication`), and Better Auth's session-reading routes
+    (`/get-session`, `/list-sessions`) are not exposed over HTTP. The app reads
+    its user from `/api/me`. The cookie alone authenticates, so a script in
+    the page can never carry the session elsewhere.
 - Every route lives in `src/routes/<resource>/`: `index.ts` is the router
   (middleware, `zValidator`, wiring, nothing else), `handler.ts` holds the
   logic, `schema.ts` holds the Zod schemas. Input is validated before a
@@ -398,4 +394,4 @@ Additional constraints:
 - The developer decides. When a principle blocks a feature, the plan says so
   and proposes the amendment; it does not route around it.
 
-**Version**: 1.2.0 | **Ratified**: 2026-10-04 | **Last Amended**: 2026-10-07
+**Version**: 1.2.1 | **Ratified**: 2026-10-04 | **Last Amended**: 2026-10-07
