@@ -12,10 +12,12 @@ Replace passwords and Agnostic Auth with **Better Auth 1.7.7, used the standard 
   client.
 - **Plugins**: the `passkey` and `emailOTP` plugins do sign-in. Better Auth's database sessions and
   rate limiter do the rest.
-- **What we still write**: only what Better Auth cannot know.
+- **What we still write**: only what Better Auth cannot know, plus one guard for the BFF.
   - registering an organization and accepting an invitation, under `/api/onboarding/*`;
   - the suspended-account refusal;
   - the notice emails;
+  - a filter where the handler is mounted, which keeps the session token out of every response body
+    (D2);
   - the business routes' session middleware.
 - **Retirement**: Agnostic Auth leaves every environment. Password columns stop being read and are
   dropped by the next deploy (D15).
@@ -59,6 +61,12 @@ Of Better Auth's core, only the safe parts are reachable:
 and we write only what Better Auth does not know (organizations, invitations).
 - `input: false` is what keeps constitution III's "`organization_id` never from a body" true on a
   route we do not write.
+- **The BFF holds**: `disabledPaths: ['/get-session', '/list-sessions']`. The mount strips `token`
+  (top level) and `session.token` from the JSON answers of `/sign-in/email-otp` and
+  `/passkey/verify-authentication`, keeping their status and `Set-Cookie`. Better Auth's standard
+  answers echo the session token, which would let a script in the page carry the session elsewhere;
+  the cookie alone must authenticate (constitution IV, v1.2.1; R14). `auth.api.getSession` still
+  works server-side, because `disabledPaths` only closes the HTTP routes.
 - Principle IV is amended for `/api/auth/*` (D18). (R2)
 
 **D3 — One auth instance per isolate.** `src/auth/index.ts` exports `getAuth(env)`, memoized in a
@@ -226,7 +234,9 @@ the same background handler, after the change succeeded (FR-041, constitution VI
   - `SecurityPage` at `/seguridad`, linked from `AccountMenu` for both roles: list, rename in a
     `FormSheet`, remove and sign out everywhere in a `ConfirmSheet`.
   - `LegacyLinkPage` for `/verify`, `/forgot-password` and `/reset-password`.
-- **Unchanged**: `/api/me`, `useMe` and the business 401/403 interceptor.
+- **Unchanged**: `/api/me`, `useMe` and the business 401/403 interceptor. The app reads its user
+  only from `/api/me` and never calls `authClient.getSession` or `useSession`, whose routes are
+  disabled (D2).
 - **MSW**: handlers mirror the Better Auth endpoints the app calls.
 
 *Why*: constitution VII (sheets, one vocabulary), and no hand-written mirror of Better Auth's
@@ -272,8 +282,8 @@ every call site. (R12, R13)
 (v1.1.1 → v1.2.0, MINOR):
 - **Principle IV**: `/api/auth/*` is served by Better Auth's handler, with its validation, its
   `{ code, message }` and its codes. Every other route keeps `routes/<resource>/` and the `ApiError`
-  envelope. Sessions are Better Auth's, still HttpOnly on `.turistearya.com`; its answers may echo
-  the token, and the app never reads it.
+  envelope. Sessions are Better Auth's, still HttpOnly on `.turistearya.com`, and no response body
+  carries the token (v1.2.1: the mount strips it and the session-reading routes are disabled).
 - **Principle VI**: the `AGNOSTIC_AUTH_API` stand-in leaves; the test config pins
   `BETTER_AUTH_SECRET`.
 - **Principle VIII**: Agnostic Auth leaves the list of services we do not own, and Resend's place on
@@ -283,8 +293,8 @@ every call site. (R12, R13)
 
 CLAUDE.md's local-login caveat is rewritten to match.
 *Why*: Governance asks for amendments to land in the pull request that needs them.
-**Done 2026-10-07** (`f8ff722`), before implementation, so no task runs against the old text
-(`/speckit-analyze` C1).
+**Done 2026-10-07**, before implementation, so no task runs against the old text
+(`/speckit-analyze` C1): v1.2.0 (`f8ff722`), then v1.2.1 (`ca7b582`), which keeps the BFF.
 
 **D19 — A pre-merge gate.** Before merging into `develop`, which deploys dev at once:
 1. Set `BETTER_AUTH_SECRET` as a Worker secret in dev and in prod, with different values.
@@ -331,14 +341,14 @@ authenticated request costs one session lookup and at most one daily renewal wri
 ## Constitution Check
 
 *GATE: Must pass before Phase 0 research. Re-checked after Phase 1 design. It passes both times.
-Principle IV was amended to v1.2.0 before implementation (D18).*
+Principle IV was amended to v1.2.1 before implementation (D18).*
 
 | Principle | Gate | Result |
 | --- | --- | --- |
 | I. Spec-driven, cited | The spec is amended in place, with dated Clarifications (2026-10-06, 2026-10-07). D1–D19 carry their why. The scope boundary is a mechanical test (D17) | PASS |
 | II. Money law | No money path changes | PASS |
-| III. Tenant isolation | New tables are scoped through `user_id` (D4). Codes, counters and passkeys are keyed by user or by globally unique keys. `organizationId`, `role` and `status` are `input: false` on Better Auth's routes (D2). The admin restore that would have crossed organizations is out of scope. Better Auth's reads by session token, credential id or verification identifier, and by the signed-in user's `user_id`, are the exempt reads that constitution v1.2.0 III names | PASS |
-| IV. The server decides | Suspension is refused in the API (D6). Our routes live in `routes/onboarding/` with `zValidator` and the envelope. `/api/auth/*` follows Better Auth's contract, under the amendment that lands in this PR (D18) | PASS — constitution v1.2.0 gives `/api/auth/*` to Better Auth |
+| III. Tenant isolation | New tables are scoped through `user_id` (D4). Codes, counters and passkeys are keyed by user or by globally unique keys. `organizationId`, `role` and `status` are `input: false` on Better Auth's routes (D2). The admin restore that would have crossed organizations is out of scope. Better Auth's reads by session token, credential id or verification identifier, and by the signed-in user's `user_id`, are the exempt reads that constitution v1.2.1 III names | PASS |
+| IV. The server decides | Suspension is refused in the API (D6). Our routes live in `routes/onboarding/` with `zValidator` and the envelope. `/api/auth/*` follows Better Auth's contract, under the amendment that lands in this PR (D18). No response body carries the session token: the mount strips it, and the session-reading routes are disabled (D2) | PASS — constitution v1.2.1 gives `/api/auth/*` to Better Auth and keeps the BFF |
 | V. Capacity guarded by the DB | No capacity path changes | PASS |
 | VI. Proven where enforced | Real D1, real Better Auth and real ceremonies in workerd (D17). Resend is stood in for at its origin. Every new test cites `passkey-auth US<n>`. Component tests assert axe | PASS |
 | VII. Elegant Field Minimalism | "Llave de acceso" and "código por correo". `FormSheet` and `ConfirmSheet`, no new tokens, targets of at least 48 px | PASS |

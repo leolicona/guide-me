@@ -87,9 +87,10 @@ invitation lookup also disappear until US3 (T026) and US4 (T029) restore them un
   - **Session-create hook (D6, R5)**: `databaseHooks.session.create.before` loads the user. It **throws** `APIError.from('FORBIDDEN', { code: 'ACCOUNT_SUSPENDED', message: 'Account suspended' })` when the user is suspended. When `status === 'unverified'`, it sets `status = 'active'` (FR-015).
   - **Notices (D12)**: `hooks.after = createAuthMiddleware(...)`. On `/passkey/verify-registration` or `/passkey/delete-passkey` with a successful result, it sends `sendPasskeyNoticeEmail` in the background, with errors caught (constitution VIII).
 
-  Email-and-password stays disabled; `user.changeEmail` and `user.deleteUser` stay at their disabled defaults.
+  Email-and-password stays disabled; `user.changeEmail` and `user.deleteUser` stay at their disabled defaults. Set `disabledPaths: ['/get-session', '/list-sessions']`, so the session is never readable over HTTP (D2, BFF; `auth.api.getSession` keeps working server-side).
 - [ ] T010 In `api-turistear/src/index.tsx`:
-  - replace `app.route('/api/auth', authRouter)` with `app.on(['GET', 'POST'], '/api/auth/*', (c) => getAuth(c.env).handler(c.req.raw))` (D2);
+  - replace `app.route('/api/auth', authRouter)` with `app.on(['GET', 'POST'], '/api/auth/*', ...)`, which calls `getAuth(c.env).handler(c.req.raw)` (D2);
+  - for the JSON answers of `/api/auth/sign-in/email-otp` and `/api/auth/passkey/verify-authentication`, rebuild the body without `token` and `session.token`, keeping the status and every header, `Set-Cookie` included (D2, constitution IV v1.2.1, R14);
   - keep `GET /api/me` behind `authMiddleware`.
 - [ ] T011 Rewrite `api-turistear/src/middleware/auth.ts` (D6):
   - read the session with `getAuth(c.env).api.getSession({ headers: c.req.raw.headers, returnHeaders: true })` and append its `Set-Cookie` headers to the response;
@@ -119,7 +120,8 @@ invitation lookup also disappear until US3 (T026) and US4 (T029) restore them un
   - 5 parallel requests during a renewal all answer 200 (BUG-014);
   - `POST /api/auth/sign-out` → the same cookie answers `401`;
   - `POST /api/auth/revoke-sessions` ends a second session;
-  - `POST /api/auth/update-user` with `organizationId`, `role` or `status` changes none of them (D2, constitution III).
+  - `POST /api/auth/update-user` with `organizationId`, `role` or `status` changes none of them (D2, constitution III);
+  - `GET /api/auth/get-session` and `GET /api/auth/list-sessions` answer `404` (BFF, D2).
 
   Exclude `test-session-%` rows from any count.
 
@@ -144,9 +146,9 @@ invitation lookup also disappear until US3 (T026) and US4 (T029) restore them un
   - the email states the code and "5 minutos" (FR-014);
   - the 4th send within 60 s from one IP → `429` with `X-Retry-After` (FR-012);
   - the 4th `sign-in/email-otp` within 10 s from one IP → `429` with `X-Retry-After` (FR-012; Better Auth's `/sign-in*` rule, 3 per 10 s);
-  - a successful `sign-in/email-otp` answers `{ token, user }`, with `user.email` and `user.name`: the shape `test/handlers/auth.ts` copies (constitution IV).
-- [ ] T017 [P] [US1] Create `app-turistear/src/services/authClient.ts` with `createAuthClient` from `better-auth/react`, configured with `baseURL` (`VITE_API_BASE_URL || window.location.origin`), `basePath: '/api/auth'`, `plugins: [emailOTPClient(), passkeyClient()]` and `fetchOptions: { credentials: 'include' }` (D14). Create `app-turistear/src/test/handlers/auth.ts` with MSW handlers for `email-otp/send-verification-otp`, `sign-in/email-otp` and `sign-out`, mirroring contracts/api.md, and register them in `app-turistear/src/test/server.ts`. Fixtures copy only shapes asserted in T016, T021 and T032 (constitution IV).
-- [ ] T018 [US1] Create `app-turistear/src/features/auth/hooks/useEmailCodeSignIn.ts`, with TanStack mutations over `authClient.emailOtp.sendVerificationOtp` and `authClient.signIn.emailOtp`. On success it invalidates `['me']` and navigates to the redirect or home, with the passkey offer flag set (US2). Rewrite `app-turistear/src/features/auth/hooks/useLogout.ts` to use `authClient.signOut()`.
+  - a successful `sign-in/email-otp` answers `{ user }`, with `user.email` and `user.name`, and no `token` anywhere in the body: the shape `test/handlers/auth.ts` copies (constitution IV, BFF).
+- [ ] T017 [P] [US1] Create `app-turistear/src/services/authClient.ts` with `createAuthClient` from `better-auth/react`, configured with `baseURL` (`VITE_API_BASE_URL || window.location.origin`), `basePath: '/api/auth'`, `plugins: [emailOTPClient(), passkeyClient()]` and `fetchOptions: { credentials: 'include' }` (D14). Create `app-turistear/src/test/handlers/auth.ts` with MSW handlers for `email-otp/send-verification-otp`, `sign-in/email-otp` and `sign-out`, mirroring contracts/api.md, and register them in `app-turistear/src/test/server.ts`. Fixtures copy only shapes asserted in T016, T021 and T032, never a `token` (constitution IV).
+- [ ] T018 [US1] Create `app-turistear/src/features/auth/hooks/useEmailCodeSignIn.ts`, with TanStack mutations over `authClient.emailOtp.sendVerificationOtp` and `authClient.signIn.emailOtp`. On success it invalidates `['me']` and navigates to the redirect or home, with the passkey offer flag set (US2). Rewrite `app-turistear/src/features/auth/hooks/useLogout.ts` to use `authClient.signOut()`. The app reads its user only from `/api/me` (`useMe`), never through `authClient.getSession` or `useSession`, whose routes are disabled (D2, D14).
 - [ ] T019 [US1] Create `app-turistear/src/features/auth/components/EmailCodeForm.tsx`:
   - an email step ("Recibir código");
   - a 6-digit step with `inputmode="numeric"` and `autocomplete="one-time-code"`;
@@ -174,7 +176,7 @@ invitation lookup also disappear until US3 (T026) and US4 (T029) restore them un
   - a replayed or lowered counter → refused (FR-006);
   - an assertion for another origin or `rpID` → refused (FR-003);
   - a suspended owner → `403` with no session row;
-  - `generate-authenticate-options` and `generate-register-options` answer the options shape MSW copies (`challenge`, `rpId`, `userVerification`), and `verify-authentication` answers `{ session, user }`.
+  - `generate-authenticate-options` and `generate-register-options` answer the options shape MSW copies (`challenge`, `rpId`, `userVerification`), and `verify-authentication` answers `{ session, user }`, with no `token` anywhere in the body (BFF).
 - [ ] T022 [P] [US2] Add MSW handlers for `passkey/generate-authenticate-options`, `passkey/verify-authentication`, `passkey/generate-register-options` and `passkey/verify-registration` to `app-turistear/src/test/handlers/auth.ts`. Fixtures copy only shapes asserted in T016, T021 and T032 (constitution IV).
 - [ ] T023 [US2] Create `app-turistear/src/features/auth/components/PasskeySignInButton.tsx` ("Entrar con llave de acceso", primary, 48 px). It calls `authClient.signIn.passkey()` and is placed above `EmailCodeForm` in `SignInScreen.tsx`. Enable conditional UI on the email input (`autocomplete="username webauthn"`, `signIn.passkey({ autoFill: true })`) when `PublicKeyCredential.isConditionalMediationAvailable()` resolves true. Hide it when `typeof PublicKeyCredential !== 'function'`. A user cancel returns silently, and `PASSKEY_NOT_FOUND` offers the email code.
 - [ ] T024 [US2] Create `app-turistear/src/features/auth/components/PasskeyOffer.tsx`, the offer (FR-007, SC-008):
@@ -300,8 +302,8 @@ invitation lookup also disappear until US3 (T026) and US4 (T029) restore them un
   - sign in each account through the browser with CDP `WebAuthn.addVirtualAuthenticator` and `WebAuthn.addCredential`, from the `E2E_AGENT_PASSKEY` and `E2E_ADMIN_PASSKEY` JSON secrets, then save `storageState`;
   - add `app-turistear/e2e/enroll-passkey.ts`, run once per account against dev;
   - update `app-turistear/e2e/README.md` and `.github/workflows/e2e.yml`, replacing `E2E_*_PASSWORD` with `E2E_*_PASSKEY`.
-- [x] T043 Amend the constitution with `/speckit-constitution` (v1.1.1 → v1.2.0, MINOR), exactly as plan D18 lists. Done 2026-10-07 (`f8ff722`), before implementation:
-  - Principle IV: `/api/auth/*` belongs to Better Auth; the cookie and the token echo;
+- [x] T043 Amend the constitution with `/speckit-constitution` (v1.1.1 → v1.2.0, MINOR), exactly as plan D18 lists. Done 2026-10-07, before implementation: v1.2.0 (`f8ff722`), then v1.2.1 (`ca7b582`), which keeps the BFF:
+  - Principle IV: `/api/auth/*` belongs to Better Auth; the cookie, and no token in any body (v1.2.1);
   - Principle VI: the stand-in leaves and the secret is pinned;
   - Principle VIII: Agnostic Auth out, Resend on the sign-in path;
   - the stack table: the "Auth" row and `nodejs_als`.

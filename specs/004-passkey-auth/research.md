@@ -190,6 +190,30 @@ Paths like `dist/…` refer to those tarballs.
 - **Rationale**: SimpleWebAuthn verifies with WebCrypto, which workerd provides. App tests mock
   `navigator.credentials` at the platform boundary and serve Better Auth's endpoints from MSW.
 
+## R14 — Keep the BFF: no token in any body (D2)
+
+- **Decision**: `disabledPaths: ['/get-session', '/list-sessions']`. The mount in `src/index.tsx`
+  removes `token` and `session.token` from the JSON answers of `/sign-in/email-otp` and
+  `/passkey/verify-authentication`, keeping their status and headers.
+- **Rationale**: Better Auth 1.7.7 echoes the session token in these places:
+  - `signInEmailOTP` answers `{ token, user }` (`email-otp/routes.mjs:428, 444`);
+  - the passkey sign-in answers `{ session, user }`, with the session's token
+    (`passkey/dist/index.mjs:504–511`);
+  - `/get-session` and `/list-sessions` serialise the session through `parseSessionOutput`, and the
+    session model does not mark `token` as hidden (`core/db/get-tables.mjs:105–109`).
+
+  An HttpOnly cookie keeps a script in the page from reading the session. A token in a body undoes
+  that. `disabledPaths` is checked only by the HTTP router (`api/index.mjs:166–168`), so the
+  middleware's `auth.api.getSession` keeps working. The app reads its user from `/api/me`.
+- **Alternatives**:
+  - Accepting the echo with "the app never reads it" (constitution v1.2.0). Rejected by the
+    developer on 2026-10-07: that is discipline, not protection.
+  - Rewriting the bodies in a Better Auth `hooks.after`. Rejected: the filter at the mount is a few
+    lines and depends on no Better Auth internals.
+
+  A test asserts that no `/api/auth/*` answer carries a token, so an upgrade that changes the shapes
+  fails CI instead of silently re-exposing it.
+
 ## Withdrawn
 
 These were withdrawn on 2026-10-07, when the developer chose Better Auth's standards:
