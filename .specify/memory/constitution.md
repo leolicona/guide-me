@@ -1,26 +1,54 @@
 <!--
-Sync Impact Report (v1.1.1, 2026-10-06)
-- Version change: 1.1.0 → 1.1.1 — PATCH. One sentence of Principle III
-  described a guard for user rows stored with the retired `affiliate` role.
-  Migration 0070 deletes the last such rows and the guard leaves the code
-  (specs/003-delete-legacy-affiliates D5, D8). The rule that still governs,
-  "two roles, admin and agent", is unchanged, so no principle or binding
-  guidance is removed or redefined.
+Sync Impact Report (v1.2.0, 2026-10-07)
+- Version change: 1.1.1 → 1.2.0 — MINOR. Authentication moves from Agnostic
+  Auth to Better Auth used the standard way (specs/004-passkey-auth, plan D18).
+  Principle IV gains a scoped exception: `/api/auth/*` follows Better Auth's
+  contract, and every other route keeps the rule unchanged. No principle is
+  removed, renumbered or redefined, and the server still decides, so this is
+  materially expanded guidance rather than a MAJOR change.
 - Modified sections (titles unchanged):
-  · III. Tenant Isolation — the authorization bullet loses "a user row stored
-    with any other role (the retired `affiliate`) is refused at authentication
-    (`retire-affiliates D3`)".
+  · III. Tenant Isolation:
+    - Better Auth's tenant fields are declared `input: false`.
+    - Its lookups by a globally unique key, and its reads of the signed-in
+      user's own rows, join the exempt reads (specs/004-passkey-auth
+      /speckit-analyze, finding M2).
+  · IV. The Server Decides:
+    - Sessions are Better Auth's: one HttpOnly cookie per environment
+      prefix. Its sign-in answers may echo the token, which the app never
+      reads (this replaces "gm_access/gm_refresh … never returned in a
+      body").
+    - `/api/auth/*` is Better Auth's handler, with its own validation,
+      `{ code, message }` and success shapes.
+    - Codes the app branches on are still declared in the spec.
+    - MSW mirrors Better Auth's client under the same fixture rule (finding
+      M1).
+  · VI. A Rule Is Proven Where It Is Enforced:
+    - The `AGNOSTIC_AUTH_API` stand-in leaves, and the test config pins
+      `BETTER_AUTH_SECRET`.
+    - Better Auth runs for real; ceremonies come from a software
+      authenticator.
+  · VIII. A Service We Do Not Own Never Undoes a Sale:
+    - Agnostic Auth leaves the list.
+    - Resend's place on the sign-in path, and what breaks when it is down,
+      are recorded.
+    - The signing secrets are named.
+  · Technology Stack & Constraints: the Runtime row adds `nodejs_als`, and the
+    Auth row becomes Better Auth.
 - Added sections: none. Removed sections: none.
 - Templates: .specify/templates/plan-template.md ✅, spec-template.md ✅,
-  tasks-template.md ✅, checklist-template.md ✅ — none names a role; no
-  template changed.
+  tasks-template.md ✅, checklist-template.md ✅. None names an auth
+  provider, so no template changed.
 - Follow-up TODOs:
-  · TODO(AFFILIATE-TABLES) — resolved:
-    - specs/002-drop-affiliate-tables (#155, released in #157) dropped the
-      four tables and six columns;
-    - specs/003-delete-legacy-affiliates deletes the last affiliate users.
-    Debt `.specify/debt/affiliate-tables/` closes with `/speckit-debt-pay`
-    once 003 is deployed to production.
+  · The code catches up in the same pull request (specs/004-passkey-auth,
+    Governance: "lands in the pull request that needs it"). On this branch the
+    text leads the code until the feature's tasks complete. `develop` keeps
+    v1.1.1 until that PR merges.
+  · TODO(PASSWORD-MATERIAL): `users.password_hash`, `users.password_salt` and
+    `password_reset_tokens` stay in D1, unread, until the deploy that follows
+    cutover (specs/004-passkey-auth D15). They are registered as debt at
+    implementation.
+  · CLAUDE.md still describes Agnostic Auth and the old local-login caveat;
+    specs/004-passkey-auth T044 rewrites it.
   · Carried from v1.0.0, still open: TODO(CONTRACT-MIRROR),
     TODO(TOKEN-FALLBACKS), TODO(EMAIL-PALETTE), TODO(TEST-CITATIONS),
     TODO(DESIGN-FOUNDATIONS), and the archived TECH_DEBT.md items to
@@ -108,12 +136,17 @@ reconstruct — instead of testing for each one.
   transitively (through `user_id`, say) says so in its migration.
 - `organization_id` comes only from the authenticated actor
   (`c.var.user.organizationId`, set by `authMiddleware`) — never from a body,
-  a query parameter or a path. A Zod request schema MUST NOT declare it.
+  a query parameter or a path. A Zod request schema MUST NOT declare it. On
+  Better Auth's routes (`/api/auth/*`) the user's `organization_id`, `role` and
+  `status` are declared `input: false`, so no request can set them.
 - Every SELECT filters by the actor's organization; every INSERT sets it from
   context; every UPDATE and DELETE carries the organization filter beside the
   id, so another organization's row matches nothing and the handler answers
   `404`. The only exempt reads are lookups by a globally unique key
-  (`users.email`, `invitations.token`).
+  (`users.email`, `invitations.token`, and Better Auth's own: a session token,
+  a passkey credential id, a verification identifier) and Better Auth's reads
+  of the signed-in user's own rows by `user_id`, which is narrower than the
+  organization.
 - Every new tenant-scoped route ships cross-org isolation tests built on
   `seedTwoOrgs` (`api-turistear/test/helpers/tenancy.ts`). Isolation is
   proven in the API; a frontend test never satisfies this rule.
@@ -132,24 +165,38 @@ it keep isolation auditable with grep.
   discounts, commissions, the cancellation ladder, apartado expiry, payment
   verification. The frontend may mirror a rule for fast feedback; a rule only
   the frontend enforces is not a rule.
-- The UI talks only to `api-turistear` and never holds a credential. Sessions
-  live in HttpOnly cookies on `.turistearya.com` (`gm_access`; `gm_refresh`,
-  restricted to `/api/auth/refresh`), every request is sent with
-  `credentials: 'include'`, and the tokens Agnostic Auth issues are written
-  as cookies by the API, never returned in a body.
+- The UI talks only to `api-turistear` and never holds a credential.
+  - The session is a Better Auth session issued by the API.
+  - It lives in one HttpOnly, Secure cookie on `.turistearya.com`:
+    `__Secure-<AUTH_COOKIE_PREFIX>.session_token`, with a prefix per
+    environment.
+  - Every request is sent with `credentials: 'include'`.
+  - Better Auth's sign-in answers may echo the session token in their body.
+    The app never reads, stores or sends it; the cookie alone
+    authenticates.
 - Every route lives in `src/routes/<resource>/`: `index.ts` is the router
   (middleware, `zValidator`, wiring, nothing else), `handler.ts` holds the
   logic, `schema.ts` holds the Zod schemas. Input is validated before a
   handler runs.
+- The one exception is `/api/auth/*`: Better Auth's handler, mounted in
+  `src/index.tsx` and configured in `src/auth/`. It validates its own input.
+  Whatever Better Auth does not know — an organization, an invitation — is a
+  route of ours under the rule above (`/api/onboarding/*`).
 - A failure answers `{ error: { code, message } }` through `ApiError` and the
   error handler, with a `SCREAMING_SNAKE` code declared in the spec before it
   exists in code. Clients branch on `code`, never on `message`. A success
   answers the resource under a named key (`{ folio }`, `{ services }`).
+- On `/api/auth/*`, failures (`{ code, message }`) and success shapes are
+  Better Auth's. The spec still declares every Better Auth code the app
+  branches on, and clients still branch on `code`.
 - Until a shared contracts package exists (TODO(CONTRACT-MIRROR)), the
   frontend's mirror of a response (`features/*/types.ts`) is held by
   discipline: MSW handlers mirror `services/<resource>Service.ts` one to one,
-  and their fixtures copy shapes an API test asserts. A fixture no API test
-  would produce is a fiction.
+  and their fixtures copy shapes an API test asserts.
+- For `/api/auth/*` the app calls Better Auth's client
+  (`services/authClient.ts`). MSW mirrors exactly the endpoints it calls,
+  under the same fixture rule. A fixture no API test would produce is a
+  fiction.
 - QR tickets are signed by the server (HMAC-SHA256, with a per-organization
   key derived from `QR_SECRET`) and validated online against it. No two
   environments share a `QR_SECRET`.
@@ -182,9 +229,11 @@ at a time.
 - API tests run in workerd (`@cloudflare/vitest-pool-workers`) against a real
   local D1, with every migration applied and storage isolated per test — no
   database mocks. Services we do not own are stood in for at their boundary
-  (the `AGNOSTIC_AUTH_API` binding, Resend's origin), and the test config pins
-  their keys so `.dev.vars` can never leak into a suite. Business rules and
-  cross-org isolation are proven here.
+  (Resend's origin), and the test config pins their keys and
+  `BETTER_AUTH_SECRET` so `.dev.vars` can never leak into a suite. Better Auth
+  runs for real; a passkey ceremony comes from a software authenticator, never
+  from stubbing its verifier. Business rules and cross-org isolation are
+  proven here.
 - App tests are co-located (`<module>.test.ts`, `<Component>.test.tsx`), run
   on jsdom with Testing Library and MSW (`onUnhandledRequest: 'error'`),
   render through `renderWithProviders`, and query by role and accessible
@@ -253,16 +302,18 @@ once. Every rule here prevents one way that glance goes wrong.
 ### VIII. A Service We Do Not Own Never Undoes a Sale
 
 - Each service we do not own is reached through one module or binding:
-  Agnostic Auth (the `AGNOSTIC_AUTH_API` service binding), Resend (email,
-  `services/resend.ts`), api.qrserver.com (the QR image only; the signature
-  is ours) and WhatsApp (an agent-sent `wa.me` link). A spec that adds one
-  records its contract and what breaks when it is down.
+  Resend (email, `services/resend.ts`), api.qrserver.com (the QR image only;
+  the signature is ours) and WhatsApp (an agent-sent `wa.me` link). A spec
+  that adds one records its contract and what breaks when it is down.
+- Resend also carries the email sign-in code, sent in the background. When it
+  is down, a user with a passkey or a live session is unaffected, and a code
+  does not arrive (specs/004-passkey-auth).
 - A notification never sits inside a money write. It is sent after the write
   succeeds, under `waitUntil`, with its failure caught, so a provider outage
   never rolls back a sale, a payment or a cancellation.
 - Secrets live in each environment's Worker secrets and in GitHub
   environments, never in the repo (`.dev.vars` is ignored), and no two
-  environments share a signing secret.
+  environments share a signing secret (`QR_SECRET`, `BETTER_AUTH_SECRET`).
 
 Rationale: the sale is the fact and the receipt is a courtesy. A ticket can be
 sent again; a sale that vanished because an email bounced cannot be sold
@@ -275,10 +326,10 @@ Complexity Tracking.
 
 | Layer | Convention |
 | --- | --- |
-| Runtime | Cloudflare Workers, `compatibility_date` 2025-08-03. The API's one cron trigger (`*/15 * * * *`) runs the bookings auto-expiry sweep |
+| Runtime | Cloudflare Workers, `compatibility_date` 2025-08-03, compatibility flag `nodejs_als` (Better Auth's request context). The API's one cron trigger (`*/15 * * * *`) runs the bookings auto-expiry sweep |
 | API | `api-turistear`: Hono 4 + `@hono/zod-validator` (Zod 4), JSX through `hono/jsx`, built and served by Vite 6 with `@cloudflare/vite-plugin` and `vite-ssr-components`. Middleware in `src/middleware/`, helpers in `src/utils/`, providers in `src/services/` |
 | Data | Cloudflare D1 through Drizzle ORM (`sqlite`); migrations `NNNN_snake_case.sql` in `api-turistear/migrations/`, applied with `wrangler d1 migrations` |
-| Auth | Agnostic Auth over the `AGNOSTIC_AUTH_API` service binding (app id `guide-me`); HttpOnly session cookies on `.turistearya.com` |
+| Auth | Better Auth 1.7.7 inside the API Worker; its handler owns `/api/auth/*`. Passkeys (WebAuthn/FIDO2, `@better-auth/passkey`) are the primary sign-in and a 6-digit email code (`emailOTP`) is the backup. Database sessions in D1 (7 days, renewed by use); one HttpOnly session cookie on `.turistearya.com` |
 | Frontend | `app-turistear`: React 19, Vite 8, MUI 9 (`cssVariables: true`), TanStack Query 5, Zustand 5, React Hook Form 7 + Zod 4, React Router 7; served as a Worker. Layers: `pages/` (route assembly only) · `layout/` · `components/` (shared primitives) · `features/<Name>/{components,hooks,types.ts,index.ts}` · `store/` · `services/` · `styles/` · `config/` |
 | Language | TypeScript, ESM; Node 22; pnpm workspace (pnpm 10 in CI) |
 | Tests | Vitest 4 — `@cloudflare/vitest-pool-workers` for the API; jsdom, Testing Library, MSW 2 and axe-core for the app; Playwright 1.62 for journeys |
@@ -347,4 +398,4 @@ Additional constraints:
 - The developer decides. When a principle blocks a feature, the plan says so
   and proposes the amendment; it does not route around it.
 
-**Version**: 1.1.1 | **Ratified**: 2026-10-04 | **Last Amended**: 2026-10-06
+**Version**: 1.2.0 | **Ratified**: 2026-10-04 | **Last Amended**: 2026-10-07
