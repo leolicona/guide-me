@@ -4,9 +4,7 @@
 export interface CommissionReportRow {
   seller_id: string
   name: string
-  // retire-affiliates D6 — the seller's STORED role: a seller still stored with a retired role keeps
-  // their row, so this is not narrowed to the roles the product has today.
-  role: string
+  role: 'admin' | 'agent'
   folios_sold: number
   sales_total: number
   cash_collected: number

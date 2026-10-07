@@ -1,29 +1,26 @@
 <!--
-Sync Impact Report (v1.1.0, 2026-10-06)
-- Version change: 1.0.0 → 1.1.0 — MINOR. The affiliate role and its shift
-  operators are retired (specs/001-retire-affiliates). Guidance that named
-  them changes materially; no principle is removed or redefined, and
-  Principle III's isolation rule is untouched — hence not MAJOR.
+Sync Impact Report (v1.1.1, 2026-10-06)
+- Version change: 1.1.0 → 1.1.1 — PATCH. One sentence of Principle III
+  described a guard for user rows stored with the retired `affiliate` role.
+  Migration 0070 deletes the last such rows and the guard leaves the code
+  (specs/003-delete-legacy-affiliates D5, D8). The rule that still governs,
+  "two roles, admin and agent", is unchanged, so no principle or binding
+  guidance is removed or redefined.
 - Modified sections (titles unchanged):
-  · Preamble — the sellers are an organization's agents; affiliates (hotels,
-    travel agencies) and their shift cashiers are gone.
-  · III. Tenant Isolation — the authorization bullet names two roles, admin
-    and agent; a user row stored with a retired role is refused at
-    authentication (retire-affiliates D3). The `affiliate` and shift
-    `operator` sentences are removed.
-  · IV. The Server Decides — `gm_op` leaves the session-cookie list
-    (retire-affiliates D4).
-  · Technology Stack & Constraints — the Auth row loses "shift operators by
-    signed link + 4-digit PIN".
+  · III. Tenant Isolation — the authorization bullet loses "a user row stored
+    with any other role (the retired `affiliate`) is refused at authentication
+    (`retire-affiliates D3`)".
 - Added sections: none. Removed sections: none.
 - Templates: .specify/templates/plan-template.md ✅, spec-template.md ✅,
   tasks-template.md ✅, checklist-template.md ✅ — none names a role; no
   template changed.
 - Follow-up TODOs:
-  · TODO(AFFILIATE-TABLES): the retired tables (affiliate_companies,
-    affiliate_commissions, affiliate_invitations, affiliate_operators) and six
-    nullable columns stay in D1, unmapped (retire-affiliates D1/D2);
-    registered as debt `.specify/debt/affiliate-tables/`.
+  · TODO(AFFILIATE-TABLES) — resolved:
+    - specs/002-drop-affiliate-tables (#155, released in #157) dropped the
+      four tables and six columns;
+    - specs/003-delete-legacy-affiliates deletes the last affiliate users.
+    Debt `.specify/debt/affiliate-tables/` closes with `/speckit-debt-pay`
+    once 003 is deployed to production.
   · Carried from v1.0.0, still open: TODO(CONTRACT-MIRROR),
     TODO(TOKEN-FALLBACKS), TODO(EMAIL-PALETTE), TODO(TEST-CITATIONS),
     TODO(DESIGN-FOUNDATIONS), and the archived TECH_DEBT.md items to
@@ -122,10 +119,8 @@ reconstruct — instead of testing for each one.
   proven in the API; a frontend test never satisfies this rule.
 - Authorization is enforced in the API, by `requireRole(...)` and by the
   scope of each query. An `agent` sees and sells only its organization's
-  services. The product has two roles, `admin` and `agent`; a user row stored
-  with any other role (the retired `affiliate`) is refused at authentication
-  (`retire-affiliates D3`). Hiding a button is presentation, never
-  authorization.
+  services. The product has two roles, `admin` and `agent`. Hiding a button
+  is presentation, never authorization.
 
 Rationale: in a shared schema a missing filter leaks another business's sales
 and cash silently — nothing errors. One way to scope and one helper to prove
@@ -352,4 +347,4 @@ Additional constraints:
 - The developer decides. When a principle blocks a feature, the plan says so
   and proposes the amendment; it does not route around it.
 
-**Version**: 1.1.0 | **Ratified**: 2026-10-04 | **Last Amended**: 2026-10-06
+**Version**: 1.1.1 | **Ratified**: 2026-10-04 | **Last Amended**: 2026-10-06
