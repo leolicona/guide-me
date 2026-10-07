@@ -2,7 +2,7 @@
 
 **Purpose**: Validate specification completeness and quality before proceeding to planning
 **Created**: 2026-10-06
-**Feature**: [spec.md](../spec.md)
+**Feature**: [spec.md](../spec.md) · **Folder**: `specs/004-passkey-auth/` (renumbered from 003 on 2026-10-07, because `develop` holds `003-delete-legacy-affiliates`)
 
 ## Content Quality
 
@@ -48,6 +48,15 @@
   - Two constitution decisions go to the plan: Principle IV's route structure and error envelope, and the stack row with the `nodejs_compat` flag.
 
   All items still pass.
+- Iteration 5 (2026-10-07): `/speckit-analyze` found the spec number (003), the migration number (0070) and the retired-role guard stale against `develop`, which had merged #158 and #159. The developer then chose **Better Auth's standards**, and the spec was rewritten accordingly:
+  - The llave de acceso is **optional**: offered after an email-code sign-in, and never forced. This supersedes iterations 2–4.
+  - Better Auth's defaults apply: codes last 5 minutes with 3 attempts, sessions last 7 days, and its fresh-session rule and rate limiter are used.
+  - `/api/auth/*` is served by Better Auth's handler, with its format and codes; constitution IV is amended in the PR.
+  - The admin "restore access" story (US6) is out of scope (constitution III).
+  - The retired-role refusal is gone (`delete-legacy-affiliates` D5, D8).
+  - The folder is now `specs/004-passkey-auth`, and the migration is `0071`.
+
+  All items pass. The library is still named only in Clarifications, Assumptions and FR-070, which states its route ownership and codes as a contract.
 - Some references to the code base and the constitution are deliberate, not leaked implementation. The constitution requires them:
   - The scope boundary names test suites and the shared session helper, because Principle I requires a mechanical test.
   - The error codes are declared in FR-070, because Principle IV says they must exist in the spec before they exist in code.
