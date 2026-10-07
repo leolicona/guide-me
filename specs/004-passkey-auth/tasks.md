@@ -139,8 +139,10 @@ sign-in works only through Better Auth, so land Phase 2 together with US1.
   - suspended → `403 ACCOUNT_SUSPENDED` and no session row (fixture rows excluded);
   - `verifications.value` does not contain the code (FR-016);
   - the email states the code and "5 minutos" (FR-014);
-  - the 4th send within 60 s from one IP → `429` with `X-Retry-After` (FR-012).
-- [ ] T017 [P] [US1] Create `app-turistear/src/services/authClient.ts` with `createAuthClient` from `better-auth/react`, configured with `baseURL` (`VITE_API_BASE_URL || window.location.origin`), `basePath: '/api/auth'`, `plugins: [emailOTPClient(), passkeyClient()]` and `fetchOptions: { credentials: 'include' }` (D14). Create `app-turistear/src/test/handlers/auth.ts` with MSW handlers for `email-otp/send-verification-otp`, `sign-in/email-otp` and `sign-out`, mirroring contracts/api.md, and register them in `app-turistear/src/test/server.ts`.
+  - the 4th send within 60 s from one IP → `429` with `X-Retry-After` (FR-012);
+  - the 4th `sign-in/email-otp` within 10 s from one IP → `429` with `X-Retry-After` (FR-012; Better Auth's `/sign-in*` rule, 3 per 10 s);
+  - a successful `sign-in/email-otp` answers `{ token, user }`, with `user.email` and `user.name`: the shape `test/handlers/auth.ts` copies (constitution IV).
+- [ ] T017 [P] [US1] Create `app-turistear/src/services/authClient.ts` with `createAuthClient` from `better-auth/react`, configured with `baseURL` (`VITE_API_BASE_URL || window.location.origin`), `basePath: '/api/auth'`, `plugins: [emailOTPClient(), passkeyClient()]` and `fetchOptions: { credentials: 'include' }` (D14). Create `app-turistear/src/test/handlers/auth.ts` with MSW handlers for `email-otp/send-verification-otp`, `sign-in/email-otp` and `sign-out`, mirroring contracts/api.md, and register them in `app-turistear/src/test/server.ts`. Fixtures copy only shapes asserted in T016, T021 and T032 (constitution IV).
 - [ ] T018 [US1] Create `app-turistear/src/features/auth/hooks/useEmailCodeSignIn.ts`, with TanStack mutations over `authClient.emailOtp.sendVerificationOtp` and `authClient.signIn.emailOtp`. On success it invalidates `['me']` and navigates to the redirect or home, with the passkey offer flag set (US2). Rewrite `app-turistear/src/features/auth/hooks/useLogout.ts` to use `authClient.signOut()`.
 - [ ] T019 [US1] Create `app-turistear/src/features/auth/components/EmailCodeForm.tsx`:
   - an email step ("Recibir código");
@@ -168,8 +170,9 @@ sign-in works only through Better Auth, so land Phase 2 together with US1.
   - a removed credential → `401 PASSKEY_NOT_FOUND`;
   - a replayed or lowered counter → refused (FR-006);
   - an assertion for another origin or `rpID` → refused (FR-003);
-  - a suspended owner → `403` with no session row.
-- [ ] T022 [P] [US2] Add MSW handlers for `passkey/generate-authenticate-options`, `passkey/verify-authentication`, `passkey/generate-register-options` and `passkey/verify-registration` to `app-turistear/src/test/handlers/auth.ts`.
+  - a suspended owner → `403` with no session row;
+  - `generate-authenticate-options` and `generate-register-options` answer the options shape MSW copies (`challenge`, `rpId`, `userVerification`), and `verify-authentication` answers `{ session, user }`.
+- [ ] T022 [P] [US2] Add MSW handlers for `passkey/generate-authenticate-options`, `passkey/verify-authentication`, `passkey/generate-register-options` and `passkey/verify-registration` to `app-turistear/src/test/handlers/auth.ts`. Fixtures copy only shapes asserted in T016, T021 and T032 (constitution IV).
 - [ ] T023 [US2] Create `app-turistear/src/features/auth/components/PasskeySignInButton.tsx` ("Entrar con llave de acceso", primary, 48 px). It calls `authClient.signIn.passkey()` and is placed above `EmailCodeForm` in `SignInScreen.tsx`. Enable conditional UI on the email input (`autocomplete="username webauthn"`, `signIn.passkey({ autoFill: true })`) when `PublicKeyCredential.isConditionalMediationAvailable()` resolves true. Hide it when `typeof PublicKeyCredential !== 'function'`. A user cancel returns silently, and `PASSKEY_NOT_FOUND` offers the email code.
 - [ ] T024 [US2] Create `app-turistear/src/features/auth/components/PasskeyOffer.tsx`, the offer (FR-007, SC-008):
   - it opens in a `BottomSheet` after an email-code sign-in when `typeof PublicKeyCredential === 'function'`;
@@ -244,11 +247,12 @@ sign-in works only through Better Auth, so land Phase 2 together with US1.
 
 - [ ] T032 [US5] Write `api-turistear/test/auth/passkey-management.test.ts`, citing `passkey-auth US5`, covering Story 5, scenarios 1–5:
   - `list-user-passkeys` returns name and creation date;
-  - `update-passkey` renames only the user's own (another user's id → refused);
+  - with `seedTwoOrgs`, `update-passkey` and `delete-passkey` using the id of a passkey owned by the other organization's user are refused and change nothing (constitution III); the user's own is renamed;
   - `delete-passkey` removes it, after which it no longer signs in, and removing the last one is allowed;
   - add and delete each send a notice, and a Resend failure does not undo the change;
-  - `revoke-sessions` ends a second session.
-- [ ] T033 [P] [US5] Add MSW handlers for `passkey/list-user-passkeys`, `passkey/update-passkey`, `passkey/delete-passkey` and `revoke-sessions` to `app-turistear/src/test/handlers/auth.ts`.
+  - `revoke-sessions` ends a second session;
+  - `list-user-passkeys` answers an array of `{ id, name, createdAt, deviceType, backedUp }`.
+- [ ] T033 [P] [US5] Add MSW handlers for `passkey/list-user-passkeys`, `passkey/update-passkey`, `passkey/delete-passkey` and `revoke-sessions` to `app-turistear/src/test/handlers/auth.ts`. Fixtures copy only shapes asserted in T016, T021 and T032 (constitution IV).
 - [ ] T034 [US5] Create the security surface in `app-turistear/src/features/auth/components/` and `app-turistear/src/pages/SecurityPage.tsx`:
   - **`PasskeyList.tsx`**: `SectionCard` rows with the name, "Creada <fecha>", and a synced or security-key icon paired with text.
   - **`RenamePasskeySheet.tsx`** (`FormSheet`).
@@ -275,7 +279,7 @@ sign-in works only through Better Auth, so land Phase 2 together with US1.
   - the password schemas and their tests;
   - `login`, `verify`, `forgotPassword`, `resetPassword` and the old invite calls in `services/authService.ts`;
   - the matching exports from `features/auth/index.ts`.
-- [ ] T038 Create `app-turistear/src/features/auth/components/LegacyLinkNotice.tsx` ("Ya no usamos contraseñas. Entra con tu llave de acceso o con un código por correo.", with a button to `ROUTES.LOGIN`) and `app-turistear/src/pages/LegacyLinkPage.tsx`. Route `ROUTES.VERIFY`, `ROUTES.FORGOT_PASSWORD` and `ROUTES.RESET_PASSWORD` to it in `app-turistear/src/App.tsx` (FR-063). Add a component test citing `passkey-auth FR-063`, with axe.
+- [ ] T038 Create `app-turistear/src/features/auth/components/LegacyLinkNotice.tsx` ("Ya no usamos contraseñas. Entra con tu llave de acceso o con un código por correo.", with a button to `ROUTES.LOGIN`) and `app-turistear/src/pages/LegacyLinkPage.tsx`. Route `ROUTES.VERIFY`, `ROUTES.FORGOT_PASSWORD` and `ROUTES.RESET_PASSWORD` to it in `app-turistear/src/App.tsx` (FR-063). Add a component test citing `passkey-auth US1` (scenario 9), with axe.
 - [ ] T039 Remove Agnostic Auth from `api-turistear/wrangler.jsonc`, `api-turistear/vitest.config.ts`, `api-turistear/src/bindings.d.ts` and `api-turistear/.dev.vars.example` (FR-062, SC-003):
   - delete the `AGNOSTIC_AUTH_API` service binding, `AGNOSTIC_AUTH_APP_ID`, `DEV_AUTH_SERVICE_URL` and `SESSION_REFRESH_TTL_SECONDS` from all three profiles, plus the "Shared auth realm" comment;
   - delete the stand-in and the keys from the vitest config;
@@ -289,7 +293,7 @@ sign-in works only through Better Auth, so land Phase 2 together with US1.
   - sign in each account through the browser with CDP `WebAuthn.addVirtualAuthenticator` and `WebAuthn.addCredential`, from the `E2E_AGENT_PASSKEY` and `E2E_ADMIN_PASSKEY` JSON secrets, then save `storageState`;
   - add `app-turistear/e2e/enroll-passkey.ts`, run once per account against dev;
   - update `app-turistear/e2e/README.md` and `.github/workflows/e2e.yml`, replacing `E2E_*_PASSWORD` with `E2E_*_PASSKEY`.
-- [ ] T043 Amend the constitution with `/speckit-constitution` (v1.1.1 → v1.2.0, MINOR), exactly as plan D18 lists:
+- [x] T043 Amend the constitution with `/speckit-constitution` (v1.1.1 → v1.2.0, MINOR), exactly as plan D18 lists. Done 2026-10-07 (`f8ff722`), before implementation:
   - Principle IV: `/api/auth/*` belongs to Better Auth; the cookie and the token echo;
   - Principle VI: the stand-in leaves and the secret is pinned;
   - Principle VIII: Agnostic Auth out, Resend on the sign-in path;

@@ -80,6 +80,7 @@ A staff member (admin or agent) who has no llave de acceso at hand types their e
 6. **Given** an admin who registered but never verified their email, **When** they sign in with an email code, **Then** their email counts as verified and the account becomes active.
 7. **Given** a suspended account, **When** its user enters a correct code, **Then** sign-in is refused with the suspended-account message, as today.
 8. **Given** a signed-in user, **When** they sign out, **Then** that session ends on the server, and its cookie cannot be replayed.
+9. **Given** a verification or password-reset link sent before cutover, **When** it is opened, **Then** a page explains that passwords are gone and offers the email code.
 
 ---
 
@@ -288,7 +289,7 @@ This feature changes how admins and agents prove who they are. Nothing about wha
   - Limits are per client address, not per email.
   - The session cookie, codes and the passkey table follow its schema.
 - **End-to-end journeys**: `app-turistear/e2e/setup/auth.setup.ts` signs in with a password today. It moves to the new sign-in, using a virtual authenticator.
-- **The constitution must be amended in the same pull request** (`/speckit-constitution`, v1.1.1 → v1.2.0, MINOR). The amendment covers:
+- **The constitution was amended to v1.2.0 in this pull request** (`/speckit-constitution`, 2026-10-07, MINOR). The amendment covers:
   - **Principle IV**: `/api/auth/*` is served by Better Auth's handler, with its validation, its `{ code, message }` format and its codes. Every other route keeps the `routes/<resource>/` rule and the `ApiError` envelope. Session cookies are Better Auth's, still HttpOnly on `.turistearya.com`. Its sign-in answers may echo the token in the body; the app never reads it.
   - **Principle VI**: the `AGNOSTIC_AUTH_API` stand-in leaves.
   - **Principle VIII**: Agnostic Auth leaves the list of services we do not own, and Resend's place on the sign-in path is recorded.

@@ -57,6 +57,15 @@
   - The folder is now `specs/004-passkey-auth`, and the migration is `0071`.
 
   All items pass. The library is still named only in Clarifications, Assumptions and FR-070, which states its route ownership and codes as a contract.
+- Iteration 6 (2026-10-07): applied the remediation from `/speckit-analyze`.
+  - C1: the constitution was amended to v1.2.0 (`f8ff722`) before implementation; the plan, spec and T043 record it.
+  - C2: Story 1 gained scenario 9 (old links), which T038's test now cites.
+  - M1: the API tests pin the response shapes that MSW copies.
+  - M2: the exempt reads are named in the plan's row III.
+  - M3: passkey rename and delete are tested across organizations with `seedTwoOrgs`.
+  - M4: the sign-in attempt limit is tested.
+
+  All items pass.
 - Some references to the code base and the constitution are deliberate, not leaked implementation. The constitution requires them:
   - The scope boundary names test suites and the shared session helper, because Principle I requires a mechanical test.
   - The error codes are declared in FR-070, because Principle IV says they must exist in the spec before they exist in code.
