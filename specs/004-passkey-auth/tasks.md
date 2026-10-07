@@ -56,8 +56,10 @@ description: "Task list for passkey sign-in with email code backup, on Better Au
 
 ## Phase 2: Foundational (blocking prerequisites)
 
-**⚠️ Note**: T010 unmounts the old password routes and T011 stops reading `gm_access`. From there,
-sign-in works only through Better Auth, so land Phase 2 together with US1.
+**⚠️ Note**: T010 unmounts every old `/api/auth` route and T011 stops reading `gm_access`. From there,
+sign-in works only through Better Auth, so land Phase 2 together with US1. Registration and the
+invitation lookup also disappear until US3 (T026) and US4 (T029) restore them under
+`/api/onboarding/*`. Everything ships in one PR, so nothing is deployed in between.
 
 - [ ] T006 Write `api-turistear/migrations/0071_better_auth.sql` (D16; use the next free number if `develop` has moved). Follow data-model.md exactly:
   - the tables `sessions`, `accounts`, `verifications`, `passkeys` and `rate_limits`, with `ON DELETE CASCADE` on every `user_id`, and their indexes;
@@ -112,6 +114,7 @@ sign-in works only through Better Auth, so land Phase 2 together with US1.
   - a `sessionCookie` reaches `/api/folios`;
   - an altered signature, another secret, an unknown token and an expired row each answer `401`;
   - suspended → `403 ACCOUNT_SUSPENDED`;
+  - a deleted user → `401` at the next request (its sessions cascade away) (FR-025);
   - a renewal after `updateAge` extends `expires_at` and keeps `token`;
   - 5 parallel requests during a renewal all answer 200 (BUG-014);
   - `POST /api/auth/sign-out` → the same cookie answers `401`;
@@ -206,6 +209,8 @@ sign-in works only through Better Auth, so land Phase 2 together with US1.
   - the organization has its policy;
   - a duplicate → `409`;
   - a mixed-case email is stored lowercased.
+
+  Exclude `test-session-%` fixture rows (T012) whenever a session is counted or looked up.
 - [ ] T028 [P] [US3] In `app-turistear/src/features/auth/components/RegisterForm.tsx`, `app-turistear/src/features/auth/hooks/useRegister.ts`, `app-turistear/src/features/auth/schemas.ts`, `app-turistear/src/services/authService.ts` (call `/api/onboarding/register`) and `app-turistear/src/pages/RegisterPage.tsx`:
   - remove the password field and `PasswordStrength`;
   - on 201, show `EmailCodeForm` at its code step with the email filled in.
@@ -231,6 +236,8 @@ sign-in works only through Better Auth, so land Phase 2 together with US1.
   - accept → code → signed in as an agent of the organization;
   - an invitation created before migration 0071's lowercasing still resolves;
   - a used or expired token → `400 INVALID_TOKEN`.
+
+  Exclude `test-session-%` fixture rows (T012) whenever a session is counted or looked up.
 - [ ] T031 [P] [US4] In `app-turistear/src/features/auth/components/InviteCompleteForm.tsx`, `app-turistear/src/features/auth/hooks/{useInviteAccept,useInviteComplete}.ts`, `app-turistear/src/services/authService.ts` (the `/api/onboarding/invitations/*` calls) and `app-turistear/src/pages/InviteAcceptPage.tsx`:
   - remove the password field;
   - on accept, show `EmailCodeForm` at its code step for the returned email.

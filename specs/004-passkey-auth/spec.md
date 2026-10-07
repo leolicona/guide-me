@@ -177,6 +177,7 @@ From their account surface, a staff member sees every llave de acceso on their a
 - **Account suspended or deleted while a session is live**: the next request is refused, as today.
 - **A llave de acceso shows signs of being cloned** (the authenticator reports fewer uses than the server has already seen): the sign-in is refused, and the user is told to use an email code.
 - **Same phone, two accounts**: each account's llave de acceso is separate, and removing one never affects the other.
+- **Invitee who never enters the code**: accepting the invitation already created the account and consumed the invitation. The invitee signs in later by requesting an email code on the sign-in screen (Story 1); nobody needs to re-invite them.
 
 ## Requirements *(mandatory)*
 
@@ -208,8 +209,8 @@ From their account surface, a staff member sees every llave de acceso on their a
 - **FR-021**: A session MUST be honored only after the API verifies it issued it, using a signing key unique to each environment (constitution VIII). A session cookie that was altered, minted elsewhere, or comes from another environment MUST be refused with `UNAUTHORIZED`.
 - **FR-022**: A session MUST last 7 days without use, and MUST be renewed by use (Better Auth's defaults).
 - **FR-023**: Signing out MUST end the session on the server, so its cookie can never be used again.
-- **FR-024**: Users MUST be able to end all of their sessions at once.
-- **FR-025**: A suspended or deleted account MUST be refused at its next request, as today. Ending a session, whether by sign-out or sign-out everywhere, MUST take effect at that session's next request.
+- **FR-024**: Users MUST be able to end all of their sessions at once; each one ends at its next request.
+- **FR-025**: A suspended or deleted account MUST be refused at its next request, as today.
 
 **Registration and invitations**
 
@@ -234,7 +235,7 @@ From their account surface, a staff member sees every llave de acceso on their a
 
 - **FR-070**: Routes under `/api/auth/*` belong to Better Auth.
   - They answer in its format, `{ "code", "message" }`, with its codes.
-  - The app handles at least `INVALID_OTP`, `OTP_EXPIRED`, `TOO_MANY_ATTEMPTS`, `PASSKEY_NOT_FOUND`, `AUTHENTICATION_FAILED`, `CHALLENGE_NOT_FOUND` and `SESSION_NOT_FRESH` (403, the fresh-session rule), plus HTTP `429` with `X-Retry-After`.
+  - The app handles at least `INVALID_OTP`, `OTP_EXPIRED`, `TOO_MANY_ATTEMPTS`, `PASSKEY_NOT_FOUND`, `AUTHENTICATION_FAILED`, `CHALLENGE_NOT_FOUND`, `SESSION_NOT_FRESH` (403, the fresh-session rule) and `ACCOUNT_SUSPENDED` (403, raised by our session-creation hook in Better Auth's format), plus HTTP `429` with `X-Retry-After`.
   - Every other route keeps `{ "error": { "code", "message" } }` (constitution IV, amended).
 - **FR-071**: The codes `INVALID_CREDENTIALS` and `EMAIL_NOT_VERIFIED` MUST be retired, because no password exists to be wrong and email-code sign-in verifies the address.
 
