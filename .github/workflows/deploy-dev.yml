@@ -38,11 +38,34 @@ jobs:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup
 
+      # passkey-auth, constitution VIII (v1.4.0) — the API's secrets are managed in this GitHub
+      # environment ("dev") and land on the Worker with the version this run deploys
+      # (`wrangler deploy --secrets-file`, additive: a secret the environment does not hold keeps
+      # the Worker's current value). BETTER_AUTH_SECRET is required — the API refuses to start
+      # without 32+ characters — so a missing one stops the run here, before anything changes. The
+      # file stays in the runner's temp and is never printed.
+      - name: Secrets for the API (dev)
+        env:
+          BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET }}
+          QR_SECRET: ${{ secrets.QR_SECRET }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+        run: |
+          set -euo pipefail
+          if [ "${#BETTER_AUTH_SECRET}" -lt 32 ]; then
+            echo "::error::BETTER_AUTH_SECRET is missing or shorter than 32 characters in the 'dev' environment. Nothing was migrated or deployed."
+            exit 1
+          fi
+          for name in QR_SECRET RESEND_API_KEY; do
+            [ -n "${!name}" ] || echo "::notice::$name is not in the 'dev' environment; the Worker keeps its current value."
+          done
+          node -e 'const e = process.env; const s = {}; for (const k of ["BETTER_AUTH_SECRET", "QR_SECRET", "RESEND_API_KEY"]) if (e[k]) s[k] = e[k]; process.stdout.write(JSON.stringify(s))' \
+            > "$RUNNER_TEMP/api-secrets.json"
+
       - name: Apply D1 migrations (dev)
         run: pnpm db:migrate:dev
 
       - name: Deploy API (dev)
-        run: pnpm deploy:api:dev
+        run: pnpm deploy:api:dev --secrets-file "$RUNNER_TEMP/api-secrets.json"
 
       - name: Deploy App (dev)
         env:

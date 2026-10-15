@@ -307,9 +307,9 @@ CLAUDE.md's local-login caveat is rewritten to match.
 **D19 — A pre-merge gate.** Before merging into `develop`, which deploys dev at once *(since
 `specs/005-delivery-pipeline`: before opening the pull request into `main`, whose preview applies
 the migration to dev's database)*:
-1. Set `BETTER_AUTH_SECRET` as a Worker secret in dev and in prod, with different values. Under
-   constitution v1.3.1 (`specs/005-delivery-pipeline` D17) no workflow plants it; a pull request's
-   preview takes it from the GitHub `dev` environment (D5).
+1. Set `BETTER_AUTH_SECRET` in dev and in prod, with different values: in the GitHub environments
+   `dev` and `production`, from which every deploy plants it on the Worker (constitution v1.4.0,
+   the developer's decision of 2026-10-15).
 2. Run the email-case collision query against both databases.
 3. Record both results in the PR.
 

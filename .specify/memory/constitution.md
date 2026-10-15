@@ -1,42 +1,42 @@
 <!--
-Sync Impact Report (v1.3.1, 2026-10-15)
-- Version change: 1.3.0 → 1.3.1 — PATCH.
-  - A correction of fact in Technology Stack & Constraints; no principle is
-    added, removed or redefined.
-  - Source: specs/004-passkey-auth, research.md R15, measured while
-    implementing (made as v1.2.2 on that branch before main moved to v1.3.0,
-    re-applied here). `@better-auth/utils` exports its password module for
-    the `workerd` condition as `password.node.mjs`, which statically imports
-    `node:crypto`. With only `nodejs_als`, the Vite dev server fails to start
-    and the production bundle carries an import a Worker cannot load; the
-    Vitest pool hid it. `nodejs_compat` is what Better Auth documents for
-    Cloudflare Workers.
+Sync Impact Report (v1.4.0, 2026-10-15)
+- Version change: 1.3.1 → 1.4.0 — MINOR. Guidance in VIII materially
+  changes; no principle is added, removed or redefined.
+  - Source: the developer's decision of 2026-10-15, "Los secrets se manejan a
+    través de GitHub environments."
+  - It reverses v1.3.0's "Dev's and prod's secrets stay on their Workers; no
+    workflow re-plants them" (specs/005-delivery-pipeline D17), now
+    superseded. The risk that rule guarded against stays named: a secret
+    enters an environment once, copied exactly from the Worker it already
+    runs on, and planting is additive, so a secret an environment does not
+    hold is never overwritten.
 - Modified sections (titles unchanged):
-  · Technology Stack & Constraints: the Runtime row's compatibility flag
-    `nodejs_als` becomes `nodejs_compat` (Better Auth's request context and
-    the Node built-ins it imports).
+  · VIII. A Service We Do Not Own Never Undoes a Sale: secrets are managed in
+    the GitHub environments `dev` and `production`; every deploy plants the
+    API's secrets on its Worker with the version it ships
+    (`wrangler deploy --secrets-file`, additive); a deploy without
+    `BETTER_AUTH_SECRET` stops before migrating. Previews unchanged.
+  · Development Workflow & Quality Gates: the dev deploy and the prod release
+    ship the API with their environment's secrets.
 - Added sections: none. Removed sections: none.
 - Templates: .specify/templates/plan-template.md ✅, spec-template.md ✅,
-  tasks-template.md ✅, checklist-template.md ✅. None names a compatibility
-  flag; no template changed.
+  tasks-template.md ✅, checklist-template.md ✅. None names where a secret
+  lives; no template changed.
 - Follow-up TODOs:
-  · specs/004-passkey-auth's code lands with this amendment and closes the
-    gap v1.2.1 opened: the API runs Better Auth (IV, VI, VIII). As the v1.3.0
-    follow-up asked, its preview profile has `AUTH_COOKIE_PREFIX`, and a
-    preview takes `BETTER_AUTH_SECRET` from the GitHub `dev` environment, or a
-    throwaway its note names (VIII). Dev's and prod's stay on their Workers.
-  · TODO(PASSWORD-MATERIAL) is registered as debt
-    `.specify/debt/password-material` (specs/004-passkey-auth D15).
-  · CLAUDE.md no longer describes Agnostic Auth (specs/004-passkey-auth T044).
-  · Debt `.specify/debt/better-auth-rejection-reports` is registered (a test
-    filter for Better Auth's duplicate rejection reports in workerd).
-  · The settings that live outside the repository remain the developer's
-    acts (specs/005-delivery-pipeline/contracts/environment.md).
-  · Carried from v1.0.0, still open: TODO(CONTRACT-MIRROR),
-    TODO(TOKEN-FALLBACKS), TODO(EMAIL-PALETTE), TODO(TEST-CITATIONS),
-    TODO(DESIGN-FOUNDATIONS), and the archived TECH_DEBT.md items to
-    re-register when a feature touches them (see the v1.0.0 report in git
-    history, develop@33b3609).
+  · specs/005-delivery-pipeline: plan D17 and contracts/environment.md are
+    annotated as superseded by this amendment.
+  · `.github/workflows/deploy-dev.yml` and `deploy-prod.yml` implement it in
+    specs/004-passkey-auth's pull request #170.
+  · The developer copies `QR_SECRET` and `RESEND_API_KEY` into the
+    `production` environment only with prod's exact current values; until
+    then prod's Worker keeps its own (planting is additive).
+  · Carried from v1.3.1: debts `.specify/debt/password-material` and
+    `.specify/debt/better-auth-rejection-reports`; the settings outside the
+    repository (specs/005-delivery-pipeline/contracts/environment.md); and
+    from v1.0.0 TODO(CONTRACT-MIRROR), TODO(TOKEN-FALLBACKS),
+    TODO(EMAIL-PALETTE), TODO(TEST-CITATIONS), TODO(DESIGN-FOUNDATIONS), and
+    the archived TECH_DEBT.md items to re-register when a feature touches
+    them (see the v1.0.0 report in git history, develop@33b3609).
 -->
 
 # Turistear Ya! Constitution
@@ -301,13 +301,18 @@ once. Every rule here prevents one way that glance goes wrong.
 - A notification never sits inside a money write. It is sent after the write
   succeeds, under `waitUntil`, with its failure caught, so a provider outage
   never rolls back a sale, a payment or a cancellation.
-- Secrets live in each environment's Worker secrets and in GitHub
-  environments, never in the repo (`.dev.vars` is ignored), and no two
-  environments share a signing secret (`QR_SECRET`, `BETTER_AUTH_SECRET`).
-  Dev's and prod's secrets stay on their Workers; no workflow re-plants them,
-  because a value pasted wrong would invalidate every live ticket. A preview
-  takes dev's values from the GitHub `dev` environment, or a throwaway value
-  that its pull-request note names.
+- Secrets are managed in the GitHub environments `dev` and `production`,
+  never in the repo (`.dev.vars` is ignored), and no two environments share a
+  signing secret (`QR_SECRET`, `BETTER_AUTH_SECRET`). Every deploy plants the
+  API's secrets on its Worker with the version it ships
+  (`wrangler deploy --secrets-file`); planting is additive, so a secret the
+  environment does not hold keeps the Worker's current value. A value pasted
+  wrong invalidates every live ticket (`QR_SECRET`) or signs everyone out
+  (`BETTER_AUTH_SECRET`), so a secret enters an environment once, copied
+  exactly from the Worker it already runs on (or generated, for a new one),
+  and a deploy without `BETTER_AUTH_SECRET` stops before it migrates. A
+  preview takes dev's values from the GitHub `dev` environment, or a throwaway
+  value that its pull-request note names.
 
 Rationale: the sale is the fact and the receipt is a courtesy. A ticket can be
 sent again; a sale that vanished because an email bounced cannot be sold
@@ -372,13 +377,15 @@ Additional constraints:
   with its addresses, and is deleted when the PR closes. A preview never
   gates a merge.
 - A push to `main` deploys dev: `verify`, then the dev D1 migrations, then the
-  API, then the app, then a smoke of both hostnames.
+  API with the `dev` environment's secrets, then the app, then a smoke of both
+  hostnames.
 - A `v*` tag releases prod, and the tag is the approval. The release refuses
   a commit that is not on `main` or whose dev deploy did not finish green,
   before touching anything. It records a D1 Time Travel restore point before
   migrating and never exports the database — this repository is public, so
-  an artifact would publish every tourist's data. It states the version of
-  each Worker that went live and smokes both hostnames.
+  an artifact would publish every tourist's data. The API ships with the
+  `production` environment's secrets. It states the version of each Worker
+  that went live and smokes both hostnames.
 - *Rollback Prod* returns one prod Worker to one named version from CI and
   passes only when the live version is the one asked for. It never touches
   data; restoring data from a restore point is a separate, deliberate act.
@@ -412,4 +419,4 @@ Additional constraints:
 - The developer decides. When a principle blocks a feature, the plan says so
   and proposes the amendment; it does not route around it.
 
-**Version**: 1.3.1 | **Ratified**: 2026-10-04 | **Last Amended**: 2026-10-15
+**Version**: 1.4.0 | **Ratified**: 2026-10-04 | **Last Amended**: 2026-10-15

@@ -20,21 +20,12 @@ Opening the pull request builds its preview, which applies migration 0071 to dev
 (`specs/005-delivery-pipeline` D3); merging deploys dev. Do both steps first and record the results
 in the PR.
 
-**Secrets.** `BETTER_AUTH_SECRET` is a secret **on each Worker**, `api-guideme-dev` and
-`api-guideme`, **a different value in each**, never committed and never planted by a workflow
-(constitution VIII, v1.3.1; `specs/005-delivery-pipeline` D17). Set it once per Worker, from a
-machine signed in to the `liconadev` account, or in the dashboard (Workers & Pages → the Worker →
-Settings → Variables and Secrets):
-
-```bash
-openssl rand -base64 48 | pnpm --filter api-turistear exec wrangler secret put BETTER_AUTH_SECRET --env dev
-openssl rand -base64 48 | pnpm --filter api-turistear exec wrangler secret put BETTER_AUTH_SECRET --env production
-```
-
-A pull request's preview takes `BETTER_AUTH_SECRET` from the GitHub `dev` environment, or a
-throwaway its note names (`preview.yml`, delivery-pipeline D5). The API refuses to start without a
-secret of 32+ characters (`src/auth/index.ts`), so dev's must be on its Worker **before** the merge
-that deploys this feature.
+**Secrets.** `BETTER_AUTH_SECRET` is managed in the GitHub environments `dev` and `production`,
+**a different value in each** (`openssl rand -base64 48`), never committed (constitution VIII,
+v1.4.0). Every dev deploy and prod release plants it on its API Worker with the version it ships
+(`wrangler deploy --secrets-file`, additive), and stops before migrating when it is missing or
+shorter than 32 characters; the API itself refuses to start without one (`src/auth/index.ts`). A
+pull request's preview takes the `dev` environment's value, or a throwaway its note names.
 
 Rotating the secret signs everyone out and invalidates every pending code. It never touches the
 passkeys.
@@ -110,7 +101,7 @@ pnpm lint:app && pnpm build:api && pnpm build:app
    credentials as `E2E_AGENT_PASSKEY` and `E2E_ADMIN_PASSKEY` in the GitHub `dev` environment, and
    delete the four `E2E_*_EMAIL` / `E2E_*_PASSWORD` secrets. The same credential serves every
    preview, which runs on dev's database. Run the `e2e` label on a PR.
-5. Set `api-guideme`'s `BETTER_AUTH_SECRET` (§2), then release: a `v*` tag on the `main` commit
+5. Put `BETTER_AUTH_SECRET` in the GitHub `production` environment (§2), then release: a `v*` tag on the `main` commit
    whose dev deploy is green (`specs/005-delivery-pipeline` D10).
 6. On prod, every active admin and agent can sign in by code (SC-007), and no screen asks for a
    password (SC-006).

@@ -62,6 +62,10 @@ repository variable to keep in step (D2).
 
 ## R4 — Secrets: previews take dev's values; dev and production keep theirs
 
+*Superseded in part on 2026-10-15 (constitution v1.4.0): dev and production no longer keep their
+secrets only on their Workers — every deploy plants the API's from its GitHub environment,
+additively (`--secrets-file`). Previews are unchanged.*
+
 **Measured**: the API reads two secrets, `QR_SECRET` and `RESEND_API_KEY` (`bindings.d.ts`). Neither
 deploy workflow plants secrets today; dev's and production's values were set on their Workers by
 hand. `wrangler deploy --secrets-file` uploads each entry as `secret_text` with the version and
