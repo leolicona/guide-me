@@ -19,9 +19,9 @@ shared one.
 | Read the notification address (D3) | `GET /v1/webhook` | connect; health | 8 s | — | `url`, failure counters | 404 = none registered |
 | Register our address (D3) | `PUT /v1/webhook` `{url}` | connect | 8 s | — | — | `INSECURE_URL` = our configuration bug |
 | Count failing deliveries (FR-005) | `GET /v1/webhook/deliveries?status=failed&limit=20` | health | 8 s | — | count | health shows `DEVOLADA_UNAVAILABLE` |
-| Issue a payment link (D6, D7) | `POST /v1/payment-links` `{customerRef: <folio id>, askCents, mode: "one_time", expiresAt, label, concept}` | checkout, settlement, replacement | **3 s** | link row id; `#<n>` after a non-retryable refusal | `id`, `url`, `notices` | fallback to the manual path |
+| Issue a payment link (D6, D7) | `POST /v1/payment-links` `{customerRef: <folio id>, askCents, mode: "one_time", expiresAt, label, concept}` | checkout, settlement, replacement; never for a link that would stay open less than 15 minutes (D7) | **3 s** | link row id; `#<n>` after a non-retryable refusal | `id`, `url`, `notices` | fallback to the manual path |
 | Learn whether a timed-out link exists (D12) | the same `POST`, same key | sweep | 8 s | link row id | a replayed answer means it exists | retry next run |
-| Close a link (D13) | `PATCH /v1/payment-links/{id}` `{close: true}` | after cancel, reject or another settlement; sweep retry | 8 s | `close:` + link row id | — | `LINK_CLOSED`, or an answer showing it paid or expired, means already closed |
+| Close a link (D13) | `PATCH /v1/payment-links/{id}` `{close: true}` | after cancel, reject or another settlement, never under a payment in flight while the sale lives; sweep retry | 8 s | `close:` + link row id | — | `LINK_CLOSED`, or an answer showing it paid or expired, means already closed |
 | Read one payment (D4) | `GET /v1/payments/{paymentId}` | every webhook | 8 s | — | everything D9 needs | `NOT_FOUND` = not this organization's (or other mode): change nothing |
 | Read a sale's payments (D12) | `GET /v1/payments?customerRef=<folio id>` | sweep | 8 s | — | every payment of every link of the sale | retry next run |
 | Signing keys (D4) | `GET /.well-known/jwks.json` (no credential) | unknown `kid`; respects `Cache-Control` | 8 s | — | JWK by `kid` | webhook answers 503 so Devolada retries |
@@ -85,7 +85,7 @@ Devolada's rules this satisfies:
 
 | Devolada condition | Effect on Turistear | Who notices | Recovery |
 |---|---|---|---|
-| Unreachable at checkout or settlement | No link is created. The sale completes on today's manual path | Seller: an alert on the receipt. Admin: Por verificar «Sin liga de pago — verificar a mano» | None needed: the admin verifies as today |
+| Unreachable at checkout or settlement | No link is created. The sale completes on today's manual path | Seller: an alert on the receipt. Admin: Por verificar «Sin enlace de pago — verificar a mano» | None needed: the admin verifies as today |
 | Its notifications stop (outage, address taken by another system) | Verdicts arrive late | Ajustes health: `consecutive_failures`, `is_ours = false` | The sweep re-reads every open link at least every 15 minutes (SC-003) |
 | Keys endpoint unreachable | The webhook answers 503 | — | Devolada retries for 4 h; the sweep needs no keys |
 | Credential revoked or business suspended | Connection `broken`; new transfers fall back | Admin, in Ajustes | The admin replaces the key, or Devolada lifts the suspension |

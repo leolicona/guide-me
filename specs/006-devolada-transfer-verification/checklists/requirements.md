@@ -42,10 +42,12 @@
   SC-009. One default was added in the same pass: an unpaid **settlement** returns the sale to an
   apartado instead of cancelling it, because a sale holding cleared money is never cancelled
   automatically. All items pass; the spec is ready for `/speckit-plan`.
-- **Accepted exception to "no implementation details"**: Context names three test files as the
-  scope boundary. Constitution I requires the boundary as a mechanical test naming the suites that
-  must pass unedited, and the constitution supersedes the template's guidance. Nothing else in the
-  spec names a technology.
+- **Accepted exceptions to "no implementation details"**: Context names three test files as the
+  scope boundary, because constitution I requires the boundary as a mechanical test naming the
+  suites that must pass unedited. FR-023 names the error codes, because constitution IV requires
+  every code to be declared in the spec before it exists in code, as specs/004-passkey-auth did in
+  its FR-070. The constitution supersedes the template's guidance. Nothing else in the spec names a
+  technology.
 - Devolada's own vocabulary (*confirmed*, *partial*, *invalid*, *expired*, *unapplied*,
   *superseded*, CLABE, CEP) is used deliberately: it is the provider's business language, which
   the admin will see, not an implementation choice. Its contract is kept verbatim in
@@ -65,3 +67,13 @@
   until the admin has something to do (FR-015 gained that sentence, and US1 scenario 2 now names
   the right labels), and a link's 24-hour lifetime is confirmed, with the stay rule stated in the
   Assumptions. All items still pass.
+- **/speckit-analyze, second run (2026-10-15)**, after the PR merged into `main`, found no CRITICAL
+  item, and 4 HIGH, 10 MEDIUM and 12 LOW items. All were resolved in place. The developer took the
+  three recommended decisions, recorded under `## Clarifications` (Session 2026-10-15):
+  - a link that would stay open less than 15 minutes is not created (FR-010, Assumptions);
+  - a link is never closed under a payment being verified while the sale lives (FR-011, US4
+    scenarios 4-5);
+  - the UI's word for the link is «enlace» (FR-022).
+
+  FR-007 now says *transfer* where it said *electronic payment*, and FR-023 declares the error
+  codes. All items still pass.

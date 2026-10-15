@@ -16,8 +16,9 @@ Banxico's verdict, which Devolada reports, instead of by an admin. The approach,
 - **Credential**: stored encrypted, one per organization, and never in the organization payload
   that every role reads (D1). Connecting probes the credential, learns its mode and checks the
   notification address before taking it (D2, D3).
-- **Links**: each electronic payment gets a one-time Devolada link, issued *after* the sale's money
-  write commits, with today's manual path as the fallback (D6, D7). A settlement is a link too, and
+- **Links**: each transfer gets a one-time Devolada link, issued *after* the sale's money
+  write commits, with today's manual path as the fallback (D6, D7). A link that would stay open less
+  than 15 minutes is not issued (D7). A settlement is a link too, and
   is recorded only once proven. This is the one place the design departs from today's flow: nothing
   in the code can undo a settlement (D8).
 - **Verdicts**: they arrive two ways.
@@ -30,7 +31,7 @@ Banxico's verdict, which Devolada reports, instead of by an admin. The approach,
     `rejectPayment`'s defects (D11).
   - Everything else → reaches Por verificar or the seller, labelled by the server (D14, D15).
 - **Por verificar holds only work for the admin**: a sale Devolada is still resolving stays out of it, and out of its count, until the admin has something to do (D14; spec clarification of 2026-10-15).
-- **Closing links**: links close whenever their sale stops taking money (D13).
+- **Closing links**: links close whenever their sale stops taking money, but never under a payment in flight while the sale lives (D13; spec clarification of 2026-10-15).
 
 Delivery is three PRs, one per story group (D19).
 
@@ -98,19 +99,22 @@ otherwise stand.
 |---|---|---|---|---|
 | I. Spec-Driven, Every Decision Cited | Spec, plan and numbered decisions with a why; a mechanical scope boundary; amended in place | PASS | PASS | Decisions D1–D20 ([research.md](./research.md)). Code cites `devolada-transfer-verification D<n>`; tests cite `US<n>`. The scope boundary is three named suites, unedited (spec Context; [quickstart.md](./quickstart.md) §1). FR-016 amended in place (D8) |
 | II. Money Law | Integer minor units; the ledger is the truth; no stored money state beside movements | PASS | PASS | Devolada's fee and received amount never touch the ledger (FR-020). Settlements are recorded when proven (D8). Attention is derived, never stored (data-model) |
-| III. Tenant Isolation (NON-NEGOTIABLE) | Org-scoped tables and indexes; the organization only from the actor, except globally unique keys; `seedTwoOrgs` on every new route | PASS | PASS | All four tables carry `organization_id` with a leading index. The public webhook resolves the organization by `paymentLinkId`, a globally unique key, then re-reads with that organization's own credential (D4). III enumerates its exempt keys, so the amendment (T006) adds this one, as v1.2.0 added Better Auth's. Isolation suites: `test/devolada/isolation.test.ts` and each route's file |
-| IV. The Server Decides | Rules server-side; routes in `src/routes/<resource>/`; error codes declared first; mirrors held | PASS | PASS | The server decides link issuance, mode policy, labels and resolution rules. The public webhook is its own resource, `src/routes/webhooks/` (`index.ts` with the signature-and-schema middleware, `handler.ts`, `schema.ts`), so its input is validated before the handler runs (D4). Error codes are declared in [contracts/turistear-api.md](./contracts/turistear-api.md). Responses use named keys (`{connection}`, `{folio, payment_link}`). Types and MSW mirror the contracts |
+| III. Tenant Isolation (NON-NEGOTIABLE) | Org-scoped tables and indexes; the organization only from the actor, except globally unique keys; `seedTwoOrgs` on every new route | PASS | PASS | All four tables carry `organization_id` with a leading index. The public webhook resolves the organization by `paymentLinkId`, a globally unique key, then re-reads with that organization's own credential (D4). III enumerates its exempt keys, so the amendment (T006) adds this one, as v1.2.0 added Better Auth's, and names the actor-less sweeps that already select across organizations. Isolation suites: `test/devolada/isolation.test.ts` and each route's file |
+| IV. The Server Decides | Rules server-side; routes in `src/routes/<resource>/`; error codes declared first; mirrors held | PASS | PASS | The server decides link issuance, mode policy, labels and resolution rules. The public webhook is its own resource, `src/routes/webhooks/` (`index.ts` with the signature-and-schema middleware, `handler.ts`, `schema.ts`), so its input is validated before the handler runs (D4). Error codes are declared in the spec (FR-023) and detailed in [contracts/turistear-api.md](./contracts/turistear-api.md). Responses use named keys (`{connection}`, `{folio, payment_link}`). Types and MSW mirror the contracts |
 | V. Capacity Is Guarded by the Database | Guarded single statements; a request gives back what it took | PASS | PASS | No new capacity consumption. No read is ever the only guard: the system cancellation claims the link, then writes one batch whose every statement is gated on that batch's own guarded transition, releasing seats only for live lines (D11). A settlement or an admin *accept* is one batch gated on a single-row claim of the link (D8, D15). A verification releases tickets only in the call whose guarded flip matched (D10). Rechazar's own missing guard stays defect 3 |
 | VI. A Rule Is Proven Where It Is Enforced | API suites for rules and isolation; app tests for presentation only; axe; citations | PASS | PASS | D18. Transfer fields and the receipt's status rule move out of `pages/` so they can be tested |
-| VII. Elegant Field Minimalism (NON-NEGOTIABLE) | Primitives, tokens, state icon-paired, «Venta» never "folio", es-MX copy, one word per concept and one verb per action | PASS | PASS | FormSheet, ConfirmSheet, StatusChip, AlertCard and MoneyText. Labels and action copy live in the contracts: *verificación* is the only word for money being checked, *accept* is «Verificar», and the credential is a «clave», since «llave» names the passkeys (D15, D16). The receipt's «Pagado» on unverified money is fixed (D16). Defect 11's «tu folio» goes through the lite path before PR 2 |
+| VII. Elegant Field Minimalism (NON-NEGOTIABLE) | Primitives, tokens, state icon-paired, «Venta» never "folio", es-MX copy, one word per concept and one verb per action | PASS | PASS | FormSheet, ConfirmSheet, StatusChip, AlertCard and MoneyText. Labels and action copy live in the contracts: *verificación* is the only word for money being checked, *accept* is «Verificar», the credential is a «clave», since «llave» names the passkeys, and the link is an «enlace», the word the customer's ticket message already uses (D15, D16). The receipt's «Pagado» on unverified money is fixed (D16). Defect 11's «tu folio» goes through the lite path before PR 2 |
 | VIII. A Service We Do Not Own Never Undoes a Sale | One module; outside money writes; failure modes recorded; secrets per environment | PASS* | PASS* | Only `services/devolada.ts` calls Devolada, the key set included, with timeouts and fallbacks (D5, D6). Failure modes: [contracts/devolada-integration.md](./contracts/devolada-integration.md). The key is managed in the GitHub environments and planted by every deploy. A preview gets dev's key or none, an exception to VIII's throwaway rule, and without a key the API fails closed (D17). *Devolada must be added to the list of services we do not own: see Complexity Tracking |
 | Technology Stack & Constraints | Stack fixed unless justified; migrations additive and safe under the code already deployed; bounded reads | JUSTIFIED | JUSTIFIED | New integration, new secret, third sweep on the existing trigger (Complexity Tracking). Migration `0073` is additive, and nothing on `main` reads its tables when the preview applies it to dev. New reads are bounded and indexed |
 | Workflow & Quality Gates | One worktree and one PR per unit, off and into `main`; `verify` green; a preview per PR; dev on merge, production on a `v*` tag; `/speckit-analyze` before implement | PASS | PASS | Three PRs to `main` (D19), each validated on its preview and on dev before a `v*` release. The constitution amendment rides PR 1 |
 
-**Result**: the gates pass. Three points need the constitution to name them, all justified below
-and resolved by one MINOR amendment through `/speckit-constitution` (T006): Devolada in the stack's
-list of external services, VIII's preview rule for a key that encrypts rows in dev's database, and
-Devolada's link id among III's exempt lookups.
+**Result**: the gates pass. Four points need the constitution to name them, all justified below
+and resolved by one MINOR amendment through `/speckit-constitution` (T006):
+- Devolada among the services we do not own, and the third sweep on the cron;
+- VIII's rules for a key that encrypts rows in dev's database: a preview gets dev's value or none, and
+  a malformed value stops the deploy;
+- Devolada's link id among III's exempt lookups;
+- the actor-less sweeps, which III does not name yet.
 
 ## Project Structure
 
@@ -118,7 +122,7 @@ Devolada's link id among III's exempt lookups.
 
 ```text
 specs/006-devolada-transfer-verification/
-├── spec.md                 # /speckit-specify (+ clarifications 2026-10-06; FR-016 amended by D8)
+├── spec.md                 # /speckit-specify (+ clarifications 2026-10-06 and 2026-10-15; FR-016 amended by D8)
 ├── plan.md                 # This file
 ├── research.md             # Phase 0: D1–D20, defects found, requests to Devolada
 ├── data-model.md           # Phase 1: four tables, states, validation rules
@@ -140,11 +144,12 @@ api-turistear/
 │   ├── bindings.d.ts                                        + DEVOLADA_* bindings (D17)
 │   ├── index.tsx                                            mount /api/webhooks and /api/devolada; third waitUntil sweep
 │   ├── db/schema.ts                                         + four tables; enum values (event types, cancellation source)
-│   ├── types/errors.ts                                      + nine new error codes, and the undeclared FOLIO_CANCELLED
+│   ├── types/errors.ts                                      + eleven new error codes (spec FR-023), and the undeclared FOLIO_CANCELLED
 │   ├── services/devolada.ts                                 NEW  the only Devolada client (D5)
 │   ├── utils/
 │   │   ├── devoladaCredential.ts                            NEW  AES-GCM encrypt/decrypt, per-org key (D1)
 │   │   ├── devoladaSignature.ts                             NEW  JWKS cache + ES256 verify (D4)
+│   │   ├── devoladaLinkView.ts                              NEW  label precedence and PaymentLinkView reads (D14)
 │   │   ├── folioDetail.ts, folioListRows.ts                 + payment_links / payment_link (D14)
 │   │   ├── folioPendingWork.ts                              + Devolada attention in pending work and counts (D14)
 │   │   └── folioEvents.ts                                   + four event types
@@ -170,7 +175,8 @@ api-turistear/
 ├── test/
 │   ├── helpers/devolada.ts                                  NEW  fake Devolada, key pair/JWKS, signed-webhook builder
 │   └── devolada/*.test.ts                                   NEW  connection, checkout-link, webhook, verdicts, apartados,
-│                                                                 link-closing, sweep, isolation, credential-cipher, signature
+│                                                                 link-closing, sweep, isolation, credential-cipher, signature,
+│                                                                 link-view, query-plans
 ├── vitest.config.ts                                         pin DEVOLADA_* bindings (D17)
 ├── wrangler.jsonc                                           DEVOLADA_* vars in local, dev, preview and production
 └── .dev.vars.example                                        document DEVOLADA_CREDENTIAL_KEY
@@ -213,4 +219,4 @@ app-turistear/src/
 
 | Violation | Why Needed | Simpler Alternative Rejected Because |
 |---|---|---|
-| **Departure from the fixed stack.** A new external service (Devolada), a new secret (`DEVOLADA_CREDENTIAL_KEY`) and a third sweep on the API's one cron trigger. The constitution's *Technology Stack* table and Principle VIII list the services we do not own, and the Runtime row describes the cron as running the bookings sweep. VIII also lets a preview take a throwaway value for any secret dev lacks. III enumerates the globally unique keys a read may use without the actor's organization | The feature *is* the integration: Banxico's verdict reaches us only through Devolada. The secret is the only way to meet FR-003. The sweep is FR-012's recovery path. A throwaway key would encrypt rows in dev's database that dev could never read. A webhook has no actor: Devolada's link id is the only way it can learn whose sale it is, and the re-read with that organization's own credential proves it | No alternative verifies a transfer without the provider. Resolved by a **MINOR** amendment (1.4.0 → 1.5.0) through `/speckit-constitution` in PR 1 (T006). Devolada joins the Integrations row and VIII's list, with its module and failure modes. The Runtime row names the three sweeps. VIII's secrets paragraph names the key, says what changing it costs, and gives a preview dev's value or none. III's list gains `devolada_links.devolada_link_id` |
+| **Departure from the fixed stack.** A new external service (Devolada), a new secret (`DEVOLADA_CREDENTIAL_KEY`) and a third sweep on the API's one cron trigger. The constitution's *Technology Stack* table and Principle VIII list the services we do not own, and the Runtime row describes the cron as running the bookings sweep. VIII also lets a preview take a throwaway value for any secret dev lacks. III enumerates the globally unique keys a read may use without the actor's organization, and does not name the actor-less sweeps, which select due rows across organizations as `sweepExpiredBookings` already does | The feature *is* the integration: Banxico's verdict reaches us only through Devolada. The secret is the only way to meet FR-003. The sweep is FR-012's recovery path. A throwaway key would encrypt rows in dev's database that dev could never read. A webhook has no actor: Devolada's link id is the only way it can learn whose sale it is, and the re-read with that organization's own credential proves it. The sweep has no actor either: like the bookings sweep, it finds due links across organizations and acts on each with that link's own organization | No alternative verifies a transfer without the provider. Resolved by a **MINOR** amendment (1.4.0 → 1.5.0) through `/speckit-constitution` in PR 1 (T006). Devolada joins the Integrations row and VIII's list, with its module and failure modes. The Runtime row names the three sweeps. VIII's secrets paragraph names the key, says what changing it costs, gives a preview dev's value or none, and stops a deploy whose value is malformed. III's list gains `devolada_links.devolada_link_id`, and III names the actor-less sweeps |

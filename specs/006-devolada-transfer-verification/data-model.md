@@ -64,7 +64,7 @@ disconnected ∧ no unresolved link ─ sweep ───────────�
 - A sale gets a payment link only while the connection is `connected` (FR-004, FR-010).
 - A `broken` connection makes new transfer sales fall back to the manual path.
 
-### `devolada_links` — one per electronic payment we asked for (D6–D8, D13)
+### `devolada_links` — one per transfer we asked for (D6–D8, D13)
 
 | Column | Type | Rules |
 |---|---|---|
@@ -103,9 +103,12 @@ abandoned ── sweep: create replay finds it ──────────▶
 abandoned ── sweep: replay is refused ───────────────▶ failed
 open ── confirmed applied (D9) ──────────────────────▶ paid     (final)
 open ── expired verdict, or past expires_at with
-        nothing in flight after a successful re-read ▶ expired  (final; D11 or D8)
+        no payment, after a successful re-read ──────▶ expired  (final; D11 or D8)
+open ── past expires_at after a partial, invalid
+        or unapplied verdict ────────────────────────▶ expired  (final; the admin decides, FR-016)
 open ── the sale stops taking it (D13), or a
-        partial/invalid settlement verdict ──────────▶ closing
+        partial/invalid settlement verdict ──────────▶ closing  (never under a payment in flight
+                                                                 while the sale lives, D13)
 closing ── Devolada acknowledges (or LINK_CLOSED) ───▶ closed   (final)
 ```
 
@@ -116,6 +119,8 @@ closing ── Devolada acknowledges (or LINK_CLOSED) ───▶ closed   (fin
   - settlement: the balance of the sale or of the line.
 - It never changes; a new amount means a new link (D13).
 - `expires_at` ≤ the first live service start, and ≤ the earliest live line clock for `deposit` and `settlement` (D7).
+- A link that would stay open less than 15 minutes is never written: the payment takes the manual path (D7).
+- A link is **unresolved** while it is `creating`, `open`, `closing` or `abandoned`: something may still happen to it at Devolada. `paid`, `expired`, `closed` and `failed` are final. A disconnected organization keeps its credential while it has an unresolved link (D12).
 
 ### `devolada_payments` — what Devolada reported for a link (D9)
 
@@ -158,13 +163,14 @@ closing ── Devolada acknowledges (or LINK_CLOSED) ───▶ closed   (fin
 - `status ∈ {partial, invalid}` ∧ link `kind = 'settlement'` ∧ `resolution IS NULL`;
 - `status = 'unapplied'` ∧ `resolution IS NULL`;
 - `status = 'confirmed'` on a cancelled sale ∧ `resolution IS NULL` (treated as `unapplied`, D9);
-- `status = 'validating'` ∧ `awaiting IS NOT NULL`.
+- `status = 'validating'` ∧ `awaiting IS NOT NULL`;
+- `status = 'queued_for_credit'`: validation credit is paused, and the admin tops it up at Devolada.
 
 A sale or deposit with `partial` or `invalid` is attended through the sale's pending verification, as today.
 
 **Flags and counts** (research D14), derived per sale on every read, never stored:
 - `devolada_attention`: the sale has at least one payment that needs the admin, as defined above.
-- `verification_auto`: the sale is pending verification with a live line; every pending payment row is collected by a link that is `open` and not past `expires_at`; that link's current payment is absent or `validating` without `awaiting`; and the sale has no attention item.
+- `verification_auto`: the sale is pending verification with a live line; every pending payment row is collected by an `open` link that either has no payment yet and is not past `expires_at`, or whose current payment is `validating` without `awaiting`, even past `expires_at`; and the sale has no attention item. The attention clause arrives with the attention items, in PR 2.
 - Each sale counts once in «Por verificar»: `verification − verification_auto + devolada_attention`. The `devolada_attention` count includes only sales that `verification` does not already count, because they are cancelled or their payment verification is not pending.
 
 ### `devolada_events` — notification inbox (D4)
@@ -197,7 +203,7 @@ A sale or deposit with `partial` or `invalid` is attended through the sale's pen
 | `folios.cancellation_source` and `folio_lines.cancellation_source` | New value `payment_not_received` (D11). Consumers to update: `utils/folioDetail.ts`, `routes/folios/handler.ts`, `routes/pos/handler.ts`, `app:features/folios/types.ts` |
 | `folio_payments` | Unchanged shape; see the two cases below the table |
 | `folios` | `payment_reference` = the latest receipt number when Devolada confirms; `payment_verified_by` NULL when automatic |
-| `ErrorCode` (`src/types/errors.ts`) | The codes in `contracts/turistear-api.md` § Error codes |
+| `ErrorCode` (`src/types/errors.ts`) | The codes of spec FR-023, detailed in `contracts/turistear-api.md` § Error codes |
 | Notifications | No new event: `payment_verified`, `tickets_delivered` and `payment_rejected` are reused |
 
 **New `folio_events` types**:
@@ -220,10 +226,12 @@ A sale or deposit with `partial` or `invalid` is attended through the sale's pen
 | Only admins read or change the connection, or resolve exceptions | routers (`requireRole('admin')`) | FR-001, FR-015 |
 | A connected organization's transfer is collected by a link; any `payment_reference` sent is ignored | confirm, settle | FR-009 |
 | A link's amount equals the payment it collects | link issue | FR-007 |
-| One open settlement link per sale | partial unique index | D13 |
+| A link is issued only if it stays open at least 15 minutes | link issue | FR-010, D7 |
+| One open settlement link per sale; a settlement for another line is refused with `SETTLEMENT_IN_PROGRESS` | partial unique index; settle | D8, D13 |
+| While the sale lives, no write closes a link under a payment in flight: a line cancellation or another settlement is refused with `SETTLEMENT_IN_PROGRESS`, and a manual Verificar leaves it open | line cancel, settle, verify | FR-011, D13 |
 | A settlement link records at most one settlement: its batch is claimed by `folio_payment_id IS NULL` and every other statement is gated on that claim | settlement core | D8 |
 | A verification releases tickets only in the call whose guarded row flip and rollup update both matched | verify core | D10 |
 | The system cancellation writes nothing unless its own guarded transition matched | `cancelForUnreceivedTransfer` | D11 |
 | A webhook acts only after the signature, the link lookup, the mode check and a re-read with the owning organization's credential | webhook | FR-013 |
-| A cancelled sale is never verified; a sale holding other money is never cancelled automatically | D9, D11 | FR-016 |
+| A cancelled sale is never verified. No sale is cancelled automatically while it holds other money, an admin verified it, another of its payments is in flight, or its payment ended *partial* or *invalid* | D9, D11, D12 | FR-016 |
 | Every row read or written carries the organization filter beside the id | everywhere; the webhook resolves the organization from the link | constitution III |

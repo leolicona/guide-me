@@ -70,6 +70,17 @@ both as the fallback when Devolada is unavailable and as the admin's override.
   verify it by hand from the sale (FR-018).
 - Q: How long does a payment link stay open? → A: As the Assumptions state: at most 24 hours, and
   never past the start of the sale's first service or the apartado's own clock. Confirmed as is.
+- Q: What if a link would expire almost at once, as for a sale made minutes before a departure, or
+  after it within the organization's sales grace? → A: A link that would stay open less than 15
+  minutes is not created. The sale, or the settlement, takes today's manual path, as when Devolada
+  fails, and the seller is told why (FR-010).
+- Q: What happens to a link whose payment is being verified when something would close it? → A:
+  It is not closed under that payment. The admin's manual Verificar leaves it open until its
+  verdict, which is recorded and releases nothing a second time. Cancelling a line, or settling
+  the balance another way, is refused until the settlement's verdict arrives. Cancelling or
+  rejecting the whole sale still closes it (FR-011).
+- Q: Which word does the UI use for the link? → A: «enlace» («Enlace de pago»), the word the
+  customer's ticket message already uses; never «liga» or «link» (constitution VII).
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -166,7 +177,7 @@ by «Sistema» with its seats released.
 
 ### User Story 3 - Apartados: the deposit and the settlement each get their own link (Priority: P2)
 
-An apartado can take two electronic payments: the deposit, then the settlement. Each gets its own
+An apartado can take two transfers: the deposit, then the settlement. Each gets its own
 link for its own amount and is verified on its own verdict. A confirmed deposit holds the seats but
 releases no tickets, as today; a confirmed settlement releases them.
 
@@ -188,7 +199,7 @@ its test payment (no tickets). Then settle by transfer and confirm the settlemen
    balance is attached, and **When** that payment is confirmed, **Then** the tickets are released.
 4. **Given** an apartado whose deposit still awaits its verdict, **When** it is settled by transfer,
    **Then** both payments are followed independently and tickets are released only once every
-   electronic payment of the sale is cleared.
+   transfer of the sale is cleared.
 
 ---
 
@@ -211,6 +222,12 @@ closed; then advance a test payment to *unapplied* and observe the admin alert.
 2. **Given** an open link, **When** a line of the sale is cancelled and the amount due changes,
    **Then** the link is closed and a new link for the new amount replaces it.
 3. **Given** a payment with an open link, **When** an admin rejects it, **Then** its link is closed.
+4. **Given** an apartado whose settlement transfer is being verified, **When** a seller cancels one
+   of its lines or settles the balance another way, **Then** it is refused until the verdict
+   arrives, and the link stays open.
+5. **Given** a sale whose transfer is being verified, **When** the admin verifies it by hand,
+   **Then** its link stays open until the verdict, which is recorded and releases nothing a second
+   time.
 
 ---
 
@@ -225,7 +242,11 @@ closed; then advance a test payment to *unapplied* and observe the admin alert.
 - **The customer corrects a misread receipt** (*superseded*) → the first payment is ignored and the
   corrected one is followed.
 - **The admin verifies by hand while Devolada is still validating** → the manual verification
-  stands; a later Devolada verdict is recorded but releases nothing a second time.
+  stands, and the link stays open until Devolada's verdict, which is recorded but releases nothing a
+  second time (FR-011). A sale an admin verified is never cancelled automatically.
+- **The first service starts in a few minutes, or has already started within the organization's
+  sales grace** → no link is created when it would stay open less than 15 minutes; the sale takes
+  the manual path and the seller is told why (FR-010).
 - **The customer pays more than asked** (Devolada's fee, or an overpayment) → confirmed; the amount
   received is recorded and shown to the admin, and the sale's total and ledger keep the sale's
   amount.
@@ -264,9 +285,9 @@ closed; then advance a test payment to *unapplied* and observe the admin alert.
 
 **Collecting**
 
-- **FR-007**: For a connected organization, every electronic payment recorded at checkout or at
-  settlement (full sale, apartado deposit, settlement) MUST get its own one-time Devolada payment
-  link for exactly the amount that payment covers.
+- **FR-007**: For a connected organization, every transfer recorded at checkout or at settlement
+  (full sale, apartado deposit, settlement) MUST get its own one-time Devolada payment link for
+  exactly the amount that payment covers. Card and the other payment methods are untouched.
 - **FR-008**: The seller MUST be able to send the link to the customer by WhatsApp in one tap from
   the sale, as a pre-filled message from the seller's own number. The customer confirms the
   transfer on Devolada's link page; Turistear shows neither the CLABE nor the payer reference —
@@ -274,12 +295,16 @@ closed; then advance a test payment to *unapplied* and observe the admin alert.
 - **FR-009**: When Devolada is connected, the seller MUST NOT be offered the manual recording of a
   transfer (the typed bank reference, cleared by an admin). The link replaces it; the manual path
   exists for the seller only as the FR-010 fallback. *(Clarified 2026-10-06.)*
-- **FR-010**: If a link cannot be created (Devolada unreachable or refusing, or the business
-  suspended), the sale MUST still complete on today's manual path and the seller MUST be told. A
-  sale is never lost or blocked by Devolada, and never delayed beyond SC-006. *(constitution VIII)*
+- **FR-010**: If a link cannot be created (Devolada unreachable or refusing, the business
+  suspended, or less than 15 minutes left before it would expire), the sale MUST still complete on
+  today's manual path and the seller MUST be told why. A sale is never lost or blocked by Devolada,
+  and never delayed beyond SC-006. *(constitution VIII; Clarified 2026-10-15)*
 - **FR-011**: A link MUST stop accepting payment when its sale stops taking that money: cancellation
   by anyone, rejection, apartado expiry, a change in the amount due (which issues a replacement
-  link), and the link's own expiry (Assumptions).
+  link), and the link's own expiry (Assumptions). While the sale stays alive, a link is never closed
+  under a payment being verified: the admin's manual Verificar leaves it open until the verdict, and
+  a line cancellation or another settlement is refused until then. Cancelling or rejecting the sale
+  still closes it. *(Clarified 2026-10-15)*
 
 **Verdicts**
 
@@ -302,8 +327,8 @@ closed; then advance a test payment to *unapplied* and observe the admin alert.
   nothing for the admin to do, is not listed there *(Clarified 2026-10-15)*. An *expired* verdict
   or an unpaid link expiry is not queued — FR-016 resolves it — and its reason shows on the sale
   and in its timeline.
-- **FR-016**: When a payment ends *expired*, or its link expires unpaid, no money arrived. The
-  system MUST then withdraw that payment without waiting for an admin:
+- **FR-016**: When a payment ends *expired*, or its link expires with no payment at all, no money
+  arrived. The system MUST then withdraw that payment without waiting for an admin:
   - for a full sale or an apartado deposit, cancel the sale the way an admin's Rechazar does
     (seats released, the seller's commission reversed), with «Sistema» as the actor and «No se
     recibió la transferencia» as the reason;
@@ -330,23 +355,41 @@ closed; then advance a test payment to *unapplied* and observe the admin alert.
   organization's credential, links or verdicts MUST never affect, or be visible to, another.
   *(constitution III)*
 - **FR-022**: Seller- and admin-facing copy follows constitution VII: the sale is «Venta», never
-  "folio" — including Devolada's receipt number, which is shown as «Comprobante Devolada».
+  "folio" — including Devolada's receipt number, which is shown as «Comprobante Devolada». The link
+  is an «enlace» («Enlace de pago»), never «liga» or «link». *(Clarified 2026-10-15)*
+
+**Error outcomes**
+
+- **FR-023**: Failures MUST answer with these codes, declared here before they exist in code
+  (constitution IV). `contracts/turistear-api.md` § Error codes gives each one's status and meaning.
+  - Connecting: `DEVOLADA_CREDENTIAL_REJECTED`, `DEVOLADA_MODE_NOT_ALLOWED`,
+    `DEVOLADA_CHANNEL_UNAVAILABLE`, `DEVOLADA_BUSINESS_SUSPENDED`, `DEVOLADA_WEBHOOK_CONFLICT` and
+    `DEVOLADA_UNAVAILABLE`.
+  - Resolving an exception: `DEVOLADA_PAYMENT_NOT_RESOLVABLE`, and `FOLIO_CANCELLED`, already in use.
+  - Cancelling a line or settling again while the balance is being collected by an enlace:
+    `SETTLEMENT_IN_PROGRESS`.
+  - Receiving a notification: `WEBHOOK_SIGNATURE_INVALID`, `WEBHOOK_PAYLOAD_INVALID` and
+    `DEVOLADA_UNAVAILABLE`.
+  - When no link can be created, the sale or the settlement still succeeds, and says why without
+    an HTTP error: `DEVOLADA_UNAVAILABLE`, `DEVOLADA_CREDENTIAL_REJECTED`,
+    `DEVOLADA_BUSINESS_SUSPENDED`, `DEVOLADA_CHANNEL_UNAVAILABLE` or `PAYMENT_LINK_TOO_SHORT`.
 
 ### Key Entities *(include if feature involves data)*
 
 - **Devolada connection** — at most one per organization: the credential (write-only), its mode
   (real or test), its status (connected · broken · disconnected), the health of its notification
   address, and who connected it and when.
-- **Payment link** — one per electronic payment of a sale: the sale and which payment it collects
+- **Payment link** — one per transfer of a sale: the sale and which payment it collects
   (sale · deposit · settlement), the amount asked, the link's address, its expiry, and its state
   (open · paid · expired · closed).
 - **Devolada payment (verdict)** — what Devolada reports for a link: its id, status, the amounts
   asked, claimed and received, the match (exact · short · over), Devolada's receipt number, the
   verdict's time, and what it awaits from the customer, if anything.
-- **Electronic payment of a sale** *(exists today)* — gains how it was verified (by an admin, or
-  automatically through Devolada) and the amount actually received.
-- **Verdict notification** — each notification received, kept for de-duplication and diagnosis,
-  with whether it changed anything.
+- **Transfer payment of a sale** *(exists today)* — gains how it was verified (by an admin, or
+  automatically through Devolada). The amount actually received is kept with Devolada's verdict.
+- **Verdict notification** — each notification that names one of the organization's links, kept
+  for de-duplication and diagnosis, with whether it changed anything. A notification for a link
+  nobody owns is only logged.
 
 ## Success Criteria *(mandatory)*
 
@@ -381,14 +424,19 @@ closed; then advance a test payment to *unapplied* and observe the admin alert.
   credential. The money lands in the organization's account; Turistear never holds it.
 - Connecting is opt-in per organization. An organization that never connects keeps today's flow
   (scope boundary).
-- One one-time link per electronic payment. The customer identity Devolada sees is the sale, so all
-  the links of one sale share the customer's payment reference.
-- A link stays open until whichever comes first: 24 hours after it is issued, or the start of the
-  sale's first service. FR-016 decides what happens when it closes unpaid. Because closing unpaid
-  now cancels the sale, this window is a product decision; the plan may tune it, but never past the
-  first service. A stay has no start time, only a check-in date, so its link may stay open until the
-  end of the check-in day: a guest who arrives that day can still pay by transfer (research D7).
-  *(Confirmed 2026-10-15.)*
+- One one-time link per transfer. The customer identity Devolada sees is the sale, so all the links
+  of one sale share the customer's payment reference.
+- A link stays open until whichever comes first: 24 hours after it is issued, the start of the
+  sale's first service, or, for an apartado's deposit or settlement, the apartado's own clock.
+  FR-016 decides what happens when it closes unpaid. Because closing unpaid now cancels the sale,
+  this window is a product decision; the plan may tune it, but never past the first service. A stay
+  has no start time, only a check-in date, so its link may stay open until the end of the check-in
+  day: a guest who arrives that day can still pay by transfer (research D7). *(Confirmed
+  2026-10-15.)*
+- A link that would stay open less than 15 minutes is not created, and the payment takes the manual
+  path (FR-010). The organization's own settings can put a sale or a settlement after its service
+  has started, and a link born expired would cancel the sale before the customer could pay.
+  *(Clarified 2026-10-15.)*
 - The organization's «Referencia obligatoria en transferencias» switch (US-A88) applies only to the
   manual path. A linked payment's reference is Devolada's receipt number.
 - A fee the organization configures in Devolada is charged to the customer on top of the amount

@@ -202,14 +202,17 @@ says otherwise.
     - the start of the sale's first live service;
     - for deposits and settlements, also the earliest live line clock (`booking_expires_at`).
   - A slot line starts at `slot_date` + `slot_start_time` in the organization's time zone; a stay at the end of its check-in day.
+  - **A link that would stay open less than 15 minutes is not issued** (`MIN_LINK_LIFETIME`, one constant in `routes/devolada/links.ts`). Nothing is written and Devolada is not called. The sale or the settlement takes today's manual path, as when Devolada fails (FR-010), and the response says `payment_link_error: 'PAYMENT_LINK_TOO_SHORT'`. Decided by the developer on 2026-10-15.
   - `customerRef` = folio id, so every link of a sale shares the customer's Devolada reference.
 - **Rationale**:
   - The spec's Assumptions: 24 hours or the first service, never past it. Confirmed by the developer on 2026-10-15.
   - A stay has no start time, only a check-in date. The end of its check-in day lets a guest who arrives that day pay by transfer; the start of the day would make every same-day stay's link born expired. The spec's Assumptions record this exception.
   - Keeping a deposit or settlement link inside the apartado's own clock means the expiry sweep never meets an apartado whose transfer link is still open. It is also guarded (D8).
+  - The organization's own settings can put a sale or a settlement after its service starts. The sales cutoff accepts sales up to 240 minutes after departure (`sales_cutoff_offset_minutes`, US-A47), and a negative booking grace keeps an apartado's clock running past departure. A link capped at the service start would then be born expired, and D11 would cancel the sale within one sweep, before the customer could pay. Fifteen minutes is a working minimum, tuned in that one constant.
 - **Alternatives considered**:
   - No expiry: a link could be paid weeks later for a seat released long before.
   - The apartado clock alone: links would stay open for days, while FR-016 needs a near decision.
+  - Capping the link at the organization's sales cutoff rather than the service start: a sale after departure would still get only minutes, and the spec keeps every link inside its first service.
 
 ### D8 — A settlement is recorded only once it is proven
 
@@ -234,6 +237,7 @@ says otherwise.
 
     A second processor — the webhook and the sweep at once, a Devolada retry, an admin's double tap on *accept* (D15) — matches nothing and writes nothing.
   - **An unpaid settlement link** simply closes.
+  - **One open settlement link per sale**: a repeated transfer settlement for the same line, or for the whole sale, returns that link. A settlement for another line answers 409 `SETTLEMENT_IN_PROGRESS`, like the writes D13 refuses while the link's payment is in flight. *(Amended 2026-10-15 by /speckit-analyze.)*
   - **The expiry sweep** skips a sale with an open link or a payment in flight.
   - **One bypass**: a settlement whose payment was in flight when the apartado's clock ran out is still recorded. The `BOOKING_EXPIRED` pre-check is skipped for that case only.
 - **Rationale**:
@@ -251,16 +255,18 @@ says otherwise.
 - **Decision**:
   - The webhook and the sweep share one function, `applyDevoladaPayment(link, payment)`.
   - Applying it twice changes nothing, and a final status never goes back. `applied_status` lets a repeat skip early, but that read is an optimization, never the guarantee: the guarantee is the guarded write each branch makes (D8, D10, D11).
-  - It never cancels on the clock alone. The unpaid branch requires a successful re-read showing no payment in flight.
+  - `applied_status` is set only when a branch acted. A status or link kind that a PR only snapshots, because a later PR handles it, stays unmarked, so the PR that handles it applies it (D19). *(Amended 2026-10-15 by /speckit-analyze.)*
+  - It never cancels on the clock alone. The unpaid branch requires a successful re-read showing no payment at all, or an *expired* one. A payment in flight keeps the link open, and any other final verdict stays with the admin (FR-016). *(Amended 2026-10-15 by /speckit-analyze: a payment that ended invalid no longer cancels its sale when the link expires.)*
 
   | Devolada status | Sale or deposit link | Settlement link |
   |---|---|---|
   | `validating` | snapshot; the sale shows «Verificando pago» | same |
-  | `queued_for_credit` | snapshot; the sale and the connection health show «Verificación en pausa» | same |
+  | `queued_for_credit` | snapshot; the sale shows «Verificación en pausa» in Por verificar, and so does the connection health | same |
   | `validating` + `awaiting: payer_tracking_key` | snapshot; seller and admin see «Pide al cliente su clave de rastreo»; no expiry while it waits | same |
-  | `confirmed` | verify that payment row (D10); the receipt number becomes its reference; link `paid` | record the settlement (D8); link `paid` |
+  | `confirmed` | verify that payment row (D10), which matches nothing if an admin already verified it by hand, so nothing is released twice; the receipt number becomes its reference; link `paid` | record the settlement (D8); link `paid` |
   | `partial`, `invalid` | snapshot; the sale stays pending, so it shows in Por verificar with asked and received amounts and its label; the admin uses Verificar or Rechazar as today (FR-018) | link closed; an attention item the admin *accepts* (records the settlement as the admin) or *dismisses* (the apartado continues) (D15) |
-  | `expired`, or the link expired with nothing in flight | FR-016 system cancellation (D11) | link `expired`; the apartado continues |
+  | `expired`, or the link expired with no payment | FR-016 system cancellation (D11) | link `expired`; the apartado continues |
+  | the link expired after a `partial`, `invalid` or `unapplied` verdict | link `expired`; nothing else: the admin decides (FR-016) | the link is already closed |
   | `unapplied` | attention item «Dinero recibido sin venta»; the admin marks it *returned* (D15) | same |
   | `superseded` | recorded and ignored; the correction arrives as a new payment | same |
   | `confirmed`, but the sale is already cancelled (a close that never reached Devolada) | treated as `unapplied`: a cancelled sale is never verified | same |
@@ -292,18 +298,25 @@ says otherwise.
 ### D11 — Cancelling when the money never arrived
 
 - **Decision**: `cancelForUnreceivedTransfer(deps, {organizationId, folioId, linkId, at})` runs four steps:
-  1. **Claim the link**: `UPDATE devolada_links SET state = 'expired' WHERE id = ? AND state = 'open' RETURNING`. One worker wins.
-  2. **Check the sale**: go on only if the sale is not cancelled **and** the link's row is its only positive money. Otherwise raise an attention item. A sale holding any other money is never cancelled automatically.
+  1. **Claim the link**: `UPDATE devolada_links SET state = 'expired' WHERE id = ? AND organization_id = ? AND state = 'open' RETURNING`. One worker wins.
+  2. **Check the sale**: go on only if all of these hold. Otherwise the result is `'kept'`: the link stays `expired` and the sale is left as it is. A sale still pending stays in Por verificar through `verification`, labelled `not_received`, and nothing else is stored.
+     - The sale is not cancelled.
+     - The link's own row is still pending. An admin may have verified it by hand while its payment was in flight (D13), and a sale an admin verified is never cancelled automatically.
+     - No other link of the sale has a payment in flight, as when an apartado's deposit link expires while its settlement is being verified.
+     - The link's row is the sale's only positive money. A sale holding any other money is never cancelled automatically.
   3. **One `db.batch`, every statement gated on the batch's own transition** (constitution V: the read in step 2 is never the only guard):
      - first, the sale is cancelled `WHERE cancelled_at IS NULL`, stamping `cancelled_at = :at`, `cancellation_source = 'payment_not_received'` (new value) and the reason «No se recibió la transferencia»;
      - every later statement carries `WHERE EXISTS (SELECT 1 FROM folios WHERE id = ? AND organization_id = ? AND cancelled_at = :at AND cancellation_source = 'payment_not_received')`, inserts written as `INSERT … SELECT … WHERE EXISTS`:
        - its live lines cancelled (`WHERE cancelled_at IS NULL`);
        - the reversal from `buildCancellationReversal`, with clawback;
        - seats and reservations released **for live lines only**;
+       - the sale's other open links marked `closing`, with `closed_reason` `cancelled` (D13);
        - the event `transfer_not_received`, with a NULL actor.
 
      If anything cancelled the sale between step 2 and the batch, the first statement matches nothing and so does every other: nothing is reversed or released twice.
-  4. **After the batch**: the `payment_rejected` notification, then the link is closed at Devolada (D13).
+  4. **After the batch**: the `payment_rejected` notification, then the claimed link and the sale's other closing links are closed at Devolada (D13).
+
+  It returns `'cancelled'`, `'kept'`, or `'noop'` when step 1's claim matched nothing. *(Amended 2026-10-15 by /speckit-analyze: step 2's conditions, the other links, and `'kept'` in place of an undefined attention item.)*
 
   The seat and reservation release statements are extracted from `rejectPayment` into a builder both use. The admin's Rechazar is otherwise untouched.
 - **Rationale**:
@@ -320,7 +333,7 @@ says otherwise.
   - `sweepDevoladaPayments(env, now)` lives in `routes/devolada/sweep.ts` and runs as a third independent `ctx.waitUntil` in `scheduled()`, with `now = new Date(controller.scheduledTime)`.
   - Each run covers every connected or broken organization, plus every disconnected one that still has open links. It is fail-soft per organization (loading its credential included) and per sale, and does four things:
     1. Sales with a link that is `open` and either unchecked for 10 minutes or past `expires_at` get `GET /v1/payments?customerRef=<folioId>`, one call covering all the sale's links, and D9 for each payment.
-    2. Links past expiry with no payment in flight or confirmed take D9's unpaid branch.
+    2. A link past expiry whose current payment is absent or *expired* takes D9's unpaid branch. One whose payment is in flight stays open. Any other final verdict (*partial*, *invalid*, *unapplied*) moves the link to `expired` and leaves the sale to the admin (FR-016), so the sweep stops re-reading it.
     3. Links in the remaining states are retried:
        - `abandoned`: replay the create with the same key; if the link exists, close it;
        - `closing`: send `PATCH {close: true}` until Devolada acknowledges.
@@ -342,30 +355,41 @@ says otherwise.
   - Every write that stops a sale from taking a payment marks that sale's open links `closing` **in the same batch**:
     - `cancelFolioPriced` and `cancelFolioLinesPriced`, which cover admin, agent and tourist cancellations, line cancellations and the expiry sweep;
     - `rejectPayment`;
-    - the admin's manual Verificar;
-    - D11;
+    - the admin's manual Verificar, for the links that collect the rows it verified;
+    - D11, for the sale's other links;
     - a cash settlement while a settlement link is open.
 
-    The reason is recorded in `closed_reason`: `cancelled` when the sale is cancelled; `amount_changed` when a line cancellation leaves the sale alive with a new balance; `rejected`; `verified_by_admin`; `settled_otherwise`; and `abandoned` when the sweep finds that a timed-out create did exist. D11's link ends `expired`, with no reason. *(Amended 2026-10-15 by /speckit-analyze.)*
+    The reason is recorded in `closed_reason`: `cancelled` when the sale is cancelled; `amount_changed` when a line cancellation leaves the sale alive with a new balance; `rejected`; `verified_by_admin`; `settled_otherwise`; and `abandoned` when the sweep finds that a timed-out create did exist. D11's own link ends `expired`, with no reason. *(Amended 2026-10-15 by /speckit-analyze.)*
+  - **While the sale stays alive, a link is never closed under a payment in flight** (*validating*, awaiting a tracking key, or `queued_for_credit`). Decided by the developer on 2026-10-15:
+    - the admin's manual Verificar leaves that link open. Its verdict is recorded and releases nothing a second time (D10), and the link is closed once that verdict is final;
+    - while a settlement link's payment is in flight, a line cancellation and a cash settlement answer 409 `SETTLEMENT_IN_PROGRESS`, and the seller waits for the verdict;
+    - cancelling the sale, and Rechazar, still close it: the sale is gone, so money that arrives after is rightly *unapplied* (D9).
   - After the write, the handler closes them at Devolada (`PATCH {close: true}`) under `waitUntil`. The sweep retries until Devolada acknowledges.
   - When a line cancellation changes an apartado's balance while its settlement link is open, a replacement settlement link (D6) is issued and returned.
 - **Rationale**:
   - FR-011 and Story 4.
   - Marking inside the batch keeps the link's state consistent with the money; the HTTP close stays outside it (VIII).
+  - Closing a link under a payment in flight turns that payment *unapplied* at Devolada: "validated money that settled nothing (the link had closed)". The admin would then be told to return money that paid a live sale. That happens in the spec's edge case of a manual verification during validation, and when a balance changes under a transfer already made.
+  - Verifying a deposit by hand does not stop the sale from taking its settlement, so the settlement link stays open.
   - Only settlement links ever need a replacement. A sale or deposit with a pending transfer cannot change what it owes, because every manual cancel path refuses it with `PAYMENT_UNVERIFIED`.
 - **Alternatives considered**:
   - Closing synchronously inside the cancellation: a Devolada outage would block cancellations, against VIII.
   - Not closing: a customer could pay a cancelled sale. That money surfaces as `unapplied` (D9), but preventing it is cheaper.
+  - Closing anyway, and labelling the resulting *unapplied* as money of a verified sale: one status with two meanings. Rejected by the developer on 2026-10-15.
 
 ### D14 — Read model, queue and counts
 
 - **Decision**:
   - **Sale reads**: `readFolioDetail` gains `payment_links[]`, and list rows gain `payment_link` (contracts/turistear-api.md § PaymentLinkView). Each carries the kind, state, amount, URL, expiry, the latest payment's facts, and a `label` code decided by the server. The client only maps codes to copy.
   - **Por verificar holds only work for the admin** (spec clarification of 2026-10-15). Two flags on every list row and on the detail, both decided by the server:
-    - `verification_auto`: the sale is pending verification with a live line, and Devolada is handling it with nothing for the admin to do. Every pending payment row is collected by a link that is `open` and not past `expires_at`, and its current payment is absent or *validating* without `awaiting`. The sale also has no unresolved attention item.
+    - `verification_auto`: the sale is pending verification with a live line, and Devolada is handling it with nothing for the admin to do. Every pending payment row is collected by an `open` link that either waits for its first payment before `expires_at`, or whose current payment is *validating* without `awaiting`. A payment still *validating* past `expires_at` keeps the flag: the customer paid in time and Banxico has not answered yet. The sale also has no unresolved attention item.
     - `devolada_attention`: the sale has an unresolved attention item (data-model § Attention).
 
-    The «Por verificar» facet lists the sales pending verification that are not `verification_auto`, plus every `devolada_attention` sale. A `verification_auto` sale offers no «Verificar y enviar» on its card, and the admin can still verify it from the sale (FR-018). It returns to the queue by itself as soon as its link expires unpaid, its credit pauses, the customer owes a tracking key, or an exception arrives.
+    The «Por verificar» facet lists the sales pending verification that are not `verification_auto`, plus every `devolada_attention` sale. A `verification_auto` sale offers no «Verificar y enviar» on its card, and the admin can still verify it from the sale (FR-018). It returns to the queue by itself as soon as its link expires with no payment, its credit pauses, the customer owes a tracking key, or an exception arrives.
+
+    The words follow the flag. On a `verification_auto` sale, the detail's header shows the link's chip instead of «Por verificar», and the receipt's pending payment rows read «En verificación»: «Por verificar» names the admin's work (`app:features/folios/components/FolioStateSheet.tsx:57-58`).
+
+    The flag and the counts share one SQL predicate. Its attention clause arrives with the attention items, in PR 2. *(Amended 2026-10-15 by /speckit-analyze: a payment validating past the link's expiry, the words, and the order of the attention clause.)*
   - **Pending work**: the pending-work set (`utils/folioPendingWork.ts`) gains the Devolada attention items, so the «Por verificar» facet lists them whatever their age.
   - **Counts**: `GET /api/folios/counts` gains two counts, and each sale counts once:
     - `verification_auto`: the sales whose row flag is set;
@@ -423,8 +447,8 @@ says otherwise.
     - While connected, the reference switch says it applies only without Devolada.
   - **Checkout and SettleSheet**: when `devolada.status` is `connected`, the Referencia field is not offered and the consequence line announces the link.
     - The transfer fields move into `features/pos/components/TransferPaymentFields.tsx` so they can be tested. Constitution VI does not allow tests of `pages/`.
-  - **Receipt, sale detail and BookingActions**: a `PaymentLinkCard` with:
-    - the amount, «Vence hoy a las HH:MM» or «Vence mañana a las HH:MM» (a link lives at most 24 h, D7) and a status chip;
+  - **Receipt, sale detail and BookingActions**: a `PaymentLinkCard`, titled «Enlace de pago», with:
+    - the amount, a status chip and, while the link is open, «Vence hoy a las HH:MM» or «Vence mañana a las HH:MM» (a link lives at most 24 h, D7);
     - the primary action «Cobrar por WhatsApp» (`paymentLinkWhatsAppUrl` in `features/pos/delivery.ts`, with a shipped default text per link kind);
     - polling every 15 s while the link waits.
 
@@ -432,7 +456,8 @@ says otherwise.
   - **BookingActions**: while a settlement link is open, «Liquidar saldo» and «Liquidar todo» give way to the chip «Liquidación en verificación».
   - **One word per concept, one verb per action** (constitution VII):
     - the state of money being checked keeps the word the UI already uses, **verificación**: «Verificando pago», «Pago en verificación», «Verificación en pausa». «Validar» never appears in the UI, even though Devolada calls its own check a validation;
-    - sending the link is collecting the payment, so its action uses the canonical verb **Cobrar**: «Cobrar por WhatsApp».
+    - sending the link is collecting the payment, so its action uses the canonical verb **Cobrar**: «Cobrar por WhatsApp»;
+    - a URL the customer opens is an **enlace**: «Enlace de pago», «con este enlace». The customer's ticket message already says «guarda el enlace», and the timeline already calls the `link` payment method «enlace». «Liga» and «link» never appear in new copy. Decided by the developer on 2026-10-15. The hidden `link` method's own label, «Link de pago», is defect 12.
   - **Por verificar**: FolioCard and FolioWorkActions show the labels and amounts. The timeline adds the new event types to its three exhaustive records, and AppLayout uses the new badge sum.
   - **Copy**: `contracts/turistear-api.md` § Labels and § Action copy. Tasks cite it rather than restate it.
   - **The link's message depends on its kind** (contracts § WhatsApp message). A deposit's message never promises tickets, because an apartado's tickets wait for its settlement. Bug `verify-send-empty-link`, fixed on `main` on 2026-10-06, removed exactly that promise from the admin's «Verificar y enviar».
@@ -487,11 +512,11 @@ says otherwise.
 - **Decision**:
   - **API** (workerd, real D1):
     - A stateful fake Devolada in `test:helpers/devolada.ts`, behind `vi.spyOn(globalThis, 'fetch')` for `https://devolada.test`. It covers links, payments, the test-mode advance, the notification address, a generated P-256 key pair served as JWKS, and a builder for signed webhook requests.
-    - Suites in `test:devolada/`: connection, checkout-link, webhook, verdicts, apartados, link-closing, sweep, isolation, credential-cipher and signature.
+    - Suites in `test:devolada/`: connection, checkout-link, webhook, verdicts, apartados, link-closing, sweep, isolation, credential-cipher, signature, link-view (the label precedence) and query-plans (BUG-042).
     - Each file cites `devolada-transfer-verification US<n>`, and every new route has `seedTwoOrgs` cases.
     - Requests authenticate the way production does: `headers: { Cookie: sessionCookie(email) }` (`test:helpers/session.ts`), a real Better Auth session row behind a signed cookie. `seedTwoOrgs` returns each admin's email for it.
     - The fake composes with `stubResend` (`test:helpers/auth-flows.ts:54-69`). A test that needs both calls `stubResend()` first, and `installFakeDevolada()` chains to the spy's current implementation instead of replacing it, so ticket emails still reach the Resend stand-in.
-  - **App**: tests for DevoladaConnectionCard, PaymentLinkCard, TransferPaymentFields, the SettleSheet connected mode and the FolioCard labels, each with `expectNoA11yViolations`. MSW handlers live in `app:test/handlers/devolada.ts`.
+  - **App**: tests for DevoladaConnectionCard, PaymentLinkCard, TransferPaymentFields, ReceiptPaymentStatus, PaymentBreakdown, PendingWorkBar, the «Por verificar» facet and card state, the SettleSheet connected mode and the FolioCard labels, each component test with `expectNoA11yViolations`. MSW handlers live in `app:test/handlers/devolada.ts`.
   - **Scope boundary**: `test:pos/payment-verification.test.ts`, `test:pos/optional-payment-reference.test.ts` and `test:paid-ledger/settle-method.test.ts` pass unedited.
 - **Rationale**: constitution VI. Rules are proven in the API, and stand-ins sit at the provider's boundary.
 
@@ -512,8 +537,9 @@ says otherwise.
   - its preview applies its pending migrations to dev's D1 **before** the merge, so PR 1's `0073` reaches dev while dev still runs `main`'s code;
   - the merge deploys dev, and a `v*` tag releases production;
   - PR 1 is released to production only after `DEVOLADA_CREDENTIAL_KEY` is in the `production` environment (D17, T003);
-  - a later PR's preview writes rows into dev's database that dev's earlier code does not handle yet: a deposit or settlement link while dev runs PR 1. PR 1's code keeps any verdict on a kind it does not handle as a snapshot (T028), and these are test-mode rows on dev;
-  - until PR 3, Rechazar does not close the link. A customer who pays a rejected sale before the link expires is recorded as a snapshot, and only surfaces once PR 2 brings `unapplied`. This is accepted: it is today's risk, since a rejected customer can transfer anyway, and the link expires within 24 hours.
+  - a later PR's preview writes rows into dev's database that dev's earlier code does not handle yet: a deposit or settlement link while dev runs PR 1. PR 1's code keeps any verdict on a kind or status it does not handle as a snapshot, without marking it applied (T028), so dev applies it once it runs PR 2. These are test-mode rows on dev;
+  - until PR 3, Rechazar does not close the link. A customer who pays a rejected sale before the link expires is recorded as a snapshot, and only surfaces once PR 2 brings `unapplied`. This is accepted: it is today's risk, since a rejected customer can transfer anyway, and the link expires within 24 hours;
+  - until PR 3, nothing closes or replaces a settlement link. So in PR 2, while a sale has an open settlement link, a line cancellation, a cash settlement and a settlement for another line answer 409 `SETTLEMENT_IN_PROGRESS`, and the settle buttons stay hidden. PR 3 narrows the refusal to a link whose payment is in flight (D13). *(Amended 2026-10-15 by /speckit-analyze.)*
 - **Rationale**:
   - The spec makes each story independently testable.
   - The migration is additive, so tables created in PR 1 sit harmlessly unused until PR 2 uses them. That holds on dev too, where `0073` lands before any code reads it.
@@ -553,3 +579,4 @@ Each should go through the lite path (`/speckit-bug-assess`). This feature guard
 9. Nothing type-checks the API (no `tsc` in CI), and 20 error codes in use are missing from `ErrorCode` (27 on 2026-10-06; the retired affiliate and operator codes left with their routes). `src/types/errors.ts:1-36`.
 10. Unstubbed outbound calls in API tests reach the real provider (Resend), with the test key `vitest.config.ts` pins, so nothing is delivered. For example, `test:pos/payment-verification.test.ts` does not call `stubResend`.
 11. The `payment_rejected` customer message, which D11 reuses, says «tu folio…» where constitution VII says «Venta»; so does the approved-cancellation message just above it. `src/utils/notifications.ts:74-81`. Because D11 newly sends `payment_rejected`, this one goes through the lite path **before PR 2** ships, not after the feature (T077).
+12. The `link` payment method, hidden at checkout (US-AG41 D1), reads «Link de pago» in its labels and «enlace» in the timeline: two words for one concept, and «link» is a word this feature never uses (D16, constitution VII). `app:features/cash/components/paymentPresentation.ts:4-8`, `app:pages/FolioReceiptPage.tsx:39`, `app:features/pos/components/PaymentBreakdown.tsx:16`, `app:features/folios/components/FolioTimeline.tsx:58`. Its fix names the method; that name must not be «Enlace de pago», which this feature gives the Devolada enlace.
