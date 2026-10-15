@@ -1,52 +1,63 @@
 <!--
-Sync Impact Report (v1.2.1, 2026-10-07)
-- Version change: 1.2.0 → 1.2.1 — PATCH.
-  - Principle IV restores the backend-for-frontend invariant that v1.2.0
-    relaxed: no response body carries the session token.
-  - v1.2.0 has not merged into `develop`. Measured against `develop`'s v1.1.1,
-    this keeps that version's own rule ("never returned in a body"), so no
-    governance is added, removed or redefined net.
-  - Source: specs/004-passkey-auth, the developer's decision of 2026-10-07 to
-    keep the BFF.
+Sync Impact Report (v1.3.0, 2026-10-15)
+- Version change: 1.2.1 → 1.3.0 — MINOR. The delivery workflow is rewritten
+  (specs/005-delivery-pipeline, plan D18), and IV and VIII gain one sentence
+  each about previews. No principle is removed, renumbered or redefined: what
+  changes is how code reaches dev and prod, which is materially expanded
+  guidance, not a new law. Source: the developer's decisions of 2026-10-15 —
+  one branch as in devolada, the tag alone is the approval, and previews
+  apply a pull request's migrations to dev.
 - Modified sections (titles unchanged):
-  · IV. The Server Decides. The session bullet's "Better Auth's sign-in
-    answers may echo the session token in their body; the app never reads,
-    stores or sends it" becomes:
-    - the API strips the token from Better Auth's sign-in answers;
-    - `/get-session` and `/list-sessions` are not exposed over HTTP;
-    - the app reads its user from `/api/me`.
-- Carried from v1.2.0 (same pull request, still on this branch):
-  · Authentication moves to Better Auth (specs/004-passkey-auth, plan D18).
-  · III: Better Auth's tenant fields are `input: false`, and its lookups by
-    globally unique key join the exempt reads.
-  · IV: `/api/auth/*` is Better Auth's handler, with its own validation,
-    `{ code, message }` and success shapes. Its codes the app branches on
-    are declared in the spec. MSW mirrors its client under the fixture rule.
-  · VI: the `AGNOSTIC_AUTH_API` stand-in leaves, `BETTER_AUTH_SECRET` is
-    pinned, and ceremonies come from a software authenticator.
-  · VIII: Agnostic Auth leaves the list, Resend's place on the sign-in path is
-    recorded, and the signing secrets are named.
-  · Technology Stack & Constraints: the Runtime row gains `nodejs_als`; the
-    Auth row becomes Better Auth 1.7.7.
+  · IV. The Server Decides:
+    - a preview's session cookie is host-only on its API (workers.dev is a
+      public suffix);
+    - a preview is a target of dev, not an environment, so it signs with
+      dev's `QR_SECRET`.
+  · VI. A Rule Is Proven Where It Is Enforced: labelled pull-request journeys
+    run against that pull request's preview; the nightly run stays on dev.
+  · VIII. A Service We Do Not Own Never Undoes a Sale:
+    - dev's and prod's secrets stay on their Workers, never re-planted by a
+      workflow;
+    - a preview takes dev's values, or a throwaway its note names.
+  · Technology Stack & Constraints:
+    - the Environments row: dev from `main`, prod from `v*` tags, a preview
+      per pull request;
+    - the migration constraint: a pull request's migrations reach dev with
+      its preview, and a migration that reached dev keeps its file name.
+  · Development Workflow & Quality Gates:
+    - one long-lived branch, `main`, and worktrees from `origin/main`;
+    - pull requests into `main`, squash-merged, and no release pull requests;
+    - `verify` gains the pipeline scripts' tests and is one composite action
+      that every deploy runs whole;
+    - a preview per pull request;
+    - a push to `main` deploys dev;
+    - a `v*` tag releases prod and is the approval: the release refuses an
+      unproven commit, records a Time Travel restore point, never exports the
+      database, states what landed and smokes both hostnames;
+    - Rollback Prod.
 - Added sections: none. Removed sections: none.
 - Templates: .specify/templates/plan-template.md ✅, spec-template.md ✅,
-  tasks-template.md ✅, checklist-template.md ✅. None names an auth
-  provider or a token rule; no template changed.
+  tasks-template.md ✅, checklist-template.md ✅. None names a branch, a
+  deploy or an environment; no template changed.
 - Follow-up TODOs:
-  · The code catches up in the same pull request (specs/004-passkey-auth).
-    On this branch the text leads the code until the feature's tasks
-    complete; `develop` keeps v1.1.1 until that PR merges.
-  · TODO(PASSWORD-MATERIAL): `users.password_hash`, `users.password_salt` and
-    `password_reset_tokens` stay in D1, unread, until the deploy that follows
-    cutover (specs/004-passkey-auth D15). They are registered as debt at
-    implementation.
-  · CLAUDE.md still describes Agnostic Auth and the old local-login caveat;
-    specs/004-passkey-auth T044 rewrites it.
-  · Carried from v1.0.0, still open: TODO(CONTRACT-MIRROR),
-    TODO(TOKEN-FALLBACKS), TODO(EMAIL-PALETTE), TODO(TEST-CITATIONS),
-    TODO(DESIGN-FOUNDATIONS), and the archived TECH_DEBT.md items to
-    re-register when a feature touches them (see the v1.0.0 report in git
-    history, develop@33b3609).
+  · The text leads the code, as it did for specs/004-passkey-auth: this
+    amendment lands with the feature's documentation in `develop`, and the
+    pipeline follows in its implementation pull request into `main`, which
+    is `develop`'s last trip there. Until that merges, `develop` and `main`
+    still deploy the old way.
+  · The settings that live outside the repository (environment policies,
+    branch protection, deleting `develop`) are the developer's acts, listed
+    in specs/005-delivery-pipeline/contracts/environment.md.
+  · Carried from v1.2.1, still open:
+    - specs/004-passkey-auth's code catches up with IV, VI and VIII; when it
+      lands, its preview profile gains `AUTH_COOKIE_PREFIX` and
+      `BETTER_AUTH_SECRET` (specs/005-delivery-pipeline research R2);
+    - TODO(PASSWORD-MATERIAL) (specs/004-passkey-auth D15);
+    - CLAUDE.md still describes Agnostic Auth (specs/004-passkey-auth T044);
+    - TODO(CONTRACT-MIRROR), TODO(TOKEN-FALLBACKS), TODO(EMAIL-PALETTE),
+      TODO(TEST-CITATIONS), TODO(DESIGN-FOUNDATIONS), and the archived
+      TECH_DEBT.md items to re-register when a feature touches them (see the
+      v1.0.0 report in git history, develop@33b3609).
 -->
 
 # Turistear Ya! Constitution
@@ -162,7 +173,9 @@ it keep isolation auditable with grep.
   - The session is a Better Auth session issued by the API.
   - It lives in one HttpOnly, Secure cookie on `.turistearya.com`:
     `__Secure-<AUTH_COOKIE_PREFIX>.session_token`, with a prefix per
-    environment.
+    environment. On a pull request's preview the cookie is host-only on the
+    preview's API; `workers.dev` is a public suffix, so the preview's app is
+    the same site (specs/005-delivery-pipeline D4).
   - Every request is sent with `credentials: 'include'`.
   - No response body carries the session token. The API strips it from
     Better Auth's sign-in answers (`sign-in/email-otp`,
@@ -195,7 +208,8 @@ it keep isolation auditable with grep.
   fiction.
 - QR tickets are signed by the server (HMAC-SHA256, with a per-organization
   key derived from `QR_SECRET`) and validated online against it. No two
-  environments share a `QR_SECRET`.
+  environments share a `QR_SECRET`. A pull request's preview is a target of
+  dev, not an environment: it serves dev's data and signs with dev's key.
 
 Rationale: the frontend runs on a phone in someone else's hands. Whatever it
 decides alone, a modified client can decide differently — and a mirror nobody
@@ -242,8 +256,9 @@ at a time.
   names the bug that tracks it; a fresh finding is never quieted.
 - Playwright (`app-turistear/e2e/`) covers only journeys that cross a real
   browser and a real API, seeds and tears down its own data, and runs nightly
-  and on pull requests labelled `e2e` — never as a merge gate. A test that
-  skips by default has never gated anything.
+  against dev and, on a pull request labelled `e2e`, against that pull
+  request's own preview — never as a merge gate. A test that skips by default
+  has never gated anything.
 - Every new test file cites what it proves: `<feature-slug> US<n>` for a
   Spec Kit story, `bug: <slug>` for a lite-path fix, or the archived
   `US-XNN` / `BUG-0NN` it extends. A bare `US1` is not a citation.
@@ -310,6 +325,10 @@ once. Every rule here prevents one way that glance goes wrong.
 - Secrets live in each environment's Worker secrets and in GitHub
   environments, never in the repo (`.dev.vars` is ignored), and no two
   environments share a signing secret (`QR_SECRET`, `BETTER_AUTH_SECRET`).
+  Dev's and prod's secrets stay on their Workers; no workflow re-plants them,
+  because a value pasted wrong would invalidate every live ticket. A preview
+  takes dev's values from the GitHub `dev` environment, or a throwaway value
+  that its pull-request note names.
 
 Rationale: the sale is the fact and the receipt is a courtesy. A ticket can be
 sent again; a sale that vanished because an email bounced cannot be sold
@@ -329,7 +348,7 @@ Complexity Tracking.
 | Frontend | `app-turistear`: React 19, Vite 8, MUI 9 (`cssVariables: true`), TanStack Query 5, Zustand 5, React Hook Form 7 + Zod 4, React Router 7; served as a Worker. Layers: `pages/` (route assembly only) · `layout/` · `components/` (shared primitives) · `features/<Name>/{components,hooks,types.ts,index.ts}` · `store/` · `services/` · `styles/` · `config/` |
 | Language | TypeScript, ESM; Node 22; pnpm workspace (pnpm 10 in CI) |
 | Tests | Vitest 4 — `@cloudflare/vitest-pool-workers` for the API; jsdom, Testing Library, MSW 2 and axe-core for the app; Playwright 1.62 for journeys |
-| Environments | `dev` from `develop` (`api-dev` / `app-dev.turistearya.com`, D1 `guideme-db`) and `prod` from `main` (`api` / `app.turistearya.com`, D1 `guideme-db-prod`) |
+| Environments | `dev` from every push to `main` (`api-dev` / `app-dev.turistearya.com`, D1 `guideme-db`) and `prod` from `v*` tags (`api` / `app.turistearya.com`, D1 `guideme-db-prod`). Beside dev, one preview per pull request: `api-guideme-pr-<n>` / `app-guideme-pr-<n>` on the account's `workers.dev` subdomain, on `guideme-db` |
 | Integrations | Resend (transactional email), api.qrserver.com (QR images), WhatsApp through agent-sent links — Principle VIII |
 
 Additional constraints:
@@ -340,7 +359,9 @@ Additional constraints:
 - Migrations take the next four-digit number and are additive and
   backward-compatible with the code already deployed: they run before the
   code on every deploy, and there are no down-migrations, so a mistake is
-  fixed forward.
+  fixed forward. A pull request's migrations reach dev with its preview,
+  before the merge. A migration that has reached dev keeps its file name; two
+  files that share a number apply in name order.
 - D1 reads are metered (archived TECH_DEBT #31). A list endpoint is bounded,
   and a correlated subquery keyed by a child column has an index led by that
   key: `EXPLAIN QUERY PLAN` shows no `SCAN` inside a correlated subquery
@@ -350,21 +371,39 @@ Additional constraints:
 
 ## Development Workflow & Quality Gates
 
-- One unit of work gets one worktree and one pull request:
-  `git worktree add .claude/worktrees/<name> -b <type>/<slug> origin/develop`,
+- There is one long-lived branch, `main`. One unit of work gets one worktree
+  and one pull request:
+  `git worktree add .claude/worktrees/<name> -b <type>/<slug> origin/main`,
   with branches `feat/`, `fix/` or `docs/` and Conventional Commits scoped by
   domain (`feat(cancellation):`). Never a bare `git stash`: the stash stack is
   shared by every worktree.
-- Pull requests target `develop` and are squash-merged, so the PR title
-  becomes the commit on `develop`. A release is a PR `develop → main`, titled
-  `release: … → prod` and merged with a merge commit, never squashed: the
-  squashed releases #84 and #99 cost #108 eleven phantom conflicts.
+- Pull requests target `main` and are squash-merged, so the PR title becomes
+  the commit on `main`. There is no release pull request and no second
+  branch: when two branches lived side by side, the squashed releases #84 and
+  #99 cost #108 eleven phantom conflicts.
 - Every PR runs `verify`: the archive guard, a frozen-lockfile install,
-  `lint:app`, `test:app`, `test:api`, `build:api`, `build:app`. All MUST pass;
-  none is skipped, disabled or quarantined to get green.
-- A push to `develop` deploys dev: tests, then the dev D1 migrations, then
-  the API, then the app. A push to `main` deploys prod the same way, after a
-  required reviewer approves the `production` environment.
+  `lint:app`, `test:app`, `test:api`, the pipeline scripts' tests
+  (`node --test '.github/scripts/*.test.mjs'`), `build:api`, `build:app`. All MUST pass;
+  none is skipped, disabled or quarantined to get green. `verify` is one
+  composite action, and every deploy runs it whole before deploying.
+- Every PR from a branch of this repository that changes more than
+  documentation gets a preview: `app-guideme-pr-<n>` and `api-guideme-pr-<n>`
+  on `workers.dev`, on dev's data. It deploys only after `verify` passes,
+  applies the PR's pending migrations to dev first, keeps one note on the PR
+  with its addresses, and is deleted when the PR closes. A preview never
+  gates a merge.
+- A push to `main` deploys dev: `verify`, then the dev D1 migrations, then the
+  API, then the app, then a smoke of both hostnames.
+- A `v*` tag releases prod, and the tag is the approval. The release refuses
+  a commit that is not on `main` or whose dev deploy did not finish green,
+  before touching anything. It records a D1 Time Travel restore point before
+  migrating and never exports the database — this repository is public, so
+  an artifact would publish every tourist's data. It states the version of
+  each Worker that went live and smokes both hostnames.
+- *Rollback Prod* returns one prod Worker to one named version from CI and
+  passes only when the live version is the one asked for. It never touches
+  data; restoring data from a restore point is a separate, deliberate act.
+  The runbook is `specs/005-delivery-pipeline/quickstart.md`.
 - A feature is done when each story of its spec has a cited test at the
   layer that can answer it (Principle VI), every tenant-scoped route has its
   `seedTwoOrgs` tests, its plan's Constitution Check passes, and
@@ -394,4 +433,4 @@ Additional constraints:
 - The developer decides. When a principle blocks a feature, the plan says so
   and proposes the amendment; it does not route around it.
 
-**Version**: 1.2.1 | **Ratified**: 2026-10-04 | **Last Amended**: 2026-10-07
+**Version**: 1.3.0 | **Ratified**: 2026-10-04 | **Last Amended**: 2026-10-15
