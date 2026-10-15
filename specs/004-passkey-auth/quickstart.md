@@ -110,10 +110,19 @@ pnpm lint:app && pnpm build:api && pnpm build:app
 was signed in, so it is measured from the Worker's request logs. Over the period, count status-200
 `POST /api/auth/passkey/verify-authentication` against status-200 `POST /api/auth/sign-in/email-otp`.
 
-## 6. The follow-up deploy (D15, the next PR after cutover)
+## 6. The follow-up deploys (D15, after cutover)
 
-Drop `users.password_hash`, `users.password_salt` and `password_reset_tokens` in migration 0072 (the
-next free number), and pay debt `password-material` with `/speckit-debt-pay`. Proof:
+The drop takes two pull requests, because a migration runs before the code it ships with and must
+be compatible with the code already deployed (constitution, Additional constraints). The cutover's
+own code still inserted users through the password columns, so it could not run against the drop.
+
+1. **The code stops depending on them** (2026-10-15). `users` maps neither column, and a new user is
+   insertable on both sides of the drop. `test/auth/password-material.test.ts` drops the columns
+   and the table from its own database and proves registration, invitations and both sign-ins
+   still work. Release it: a `v*` tag on a `main` commit that carries it.
+2. **The drop**, once that release is live in prod. Drop `users.password_hash`,
+   `users.password_salt` and `password_reset_tokens` in migration 0072 (the next free number),
+   remove the step-1 fallback, and pay debt `password-material` with `/speckit-debt-pay`. Proof:
 
 ```bash
 wrangler d1 execute … --command "SELECT name FROM pragma_table_info('users') WHERE name LIKE 'password%';"

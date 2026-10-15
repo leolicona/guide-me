@@ -96,16 +96,12 @@ export const users = sqliteTable('users', {
     .references(() => organizations.id),
   name: text('name').notNull(),
   email: text('email').notNull().unique(),
-  // passkey-auth D15 — no longer read; dropped by the deploy after cutover (debt
-  // `password-material`). Until then the columns are NOT NULL, so an insert that omits them
-  // writes ''. Better Auth's schema check also requires every column it never writes to have a
-  // default.
-  passwordHash: text('password_hash')
-    .notNull()
-    .$defaultFn(() => ''),
-  passwordSalt: text('password_salt')
-    .notNull()
-    .$defaultFn(() => ''),
+  // passkey-auth D15 — `password_hash` and `password_salt` are deliberately NOT mapped, so no read
+  // touches them and migration 0072 can drop them under the code already deployed (debt
+  // `password-material`). Better Auth's adapter selects every mapped column, and once dropped a
+  // mapped column would not fail but read back as the text 'password_hash' (SQLite takes a
+  // double-quoted name it cannot resolve for a string). They stay NOT NULL in D1 until then: a new
+  // user goes in through routes/onboarding/handler.ts, which writes them on either side of the drop.
   // passkey-auth D4 — Better Auth's `emailVerified` (set by an email-code sign-in) and `image`
   // (required by its model, never written).
   emailVerified: integer('email_verified', { mode: 'boolean' })
@@ -156,8 +152,8 @@ export const invitations = sqliteTable('invitations', {
 })
 
 // passkey-auth D15 — `password_reset_tokens` (and `users.password_hash`/`password_salt`) are no
-// longer mapped or read: the email code replaced every password flow (FR-060, FR-061). The table
-// stays in D1 until the follow-up migration drops it (debt `password-material`).
+// longer mapped or read: the email code replaced every password flow (FR-060, FR-061). They stay in
+// D1 until migration 0072 drops them (debt `password-material`).
 
 // ─── passkey-auth D4 — Better Auth 1.7.7's standard schema (migration 0071) ────────────────────
 // Better Auth addresses these through the Drizzle adapter: each table by its export name here
