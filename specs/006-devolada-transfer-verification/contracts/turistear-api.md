@@ -76,6 +76,33 @@ Every chip pairs its colour with an icon and the text (constitution VII). The st
 checked always uses the word the UI already has, *verificación*; «validar» never appears in the UI
 (research D16).
 
+### Action copy — one verb per action (constitution VII, research D15, D16)
+
+| Where | es-MX copy |
+|---|---|
+| Ajustes card, title | Cobro con Devolada |
+| Ajustes card, key hint | Clave …abcd |
+| Ajustes card, health | Avisos funcionando · Avisos con fallas · Verificación en pausa · Avisos: solo revisión periódica (when `is_ours` is `null`) |
+| Connect sheet, field and submit | Clave de API de Devolada · Conectar |
+| Address conflict, confirm | ¿Reemplazar la dirección de avisos? |
+| Disconnect, confirm | ¿Desconectar Devolada? |
+| Payment link card, expiry | Vence hoy a las HH:MM · Vence mañana a las HH:MM |
+| Payment link card, primary action | Cobrar por WhatsApp |
+| Link not created (alert) | No se pudo crear la liga de pago; un administrador verificará la transferencia |
+| Checkout and SettleSheet, connected | Se generará una liga de pago para cobrar por WhatsApp |
+| Settlement link open, BookingActions chip | Liquidación en verificación |
+| Line cancel replaced the link | La liga de pago cambió — vuelve a enviarla |
+| Settlement exception, accept | Verificar |
+| Settlement exception, dismiss | Descartar (the sale stays an apartado; unlike «Rechazar pago», it cancels nothing) |
+| Unapplied money, returned | Ya lo devolví |
+| Receipt header while the money is unverified | Pago en verificación (instead of «Venta confirmada» and the «Pagado» chip) |
+| Payment breakdown, pending row of a sale cancelled with `payment_not_received` | No recibido |
+| Cancellation source `payment_not_received` | No se recibió la transferencia |
+| Timeline `payment_link_issued` · `payment_link_closed` | Liga de pago creada · Liga de pago cerrada |
+| Timeline `payment_verdict` | the status's copy from § Labels |
+| Timeline `transfer_not_received` | No se recibió la transferencia — venta cancelada |
+| Timeline `payment_verified` from Devolada | Transferencia verificada por Devolada · Comprobante {receipt_number} |
+
 ### `OrganizationDevoladaSummary` — on `GET /organizations/me`, every role
 
 ```json
@@ -110,6 +137,7 @@ checked always uses the word the UI already has, *verificación*; «validar» ne
 ```
 
 - `webhook` is read live from Devolada with an 8 s limit. When Devolada cannot be reached, `webhook` is `null` and `health_error` is `"DEVOLADA_UNAVAILABLE"`. Health never fails the request.
+- `webhook.is_ours` is `null` where this environment registers no address (`DEVOLADA_WEBHOOK_URL` empty: local and pull-request previews). There, verdicts arrive only through the sweep, which is expected rather than a failure (research D3, D17).
 
 ## Endpoints
 
@@ -144,6 +172,7 @@ Steps (D2, D3):
 | 409 | `DEVOLADA_WEBHOOK_CONFLICT` | another address is registered; `message` is that URL. Resend with `replace_webhook: true` |
 | 422 | `DEVOLADA_CREDENTIAL_REJECTED` | Devolada answered `AUTHENTICATION_ERROR` |
 | 422 | `DEVOLADA_MODE_NOT_ALLOWED` | a test key in production, or a real key elsewhere |
+| 500 | `INTERNAL_ERROR` | this environment cannot encrypt the key: `DEVOLADA_CREDENTIAL_KEY` is missing or malformed (research D17). Nothing is called at Devolada |
 | 502 | `DEVOLADA_UNAVAILABLE` | Devolada unreachable, timed out or answered 5xx |
 
 #### `DELETE /organizations/me/devolada` — disconnect
@@ -193,9 +222,9 @@ For a connected organization with `"method": "transfer"`, no settlement is recor
 
 | Endpoint | Change |
 |---|---|
-| `GET /pos/folios/:id`, `GET /folios/:id` | `folio.payment_links: PaymentLinkView[]`, newest first |
-| `GET /pos/folios`, `GET /folios` | each row gains `payment_link: PaymentLinkView | null`: the latest unresolved link, otherwise the latest. Devolada attention items join the pending-work set, so they are listed whatever their age (D14) |
-| `GET /folios/counts` | adds `verification_auto` (pending sales an open Devolada link covers; no action needed) and `devolada_attention` (actionable Devolada items). Admin badge = `verification − verification_auto + devolada_attention + folio_requests` |
+| `GET /pos/folios/:id`, `GET /folios/:id` | `folio.payment_links: PaymentLinkView[]`, newest first; `folio.verification_auto` and `folio.devolada_attention` (booleans, D14) |
+| `GET /pos/folios`, `GET /folios` | each row gains `payment_link: PaymentLinkView | null` (the latest unresolved link, otherwise the latest), `verification_auto: boolean` and `devolada_attention: boolean`. Devolada attention items join the pending-work set, so they are listed whatever their age (D14) |
+| `GET /folios/counts` | adds `verification_auto` (sales Devolada is handling with nothing for the admin to do) and `devolada_attention` (sales needing the admin that `verification` does not already count). Each sale counts once: «Por verificar» = `verification − verification_auto + devolada_attention`, in the badge, the pending-work bar and Hoy. Admin badge = that number + `folio_requests` |
 | `GET /organizations/me` | adds `devolada: OrganizationDevoladaSummary` |
 
 ### Resolving Devolada exceptions — admin (`/devolada` router, `requireRole('admin')`)
@@ -240,7 +269,7 @@ Sale and deposit exceptions use today's `POST /pos/folios/:id/verify` and `/reje
 | 200 | `{ "received": true }`: applied, duplicate, unknown link or mode mismatch | delivered |
 | 400 | `WEBHOOK_PAYLOAD_INVALID`: not JSON, wrong shape, or over 64 KiB | failed attempt |
 | 401 | `WEBHOOK_SIGNATURE_INVALID` | failed attempt |
-| 503 | `DEVOLADA_UNAVAILABLE`: keys or the re-read unreachable | failed attempt, retried |
+| 503 | `DEVOLADA_UNAVAILABLE`: keys or the re-read unreachable, or the organization's credential unreadable here (research D17) | failed attempt, retried |
 | 500 | `INTERNAL_ERROR` | failed attempt, retried |
 
 ## Error codes (declared before code — constitution IV)

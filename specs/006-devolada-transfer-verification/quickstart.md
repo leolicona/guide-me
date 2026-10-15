@@ -78,13 +78,13 @@ curl -s -X POST "https://api.devoladapago.com/v1/test/payments/<payment id>/adva
 
 | # | Do | Expect |
 |---|---|---|
-| 1 | Ajustes → «Cobro con Devolada» → Conectar, with the test key | «Conectada · Prueba · …abcd». An expired "Prueba de conexión — Turistear Ya!" link appears in Devolada's panel. A real key is refused (`DEVOLADA_MODE_NOT_ALLOWED`) |
-| 2 | POS → sell a full sale by Transferencia | No Referencia field. The receipt shows the «Liga de pago» card: amount, «Vence hoy a las …» (or «mañana»), «Esperando pago». «Cobrar por WhatsApp» opens `wa.me` with the link in the text |
+| 1 | Ajustes → «Cobro con Devolada» → Conectar, with the test key | «Conectada · Prueba · Clave …abcd», and the health reads «Avisos: solo revisión periódica» (no address locally). An expired "Prueba de conexión — Turistear Ya!" link appears in Devolada's panel. A real key is refused (`DEVOLADA_MODE_NOT_ALLOWED`) |
+| 2 | POS → sell a full sale by Transferencia | No Referencia field. The receipt shows the «Liga de pago» card: amount, «Vence hoy a las …» (or «mañana»), «Esperando pago». «Cobrar por WhatsApp» opens `wa.me` with the link in the text. Por verificar does not list the sale, and its count does not change |
 | 3 | Open the link and confirm a test transfer on Devolada's page; trigger the sweep | «Verificando pago» |
 | 4 | Advance it to `confirmed`; trigger the sweep | Tickets appear (QR, portal link), «Pago confirmado». The timeline shows «Transferencia verificada · Sistema» with the Comprobante Devolada. The sale never appears in Por verificar |
 | 5 | Repeat 2–3, advance to `partial` with a lower `receivedCents` | Por verificar: «Pago incompleto» with asked and received amounts; Verificar and Rechazar work as today |
 | 6 | Repeat with `invalid` | Por verificar: «Banxico no confirma la transferencia» |
-| 7 | Repeat 2, don't pay; trigger the sweep with `time=` after the expiry | The sale is cancelled by «Sistema», reason «No se recibió la transferencia», and its seats are back on sale (SC-009) |
+| 7 | Repeat 2, don't pay; trigger the sweep with `time=` after the expiry | The sale is cancelled by «Sistema», reason «No se recibió la transferencia», and its seats are back on sale (SC-009). With PR 1 alone, before the automatic cancellation exists, the sale is back in Por verificar instead |
 | 8 | Create an apartado with a transfer deposit; confirm it | The deposit link's WhatsApp text asks for the anticipo and promises no tickets. Confirm it → deposit verified, no tickets. Settle by transfer → a settlement link, and the sale is still an apartado. Confirm it → tickets |
 | 9 | Settle an apartado by transfer, but let the link expire unpaid | The sale stays an apartado with its deposit, and its clocks unchanged |
 | 10 | With a settlement link open, cancel a line | The link is closed in Devolada's panel; the response carries a replacement link for the new balance |
@@ -99,8 +99,8 @@ dev's D1, so migration `0073` is already there. It registers no notification add
 cron (research D17).
 - If the `dev` GitHub environment holds `DEVOLADA_CREDENTIAL_KEY`, connect a test business.
   **Expected**: «Conectada · Prueba», and Devolada's `GET /v1/webhook` for that business is unchanged.
-- Without the key, connecting answers 500 `INTERNAL_ERROR`, and a transfer sale stays on the manual
-  path, as in step 12.
+- Without the key, the pull request's note says Devolada is off on that preview: connecting answers
+  500 `INTERNAL_ERROR`, and a transfer sale stays on the manual path, as in step 12.
 - Repeat manual step 2. **Expected**: the link card and the WhatsApp text, as locally. Before the
   merge nothing applies verdicts to a preview's sales: validate those locally (§2).
 

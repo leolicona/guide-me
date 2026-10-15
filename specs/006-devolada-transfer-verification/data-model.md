@@ -80,7 +80,7 @@ disconnected ∧ no unresolved link ─ sweep ───────────�
 | `url` | text NULL | the payer's page, sent by WhatsApp |
 | `expires_at` | integer NOT NULL | D7 |
 | `state` | text NOT NULL | see below |
-| `closed_reason` | text NULL | `cancelled` · `rejected` · `amount_changed` · `settled_otherwise` · `verified_by_admin` · `abandoned` |
+| `closed_reason` | text NULL | `cancelled` · `rejected` · `amount_changed` · `settled_otherwise` · `verified_by_admin` · `abandoned`, each written as D13 says |
 | `requested_by` | text NOT NULL → users | the seller who issued it; becomes `collected_by` of a settlement recorded under D8 |
 | `create_attempts` | integer NOT NULL DEFAULT 1 | suffixes the idempotency key after a refusal (D5) |
 | `last_checked_at` | integer NULL | last re-read (D12); NULL = never checked, so the next sweep checks it |
@@ -161,6 +161,11 @@ closing ── Devolada acknowledges (or LINK_CLOSED) ───▶ closed   (fin
 - `status = 'validating'` ∧ `awaiting IS NOT NULL`.
 
 A sale or deposit with `partial` or `invalid` is attended through the sale's pending verification, as today.
+
+**Flags and counts** (research D14), derived per sale on every read, never stored:
+- `devolada_attention`: the sale has at least one payment that needs the admin, as defined above.
+- `verification_auto`: the sale is pending verification with a live line; every pending payment row is collected by a link that is `open` and not past `expires_at`; that link's current payment is absent or `validating` without `awaiting`; and the sale has no attention item.
+- Each sale counts once in «Por verificar»: `verification − verification_auto + devolada_attention`. The `devolada_attention` count includes only sales that `verification` does not already count, because they are cancelled or their payment verification is not pending.
 
 ### `devolada_events` — notification inbox (D4)
 

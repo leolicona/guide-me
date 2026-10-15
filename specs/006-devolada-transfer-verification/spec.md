@@ -60,6 +60,17 @@ both as the fallback when Devolada is unavailable and as the admin's override.
   replaces the seller's manual recording; the manual path is used only when no link can be
   created, and the admin can always verify by hand (FR-009, FR-010, FR-018).
 
+### Session 2026-10-15
+
+- Q: While Devolada is resolving a transfer, is the sale listed in Por verificar? → A: No. Por
+  verificar holds only work for the admin. A sale whose link is alive and waiting for the customer
+  or for Banxico stays out of it, and out of its count, and offers no «Verificar y enviar». It
+  enters Por verificar as soon as the admin has something to do: an exception, paused validation
+  credit, a tracking key to ask for, no link, or a link that expired unpaid. The admin can still
+  verify it by hand from the sale (FR-018).
+- Q: How long does a payment link stay open? → A: As the Assumptions state: at most 24 hours, and
+  never past the start of the sale's first service or the apartado's own clock. Confirmed as is.
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - A transfer sale clears itself when Banxico confirms the money (Priority: P1)
@@ -88,8 +99,9 @@ observe the sale verified by «Sistema» with its tickets released and no admin 
 2. **Given** a connected organization, **When** a seller completes a full sale by Transferencia,
    **Then** the sale is created as today (paid, awaiting verification, no tickets) **and** a payment
    link for exactly the sale's amount is attached, the seller can send it to the customer by
-   WhatsApp in one tap, and the sale shows as «Verificando pago». The seller is not offered a field to
-   type a bank reference.
+   WhatsApp in one tap, the link shows «Esperando pago» and the receipt «Pago en verificación»,
+   and the sale is not listed in Por verificar. The seller is not offered a field to type a bank
+   reference.
 3. **Given** that sale, **When** Devolada reports the payment *confirmed*, **Then** the sale is
    verified with the system as the actor, its tickets are signed, the ticket email is sent if the
    customer has one, the seller's WhatsApp send unlocks, Devolada's receipt number is recorded as
@@ -286,8 +298,10 @@ closed; then advance a test payment to *unapplied* and observe the admin alert.
 - **FR-015**: Each of the following MUST be surfaced with its own label and the amounts involved
   (asked, claimed, received): *partial*, *invalid* and *unapplied* verdicts, a payment waiting on
   the customer's tracking key, and paused validation credit. They go to the admin in Por verificar;
-  the tracking-key case also goes to the seller. An *expired* verdict or an unpaid link expiry is
-  not queued — FR-016 resolves it — and its reason shows on the sale and in its timeline.
+  the tracking-key case also goes to the seller. A payment Devolada is still resolving, with
+  nothing for the admin to do, is not listed there *(Clarified 2026-10-15)*. An *expired* verdict
+  or an unpaid link expiry is not queued — FR-016 resolves it — and its reason shows on the sale
+  and in its timeline.
 - **FR-016**: When a payment ends *expired*, or its link expires unpaid, no money arrived. The
   system MUST then withdraw that payment without waiting for an admin:
   - for a full sale or an apartado deposit, cancel the sale the way an admin's Rechazar does
@@ -372,7 +386,9 @@ closed; then advance a test payment to *unapplied* and observe the admin alert.
 - A link stays open until whichever comes first: 24 hours after it is issued, or the start of the
   sale's first service. FR-016 decides what happens when it closes unpaid. Because closing unpaid
   now cancels the sale, this window is a product decision; the plan may tune it, but never past the
-  first service.
+  first service. A stay has no start time, only a check-in date, so its link may stay open until the
+  end of the check-in day: a guest who arrives that day can still pay by transfer (research D7).
+  *(Confirmed 2026-10-15.)*
 - The organization's «Referencia obligatoria en transferencias» switch (US-A88) applies only to the
   manual path. A linked payment's reference is Devolada's receipt number.
 - A fee the organization configures in Devolada is charged to the customer on top of the amount

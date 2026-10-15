@@ -59,3 +59,9 @@
   retired on `main`); no requirement changed. The plan's environment, delivery and auth facts were
   re-read: Better Auth sessions, the one-branch pipeline with previews, and secrets in GitHub
   environments (research § Re-baseline). All items still pass.
+- **/speckit-analyze (2026-10-15)**, after the re-baseline, found 3 CRITICAL, 3 HIGH, 10 MEDIUM and
+  10 LOW items. All were resolved in place. The developer decided two clarifications, recorded under
+  `## Clarifications` (Session 2026-10-15): a sale Devolada is resolving stays out of Por verificar
+  until the admin has something to do (FR-015 gained that sentence, and US1 scenario 2 now names
+  the right labels), and a link's 24-hour lifetime is confirmed, with the stay rule stated in the
+  Assumptions. All items still pass.
