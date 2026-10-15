@@ -1,10 +1,10 @@
 import { AuthLayout } from '../layout/AuthLayout';
-import { LoginForm } from '../features/auth/components/LoginForm';
+import { SignInScreen } from '../features/auth/components/SignInScreen';
 
 export default function LoginPage() {
   return (
     <AuthLayout title="Iniciar sesión">
-      <LoginForm />
+      <SignInScreen />
     </AuthLayout>
   );
 }

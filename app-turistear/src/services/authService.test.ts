@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { request, ServiceError, login, getMe } from './authService'
+import { request, ServiceError, getMe } from './authService'
 import { queryClient } from '../config/queryClient'
 
 // The global interceptor. It runs on EVERY request the app makes, it decides whether a 401 means
@@ -166,9 +166,11 @@ describe('request — 401 on a public auth path is a domain error, not an expire
     stubLocation('/login')
     fetchMock.mockResolvedValue(errorBody(401, 'INVALID_CREDENTIALS', 'Credenciales inválidas'))
 
-    const error = await login({ email: 'ana@example.com', password: 'wrong' }).catch(
-      (e: unknown) => e,
-    )
+    // passkey-auth T037 removed the `login` helper; the interceptor rule it exercised is unchanged.
+    const error = await request('/api/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ email: 'ana@example.com', password: 'wrong' }),
+    }).catch((e: unknown) => e)
 
     expect(error).toMatchObject({ code: 'INVALID_CREDENTIALS' })
     expect(replace).not.toHaveBeenCalled()

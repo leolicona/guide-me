@@ -5,6 +5,7 @@ import { AuthLayout } from '../layout/AuthLayout';
 import { InviteCompleteForm } from '../features/auth/components/InviteCompleteForm';
 import { SuccessScreen } from '../features/auth/components/SuccessScreen';
 import { useInviteAccept } from '../features/auth/hooks/useInviteAccept';
+import { ROUTES } from '../config/routes';
 
 export default function InviteAcceptPage() {
   const [searchParams] = useSearchParams();
@@ -35,12 +36,15 @@ export default function InviteAcceptPage() {
   }
 
   if (isError || !data) {
+    // passkey-auth spec § Edge Cases — accepting consumes the invitation, so someone who accepted
+    // but never entered the code lands here; they sign in with a code, nobody re-invites them.
     return (
       <AuthLayout title="Aceptar invitación">
         <SuccessScreen
           icon={<ErrorOutlined sx={{ fontSize: 64 }} color="error" />}
           title="Invitación inválida"
-          description="La invitación es inválida, ha expirado o ya fue utilizada. Contacta a tu administrador."
+          description="La invitación es inválida, ha expirado o ya fue utilizada. Si ya la aceptaste, entra con un código por correo; si no, contacta a tu administrador."
+          action={{ label: 'Ir a iniciar sesión', href: ROUTES.LOGIN }}
         />
       </AuthLayout>
     );

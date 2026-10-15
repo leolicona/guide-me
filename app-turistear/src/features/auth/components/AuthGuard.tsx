@@ -13,7 +13,7 @@ export function AuthGuard({ children }: AuthGuardProps) {
   const location = useLocation();
 
   // Show the loader on the first load AND while a refetch is in flight without a
-  // cached user yet. LoginForm resolves ['me'] via fetchQuery BEFORE navigating, so
+  // cached user yet. useCompleteSignIn resolves ['me'] via fetchQuery BEFORE navigating, so
   // the normal post-login mount finds a fresh success state; this guard remains for
   // the residual paths (e.g. the 401 interceptor removed the query and a refetch is
   // in flight) where React Query keeps a stale error (isLoading is false) — without

@@ -19,6 +19,9 @@ import QrCodeScannerRounded from '@mui/icons-material/QrCodeScannerRounded'
 import ReceiptLongRounded from '@mui/icons-material/ReceiptLongRounded'
 import TodayRounded from '@mui/icons-material/TodayRounded'
 import { useCurrentUser } from '../features/auth/CurrentUserContext'
+import { PasskeyOffer } from '../features/auth/components/PasskeyOffer'
+import { passkeysSupported } from '../features/auth/webauthn'
+import { usePasskeyOffer } from '../store/passkeyOffer'
 import { usePendingAckCount, usePendingDropCount } from '../features/cash/hooks'
 import { usePendingDeliveryCount } from '../features/pos/hooks'
 import { useFolioCounts } from '../features/folios/hooks'
@@ -98,6 +101,9 @@ export function AppLayout() {
   const landingRoute = user.role === 'admin' ? ROUTES.DASHBOARD : ROUTES.POS
 
   const [accountAnchor, setAccountAnchor] = useState<HTMLElement | null>(null)
+  // passkey-auth FR-007, SC-008 — an email-code sign-in raised this flag on its way in.
+  const passkeyOfferPending = usePasskeyOffer((s) => s.pending)
+  const dismissPasskeyOffer = usePasskeyOffer((s) => s.dismiss)
   // Actions a page injects into the layout-owned TopBar (e.g. the POS cart) via useTopBarActions.
   const [topBarActions, setTopBarActions] = useState<ReactNode>(null)
 
@@ -275,6 +281,12 @@ export function AppLayout() {
       {/* The fixed top-right cluster (account avatar on mobile + any page-injected actions like
           the POS cart). Rendered once here so the avatar never unmounts on navigation — no jump. */}
       <TopBar actions={topBarActions} />
+
+      {/* The offer to create a llave de acceso, after an email-code sign-in on a capable device. */}
+      <PasskeyOffer
+        open={passkeyOfferPending && passkeysSupported()}
+        onClose={dismissPasskeyOffer}
+      />
 
       {!isDesktop && (
         <BottomNavigation
