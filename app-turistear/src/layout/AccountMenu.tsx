@@ -22,16 +22,13 @@ import {
 } from '@mui/material'
 import type { SvgIconComponent } from '@mui/icons-material'
 import AssessmentRounded from '@mui/icons-material/AssessmentRounded'
-import BadgeRounded from '@mui/icons-material/BadgeRounded'
 import GroupsRounded from '@mui/icons-material/GroupsRounded'
 import LogoutRounded from '@mui/icons-material/LogoutRounded'
 import MapRounded from '@mui/icons-material/MapRounded'
-import PinRounded from '@mui/icons-material/PinRounded'
 import SettingsRounded from '@mui/icons-material/SettingsRounded'
-import StorefrontRounded from '@mui/icons-material/StorefrontRounded'
+import SecurityRounded from '@mui/icons-material/SecurityRounded'
 import { useCurrentUser } from '../features/auth/CurrentUserContext'
 import { useLogout } from '../features/auth/hooks/useLogout'
-import { ChangePinSheet } from '../features/operators/components/ChangePinSheet'
 import { ROUTES } from '../config/routes'
 
 // US-UX03/UX04 — the single account surface that replaces the removed top bar. It holds the
@@ -49,7 +46,6 @@ interface ManagementLink {
 
 const MANAGEMENT_LINKS: ManagementLink[] = [
   { label: 'Agentes', to: ROUTES.AGENTS, icon: GroupsRounded },
-  { label: 'Afiliados', to: ROUTES.AFFILIATES, icon: StorefrontRounded },
   { label: 'Catálogo', to: ROUTES.CATALOG, icon: MapRounded },
   { label: 'Reportes', to: ROUTES.REPORTS, icon: AssessmentRounded },
   { label: 'Configuración', to: ROUTES.SETTINGS, icon: SettingsRounded },
@@ -63,8 +59,7 @@ const initialsOf = (name: string) =>
     .map((w) => w[0]?.toUpperCase() ?? '')
     .join('') || '?'
 
-const roleLabel = (role: 'admin' | 'agent' | 'affiliate') =>
-  role === 'admin' ? 'Administrador' : role === 'affiliate' ? 'Afiliado' : 'Agente'
+const roleLabel = (role: 'admin' | 'agent') => (role === 'admin' ? 'Administrador' : 'Agente')
 
 interface AccountMenuProps {
   variant: 'popover' | 'sheet'
@@ -79,13 +74,6 @@ export function AccountMenu({ variant, open, onClose, anchorEl }: AccountMenuPro
   const navigate = useNavigate()
   const { logout, isPending, isError } = useLogout()
   const [confirmOpen, setConfirmOpen] = useState(false)
-  const [changePinOpen, setChangePinOpen] = useState(false)
-
-  // US-OP01/OP02 — an operator shift session borrows the affiliate identity; `operator` names who
-  // is at the register. Managers (affiliate, no operator) get the operators panel; operators get
-  // "Cambiar PIN" instead and never the management surface (D6).
-  const operator = user.operator ?? null
-  const isAffiliateManager = user.role === 'affiliate' && !operator
 
   const go = (to: string) => {
     onClose()
@@ -101,50 +89,18 @@ export function AccountMenu({ variant, open, onClose, anchorEl }: AccountMenuPro
         </Avatar>
         <Box sx={{ minWidth: 0 }}>
           <Typography variant="subtitle2" noWrap sx={{ fontWeight: 600 }}>
-            {operator ? operator.name : user.name}
+            {user.name}
           </Typography>
           <Typography variant="caption" color="textSecondary" noWrap component="div">
-            {operator ? `Operador · ${user.name}` : roleLabel(user.role)}
+            {roleLabel(user.role)}
           </Typography>
-          {!operator && (
-            <Typography variant="caption" color="textSecondary" noWrap component="div">
-              {user.email}
-            </Typography>
-          )}
+          <Typography variant="caption" color="textSecondary" noWrap component="div">
+            {user.email}
+          </Typography>
         </Box>
       </Box>
 
       <Divider />
-
-      {/* Operator shift — self-service PIN change (US-OP02) */}
-      {operator && (
-        <>
-          <List dense disablePadding>
-            <ListItemButton onClick={() => setChangePinOpen(true)} sx={{ px: 2 }}>
-              <ListItemIcon sx={{ minWidth: 36, color: 'text.secondary' }}>
-                <PinRounded fontSize="small" />
-              </ListItemIcon>
-              <ListItemText primary="Cambiar PIN" />
-            </ListItemButton>
-          </List>
-          <Divider />
-        </>
-      )}
-
-      {/* Operadores — affiliate manager's shift-cashier panel (US-AF10) */}
-      {isAffiliateManager && (
-        <>
-          <List dense disablePadding>
-            <ListItemButton onClick={() => go(ROUTES.OPERATORS)} sx={{ px: 2 }}>
-              <ListItemIcon sx={{ minWidth: 36, color: 'text.secondary' }}>
-                <BadgeRounded fontSize="small" />
-              </ListItemIcon>
-              <ListItemText primary="Operadores" />
-            </ListItemButton>
-          </List>
-          <Divider />
-        </>
-      )}
 
       {/* Gestión — admin overflow (occasional tools) */}
       {user.role === 'admin' && (
@@ -180,6 +136,17 @@ export function AccountMenu({ variant, open, onClose, anchorEl }: AccountMenuPro
           <Divider />
         </>
       )}
+
+      {/* Seguridad — every role's llaves de acceso and sessions (passkey-auth US5) */}
+      <List dense disablePadding>
+        <ListItemButton onClick={() => go(ROUTES.SECURITY)} sx={{ px: 2 }}>
+          <ListItemIcon sx={{ minWidth: 36, color: 'text.secondary' }}>
+            <SecurityRounded fontSize="small" />
+          </ListItemIcon>
+          <ListItemText primary="Seguridad" />
+        </ListItemButton>
+      </List>
+      <Divider />
 
       {/* Cerrar sesión — behind a confirm step */}
       <List dense disablePadding sx={{ pb: variant === 'sheet' ? 1 : 0 }}>
@@ -289,10 +256,6 @@ export function AccountMenu({ variant, open, onClose, anchorEl }: AccountMenuPro
           </Button>
         </DialogActions>
       </Dialog>
-
-      {operator && (
-        <ChangePinSheet open={changePinOpen} onClose={() => setChangePinOpen(false)} />
-      )}
     </>
   )
 }

@@ -27,7 +27,7 @@ const finds = (q: string, f = folio()) => matchesQuery(f, normalize(q))
 
 describe('S-1…S-4 — the five fields a folio gets described by', () => {
   it('S-1 — the service, which is the only handle an Express sale has', () => {
-    // No name at all (express-sale D17), no operator. Findable only by what was sold.
+    // No name at all (express-sale D17). Findable only by what was sold.
     const express = folio({
       customer_name: null,
       lines: [{ service_name: 'Catamarán', quantity: 4 }] as FolioListItem['lines'],
@@ -62,10 +62,6 @@ describe('S-1…S-4 — the five fields a folio gets described by', () => {
     // behaviour is a decision on the record rather than a surprise in the field.
     expect(finds('carlos')).toBe(true)
     expect(finds('mendez')).toBe(true)
-  })
-
-  it('the operator is searchable too — an affiliate shift is how a sale gets described', () => {
-    expect(finds('rosa', folio({ operator_name: 'Rosa Elena' }))).toBe(true)
   })
 
   it('S-5 — a query below the floor filters nothing', () => {

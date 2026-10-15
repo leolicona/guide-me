@@ -2,7 +2,6 @@ import type { Context } from 'hono'
 import { and, eq, gte, inArray, lte, sql } from 'drizzle-orm'
 import { getDb } from '../../db/client'
 import {
-  affiliateOperators,
   folioLines,
   folioPayments,
   folios,
@@ -146,21 +145,18 @@ export const getDashboardDay = async (c: DashboardContext) => {
       .select({
         userId: folioPayments.collectedBy,
         name: users.name,
-        operatorName: affiliateOperators.name,
         total: sql<number>`coalesce(sum(${folioPayments.amount}), 0)`,
       })
       .from(folioPayments)
       .leftJoin(users, eq(users.id, folioPayments.collectedBy))
-      .leftJoin(affiliateOperators, eq(affiliateOperators.id, folioPayments.operatorId))
       .where(moneyWhere)
-      .groupBy(folioPayments.collectedBy, folioPayments.operatorId),
+      .groupBy(folioPayments.collectedBy),
   ])
 
   const perSeller = sellerRows
     .map((r) => ({
       user_id: r.userId,
       name: r.name ?? 'Desconocido',
-      operator_name: r.operatorName ?? null,
       collected_cents: Number(r.total ?? 0),
     }))
     .filter((r) => r.collected_cents !== 0)

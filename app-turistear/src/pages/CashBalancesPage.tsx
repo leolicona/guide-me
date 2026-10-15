@@ -18,7 +18,6 @@ import {
 } from '@mui/material'
 import ExpandMoreRounded from '@mui/icons-material/ExpandMoreRounded'
 import ArrowForwardRounded from '@mui/icons-material/ArrowForwardRounded'
-import StorefrontRounded from '@mui/icons-material/StorefrontRounded'
 import PersonRounded from '@mui/icons-material/Person'
 import TrendingDownRounded from '@mui/icons-material/TrendingDown'
 import TrendingUpRounded from '@mui/icons-material/TrendingUp'
@@ -103,35 +102,16 @@ function BalanceRow({
   const formatDate = useOrgDateFormatter(DATE_FMT) // US-A66 — org-local audit timestamps
   const [open, setOpen] = useState(false)
   const negative = row.balance < 0
-  const isAffiliate = row.role === 'affiliate'
 
   return (
     <Card variant="outlined">
       <CardContent>
         <Stack direction="row" sx={{ justifyContent: 'space-between', alignItems: 'center' }}>
           <Box sx={{ minWidth: 0, flex: '1 1 10rem' }}>
-            {/* Not `noWrap` beside the company chip: at 375px «Sofía Reyes» clipped to «So…»,
-                which is not a name. The chip wraps under it instead. */}
-            <Stack
-              direction="row"
-              spacing={1}
-              sx={{ alignItems: 'center', flexWrap: 'wrap', rowGap: 0.5 }}
-            >
-              <Typography variant="subtitle1">{row.agent.name}</Typography>
-              {isAffiliate && (
-                <Chip
-                  size="small"
-                  variant="outlined"
-                  color="primary"
-                  icon={<StorefrontRounded sx={{ fontSize: 16 }} />}
-                  label={row.affiliate_company ?? 'Afiliado'}
-                />
-              )}
-            </Stack>
+            {/* Not `noWrap`: at 375px «Sofía Reyes» clipped to «So…», which is not a name. */}
+            <Typography variant="subtitle1">{row.agent.name}</Typography>
             <Typography variant="caption" color="textSecondary">
-              {negative
-                ? `La empresa debe ${isAffiliate ? 'al afiliado' : 'al agente'}`
-                : 'Tiene efectivo de la empresa'}
+              {negative ? 'La empresa debe al agente' : 'Tiene efectivo de la empresa'}
             </Typography>
           </Box>
           <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center' }}>
@@ -197,10 +177,7 @@ function BalanceRow({
             )}
             <BreakdownRow label="Cobrado" value={row.cash_collected} sign="+" />
             <BreakdownRow label="Comisión" value={row.commission_total} sign="−" />
-            {/* Affiliates have no expenses (affiliate-portal D4) — the line is always zero. */}
-            {!isAffiliate && (
-              <BreakdownRow label="Gastos" value={row.expense_total} sign="−" />
-            )}
+            <BreakdownRow label="Gastos" value={row.expense_total} sign="−" />
             {row.payouts_total > 0 && (
               <BreakdownRow label="Pagado" value={row.payouts_total} sign="+" />
             )}
@@ -248,7 +225,7 @@ function BalanceRow({
   )
 }
 
-// --- Balances tab: company cash exposure per agent/affiliate (US-A19) + payouts (US-A25)
+// --- Balances tab: company cash exposure per agent (US-A19) + payouts (US-A25)
 //     + direct collections (US-A27) ---
 function TeamBalances() {
   const { data: balances, isLoading, isError } = useBalances()
@@ -305,7 +282,7 @@ function TeamBalances() {
     return <Alert severity="error">No se pudieron cargar los saldos. Inténtalo de nuevo.</Alert>
   }
   if (!balances || balances.length === 0) {
-    return <Typography color="textSecondary">No hay agentes ni afiliados para mostrar.</Typography>
+    return <Typography color="textSecondary">No hay agentes para mostrar.</Typography>
   }
 
   return (

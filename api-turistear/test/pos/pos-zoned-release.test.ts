@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { env, SELF } from 'cloudflare:test'
 import { seedUser, clearTenancyDb , readDerivedFolio} from '../helpers/tenancy'
-import { buildFakeJwt } from '../helpers/jwt'
+import { sessionCookie } from '../helpers/session'
 import { sweepExpiredBookings } from '../../src/routes/pos/sweep'
 
 // Zoned Capacity (US-A64) — release paths (Phase 3). Every path that returns seats must hand them
@@ -10,7 +10,7 @@ import { sweepExpiredBookings } from '../../src/routes/pos/sweep'
 
 const AGENT = 'agent@empresa.com'
 const PHONE = '+52 55 1234 5678'
-const auth = (email: string) => ({ Cookie: `gm_access=${buildFakeJwt(email)}` })
+const auth = (email: string) => ({ Cookie: sessionCookie(email) })
 const jsonAuth = (email: string) => ({ ...auth(email), 'Content-Type': 'application/json' })
 const base = 'http://api.local/api/pos'
 const ts = () => Math.floor(Date.now() / 1000)

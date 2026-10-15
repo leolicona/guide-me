@@ -194,8 +194,8 @@ export interface FolioCardProps {
   folio: FolioCardFolio
   /** Where the info region navigates — the admin detail or the seller's read-only one. */
   to: string
-  /** Who the row is attributed to. Admin lists name the agent; a seller's own list names the shift
-   *  operator (D13), and a direct sale passes `null` so the line simply collapses. */
+  /** Who the row is attributed to. Admin lists name the agent (D13); a seller's own list passes
+   *  `null` so the line simply collapses. */
   byline?: string | null
   /** Org-local sale timestamp, already formatted by the page's `useOrgDateFormatter`. */
   soldAt: string

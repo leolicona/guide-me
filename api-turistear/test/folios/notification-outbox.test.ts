@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { env, SELF } from 'cloudflare:test'
-import { seedUser, seedTwoOrgs, clearAffiliateDb } from '../helpers/tenancy'
-import { buildFakeJwt } from '../helpers/jwt'
+import { seedUser, seedTwoOrgs, clearFullDb } from '../helpers/tenancy'
+import { sessionCookie } from '../helpers/session'
 
 // US-A86 / US-AG51 — the notification outbox.
 // Spec: docs/folios/folio-state-machine.spec.md — S-13 … S-17, plus D20/D21/D26.
@@ -14,7 +14,7 @@ import { buildFakeJwt } from '../helpers/jwt'
 //   · draining `tickets_delivered` is the only writer of `tickets_sent_at` (D26)
 
 const ADMIN = 'admin@empresa.com'
-const auth = (email: string) => ({ Cookie: `gm_access=${buildFakeJwt(email)}` })
+const auth = (email: string) => ({ Cookie: sessionCookie(email) })
 const OUTBOX = 'http://api.local/api/notifications'
 const nowSec = () => Math.floor(Date.now() / 1000)
 
@@ -72,7 +72,7 @@ const drain = (email: string, id: string) =>
     body: '{}',
   })
 
-beforeEach(clearAffiliateDb)
+beforeEach(clearFullDb)
 
 describe('US-A86 — the outbox records what was emitted', () => {
   it('S-13 — no address on file: the WhatsApp row is pending, the email row is SKIPPED', async () => {

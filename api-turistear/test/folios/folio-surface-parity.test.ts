@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { env, SELF } from 'cloudflare:test'
 import { seedUser, seedTwoOrgs, clearTenancyDb } from '../helpers/tenancy'
-import { buildFakeJwt } from '../helpers/jwt'
+import { sessionCookie } from '../helpers/session'
 
 // US-AG59 / US-A93 / BUG-034 — the folio detail is ONE payload, read by two audiences.
 // Spec: docs/oversight/folio-surface-parity.spec.md (D6, S-1…S-3, S-12, S-13).
@@ -17,7 +17,7 @@ const OTHER_AGENT_EMAIL = 'otro.vendedor@empresa.com'
 const ADMIN_EMAIL = 'admin@empresa.com'
 const PHONE = '+52 55 1234 5678'
 
-const auth = (email: string) => ({ Cookie: `gm_access=${buildFakeJwt(email)}` })
+const auth = (email: string) => ({ Cookie: sessionCookie(email) })
 const jsonAuth = (email: string) => ({ ...auth(email), 'Content-Type': 'application/json' })
 const POS = 'http://api.local/api/pos'
 const FOLIOS = 'http://api.local/api/folios'

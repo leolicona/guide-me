@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { env, SELF } from 'cloudflare:test'
 import { seedUser, seedTwoOrgs, clearTenancyDb } from '../helpers/tenancy'
-import { buildFakeJwt } from '../helpers/jwt'
+import { sessionCookie } from '../helpers/session'
 
 // Zoned Capacity (US-A64) — POS sell path (Phase 2). Scenarios 8–14, 29.
 // A zoned line is guarded against its OWN `slot_zones` row (single-statement atomic UPDATE →
@@ -12,7 +12,7 @@ import { buildFakeJwt } from '../helpers/jwt'
 const AGENT_EMAIL = 'agent@empresa.com'
 const ADMIN_EMAIL = 'admin@empresa.com'
 const SLOT_DATE = '2026-06-15'
-const auth = (email: string) => ({ Cookie: `gm_access=${buildFakeJwt(email)}` })
+const auth = (email: string) => ({ Cookie: sessionCookie(email) })
 const jsonAuth = (email: string) => ({ ...auth(email), 'Content-Type': 'application/json' })
 const base = 'http://api.local/api/pos'
 const svcBase = 'http://api.local/api/services'

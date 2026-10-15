@@ -98,7 +98,7 @@ describe('useBalances', () => {
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true))
     expect(result.current.data).toHaveLength(1)
-    expect(result.current.data?.[0]).toMatchObject({ role: 'agent', balance: 225_000 })
+    expect(result.current.data?.[0]).toMatchObject({ agent: { id: 'agent-1' }, balance: 225_000 })
   })
 })
 

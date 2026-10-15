@@ -3,7 +3,9 @@ import {
   deliveryState,
   fillTemplate,
   ticketWhatsAppUrl,
+  depositVerifiedWhatsAppUrl,
   DEFAULT_TICKET_TEMPLATE,
+  DEPOSIT_VERIFIED_TEMPLATE,
   DEFAULT_REMINDER_TEMPLATE,
   TEMPLATE_PLACEHOLDERS,
   type TemplateContext,
@@ -182,6 +184,12 @@ describe('ticketWhatsAppUrl', () => {
     expect(url).not.toContain('¡')
   })
 
+  // verify-send-empty-link — the builder itself refuses, so no caller can send "Ábrelos aquí:" and
+  // then nothing.
+  it('returns null when there is no portal link', () => {
+    expect(ticketWhatsAppUrl(DEFAULT_TICKET_TEMPLATE, { ...ctx(), portalLink: '' })).toBeNull()
+  })
+
   it('returns null when there is no phone at all', () => {
     expect(ticketWhatsAppUrl('Hola', ctx({ customer_phone: null }))).toBeNull()
     expect(ticketWhatsAppUrl('Hola', ctx({ customer_phone: '' }))).toBeNull()
@@ -196,5 +204,22 @@ describe('ticketWhatsAppUrl', () => {
     expect(ticketWhatsAppUrl('Hola', ctx({ customer_phone: '123' }))).toBe(
       'https://wa.me/123?text=Hola',
     )
+  })
+})
+
+// verify-send-empty-link — what an apartado's verified transfer says instead of the ticket message.
+describe('depositVerifiedWhatsAppUrl', () => {
+  it('confirms the deposit and the pending balance, with no ticket wording or link', () => {
+    const url = depositVerifiedWhatsAppUrl(ctx())!
+    const text = new URL(url).searchParams.get('text')
+    expect(url.startsWith('https://wa.me/529981234567?text=')).toBe(true)
+    expect(text).toBe(
+      'Hola Ana, te escribe Luis de Turistear Ya. Confirmamos tu anticipo de $500.00. Tu saldo pendiente es $1,000.00; tus boletos se envían al liquidarlo.',
+    )
+    expect(fillTemplate(DEPOSIT_VERIFIED_TEMPLATE, ctx())).not.toMatch(/\{[a-z_]+\}/)
+  })
+
+  it('returns null when there is no phone', () => {
+    expect(depositVerifiedWhatsAppUrl(ctx({ customer_phone: null }))).toBeNull()
   })
 })

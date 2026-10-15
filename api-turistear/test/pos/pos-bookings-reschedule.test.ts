@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest'
 import { env, SELF } from 'cloudflare:test'
-import { materializeSeededFolio, seedUser, seedTwoOrgs, clearAffiliateDb } from '../helpers/tenancy'
-import { buildFakeJwt } from '../helpers/jwt'
+import { materializeSeededFolio, seedUser, seedTwoOrgs, clearFullDb } from '../helpers/tenancy'
+import { sessionCookie } from '../helpers/session'
 
 // US-AG52 — reagendar mientras el lugar es tuyo.
 // Spec: docs/bookings/booking-reschedule.spec.md — S-1 … S-9b, S-16, S-17.
@@ -12,7 +12,7 @@ import { buildFakeJwt } from '../helpers/jwt'
 
 const AGENT = 'agent@empresa.com'
 const ADMIN = 'admin@empresa.com'
-const auth = (email: string) => ({ Cookie: `gm_access=${buildFakeJwt(email)}` })
+const auth = (email: string) => ({ Cookie: sessionCookie(email) })
 const jsonAuth = (email: string) => ({ ...auth(email), 'Content-Type': 'application/json' })
 
 const NOW = new Date('2026-06-14T12:00:00Z')
@@ -111,7 +111,7 @@ const line = (id: string) =>
     .bind(id).first<any>()
 
 beforeEach(async () => {
-  await clearAffiliateDb()
+  await clearFullDb()
   vi.useFakeTimers()
   vi.setSystemTime(NOW)
 })

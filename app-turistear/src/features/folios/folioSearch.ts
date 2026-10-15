@@ -33,8 +33,9 @@ const digits = (raw: string | null | undefined): string => (raw ?? '').replace(/
  * `query` must already be normalised — the caller normalises once per keystroke rather than once
  * per row, which for a few hundred rows is the difference that keeps typing feeling instant.
  *
- * The seller/operator arm carries its stated cost: `ana` matches sales TO Ana and sales BY Ana.
- * That was asked for explicitly and is recorded as D2, not discovered in the field.
+ * The seller arm carries its stated cost: `ana` matches sales TO Ana and sales BY Ana. That was
+ * asked for explicitly and is recorded as D2, not discovered in the field. (The shift operator's
+ * arm left with the operators, here and on the server together — retire-affiliates D10.)
  */
 export const matchesQuery = (folio: FolioListItem, query: string): boolean => {
   if (query.length < MIN_QUERY_LENGTH) return true
@@ -42,7 +43,6 @@ export const matchesQuery = (folio: FolioListItem, query: string): boolean => {
   const haystacks = [
     folio.customer_name,
     folio.agent?.name,
-    folio.operator_name,
     // The same 8 characters `{folio_ref}` renders in the WhatsApp template.
     folio.id?.slice(0, 8),
     // A folio with three lines is still one row: `some`, not a flattened join.

@@ -3,8 +3,6 @@ export type ErrorCode =
   | 'EMAIL_ALREADY_EXISTS'
   | 'IDENTITY_ALREADY_EXISTS'
   | 'INVALID_TOKEN'
-  | 'INVALID_CREDENTIALS'
-  | 'EMAIL_NOT_VERIFIED'
   | 'ACCOUNT_SUSPENDED'
   | 'UNAUTHORIZED'
   | 'FORBIDDEN'
@@ -22,7 +20,6 @@ export type ErrorCode =
   // company never confirmed and mint a refund PIN for it. Verify or reject the payment first.
   | 'PAYMENT_UNVERIFIED'
   | 'SERVICE_INACTIVE'
-  | 'SERVICE_NOT_ALLOWED'
   | 'SERVICE_HAS_FOLIOS'
   // Accommodation/lodging (docs/lodging/accommodation-stays.spec.md §4.6, v2) — introduced &
   // consumed by this feature (see docs/TECH_DEBT.md). INSUFFICIENT_INVENTORY replaced the v1

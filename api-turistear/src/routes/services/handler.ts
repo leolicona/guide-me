@@ -3,7 +3,6 @@ import type { BatchItem } from 'drizzle-orm/batch'
 import { and, asc, eq, inArray } from 'drizzle-orm'
 import { getDb } from '../../db/client'
 import {
-  affiliateCommissions,
   folioLines,
   schedules,
   serviceExtras,
@@ -321,8 +320,7 @@ export const reactivateService = (c: ServicesContext) =>
 // stays clean. The snapshot guarantee (folios carry their own copies) is never at risk because
 // the delete is REJECTED (409 SERVICE_HAS_FOLIOS) whenever any folio line references the service.
 // Otherwise it removes the service and its dependent rows that hold no historical value —
-// affiliate_commissions (affiliate-setup-commissions.spec.md D12), slots, schedules, extras — in
-// one atomic batch (D1 has no automatic ON DELETE CASCADE). A zero-booking future slot does not
+// slots, schedules, extras — in one atomic batch (D1 has no automatic ON DELETE CASCADE). A zero-booking future slot does not
 // block (no folio references it); it is simply removed with the service.
 export const deleteService = async (c: ServicesContext) => {
   const admin = c.get('user')
@@ -350,9 +348,6 @@ export const deleteService = async (c: ServicesContext) => {
   // and `service_zones`, so they go FIRST; then slots/schedules, then the zone definitions, then
   // the service. Without this a zoned service could never be hard-deleted (FK on the slots delete).
   await db.batch([
-    db
-      .delete(affiliateCommissions)
-      .where(and(eq(affiliateCommissions.serviceId, id), eq(affiliateCommissions.organizationId, org))),
     db
       .delete(slotZones)
       .where(

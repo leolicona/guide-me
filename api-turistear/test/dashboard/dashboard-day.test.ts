@@ -5,9 +5,9 @@ import {
   seedFolioLedgerRows,
   seedTwoOrgs,
   seedUser,
-  clearAffiliateDb,
+  clearFullDb,
 } from '../helpers/tenancy'
-import { buildFakeJwt } from '../helpers/jwt'
+import { sessionCookie } from '../helpers/session'
 
 // US-A14/A15/A16/A90 — the Daily Operations Dashboard read.
 // Spec: docs/dashboard/occupancy-dashboard.spec.md — S-1 … S-12.
@@ -19,7 +19,7 @@ import { buildFakeJwt } from '../helpers/jwt'
 // one org's day never leaks into another's.
 
 const ADMIN = 'admin@empresa.com'
-const auth = (email: string) => ({ Cookie: `gm_access=${buildFakeJwt(email)}` })
+const auth = (email: string) => ({ Cookie: sessionCookie(email) })
 const DAY_URL = 'http://api.local/api/dashboard/day'
 
 const nowSec = () => Math.floor(Date.now() / 1000)
@@ -179,7 +179,7 @@ const getDay = async (email = ADMIN, qs = '') => {
 
 // Full wipe: this suite seeds services, slots, folio_lines and folio_payments, which
 // clearTenancyDb does not reach.
-beforeEach(clearAffiliateDb)
+beforeEach(clearFullDb)
 
 describe('US-A14/US-A15 — occupancy rows', () => {
   it('S-1/S-4 — chronological rows with remaining and the vendidos/apartados split', async () => {

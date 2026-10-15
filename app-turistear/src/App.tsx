@@ -10,16 +10,11 @@ import { AppLayout } from './layout/AppLayout'
 
 const LoginPage = lazy(() => import('./pages/LoginPage'))
 const RegisterPage = lazy(() => import('./pages/RegisterPage'))
-const VerifyPage = lazy(() => import('./pages/VerifyPage'))
-const ForgotPasswordPage = lazy(() => import('./pages/ForgotPasswordPage'))
-const ResetPasswordPage = lazy(() => import('./pages/ResetPasswordPage'))
+const LegacyLinkPage = lazy(() => import('./pages/LegacyLinkPage'))
 const InviteAcceptPage = lazy(() => import('./pages/InviteAcceptPage'))
 const DashboardPage = lazy(() => import('./pages/DashboardPage'))
 const AgentsListPage = lazy(() => import('./pages/AgentsListPage'))
 const InviteAgentPage = lazy(() => import('./pages/InviteAgentPage'))
-const AffiliatesListPage = lazy(() => import('./pages/AffiliatesListPage'))
-const AffiliateNewPage = lazy(() => import('./pages/AffiliateNewPage'))
-const AffiliateDetailPage = lazy(() => import('./pages/AffiliateDetailPage'))
 const CatalogListPage = lazy(() => import('./pages/CatalogListPage'))
 const CatalogNewServicePage = lazy(() => import('./pages/CatalogNewServicePage'))
 const CatalogDetailPage = lazy(() => import('./pages/CatalogDetailPage'))
@@ -39,8 +34,7 @@ const CashBalancesPage = lazy(() => import('./pages/CashBalancesPage'))
 const CashDropDetailPage = lazy(() => import('./pages/CashDropDetailPage'))
 const CashDropsHistoryPage = lazy(() => import('./pages/CashDropsHistoryPage'))
 const ReportsPage = lazy(() => import('./pages/ReportsPage'))
-const OperatorsPage = lazy(() => import('./pages/OperatorsPage'))
-const OperatorAccessPage = lazy(() => import('./pages/OperatorAccessPage'))
+const SecurityPage = lazy(() => import('./pages/SecurityPage'))
 
 function PageLoader() {
   return (
@@ -67,13 +61,11 @@ function App() {
         <Routes>
           <Route path={ROUTES.LOGIN} element={<LoginPage />} />
           <Route path={ROUTES.REGISTER} element={<RegisterPage />} />
-          <Route path={ROUTES.VERIFY} element={<VerifyPage />} />
-          <Route path={ROUTES.FORGOT_PASSWORD} element={<ForgotPasswordPage />} />
-          <Route path={ROUTES.RESET_PASSWORD} element={<ResetPasswordPage />} />
+          {/* passkey-auth FR-063 — links mailed before cutover explain that passwords are gone. */}
+          <Route path={ROUTES.VERIFY} element={<LegacyLinkPage />} />
+          <Route path={ROUTES.FORGOT_PASSWORD} element={<LegacyLinkPage />} />
+          <Route path={ROUTES.RESET_PASSWORD} element={<LegacyLinkPage />} />
           <Route path={ROUTES.INVITE_ACCEPT} element={<InviteAcceptPage />} />
-          {/* Operator saved WhatsApp link — PUBLIC (no session yet): set PIN or unlock a shift
-              (US-OP01/OP02). The server sets the shift cookie; the page then routes into the POS. */}
-          <Route path={ROUTES.OPERATOR_ACCESS} element={<OperatorAccessPage />} />
 
           {/* Authenticated app — shares the AppLayout navigation shell */}
           <Route
@@ -97,23 +89,6 @@ function App() {
               element={
                 <RoleGuard role="admin">
                   <AgentsListPage />
-                </RoleGuard>
-              }
-            />
-            {/* Affiliate setup & commissions — admin only (US-A48/A50/A52) */}
-            <Route
-              path={ROUTES.AFFILIATES}
-              element={
-                <RoleGuard role="admin">
-                  <AffiliatesListPage />
-                </RoleGuard>
-              }
-            />
-            <Route
-              path={ROUTES.AFFILIATE_DETAIL}
-              element={
-                <RoleGuard role="admin">
-                  <AffiliateDetailPage />
                 </RoleGuard>
               }
             />
@@ -151,11 +126,11 @@ function App() {
             <Route path={ROUTES.POS_CHECKOUT} element={<PosCheckoutPage />} />
             <Route path={ROUTES.FOLIO} element={<FolioReceiptPage />} />
 
-            {/* Agent + affiliate folio history — read-only list + detail (US-AG20/AG21, AF09) */}
+            {/* Agent folio history — read-only list + detail (US-AG20/AG21) */}
             <Route
               path={ROUTES.HISTORY}
               element={
-                <RoleGuard role={['agent', 'affiliate']}>
+                <RoleGuard role="agent">
                   <FolioHistoryPage />
                 </RoleGuard>
               }
@@ -163,15 +138,13 @@ function App() {
             <Route
               path={ROUTES.HISTORY_DETAIL}
               element={
-                <RoleGuard role={['agent', 'affiliate']}>
+                <RoleGuard role="agent">
                   <FolioHistoryDetailPage />
                 </RoleGuard>
               }
             />
 
-            {/* Access scanner (US-AG15, AG17, AG19) — agents + admins (US-A32). Denied to an
-                affiliate (D4): the backend rejects scan calls and the nav hides Escáner; this
-                guard closes the by-URL path too. */}
+            {/* Access scanner (US-AG15, AG17, AG19) — agents + admins (US-A32). */}
             <Route
               path={ROUTES.SCAN}
               element={
@@ -181,27 +154,14 @@ function App() {
               }
             />
 
-            {/* Everyone's own caja — agent, affiliate AND admin (caja-surface-parity D2′). One
-                screen, one route, one meaning of the word «Caja»; `surface` gates the verbs, and
-                every call this page makes is already authorized for all three roles (`selfActor`).
-                Neither an affiliate nor an admin has expenses — `/me/expenses` is `agent`-only. */}
+            {/* Everyone's own caja — agent AND admin (caja-surface-parity D2′). One screen, one
+                route, one meaning of the word «Caja»; `surface` gates the verbs, and every call this
+                page makes is already authorized for both roles. */}
             <Route
               path={ROUTES.BALANCE}
               element={
-                <RoleGuard role={['agent', 'affiliate', 'admin']}>
+                <RoleGuard role={['agent', 'admin']}>
                   <BalancePage />
-                </RoleGuard>
-              }
-            />
-
-            {/* Affiliate manager — shift-cashier operators panel (US-AF10–AF12). Operator
-                sessions borrow the affiliate role but are rejected server-side (D6); this guard
-                keeps the panel off their nav. */}
-            <Route
-              path={ROUTES.OPERATORS}
-              element={
-                <RoleGuard role="affiliate">
-                  <OperatorsPage />
                 </RoleGuard>
               }
             />
@@ -271,6 +231,16 @@ function App() {
                 </RoleGuard>
               }
             />
+
+            {/* Seguridad — every role's own llaves de acceso and sessions (passkey-auth US5). */}
+            <Route
+              path={ROUTES.SECURITY}
+              element={
+                <RoleGuard role={['agent', 'admin']}>
+                  <SecurityPage />
+                </RoleGuard>
+              }
+            />
           </Route>
 
           {/* Focused form page — uses the centered AuthLayout, not the shell */}
@@ -292,18 +262,6 @@ function App() {
               <AuthGuard>
                 <RoleGuard role="admin">
                   <CatalogNewServicePage />
-                </RoleGuard>
-              </AuthGuard>
-            }
-          />
-          {/* Full-page affiliate setup wizard — immersive, outside the nav shell (US-A54–A57).
-              The static /affiliates/new outranks /affiliates/:id in v6 route ranking. */}
-          <Route
-            path={ROUTES.AFFILIATE_NEW}
-            element={
-              <AuthGuard>
-                <RoleGuard role="admin">
-                  <AffiliateNewPage />
                 </RoleGuard>
               </AuthGuard>
             }

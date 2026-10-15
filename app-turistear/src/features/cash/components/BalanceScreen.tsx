@@ -57,7 +57,7 @@ const DATE_FMT: Intl.DateTimeFormatOptions = {
 export type CajaSurface = 'self' | 'admin'
 
 /**
- * One caja screen, three roles. `GET /api/cash/me` was always one payload; it was rendered by two
+ * One caja screen, two roles. `GET /api/cash/me` was always one payload; it was rendered by two
  * hand-written screens that drifted — an admin could file a hand-in and never see it again, their
  * negative-balance card carried a poorer breakdown than the seller's, and their reconciliation
  * offered a `Gastos` row for a capability the API answers 403 to.
@@ -74,11 +74,6 @@ export function BalanceScreen({ surface }: { surface: CajaSurface }) {
   const formatDate = useOrgDateFormatter(DATE_FMT) // US-A66 — org-local audit timestamps
   const user = useCurrentUser()
   const isAdmin = surface === 'admin'
-  // D6 — the ONLY place a role is named in this file, and it mirrors the API guard exactly:
-  // `/me/expenses` is `agentOrAdmin`, so an affiliate gets 403 and nobody else does (US-A99).
-  // A second role test anywhere below is precisely the bug that left the admin reading a
-  // `Gastos −$0.00` row for a capability the server was denying them.
-  const canExpense = user.role !== 'affiliate'
   const { data: balance, isLoading, isError } = useMyBalance()
   const addExpense = useAddExpense()
   const deleteExpense = useDeleteExpense()
@@ -201,7 +196,6 @@ export function BalanceScreen({ surface }: { surface: CajaSurface }) {
               <Stack spacing={3}>
                 <CashBoxCard
                   balance={balance}
-                  showExpenses={canExpense}
                   onRegisterDrop={openDrop}
                   onRegisterPayout={isAdmin ? () => setPayoutOpen(true) : undefined}
                 />
@@ -210,9 +204,7 @@ export function BalanceScreen({ surface }: { surface: CajaSurface }) {
               </Stack>
             </Box>
 
-            {/* Expenses (US-AG13, US-A99) — an agent or an admin, out of their own caja. An
-                affiliate may not: `/me/expenses` answers them 403 (affiliate-portal D4). */}
-            {canExpense && (
+            {/* Expenses (US-AG13, US-A99) — an agent or an admin, out of their own caja. */}
             <SectionCard title="Gastos">
                 {/* Full-size fields, not `size="small"`: this is the one form a seller fills
                     standing up in the sun, and every other input in the product is 48px. The
@@ -297,7 +289,6 @@ export function BalanceScreen({ surface }: { surface: CajaSurface }) {
                   </Alert>
                 )}
             </SectionCard>
-            )}
 
             {/* Recent hand-ins (US-AG14) */}
             <SectionCard title="Entregas">
@@ -363,7 +354,7 @@ export function BalanceScreen({ surface }: { surface: CajaSurface }) {
                           <DropStatusChip status={drop.status} />
                           {/* An admin's own drop is born `confirmed` (self-authorized), so there
                               is never a pending one to cancel — and the endpoint is
-                              `agentOrAffiliate` anyway. */}
+                              `agent`-only anyway. */}
                           {!isAdmin && drop.status === 'pending' && (
                             <Button
                               size="small"

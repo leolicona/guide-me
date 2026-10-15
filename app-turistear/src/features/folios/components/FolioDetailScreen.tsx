@@ -395,10 +395,7 @@ export function FolioDetailScreen({ surface }: FolioDetailScreenProps) {
                     money reads first. The Historial's `confirmed_sale` row carries the same fact
                     as narrative; this is the at-a-glance read. */}
                 <Typography variant="caption" color="textSecondary">
-                  Vendido por {folio.agent.name}
-                  {/* US-A68 — the affiliate shift operator who took the sale, when applicable. */}
-                  {folio.operator_name ? ` (op. ${folio.operator_name})` : ''} ·{' '}
-                  {formatDate(folio.created_at)}
+                  Vendido por {folio.agent.name} · {formatDate(folio.created_at)}
                 </Typography>
                 <Divider sx={{ my: 2 }} />
 

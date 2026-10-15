@@ -1,56 +1,184 @@
 name: Deploy Prod
 
-# main → Prod. Gated by the GitHub "production" environment: add a Required Reviewer
-# to it (Settings → Environments → production) and every run pauses for your manual
-# approval before any migration or deploy step executes.
+# A v* tag → prod, and the tag is the approval (delivery-pipeline D10): pushing it is the
+# deliberate act, so nothing here pauses for a reviewer. What keeps the act safe is the `gate`
+# job, which refuses any commit that is not on main or whose dev deploy did not finish green —
+# before production is touched. The `production` environment admits only tags v* and main,
+# set outside this file (specs/005-delivery-pipeline/contracts/environment.md, E3).
+#
+# Order (FR-016): gate → verify → restore point → migrations → API → app → what landed → smoke.
+# The runbook — release, read, refuse, undo, restore — is specs/005-delivery-pipeline/quickstart.md.
 on:
   push:
-    branches: [main]
-    # Docs-only changes don't affect the workers — skip the deploy for them.
-    paths-ignore:
-      - '**.md'
+    tags: ['v*']
 
 permissions:
   contents: read
 
+# Same group as rollback-prod.yml: a release and a rollback queue, never race (FR-020, FR-023).
 concurrency:
   group: deploy-prod
   cancel-in-progress: false
 
 jobs:
-  deploy:
+  gate:
     runs-on: ubuntu-latest
-    # Protection rules on this environment (required reviewer) create the approval gate.
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      # `head_sha` is exact: the Deploy Dev runs for this very commit. "Green" means finished and
+      # successful; a run still in progress has no conclusion and does not count (D10).
+      - name: The commit's dev deploy finished green
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          green=$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/deploy-dev.yml/runs?head_sha=${GITHUB_SHA}&per_page=20" \
+            --jq '[.workflow_runs[] | select(.conclusion == "success")] | length')
+          if [ "${green:-0}" -eq 0 ]; then
+            echo "::error::No green Deploy Dev run for ${GITHUB_SHA}. Tag a main commit whose dev deploy finished green (delivery-pipeline D10)."
+            exit 1
+          fi
+          echo "Deploy Dev is green for ${GITHUB_SHA} (${green} run(s))."
+
+      - name: The commit is on main
+        run: |
+          git fetch --no-tags origin +main:refs/remotes/origin/main
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::${GITHUB_SHA} is not on main. A release is a main commit (delivery-pipeline D10)."
+            exit 1
+          fi
+          echo "${GITHUB_SHA} is on main."
+
+  # The whole gate again, on the tagged commit (D8).
+  verify:
+    needs: gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/verify
+
+  deploy:
+    needs: verify
+    runs-on: ubuntu-latest
     environment: production
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
     steps:
       - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
 
-      - uses: pnpm/action-setup@v6
-        with:
-          version: 10
+      # passkey-auth, constitution VIII (v1.4.0) — the API's secrets are managed in this GitHub
+      # environment ("production") and land on the Worker with the version this run deploys
+      # (`wrangler deploy --secrets-file`, additive: a secret the environment does not hold keeps
+      # the Worker's current value). BETTER_AUTH_SECRET is required — the API refuses to start
+      # without 32+ characters — so a missing one stops the run here, before anything changes. The
+      # file stays in the runner's temp and is never printed.
+      - name: Secrets for the API (prod)
+        env:
+          BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET }}
+          QR_SECRET: ${{ secrets.QR_SECRET }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+        run: |
+          set -euo pipefail
+          if [ "${#BETTER_AUTH_SECRET}" -lt 32 ]; then
+            echo "::error::BETTER_AUTH_SECRET is missing or shorter than 32 characters in the 'production' environment. Nothing was migrated or deployed."
+            exit 1
+          fi
+          for name in QR_SECRET RESEND_API_KEY; do
+            [ -n "${!name}" ] || echo "::notice::$name is not in the 'production' environment; the Worker keeps its current value."
+          done
+          node -e 'const e = process.env; const s = {}; for (const k of ["BETTER_AUTH_SECRET", "QR_SECRET", "RESEND_API_KEY"]) if (e[k]) s[k] = e[k]; process.stdout.write(JSON.stringify(s))' \
+            > "$RUNNER_TEMP/api-secrets.json"
 
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 22
-          cache: pnpm
-
-      - name: Install
-        run: pnpm install --frozen-lockfile
-
-      # Last line of defense before touching production.
-      - name: Test (api)
-        run: pnpm test:api
+      # A restore point, not a copy (D11). This repository is public: a database export uploaded
+      # as an artifact could be downloaded by anyone signed in to GitHub — every tourist's name,
+      # email and phone. A Time Travel bookmark is a position, not data; using it needs the
+      # account's token, and it is good for 30 days. No restore point, no migration.
+      - name: Restore point (before migrating)
+        id: restore
+        working-directory: api-turistear
+        run: |
+          set -euo pipefail
+          taken=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          pnpm exec wrangler d1 time-travel info guideme-db-prod --env production --json \
+            > "$RUNNER_TEMP/time-travel.json" 2> "$RUNNER_TEMP/time-travel.err" || true
+          bookmark=$(node -e '
+            const t = require("fs").readFileSync(process.argv[1], "utf8");
+            try { process.stdout.write(JSON.parse(t.slice(t.indexOf("{"))).bookmark || ""); } catch {}
+          ' "$RUNNER_TEMP/time-travel.json")
+          if [ -z "$bookmark" ]; then
+            cat "$RUNNER_TEMP/time-travel.err" "$RUNNER_TEMP/time-travel.json"
+            echo "::error::D1 Time Travel gave no bookmark for guideme-db-prod. Nothing was migrated or deployed (delivery-pipeline D11)."
+            exit 1
+          fi
+          echo "bookmark=$bookmark" >> "$GITHUB_OUTPUT"
+          echo "taken=$taken" >> "$GITHUB_OUTPUT"
+          echo "Restore point: $bookmark ($taken)"
 
       - name: Apply D1 migrations (prod)
         run: pnpm db:migrate:prod
 
+      # Each deploy's output is kept so the summary can say which version went live (D12).
+      # `shell: bash` runs with -eo pipefail, so a failed deploy still fails through the tee.
       - name: Deploy API (prod)
-        run: pnpm deploy:api:prod
+        shell: bash
+        run: pnpm deploy:api:prod --secrets-file "$RUNNER_TEMP/api-secrets.json" 2>&1 | tee "$RUNNER_TEMP/deploy-api.log"
 
       - name: Deploy App (prod)
+        shell: bash
         env:
           VITE_API_BASE_URL: https://api.turistearya.com
-        run: pnpm deploy:app:prod
+        run: pnpm deploy:app:prod 2>&1 | tee "$RUNNER_TEMP/deploy-app.log"
+
+      # The one place to read after a release (D12): the restore point and the version ids that
+      # rollback-prod.yml takes. It runs even when a step above failed — a red release needs it
+      # most.
+      - name: What landed
+        if: always()
+        env:
+          TAG: ${{ github.ref_name }}
+          BOOKMARK: ${{ steps.restore.outputs.bookmark }}
+          TAKEN: ${{ steps.restore.outputs.taken }}
+        run: |
+          version() { grep -o 'Current Version ID: [0-9a-f-]*' "$RUNNER_TEMP/deploy-$1.log" 2>/dev/null | tail -1 | awk '{print $4}'; }
+          api=$(version api); app=$(version app)
+          {
+            echo "## What landed — $TAG"
+            echo
+            echo "Commit \`$GITHUB_SHA\`."
+            echo
+            echo "| Worker | Version id |"
+            echo "| --- | --- |"
+            echo "| api-guideme | ${api:-not deployed in this run} |"
+            echo "| app-guideme | ${app:-not deployed in this run} |"
+            echo
+            if [ -n "$BOOKMARK" ]; then
+              echo "Restore point of \`guideme-db-prod\`, taken before migrating: bookmark \`$BOOKMARK\` at $TAKEN (usable for 30 days)."
+            else
+              echo "No restore point was taken, so nothing was migrated."
+            fi
+            echo
+            echo "Undo a Worker: Actions → Rollback Prod with the Worker and a version id. Restore data: specs/005-delivery-pipeline/quickstart.md §6."
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      # Both hostnames, each with its own wait, every one tried before the step fails (D13).
+      - name: Smoke
+        run: |
+          probe() {
+            for i in $(seq 1 10); do
+              if curl -sf -o /dev/null --max-time 20 "$1"; then echo "answered: $1"; return 0; fi
+              echo "not up yet (attempt $i): $1"; sleep 30
+            done
+            echo "::error::$1 did not answer in 5 minutes. To return a Worker to its previous version, run Actions → Rollback Prod (delivery-pipeline D14)."
+            return 1
+          }
+          failed=0
+          probe https://api.turistearya.com/ || failed=1
+          probe https://app.turistearya.com/ || failed=1
+          exit $failed

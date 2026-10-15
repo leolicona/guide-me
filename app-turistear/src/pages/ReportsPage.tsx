@@ -6,7 +6,6 @@ import {
   Card,
   CardActionArea,
   CardContent,
-  Chip,
   Collapse,
   Divider,
   Fade,
@@ -29,7 +28,6 @@ import CalendarMonthRounded from '@mui/icons-material/CalendarMonthRounded'
 import DownloadRounded from '@mui/icons-material/DownloadRounded'
 import ExpandMoreRounded from '@mui/icons-material/ExpandMoreRounded'
 import PrintRounded from '@mui/icons-material/PrintRounded'
-import StorefrontRounded from '@mui/icons-material/StorefrontRounded'
 import { FilterPill, FilterStrip, DateRangeSheet } from '../features/filters'
 import { useCommissionReport, useExportCommissionReport } from '../features/reports'
 import type { CommissionReport, CommissionReportRow, ReportSortKey } from '../features/reports'
@@ -64,7 +62,6 @@ function buildPresets(today: string): Preset[] {
 const ROLE_LABEL: Record<CommissionReportRow['role'], string> = {
   admin: 'Administrador',
   agent: 'Agente',
-  affiliate: 'Afiliado',
 }
 
 const SORT_OPTIONS: { key: ReportSortKey; label: string }[] = [
@@ -268,20 +265,9 @@ function SellerCard({ s, sortKey }: { s: CommissionReportRow; sortKey: ReportSor
             sx={{ justifyContent: 'space-between', alignItems: 'flex-start' }}
           >
             <Box sx={{ minWidth: 0 }}>
-              <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
-                <Typography variant="subtitle1" noWrap sx={{ fontWeight: 600 }}>
-                  {s.name}
-                </Typography>
-                {s.affiliate_company && (
-                  <Chip
-                    size="small"
-                    variant="outlined"
-                    color="primary"
-                    icon={<StorefrontRounded sx={{ fontSize: 16 }} />}
-                    label={s.affiliate_company}
-                  />
-                )}
-              </Stack>
+              <Typography variant="subtitle1" noWrap sx={{ fontWeight: 600 }}>
+                {s.name}
+              </Typography>
               <Typography variant="caption" color="textSecondary">
                 {ROLE_LABEL[s.role]}
               </Typography>
@@ -387,15 +373,6 @@ function SellerRow({ s }: { s: CommissionReportRow }) {
                 {ROLE_LABEL[s.role]}
               </Typography>
             </Box>
-            {s.affiliate_company && (
-              <Chip
-                size="small"
-                variant="outlined"
-                color="primary"
-                icon={<StorefrontRounded sx={{ fontSize: 16 }} />}
-                label={s.affiliate_company}
-              />
-            )}
           </Stack>
         </TableCell>
         <NumCell>{s.folios_sold}</NumCell>

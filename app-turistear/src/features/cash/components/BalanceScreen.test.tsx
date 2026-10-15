@@ -22,7 +22,6 @@ const aUser = (role: UserRole = 'agent'): UserPayload => ({
   email: 'ana@x.com',
   role,
   organizationId: 'o1',
-  affiliateCompanyId: role === 'affiliate' ? 'aff-1' : null,
 })
 
 // The org read behind `useOrgDateFormatter`. In `beforeEach`, not `beforeAll`: MSW resets handlers
@@ -226,15 +225,6 @@ describe('BalanceScreen — the capability line', () => {
     expect(screen.getAllByText('Gastos')).toHaveLength(2)
   })
 
-  // The affiliate exclusion IS a decision (affiliate-portal D4), and it stays.
-  it('offers them to no affiliate, on either half', async () => {
-    withBalance({ expense_total: 0 })
-    renderScreen('self', 'affiliate')
-    await screen.findByRole('heading', { level: 2, name: 'Entregas' })
-    expect(screen.queryByRole('heading', { level: 2, name: 'Gastos' })).not.toBeInTheDocument()
-    expect(screen.queryByText('Gastos')).not.toBeInTheDocument()
-  })
-
   // S-6 — a screen that looks identical while behaving differently is worse than two screens.
   it('states self-authorization on the admin surface only', async () => {
     withBalance()
@@ -269,7 +259,7 @@ describe('BalanceScreen — the capability line', () => {
   })
 
   // An admin owes no signature: their own moves are self-authorized, so the endpoint never mints
-  // an obligation for them — and the acknowledge/dispute routes are `agentOrAffiliate` anyway.
+  // an obligation for them — and the acknowledge/dispute routes are `agent`-only anyway.
   it('shows the signature queue to the seller only', async () => {
     const ack = [
       {

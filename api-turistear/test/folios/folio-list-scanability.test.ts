@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { env, SELF } from 'cloudflare:test'
 import { materializeSeededFolio, seedUser, seedTwoOrgs, clearTenancyDb } from '../helpers/tenancy'
-import { buildFakeJwt } from '../helpers/jwt'
+import { sessionCookie } from '../helpers/session'
 
 // US-A82 / US-AG49 — the folio list identifies a sale without opening it.
 // Spec: docs/oversight/folio-list-scanability.spec.md — Scenarios S-1, S-7, S-8, S-9, the payload
@@ -16,7 +16,7 @@ import { buildFakeJwt } from '../helpers/jwt'
 // proven where it is enforced, and none of these is enforced here (docs/TESTING.md).
 
 const ADMIN_EMAIL = 'admin@empresa.com'
-const auth = (email: string) => ({ Cookie: `gm_access=${buildFakeJwt(email)}` })
+const auth = (email: string) => ({ Cookie: sessionCookie(email) })
 const FOLIOS = 'http://api.local/api/folios'
 
 const nowSec = () => Math.floor(Date.now() / 1000)
@@ -302,7 +302,8 @@ describe('US-A82 — identify a sale from the list', () => {
     const keys = Object.keys(row)
 
     // The scope boundary of this feature, asserted rather than asserted-about: no field was
-    // removed or renamed to make room for the three new ones.
+    // removed or renamed to make room for the three new ones. (`operator_name` left later, with the
+    // shift operators — retire-affiliates D9.)
     for (const field of [
       'id',
       'agent',
@@ -321,7 +322,6 @@ describe('US-A82 — identify a sale from the list', () => {
       'deliverable',
       'tickets_sent_at',
       'tickets_viewed_at',
-      'operator_name',
       'refund_status',
       'refund_amount',
     ]) {

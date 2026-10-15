@@ -24,7 +24,7 @@ export function InviteAgentForm() {
   const onSubmit = (data: InviteAgentFormData) => {
     setForbidden(false);
     inviteMutation.mutate(data, {
-      // Return to the agents list with a success toast (unified with the service/affiliate flows).
+      // Return to the agents list with a success toast (unified with the service flow).
       onSuccess: () => {
         navigate(ROUTES.AGENTS, { replace: true, state: { agentInvited: true } });
       },

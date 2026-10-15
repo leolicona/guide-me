@@ -96,18 +96,23 @@ export const users = sqliteTable('users', {
     .references(() => organizations.id),
   name: text('name').notNull(),
   email: text('email').notNull().unique(),
-  passwordHash: text('password_hash').notNull(),
-  passwordSalt: text('password_salt').notNull(),
+  // passkey-auth D15 — `password_hash` and `password_salt` are deliberately NOT mapped, so no read
+  // touches them and migration 0072 can drop them under the code already deployed (debt
+  // `password-material`). Better Auth's adapter selects every mapped column, and once dropped a
+  // mapped column would not fail but read back as the text 'password_hash' (SQLite takes a
+  // double-quoted name it cannot resolve for a string). They stay NOT NULL in D1 until then: a new
+  // user goes in through routes/onboarding/handler.ts, which writes them on either side of the drop.
+  // passkey-auth D4 — Better Auth's `emailVerified` (set by an email-code sign-in) and `image`
+  // (required by its model, never written).
+  emailVerified: integer('email_verified', { mode: 'boolean' })
+    .notNull()
+    .default(false),
+  image: text('image'),
   phone: text('phone'),
-  role: text('role', { enum: ['admin', 'agent', 'affiliate'] }).notNull(),
+  role: text('role', { enum: ['admin', 'agent'] }).notNull(),
   status: text('status', { enum: ['unverified', 'active', 'suspended'] })
     .notNull()
     .default('unverified'),
-  // Affiliate program (docs/affiliates/affiliate-setup-commissions.spec.md, D4). Set at invite
-  // acceptance for an `affiliate` user; null for admin/agent. `position` is the optional job
-  // title collected on the affiliate onboarding form (US-AF01).
-  affiliateCompanyId: text('affiliate_company_id').references(() => affiliateCompanies.id),
-  position: text('position'),
   // DEPRECATED (2026-06-11): commission is service-based now (services.commission_type/value —
   // docs/commissions/service-based-commission.spec.md). No code reads or writes this column;
   // it is kept only to avoid a users-table rebuild. A future migration may drop it.
@@ -146,16 +151,92 @@ export const invitations = sqliteTable('invitations', {
     .default(sql`(unixepoch())`),
 })
 
-export const passwordResetTokens = sqliteTable('password_reset_tokens', {
+// passkey-auth D15 — `password_reset_tokens` (and `users.password_hash`/`password_salt`) are no
+// longer mapped or read: the email code replaced every password flow (FR-060, FR-061). They stay in
+// D1 until migration 0072 drops them (debt `password-material`).
+
+// ─── passkey-auth D4 — Better Auth 1.7.7's standard schema (migration 0071) ────────────────────
+// Better Auth addresses these through the Drizzle adapter: each table by its export name here
+// (`modelName` in src/auth/index.ts), each column by its property name. The SQL columns are
+// snake_case. Child tables are scoped through `user_id → users.organization_id` (constitution III).
+
+export const sessions = sqliteTable('sessions', {
   id: text('id').primaryKey(),
   userId: text('user_id')
     .notNull()
-    .references(() => users.id),
+    .references(() => users.id, { onDelete: 'cascade' }),
   token: text('token').notNull().unique(),
+  expiresAt: integer('expires_at', { mode: 'timestamp' }).notNull(),
+  ipAddress: text('ip_address'),
+  userAgent: text('user_agent'),
+  createdAt: integer('created_at', { mode: 'timestamp' })
+    .notNull()
+    .default(sql`(unixepoch())`),
+  updatedAt: integer('updated_at', { mode: 'timestamp' })
+    .notNull()
+    .default(sql`(unixepoch())`),
+})
+
+// Required by Better Auth's schema; neither email codes nor passkeys write it.
+export const accounts = sqliteTable('accounts', {
+  id: text('id').primaryKey(),
+  userId: text('user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  accountId: text('account_id').notNull(),
+  providerId: text('provider_id').notNull(),
+  accessToken: text('access_token'),
+  refreshToken: text('refresh_token'),
+  idToken: text('id_token'),
+  accessTokenExpiresAt: integer('access_token_expires_at', { mode: 'timestamp' }),
+  refreshTokenExpiresAt: integer('refresh_token_expires_at', { mode: 'timestamp' }),
+  scope: text('scope'),
+  password: text('password'),
+  createdAt: integer('created_at', { mode: 'timestamp' })
+    .notNull()
+    .default(sql`(unixepoch())`),
+  updatedAt: integer('updated_at', { mode: 'timestamp' })
+    .notNull()
+    .default(sql`(unixepoch())`),
+})
+
+// Sign-in codes (`sign-in-otp-<email>`, value stored encrypted — FR-016) and passkey challenges.
+export const verifications = sqliteTable('verifications', {
+  id: text('id').primaryKey(),
+  identifier: text('identifier').notNull(),
+  value: text('value').notNull(),
   expiresAt: integer('expires_at', { mode: 'timestamp' }).notNull(),
   createdAt: integer('created_at', { mode: 'timestamp' })
     .notNull()
     .default(sql`(unixepoch())`),
+  updatedAt: integer('updated_at', { mode: 'timestamp' })
+    .notNull()
+    .default(sql`(unixepoch())`),
+})
+
+// `@better-auth/passkey`'s model. `counter` is the authenticator's use count (FR-006).
+export const passkeys = sqliteTable('passkeys', {
+  id: text('id').primaryKey(),
+  userId: text('user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  name: text('name'),
+  credentialID: text('credential_id').notNull().unique(),
+  publicKey: text('public_key').notNull(),
+  counter: integer('counter').notNull(),
+  deviceType: text('device_type').notNull(),
+  backedUp: integer('backed_up', { mode: 'boolean' }).notNull(),
+  transports: text('transports'),
+  aaguid: text('aaguid'),
+  createdAt: integer('created_at', { mode: 'timestamp' }),
+})
+
+// Better Auth's rate limiter on database storage (D9). `lastRequest` is epoch MILLISECONDS.
+export const rateLimits = sqliteTable('rate_limits', {
+  id: text('id').primaryKey(),
+  key: text('key').notNull().unique(),
+  count: integer('count').notNull(),
+  lastRequest: integer('last_request').notNull(),
 })
 
 export const services = sqliteTable('services', {
@@ -343,10 +424,6 @@ export const folios = sqliteTable('folios', {
   agentId: text('agent_id')
     .notNull()
     .references(() => users.id),
-  // Affiliate sale attribution (docs/affiliates/affiliate-setup-commissions.spec.md, D5). Null for
-  // in-house (agent/admin) sales; stamped with the seller's company for an affiliate sale (US-A51)
-  // so in-house vs affiliate revenue stays separable. The seller is still `agentId`.
-  affiliateCompanyId: text('affiliate_company_id').references(() => affiliateCompanies.id),
   customerName: text('customer_name'),
   customerEmail: text('customer_email'),
   customerPhone: text('customer_phone'),
@@ -441,9 +518,6 @@ export const folios = sqliteTable('folios', {
   ticketsSentAt: integer('tickets_sent_at', { mode: 'timestamp' }),
   ticketsSentBy: text('tickets_sent_by').references(() => users.id),
   ticketsViewedAt: integer('tickets_viewed_at', { mode: 'timestamp' }),
-  // US-AF13 — the affiliate shift operator who made the sale (docs/affiliate-operators/affiliate-operators.spec.md).
-  // Null ⇒ the manager/agent sold directly. Pure attribution: agent_id still owns the caja/commission.
-  operatorId: text('operator_id').references((): any => affiliateOperators.id),
   createdAt: integer('created_at', { mode: 'timestamp' })
     .notNull()
     .default(sql`(unixepoch())`),
@@ -833,126 +907,6 @@ export const accommodationReservations = sqliteTable('accommodation_reservations
     .default(sql`(unixepoch())`),
 })
 
-// ── Affiliate program ────────────────────────────────────────────────────────────────────
-// docs/affiliates/affiliate-setup-commissions.spec.md. An affiliate is an external reseller
-// (hotel / agency / restaurant). The admin models the company, curates which services it may
-// sell and at what commission (the allow-list), and invites its logins.
-
-// The partner company (US-A48/A52/A55). Suspending it (status) cascades to its users at
-// authMiddleware — existing folios/QRs stay intact (D7).
-export const affiliateCompanies = sqliteTable('affiliate_companies', {
-  id: text('id').primaryKey(),
-  organizationId: text('organization_id')
-    .notNull()
-    .references(() => organizations.id),
-  name: text('name').notNull(),
-  contactEmail: text('contact_email'),
-  contactPhone: text('contact_phone'),
-  status: text('status', { enum: ['active', 'suspended'] })
-    .notNull()
-    .default('active'),
-  createdAt: integer('created_at', { mode: 'timestamp' })
-    .notNull()
-    .default(sql`(unixepoch())`),
-  updatedAt: integer('updated_at', { mode: 'timestamp' })
-    .notNull()
-    .default(sql`(unixepoch())`),
-})
-
-// The allow-list AND the per-service rate in one (D1/D2): a service is sellable by an affiliate
-// iff a row exists here. `percent` → commission_value is basis points (1500 = 15%); `fixed` →
-// minor units PER SPOT (× quantity), capped at the service's minimum_price (D10). UNIQUE per
-// (company, service). Rows survive a service deactivation (D12); removed only on hard-delete.
-export const affiliateCommissions = sqliteTable('affiliate_commissions', {
-  id: text('id').primaryKey(),
-  organizationId: text('organization_id')
-    .notNull()
-    .references(() => organizations.id),
-  affiliateCompanyId: text('affiliate_company_id')
-    .notNull()
-    .references(() => affiliateCompanies.id),
-  serviceId: text('service_id')
-    .notNull()
-    .references(() => services.id),
-  commissionType: text('commission_type', { enum: ['percent', 'fixed'] }).notNull(),
-  commissionValue: integer('commission_value').notNull(),
-  createdAt: integer('created_at', { mode: 'timestamp' })
-    .notNull()
-    .default(sql`(unixepoch())`),
-  updatedAt: integer('updated_at', { mode: 'timestamp' })
-    .notNull()
-    .default(sql`(unixepoch())`),
-})
-
-// Parallel invite flow (D8): a dedicated table so the affiliate invite carries role + company
-// explicitly and the agent `invitations` path stays untouched. Acceptance creates the
-// `affiliate` user linked to affiliateCompanyId (US-AF01).
-export const affiliateInvitations = sqliteTable('affiliate_invitations', {
-  id: text('id').primaryKey(),
-  organizationId: text('organization_id')
-    .notNull()
-    .references(() => organizations.id),
-  affiliateCompanyId: text('affiliate_company_id')
-    .notNull()
-    .references(() => affiliateCompanies.id),
-  identity: text('identity').notNull(),
-  identityType: text('identity_type', { enum: ['email'] })
-    .notNull()
-    .default('email'),
-  token: text('token').notNull().unique(),
-  invitedBy: text('invited_by')
-    .notNull()
-    .references(() => users.id),
-  status: text('status', { enum: ['pending', 'accepted', 'expired'] })
-    .notNull()
-    .default('pending'),
-  expiresAt: integer('expires_at', { mode: 'timestamp' }).notNull(),
-  createdAt: integer('created_at', { mode: 'timestamp' })
-    .notNull()
-    .default(sql`(unixepoch())`),
-  updatedAt: integer('updated_at', { mode: 'timestamp' })
-    .notNull()
-    .default(sql`(unixepoch())`),
-})
-
-// US-AF10–AF13 / US-OP01–OP02 (docs/affiliate-operators/affiliate-operators.spec.md). A shift cashier at an affiliate
-// company's register — NOT a `users` row (no email/password). Registered by the manager with name +
-// phone; identified by a durable access_token (the saved WhatsApp link) and unlocked by a 4-digit
-// PIN. Pure attribution: its sales roll into the owning manager's one caja (folios.agent_id stays
-// the manager); folios.operator_id only labels "Vendido por: {name}".
-export const affiliateOperators = sqliteTable('affiliate_operators', {
-  id: text('id').primaryKey(),
-  organizationId: text('organization_id')
-    .notNull()
-    .references(() => organizations.id),
-  affiliateCompanyId: text('affiliate_company_id')
-    .notNull()
-    .references(() => affiliateCompanies.id),
-  // The affiliate user who owns this operator — sales attribute to this manager's caja/balance
-  // (folios.agent_id) and it resolves the operator session's borrowed identity (D5).
-  managerId: text('manager_id')
-    .notNull()
-    .references(() => users.id),
-  name: text('name').notNull(),
-  phone: text('phone').notNull(), // MX-normalized; unique among the company's ACTIVE operators
-  pinHash: text('pin_hash'), // null until first-run PIN setup (US-OP01)
-  pinSalt: text('pin_salt'),
-  pinAttempts: integer('pin_attempts').notNull().default(0), // >= 5 ⇒ locked until a manager resets
-  accessToken: text('access_token').notNull().unique(), // the saved link's secret; rotated on remove/reset
-  status: text('status', { enum: ['active', 'removed'] })
-    .notNull()
-    .default('active'),
-  createdAt: integer('created_at', { mode: 'timestamp' })
-    .notNull()
-    .default(sql`(unixepoch())`),
-  updatedAt: integer('updated_at', { mode: 'timestamp' })
-    .notNull()
-    .default(sql`(unixepoch())`),
-})
-
-export type AffiliateOperator = typeof affiliateOperators.$inferSelect
-export type NewAffiliateOperator = typeof affiliateOperators.$inferInsert
-
 // US-LG01 (docs/paid-ledger/paid-ledger.spec.md) — per-payment money-movement ledger. One SIGNED row per
 // movement on a folio; the cash engine's source of truth (later steps re-home cash_collected /
 // by-method sales / commissions onto it). `entry_type` separates money movements (payment/refund,
@@ -983,8 +937,6 @@ export const folioPayments = sqliteTable('folio_payments', {
   collectedBy: text('collected_by')
     .notNull()
     .references(() => users.id),
-  // The PIN shift that took it (US-A68); null for an in-house (agent/admin) collection.
-  operatorId: text('operator_id').references((): any => affiliateOperators.id),
   // US-A22 (line-autonomy D9) — which line an accrual or single-line reversal belongs to. NULL =
   // folio-scoped (every pre-feature row, and multi-line reversals whose split lives in the
   // allocations instead). SET NULL: a ledger row outlives its line, losing only the label.
@@ -1058,8 +1010,6 @@ export const folioEvents = sqliteTable('folio_events', {
     ],
   }).notNull(),
   actorId: text('actor_id').references(() => users.id),
-  // The PIN shift that acted (US-A68); null for an in-house (agent/admin) action.
-  operatorId: text('operator_id').references((): any => affiliateOperators.id),
   // US-A22 (line-autonomy D13) — the line this event is about. NULL = folio-scoped (created,
   // tickets_sent…); set for line-scoped actions (a line's cancellation, payment, reschedule).
   // SET NULL: the narrative outlives its line.
@@ -1123,21 +1073,19 @@ export type NewFolioPaymentAllocation = typeof folioPaymentAllocations.$inferIns
 export type FolioPayment = typeof folioPayments.$inferSelect
 export type NewFolioPayment = typeof folioPayments.$inferInsert
 
-export type AffiliateCompany = typeof affiliateCompanies.$inferSelect
-export type NewAffiliateCompany = typeof affiliateCompanies.$inferInsert
-export type AffiliateCommission = typeof affiliateCommissions.$inferSelect
-export type NewAffiliateCommission = typeof affiliateCommissions.$inferInsert
-export type AffiliateInvitation = typeof affiliateInvitations.$inferSelect
-export type NewAffiliateInvitation = typeof affiliateInvitations.$inferInsert
-
 export type Organization = typeof organizations.$inferSelect
 export type NewOrganization = typeof organizations.$inferInsert
 export type User = typeof users.$inferSelect
 export type NewUser = typeof users.$inferInsert
 export type Invitation = typeof invitations.$inferSelect
 export type NewInvitation = typeof invitations.$inferInsert
-export type PasswordResetToken = typeof passwordResetTokens.$inferSelect
-export type NewPasswordResetToken = typeof passwordResetTokens.$inferInsert
+export type Session = typeof sessions.$inferSelect
+export type NewSession = typeof sessions.$inferInsert
+export type Account = typeof accounts.$inferSelect
+export type Verification = typeof verifications.$inferSelect
+export type Passkey = typeof passkeys.$inferSelect
+export type NewPasskey = typeof passkeys.$inferInsert
+export type RateLimit = typeof rateLimits.$inferSelect
 export type Service = typeof services.$inferSelect
 export type NewService = typeof services.$inferInsert
 export type ServiceExtra = typeof serviceExtras.$inferSelect

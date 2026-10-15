@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { env } from 'cloudflare:test'
 import { and, eq, sql } from 'drizzle-orm'
 import { getDb } from '../../src/db/client'
-import { folios, folioLines, users, affiliateOperators } from '../../src/db/schema'
+import { folios, folioLines, users } from '../../src/db/schema'
 import {
   anyLineStatusSql,
   deriveBookingExpiresAtSql,
@@ -54,13 +54,11 @@ describe('BUG-042 — folio roll-up correlations enter an index', () => {
           status: deriveStatusSql,
           bookingExpiresAt: deriveBookingExpiresAtSql,
           paymentMethod: displayMethodSql,
-          operatorName: affiliateOperators.name,
           refundStatus: deriveRefundStatusSql,
           refundAmount: deriveRefundAmountSql,
         })
         .from(folios)
         .innerJoin(users, eq(folios.agentId, users.id))
-        .leftJoin(affiliateOperators, eq(folios.operatorId, affiliateOperators.id))
         .where(eq(folios.organizationId, 'org')),
     )
     expect(plan.some((l) => l.startsWith('CORRELATED SCALAR SUBQUERY'))).toBe(true)

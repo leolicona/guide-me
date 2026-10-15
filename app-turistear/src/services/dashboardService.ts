@@ -29,7 +29,6 @@ export interface DashboardDepartedRow {
 export interface DashboardSeller {
   user_id: string
   name: string
-  operator_name: string | null
   collected_cents: number
 }
 

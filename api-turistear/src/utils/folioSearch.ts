@@ -3,7 +3,7 @@
 
 import { and, eq, exists, gte, lte, or, sql, type SQL } from 'drizzle-orm'
 import type { Db } from '../db/client'
-import { affiliateOperators, folioLines, folios, users } from '../db/schema'
+import { folioLines, folios, users } from '../db/schema'
 import { naiveEpoch } from './tz'
 
 /** Below this a `LIKE %x%` scans the table to return everything, so it is not a filter (rule 7). */
@@ -47,8 +47,9 @@ export const normalizeQuery = (raw: string): string =>
  * a folio with three lines must appear once, not three times, and this predicate is `OR`-ed into a
  * query that already returns one row per folio.
  *
- * The seller/operator arm is the one with a stated cost: searching `Ana` returns sales *to* Ana and
- * sales *by* Ana. That was asked for explicitly and is recorded as D2, not discovered later.
+ * The seller arm is the one with a stated cost: searching `Ana` returns sales *to* Ana and sales
+ * *by* Ana. That was asked for explicitly and is recorded as D2, not discovered later. (The shift
+ * operator's arm left with the operators — retire-affiliates D10, on the client too.)
  */
 export const searchFilter = (db: Db, org: string, normalized: string): SQL => {
   const like = `%${normalized}%`
@@ -57,7 +58,6 @@ export const searchFilter = (db: Db, org: string, normalized: string): SQL => {
   const arms: SQL[] = [
     sql`${unaccent(folios.customerName)} LIKE ${like}`,
     sql`${unaccent(users.name)} LIKE ${like}`,
-    sql`${unaccent(affiliateOperators.name)} LIKE ${like}`,
     // The folio ref the WhatsApp template renders: the id's first 8 characters (`delivery.ts:102`).
     sql`lower(substr(${folios.id}, 1, 8)) LIKE ${like}`,
     exists(

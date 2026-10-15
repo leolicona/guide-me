@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { env, SELF } from 'cloudflare:test'
-import { materializeSeededFolio, seedUser, seedTwoOrgs, clearAffiliateDb } from '../helpers/tenancy'
-import { buildFakeJwt } from '../helpers/jwt'
+import { materializeSeededFolio, seedUser, seedTwoOrgs, clearFullDb } from '../helpers/tenancy'
+import { sessionCookie } from '../helpers/session'
 
 // US-A85 — the wasted seat, end to end.
 // Spec: docs/folios/folio-state-machine.spec.md — S-4 … S-10, S-18.
@@ -12,7 +12,7 @@ import { buildFakeJwt } from '../helpers/jwt'
 // a request body, and that one org's wasted seats never appear in another's report.
 
 const ADMIN = 'admin@empresa.com'
-const auth = (email: string) => ({ Cookie: `gm_access=${buildFakeJwt(email)}` })
+const auth = (email: string) => ({ Cookie: sessionCookie(email) })
 const FOLIOS = 'http://api.local/api/folios'
 const REPORT = 'http://api.local/api/reports/wasted-seats'
 
@@ -97,7 +97,7 @@ const getFolios = async (email = ADMIN) => {
 
 // The full wipe: this suite seeds services and folio_lines, which `clearTenancyDb` does not
 // reach — deleting users first then trips their foreign keys.
-beforeEach(clearAffiliateDb)
+beforeEach(clearFullDb)
 
 describe('US-A85 — a folio carries its fulfilment', () => {
   it('S-4 — nobody boarded and the departure has passed', async () => {

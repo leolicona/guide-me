@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { env, SELF } from 'cloudflare:test'
 import { seedUser, seedTwoOrgs, clearTenancyDb } from '../helpers/tenancy'
-import { buildFakeJwt } from '../helpers/jwt'
+import { sessionCookie } from '../helpers/session'
 
 // Default-Filtered POS Catalog & Lightweight Availability Query (US-AG30).
 // Spec: docs/pos/default-filtered-catalog.spec.md (Scenarios 1–6, 11).
@@ -14,7 +14,7 @@ import { buildFakeJwt } from '../helpers/jwt'
 
 const AGENT_EMAIL = 'agent@empresa.com'
 const POS = 'http://api.local/api/pos'
-const auth = (email: string) => ({ Cookie: `gm_access=${buildFakeJwt(email)}` })
+const auth = (email: string) => ({ Cookie: sessionCookie(email) })
 
 // Deterministic calendar anchor. Default window = [TODAY, TODAY+2] = 06-15 … 06-17.
 const TODAY = '2026-06-15'

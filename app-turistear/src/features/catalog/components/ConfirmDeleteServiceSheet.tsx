@@ -33,7 +33,7 @@ export function ConfirmDeleteServiceSheet({ service, open, onClose }: Props) {
       open={open}
       onClose={handleClose}
       title={`¿Eliminar ${service?.name ?? 'servicio'}?`}
-      description="Esta acción es permanente y elimina el servicio junto con sus horarios, extras y comisiones de afiliados. No se puede deshacer."
+      description="Esta acción es permanente y elimina el servicio junto con sus horarios y extras. No se puede deshacer."
       confirmLabel="Eliminar"
       busy={remove.isPending}
       onConfirm={onConfirm}

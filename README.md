@@ -90,19 +90,25 @@ transaction, so a half-applied deploy must still be safe. After changing binding
 ## Environments & the release flow
 
 Deploys run in **GitHub Actions** — you normally never deploy from your laptop. Full detail in
+the runbook, [`specs/005-delivery-pipeline/quickstart.md`](./specs/005-delivery-pipeline/quickstart.md);
+the two-branch flow it replaced is archived in
 [`docs/ci-cd.md`](https://github.com/leolicona/guide-me-docs/blob/main/docs/ci-cd.md).
 
-| Env | Branch | Workers | Domains | Database |
+| Env | From | Workers | Domains | Database |
 |---|---|---|---|---|
-| **Dev** | `develop` → auto | `api-guideme-dev` · `app-guideme-dev` | `*-dev.turistearya.com` | `guideme-db` |
-| **Prod** | `main` → approval-gated | `api-guideme` · `app-guideme` | `api`/`app`.turistearya.com | `guideme-db-prod` |
+| **Preview** | each pull request into `main` | `api-guideme-pr-<n>` · `app-guideme-pr-<n>` | `*.workers.dev` | `guideme-db` (dev's) |
+| **Dev** | every push to `main` | `api-guideme-dev` · `app-guideme-dev` | `*-dev.turistearya.com` | `guideme-db` |
+| **Prod** | a `v*` tag — the tag is the approval | `api-guideme` · `app-guideme` | `api`/`app`.turistearya.com | `guideme-db-prod` |
 
-**Working on a change:**
+**Working on a change** (`specs/005-delivery-pipeline/quickstart.md` is the runbook):
 
-1. Branch off `develop` → open a PR into `develop`. The **CI** gate (lint + test + build) must pass.
-2. Merge → **Dev** deploys automatically. Verify on `*-dev.turistearya.com`.
-3. Open a PR `develop → main`, merge → the **Prod** deploy pauses for a manual approval in the
-   **Actions** tab, then ships.
+1. Branch off `main` → open a PR into `main`. The **CI** gate (`verify`: lint + tests + build)
+   must pass. A comment on the PR gives its **preview** addresses, on dev's data; the `e2e` label
+   runs the journeys against it.
+2. Merge → **Dev** deploys automatically after the same gate. Verify on `*-dev.turistearya.com`.
+3. Release: `git tag vX.Y.Z origin/main && git push origin vX.Y.Z` on a commit whose *Deploy Dev*
+   run is green. The release refuses any other commit, records a database restore point, and lists
+   the version of each Worker in its summary. *Rollback Prod* (Actions) undoes one Worker.
 
 The environment is selected at build time via `CLOUDFLARE_ENV` (handled by the deploy scripts);
 the frontend's API origin is baked in via `VITE_API_BASE_URL`. Manual deploys exist for

@@ -4,14 +4,19 @@ import CheckCircleRounded from '@mui/icons-material/CheckCircleRounded'
 import { useVerifyPayment, useMarkTicketsSent } from '../../bookings'
 import { useMyOrganization } from '../../organization'
 import { useMe } from '../../auth/hooks/useMe'
-import { ticketWhatsAppUrl, DEFAULT_TICKET_TEMPLATE } from '../../pos/delivery'
+import {
+  ticketWhatsAppUrl,
+  depositVerifiedWhatsAppUrl,
+  DEFAULT_TICKET_TEMPLATE,
+} from '../../pos/delivery'
 import type { FolioListLine } from '../../pos/types'
 
 // US-A84 (D13) — the card's verb for a payment awaiting verification, lifted out of the
 // `PaymentVerificationTab` this feature deletes.
 //
 // ONE verb that finishes the job: verify, open WhatsApp with the freshly-minted portal link, stamp
-// `tickets_sent_at`. Bare `Verificar` was the other candidate and it loses for a specific reason —
+// `tickets_sent_at`. For an apartado the job is smaller — the deposit is confirmed and the
+// customer is told so; the tickets wait for settle (verify-send-empty-link). Bare `Verificar` was the other candidate and it loses for a specific reason —
 // it moves the folio straight out of the verification queue and into the undelivered one. A queue
 // that grows from correct behaviour is the failure US-A82 D7 was written against, and offering the
 // admin a verb that creates it would repeat it one screen over.
@@ -40,15 +45,28 @@ export function VerifyAndSendButton({
   const run = () =>
     verify.mutate(folio.id, {
       onSuccess: (verified) => {
-        setToast('Pago verificado')
-        const url = ticketWhatsAppUrl(org?.wa_ticket_template || DEFAULT_TICKET_TEMPLATE, {
+        const ctx = {
           folio: verified,
           agentName: me?.name ?? '',
           orgName: org?.name ?? 'Turistear Ya!',
+        }
+        // verify-send-empty-link — an apartado's verify confirms the DEPOSIT only: the server mints
+        // no QR and no portal link until the balance settles. Its message is the deposit
+        // confirmation, and since no tickets went out, nothing is marked sent.
+        if (verified.status === 'booking') {
+          setToast('Anticipo verificado')
+          const url = depositVerifiedWhatsAppUrl(ctx)
+          if (url) window.open(url, '_blank')
+          return
+        }
+        setToast('Pago verificado')
+        const url = ticketWhatsAppUrl(org?.wa_ticket_template || DEFAULT_TICKET_TEMPLATE, {
+          ...ctx,
           portalLink: verified.portal_link ?? '',
         })
-        // No dialable phone ⇒ the money is still verified and the ticket email still goes out; only
-        // the WhatsApp hop is skipped. Failing the whole action there would strand the payment.
+        // No dialable phone (or no portal link) ⇒ the money is still verified and the ticket email
+        // still goes out; only the WhatsApp hop is skipped. Failing the whole action there would
+        // strand the payment.
         if (url) {
           window.open(url, '_blank')
           markSent.mutate(verified.id)

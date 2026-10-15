@@ -204,7 +204,6 @@ export interface FolioListRow {
   paymentMethod: string
   paymentReference: string | null
   paymentVerification: string
-  operatorName: string | null
   refundStatus: 'none' | 'pending' | 'refunded'
   refundAmount: number | null
   creditAmount: number | null
@@ -246,8 +245,6 @@ export const serializeFolioListRow = (r: FolioListRow, deco: FolioListDecoration
     deliverable: r.status === 'paid' && r.paymentVerification !== 'pending',
     tickets_sent_at: ts(r.ticketsSentAt),
     tickets_viewed_at: ts(r.ticketsViewedAt),
-    // US-A68 — the affiliate shift operator who took the sale (null ⇒ sold directly).
-    operator_name: r.operatorName ?? null,
     // US-A78 — 'pending' = cancelled, money owed, nobody confirmed the hand-back.
     refund_status: r.refundStatus,
     refund_amount: r.refundAmount,

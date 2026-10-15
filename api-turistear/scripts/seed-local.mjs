@@ -1,17 +1,16 @@
 #!/usr/bin/env node
-// Seed the LOCAL D1 replica with an organization, an admin you can actually log in as, and enough
-// catalog + sales for every screen to have something on it.
+// Seed the LOCAL D1 replica with an organization, an admin and an agent you can sign in as, and
+// enough catalog + sales for every screen to have something on it.
 //
-// Why this exists instead of "just register through the UI": `POST /api/auth/register` inserts the
-// user and THEN emails a magic link through Resend. Locally there is no Resend key, so the call
-// 502s after the row is written and the account is left `unverified`, which login refuses. Rather
-// than teach people that half-broken dance, this script asks agnostic-auth for a password hash —
-// a stateless call that creates no account anywhere — and writes an ALREADY-ACTIVE admin.
+// Signing in needs no password and no external service (passkey-auth FR-064, SC-011): enter the
+// seeded email at /login, and the sign-in code is printed in the API console
+// (`[otp] <email> <code>`, OTP_LOG_TO_CONSOLE in wrangler.jsonc's local profile). Both users are
+// written already `active` with their address verified, as an email-code sign-in would leave them.
 //
-//   node scripts/seed-local.mjs [email] [password]
+//   node scripts/seed-local.mjs [email]
 //
-// Idempotent: it deletes the seeded organization and everything under it first, so re-running is
-// how you get back to a clean board.
+// Idempotent: it deletes the seeded organization and everything under it first (sessions and
+// llaves de acceso go with their users), so re-running is how you get back to a clean board.
 
 import { execFileSync } from 'node:child_process'
 import { writeFileSync, mkdtempSync } from 'node:fs'
@@ -19,9 +18,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 
-const EMAIL = process.argv[2] ?? 'admin@local.test'
-const PASSWORD = process.argv[3] ?? 'Local1234!'
-const AUTH_URL = 'https://agnostic-auth.leolicona-dev.workers.dev'
+// passkey-auth R11 — Better Auth looks every email up lowercased.
+const EMAIL = (process.argv[2] ?? 'admin@local.test').trim().toLowerCase()
 const ORG_ID = '00000000-0000-4000-8000-000000000001' // stable, so re-seeding can clean up
 const TZ = 'America/Cancun'
 
@@ -32,18 +30,6 @@ const DAY = 86400
 // it: every folio reads pending, the wasted-seat report is empty, and the T-24h sweep finds nothing.
 const dayOffset = (n) => new Date((now + n * DAY) * 1000).toISOString().slice(0, 10)
 const q = (s) => `'${String(s).replace(/'/g, "''")}'`
-
-console.log(`→ hashing the password via agnostic-auth (stateless; no account is created there)`)
-const res = await fetch(`${AUTH_URL}/auth/hash`, {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({ password: PASSWORD }),
-})
-if (!res.ok) {
-  console.error(`agnostic-auth returned ${res.status}. Is the service up?`)
-  process.exit(1)
-}
-const { data } = await res.json()
 
 const adminId = randomUUID()
 const agentId = randomUUID()
@@ -186,15 +172,15 @@ DELETE FROM organizations WHERE id = ${q(ORG_ID)};
 
 INSERT INTO organizations (id, name, timezone) VALUES (${q(ORG_ID)}, 'Turistear Local', ${q(TZ)});
 
--- status='active' is the whole point: the verify endpoint does nothing else to the user row,
--- so skipping the magic link costs nothing.
-INSERT INTO users (id, organization_id, name, email, password_hash, password_salt, phone, role,
-                   status, base_commission, plan)
-VALUES (${q(adminId)}, ${q(ORG_ID)}, 'Admin Local', ${q(EMAIL)}, ${q(data.hash)}, ${q(data.salt)},
+-- passkey-auth D15 — no password: the columns get '' until the follow-up drops them. Active and
+-- verified, as an email-code sign-in leaves an account.
+INSERT INTO users (id, organization_id, name, email, password_hash, password_salt, email_verified,
+                   phone, role, status, base_commission, plan)
+VALUES (${q(adminId)}, ${q(ORG_ID)}, 'Admin Local', ${q(EMAIL)}, '', '', 1,
         '+529980000000', 'admin', 'active', 0, 'free');
-INSERT INTO users (id, organization_id, name, email, password_hash, password_salt, phone, role,
-                   status, base_commission, plan)
-VALUES (${q(agentId)}, ${q(ORG_ID)}, 'Ana Ramírez', 'ana@local.test', ${q(data.hash)}, ${q(data.salt)},
+INSERT INTO users (id, organization_id, name, email, password_hash, password_salt, email_verified,
+                   phone, role, status, base_commission, plan)
+VALUES (${q(agentId)}, ${q(ORG_ID)}, 'Ana Ramírez', 'ana@local.test', '', '', 1,
         '+529981111111', 'agent', 'active', 10, 'free');
 
 ${svc
@@ -371,11 +357,10 @@ execFileSync(
 console.log(`
 ✔ Ready.
 
-   URL       http://localhost:5174
-   Email     ${EMAIL}
-   Password  ${PASSWORD}
+   Entra en http://localhost:5174/login con ${EMAIL}; el código aparece en la consola del API.
+   ([otp] ${EMAIL} 123456 — then offer yourself a llave de acceso and sign in with it.)
 
-   Also seeded: an agent (ana@local.test, same password), 4 services, and 13 sales — one per
+   Also seeded: an agent (ana@local.test, same way in), 4 services, and 13 sales — one per
    state the Ventas screen can show, plus one from 200 days ago that ONLY search or a date
    range can reach.
 

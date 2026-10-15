@@ -26,7 +26,6 @@ const anEvent = (over: Partial<FolioEvent> = {}): FolioEvent => ({
   type: 'created',
   at: 1000,
   actor: { id: 'u1', name: 'Ana R.' },
-  operator_name: null,
   backfilled: false,
   payload: null,
   ...over,

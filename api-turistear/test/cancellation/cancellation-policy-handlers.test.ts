@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { env, SELF } from 'cloudflare:test'
 import { materializeSeededFolio, seedUser, seedTwoOrgs, clearTenancyDb } from '../helpers/tenancy'
-import { buildFakeJwt } from '../helpers/jwt'
+import { sessionCookie } from '../helpers/session'
 
 // Cancellation Policy Engine — the WIRING.
 // Spec: docs/cancellation/cancellation-policy-engine.spec.md (Scenarios 1–19, 31–32)
@@ -13,7 +13,7 @@ import { buildFakeJwt } from '../helpers/jwt'
 
 const ADMIN = 'admin@empresa.com'
 const AGENT = 'agent@empresa.com'
-const auth = (email: string) => ({ Cookie: `gm_access=${buildFakeJwt(email)}` })
+const auth = (email: string) => ({ Cookie: sessionCookie(email) })
 const jsonAuth = (email: string) => ({ ...auth(email), 'Content-Type': 'application/json' })
 const FOLIOS = 'http://api.local/api/folios'
 const ORGS = 'http://api.local/api/organizations'
@@ -80,23 +80,21 @@ interface SeedFolio {
   amountPaid?: number
   commissionAmount?: number
   policySnapshot?: unknown
-  affiliateCompanyId?: string | null
 }
 
 const seedFolio = async (o: SeedFolio) => {
   const id = crypto.randomUUID()
   const total = o.total ?? 100_000
   await env.DB.prepare(
-    `INSERT INTO folios (id, organization_id, agent_id, affiliate_company_id, customer_name, status,
+    `INSERT INTO folios (id, organization_id, agent_id, customer_name, status,
         subtotal, discount_total, total, amount_paid, commission_amount,
         cancellation_policy_snapshot, created_at, updated_at)
-     VALUES (?, ?, ?, ?, 'Cliente', ?, ?, 0, ?, ?, ?, ?, ?, ?)`,
+     VALUES (?, ?, ?, 'Cliente', ?, ?, 0, ?, ?, ?, ?, ?, ?)`,
   )
     .bind(
       id,
       o.organizationId,
       o.agentId,
-      o.affiliateCompanyId ?? null,
       o.status ?? 'paid',
       total,
       total,

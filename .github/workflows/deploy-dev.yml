@@ -1,14 +1,15 @@
 name: Deploy Dev
 
-# develop → Dev (automatic). Migrations are applied to the dev D1 BEFORE the workers
-# ship, so the new schema is in place when the new code lands. Keep migrations additive
-# and backward-compatible (D1 has no cross-statement transaction).
+# main → dev, on every push (delivery-pipeline D9). `verify` runs whole first — the same gate as
+# every pull request, never a subset (D8) — then dev's D1 migrations, then the API, then the app,
+# so the new schema is in place when the new code lands. Keep migrations additive and
+# backward-compatible (D1 has no cross-statement transaction).
+#
+# Documentation-only pushes deploy too: a release takes only a main commit whose run of THIS
+# workflow finished green (deploy-prod.yml, D10), so every commit on main must be able to earn one.
 on:
   push:
-    branches: [develop]
-    # Docs-only changes don't affect the workers — skip the deploy for them.
-    paths-ignore:
-      - '**.md'
+    branches: [main]
 
 permissions:
   contents: read
@@ -19,7 +20,14 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/verify
+
   deploy:
+    needs: verify
     runs-on: ubuntu-latest
     # Bind this job to the GitHub "dev" environment (no protection rules).
     environment: dev
@@ -28,30 +36,54 @@ jobs:
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
     steps:
       - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
 
-      - uses: pnpm/action-setup@v6
-        with:
-          version: 10
-
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 22
-          cache: pnpm
-
-      - name: Install
-        run: pnpm install --frozen-lockfile
-
-      # Safety net: a broken develop branch never reaches the dev workers.
-      - name: Test (api)
-        run: pnpm test:api
+      # passkey-auth, constitution VIII (v1.4.0) — the API's secrets are managed in this GitHub
+      # environment ("dev") and land on the Worker with the version this run deploys
+      # (`wrangler deploy --secrets-file`, additive: a secret the environment does not hold keeps
+      # the Worker's current value). BETTER_AUTH_SECRET is required — the API refuses to start
+      # without 32+ characters — so a missing one stops the run here, before anything changes. The
+      # file stays in the runner's temp and is never printed.
+      - name: Secrets for the API (dev)
+        env:
+          BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET }}
+          QR_SECRET: ${{ secrets.QR_SECRET }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+        run: |
+          set -euo pipefail
+          if [ "${#BETTER_AUTH_SECRET}" -lt 32 ]; then
+            echo "::error::BETTER_AUTH_SECRET is missing or shorter than 32 characters in the 'dev' environment. Nothing was migrated or deployed."
+            exit 1
+          fi
+          for name in QR_SECRET RESEND_API_KEY; do
+            [ -n "${!name}" ] || echo "::notice::$name is not in the 'dev' environment; the Worker keeps its current value."
+          done
+          node -e 'const e = process.env; const s = {}; for (const k of ["BETTER_AUTH_SECRET", "QR_SECRET", "RESEND_API_KEY"]) if (e[k]) s[k] = e[k]; process.stdout.write(JSON.stringify(s))' \
+            > "$RUNNER_TEMP/api-secrets.json"
 
       - name: Apply D1 migrations (dev)
         run: pnpm db:migrate:dev
 
       - name: Deploy API (dev)
-        run: pnpm deploy:api:dev
+        run: pnpm deploy:api:dev --secrets-file "$RUNNER_TEMP/api-secrets.json"
 
       - name: Deploy App (dev)
         env:
           VITE_API_BASE_URL: https://api-dev.turistearya.com
         run: pnpm deploy:app:dev
+
+      # Every host is tried before the step fails, so one red log names each one that did not
+      # answer; the wait covers a certificate race after a custom-domain change (D9).
+      - name: Smoke
+        run: |
+          probe() {
+            for i in $(seq 1 10); do
+              if curl -sf -o /dev/null --max-time 20 "$1"; then echo "answered: $1"; return 0; fi
+              echo "not up yet (attempt $i): $1"; sleep 30
+            done
+            echo "::error::$1 did not answer in 5 minutes"; return 1
+          }
+          failed=0
+          probe https://api-dev.turistearya.com/ || failed=1
+          probe https://app-dev.turistearya.com/ || failed=1
+          exit $failed

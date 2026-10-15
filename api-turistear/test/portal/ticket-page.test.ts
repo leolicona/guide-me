@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { env, SELF } from 'cloudflare:test'
 import { seedUser, seedTwoOrgs, clearTenancyDb } from '../helpers/tenancy'
-import { buildFakeJwt } from '../helpers/jwt'
+import { sessionCookie } from '../helpers/session'
 
 // The public ticket page /t/:token — US-T07 (docs/pos/express-sale.spec.md S-15..S-20, S-23).
 // The QR encodes `${API_BASE_URL}/t/<qr_token>` (D9): a tourist's camera lands on a MINIMAL,
@@ -10,7 +10,7 @@ import { buildFakeJwt } from '../helpers/jwt'
 const AGENT_EMAIL = 'agent@empresa.com'
 const CUSTOMER_NAME = 'Juan Pérez Confidencial'
 const PHONE = '+52 55 1234 5678'
-const auth = (email: string) => ({ Cookie: `gm_access=${buildFakeJwt(email)}` })
+const auth = (email: string) => ({ Cookie: sessionCookie(email) })
 const jsonAuth = (email: string) => ({ ...auth(email), 'Content-Type': 'application/json' })
 
 const todayStr = (): string => new Date().toISOString().slice(0, 10)

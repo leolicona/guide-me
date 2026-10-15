@@ -5,7 +5,7 @@ import {
   seedTwoOrgs,
   clearTenancyDb,
 } from '../helpers/tenancy'
-import { buildFakeJwt } from '../helpers/jwt'
+import { sessionCookie } from '../helpers/session'
 
 // Staff Management — list / edit / deactivate / reactivate agents.
 // Spec: docs/staff/staff-management.spec.md (Scenarios 1–15).
@@ -15,36 +15,11 @@ import { buildFakeJwt } from '../helpers/jwt'
 const ADMIN_EMAIL = 'admin@empresa.com'
 const AGENT_EMAIL = 'agent@empresa.com'
 
-const auth = (email: string) => ({ Cookie: `gm_access=${buildFakeJwt(email)}` })
+const auth = (email: string) => ({ Cookie: sessionCookie(email) })
 const jsonAuth = (email: string) => ({
   ...auth(email),
   'Content-Type': 'application/json',
 })
-
-/** Mock a SUCCESSFUL refresh so the only thing that can block a request is the
- *  post-refresh status gate (see Scenario 9). */
-const mockSuccessfulRefresh = (identity: string) => {
-  vi.spyOn(env.AGNOSTIC_AUTH_API, 'fetch').mockImplementation(
-    async (input: RequestInfo | URL) => {
-      const url =
-        typeof input === 'string'
-          ? input
-          : input instanceof URL
-            ? input.toString()
-            : input.url
-      if (new URL(url).pathname === '/auth/refresh') {
-        return new Response(
-          JSON.stringify({
-            success: true,
-            data: { jwt: buildFakeJwt(identity), refreshToken: 'fresh-token' },
-          }),
-          { status: 200 },
-        )
-      }
-      return new Response('{"success":false}', { status: 404 })
-    },
-  )
-}
 
 /** Read a single user row straight from D1 (bypasses the API) for after-state
  *  assertions on UPDATE/DELETE isolation. */
@@ -294,53 +269,8 @@ describe('US-A08 — deactivate / reactivate', () => {
     expect(res.status).toBe(403)
     expect(((await res.json()) as any).error.code).toBe('ACCOUNT_SUSPENDED')
     const setCookie = res.headers.get('set-cookie') ?? ''
-    expect(setCookie).toContain('gm_access=')
+    expect(setCookie).toContain('__Secure-gm-test.session_token=')
     expect(setCookie).toMatch(/Max-Age=0|Expires=Thu, 01 Jan 1970/)
-  })
-
-  it('Scenario 9 — a suspended user cannot refresh back in (post-refresh branch re-checks status)', async () => {
-    const { organizationId } = await seedUser({
-      email: ADMIN_EMAIL,
-      role: 'admin',
-    })
-    await seedUser({
-      email: AGENT_EMAIL,
-      role: 'agent',
-      status: 'suspended',
-      organizationId,
-    })
-    mockSuccessfulRefresh(AGENT_EMAIL)
-
-    const res = await SELF.fetch('http://api.local/api/me', {
-      headers: {
-        Cookie: `gm_access=${buildFakeJwt(AGENT_EMAIL, -10)}; gm_refresh=valid-refresh-token`,
-      },
-    })
-
-    expect(res.status).toBe(403)
-    expect(((await res.json()) as any).error.code).toBe('ACCOUNT_SUSPENDED')
-  })
-
-  it('control — an active user passes the same expired-access + successful-refresh flow', async () => {
-    const { organizationId } = await seedUser({
-      email: ADMIN_EMAIL,
-      role: 'admin',
-    })
-    await seedUser({
-      email: AGENT_EMAIL,
-      role: 'agent',
-      status: 'active',
-      organizationId,
-    })
-    mockSuccessfulRefresh(AGENT_EMAIL)
-
-    const res = await SELF.fetch('http://api.local/api/me', {
-      headers: {
-        Cookie: `gm_access=${buildFakeJwt(AGENT_EMAIL, -10)}; gm_refresh=valid-refresh-token`,
-      },
-    })
-
-    expect(res.status).toBe(200)
   })
 
   it('Scenario 10 — reactivate restores status=active', async () => {

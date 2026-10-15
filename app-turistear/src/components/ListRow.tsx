@@ -63,8 +63,8 @@ const interactiveTitleSx = {
 } as const
 
 /**
- * The standard entity list row (Elegant Field Minimalism), shared by the Catálogo / Agentes /
- * Afiliados lists so every list in the system reads and behaves identically. One stacked
+ * The standard entity list row (Elegant Field Minimalism), shared by the Catálogo / Agentes
+ * lists so every list in the system reads and behaves identically. One stacked
  * anatomy at every width:
  *
  *   Title (tappable)            [✎]   ← identity + the corner general-edit control

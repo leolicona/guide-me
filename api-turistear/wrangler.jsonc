@@ -6,6 +6,7 @@
   // config ignores). The package scripts set it:
   //   pnpm deploy:api:dev   → CLOUDFLARE_ENV=dev        (api-guideme-dev · api-dev.turistearya.com · guideme-db)
   //   pnpm deploy:api:prod  → CLOUDFLARE_ENV=production (api-guideme     · api.turistearya.com     · guideme-db-prod)
+  //   preview.yml           → CLOUDFLARE_ENV=preview    (api-guideme-pr-<n> · workers.dev       · guideme-db)
   // D1 migrations bypass vite, so THEY use `--env` directly (pnpm db:migrate:dev|prod).
   //
   // The TOP LEVEL is the LOCAL profile only (`vite dev`); its fallback name
@@ -19,6 +20,11 @@
   // ─────────────────────────────────────────────────────────────────────────────
   "name": "api-guideme-local",
   "compatibility_date": "2025-08-03",
+  // passkey-auth D3 (R15) — Better Auth needs Node built-ins at runtime: AsyncLocalStorage
+  // (`node:async_hooks`) for its request context, and `node:crypto`, which @better-auth/utils
+  // resolves for the `workerd` condition. `nodejs_compat` is what Better Auth documents for
+  // Workers. Inherited by the named envs.
+  "compatibility_flags": ["nodejs_compat"],
   "main": "./src/index.tsx",
 
   // Local (`vite dev`) bindings + vars. Secrets come from `.dev.vars`. Migrations run
@@ -31,22 +37,19 @@
       "migrations_dir": "migrations"
     }
   ],
-  "services": [
-    {
-      "binding": "AGNOSTIC_AUTH_API",
-      "service": "agnostic-auth"
-    }
-  ],
   "vars": {
-    "AGNOSTIC_AUTH_APP_ID": "guide-me",
     "COOKIE_DOMAIN": ".turistearya.com",
     "CORS_ORIGIN": "http://localhost:5173,https://app.turistearya.com",
     "API_BASE_URL": "https://api.turistearya.com",
     "APP_BASE_URL": "https://app.turistearya.com",
     "RESEND_FROM": "no-reply@turistearya.com",
-    // Idle-session window (seconds). Keep in sync with `refreshTokenTtlSeconds`
-    // in the agnostic-auth APP_REGISTRY KV entry for app "guide-me".
-    "SESSION_REFRESH_TTL_SECONDS": "5184000"
+    // passkey-auth D5 — the session cookie is `__Secure-<prefix>.session_token`. Each
+    // environment has its own prefix: dev and prod both set cookies on `.turistearya.com`,
+    // so a shared name would let one overwrite the other's session.
+    "AUTH_COOKIE_PREFIX": "gm-local",
+    // passkey-auth D7, FR-064 — LOCAL ONLY: print sign-in codes in the API console instead
+    // of emailing them. Never set it in `env.dev` or `env.production`.
+    "OTP_LOG_TO_CONSOLE": "true"
   },
 
   "env": {
@@ -74,22 +77,46 @@
           "migrations_dir": "migrations"
         }
       ],
-      // Shared auth realm (decision: dev uses the production agnostic-auth service +
-      // the "guide-me" app id; the `.turistearya.com` cookie domain spans both subdomains).
-      "services": [
-        {
-          "binding": "AGNOSTIC_AUTH_API",
-          "service": "agnostic-auth"
-        }
-      ],
       "vars": {
-        "AGNOSTIC_AUTH_APP_ID": "guide-me",
         "COOKIE_DOMAIN": ".turistearya.com",
         "CORS_ORIGIN": "http://localhost:5173,https://app-dev.turistearya.com",
         "API_BASE_URL": "https://api-dev.turistearya.com",
         "APP_BASE_URL": "https://app-dev.turistearya.com",
         "RESEND_FROM": "no-reply@turistearya.com",
-        "SESSION_REFRESH_TTL_SECONDS": "5184000"
+        "AUTH_COOKIE_PREFIX": "gm-dev"
+      }
+    },
+
+    // ─── PREVIEW ─── api-guideme-pr-<n> · <n>.workers.dev · guideme-db (dev's data) ───
+    // One per pull request (delivery-pipeline D2). preview.yml deploys it with
+    // `--name api-guideme-pr-<n>` and sets the three origins with `--var`, because they
+    // carry the pull request number; the empty values below fail closed (CORS admits
+    // nobody) if a deploy ever forgets them. No `routes`, so a preview can never claim
+    // api-dev or api; no `triggers`, because dev's own sweep already covers the shared
+    // database (D3). `COOKIE_DOMAIN` is empty, so the session cookie is host-only on the
+    // preview's API — workers.dev is a public suffix, so the preview's app is the same
+    // site and the cookie still reaches the API (D4).
+    "preview": {
+      "name": "api-guideme-preview",
+      "workers_dev": true,
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "guideme-db",
+          "database_id": "15cd8f75-c94e-41e8-9ec0-d43b1cf73a04",
+          "migrations_dir": "migrations"
+        }
+      ],
+      "vars": {
+        "COOKIE_DOMAIN": "",
+        "CORS_ORIGIN": "",
+        "API_BASE_URL": "",
+        "APP_BASE_URL": "",
+        "RESEND_FROM": "no-reply@turistearya.com",
+        // passkey-auth D5 — its own cookie name. Host-only on the preview's API, so it never
+        // meets dev's or prod's session cookie; `BETTER_AUTH_SECRET` comes from the GitHub `dev`
+        // environment through preview.yml's secrets file (delivery-pipeline D5, research R2).
+        "AUTH_COOKIE_PREFIX": "gm-preview"
       }
     },
 
@@ -116,20 +143,13 @@
           "migrations_dir": "migrations"
         }
       ],
-      "services": [
-        {
-          "binding": "AGNOSTIC_AUTH_API",
-          "service": "agnostic-auth"
-        }
-      ],
       "vars": {
-        "AGNOSTIC_AUTH_APP_ID": "guide-me",
         "COOKIE_DOMAIN": ".turistearya.com",
         "CORS_ORIGIN": "http://localhost:5173,https://app.turistearya.com",
         "API_BASE_URL": "https://api.turistearya.com",
         "APP_BASE_URL": "https://app.turistearya.com",
         "RESEND_FROM": "no-reply@turistearya.com",
-        "SESSION_REFRESH_TTL_SECONDS": "5184000"
+        "AUTH_COOKIE_PREFIX": "gm"
       }
     }
   }

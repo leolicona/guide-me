@@ -57,14 +57,7 @@ describe('S-10 — the byline follows the audience', () => {
     expect(screen.getByText(/Ana Ramírez/)).toBeInTheDocument()
   })
 
-  it("the seller's own list names the shift operator instead", () => {
-    renderWithProviders(
-      <FolioCard folio={aFolio()} to="/history/f1" byline="Luis Palma" soldAt="hoy 14:32" surface="seller" />,
-    )
-    expect(screen.getByText(/Luis Palma/)).toBeInTheDocument()
-  })
-
-  it('a direct sale collapses the byline — no placeholder, no stray separator', () => {
+  it("the seller's own list collapses the byline — no placeholder, no stray separator", () => {
     renderWithProviders(
       <FolioCard folio={aFolio()} to="/history/f1" byline={null} soldAt="hoy 14:32" />,
     )

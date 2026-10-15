@@ -53,7 +53,6 @@ export function PaymentBreakdown({ payments }: { payments: FolioPaymentEntry[] }
                 </Typography>
                 <Typography variant="caption" color="textSecondary" noWrap>
                   {formatDate(p.collected_at)}
-                  {p.operator_name ? ` · ${p.operator_name}` : ''}
                   {p.reference ? ` · Ref. ${p.reference}` : ''}
                 </Typography>
               </Stack>

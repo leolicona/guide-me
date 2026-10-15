@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { request, ServiceError, login, getMe } from './authService'
+import { request, ServiceError, getMe } from './authService'
 import { queryClient } from '../config/queryClient'
 
 // The global interceptor. It runs on EVERY request the app makes, it decides whether a 401 means
@@ -166,9 +166,11 @@ describe('request — 401 on a public auth path is a domain error, not an expire
     stubLocation('/login')
     fetchMock.mockResolvedValue(errorBody(401, 'INVALID_CREDENTIALS', 'Credenciales inválidas'))
 
-    const error = await login({ email: 'ana@example.com', password: 'wrong' }).catch(
-      (e: unknown) => e,
-    )
+    // passkey-auth T037 removed the `login` helper; the interceptor rule it exercised is unchanged.
+    const error = await request('/api/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ email: 'ana@example.com', password: 'wrong' }),
+    }).catch((e: unknown) => e)
 
     expect(error).toMatchObject({ code: 'INVALID_CREDENTIALS' })
     expect(replace).not.toHaveBeenCalled()
@@ -224,19 +226,8 @@ describe('request — a suspended account (US-A08)', () => {
 })
 
 describe('getMe', () => {
-  it('folds the operator claim into the session user (US-OP01/OP02)', async () => {
-    fetchMock.mockResolvedValue(
-      jsonOk({ user: { id: 'u1', role: 'affiliate' }, operator: { id: 'op1', name: 'Caja 2' } }),
-    )
-    await expect(getMe()).resolves.toMatchObject({
-      id: 'u1',
-      role: 'affiliate',
-      operator: { id: 'op1', name: 'Caja 2' },
-    })
-  })
-
-  it('normalises a missing operator to null, never undefined', async () => {
+  it('returns the session user as /api/me sends it — no operator claim (retire-affiliates D9)', async () => {
     fetchMock.mockResolvedValue(jsonOk({ user: { id: 'u1', role: 'admin' } }))
-    await expect(getMe()).resolves.toMatchObject({ operator: null })
+    await expect(getMe()).resolves.toEqual({ id: 'u1', role: 'admin' })
   })
 })

@@ -21,6 +21,17 @@ for (const ddl of [
   await env.DB.exec(ddl)
 }
 
+// passkey-auth D17, R12 — TEST-ONLY, never a migration. Every user a fixture inserts gets a
+// Better Auth session whose token derives from the email, so `sessionCookie(email)`
+// (test/helpers/session.ts) can sign it synchronously. Valid for a year of REAL time (SQLite's
+// clock, not the frozen Date below); created "now" in real time, which the frozen clock reads as
+// the future, so it is always fresh and never due for renewal. ON DELETE CASCADE removes it with
+// the user, so cleanup helpers need no change. Count or look up sessions excluding
+// `token LIKE 'test-session-%'`.
+await env.DB.exec(
+  `CREATE TRIGGER test_user_session AFTER INSERT ON users BEGIN INSERT INTO sessions (id, user_id, token, expires_at, created_at, updated_at) VALUES (lower(hex(randomblob(16))), NEW.id, 'test-session-' || NEW.email, unixepoch() + 31536000, unixepoch(), unixepoch()); END`,
+)
+
 // Freeze the clock so date-relative fixtures don't rot as real time passes. US-A47 added a
 // sales-time cutoff that makes any past-dated slot unsellable, which detonated the suite's
 // long-standing latent date-bomb (fixtures hardcode 2026-06-15). Fake ONLY Date so the worker's

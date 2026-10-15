@@ -1,0 +1,247 @@
+name: Preview
+
+# One preview per pull request into main (delivery-pipeline D2): a pair of Workers,
+# api-guideme-pr-<n> and app-guideme-pr-<n>, on the account's workers.dev subdomain, built from
+# the `preview` profile of each wrangler.jsonc. It runs on dev's data and applies the pull
+# request's pending migrations to dev first (D3) — so it deploys only code that passed the gate,
+# whose API suite applies every migration (D6). One comment on the pull request carries its
+# addresses (D7); preview-cleanup.yml deletes it on close. Never a merge gate: `verify` in
+# ci.yml is (D6). The order and every refusal are in
+# specs/005-delivery-pipeline/contracts/pipeline.md.
+on:
+  pull_request:
+    branches: [main]
+    # `labeled` only matters for `e2e`; the jobs below skip every other label (D15).
+    types: [opened, synchronize, reopened, labeled]
+    # A documentation-only pull request gets no preview (D16).
+    paths-ignore:
+      - '**.md'
+      - '.claude/**'
+      - '.specify/**'
+
+permissions:
+  contents: read
+
+# A newer push replaces the preview; the older run is cancelled (FR-004).
+concurrency:
+  group: preview-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  gate:
+    # A fork gets no preview and no credential (D16); a label other than e2e changes nothing.
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      (github.event.action != 'labeled' || github.event.label.name == 'e2e')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/verify
+
+  deploy:
+    needs: gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # The dev environment holds the Cloudflare token and, optionally, dev's secret values (D5).
+    # It must admit every branch (specs/005-delivery-pipeline/contracts/environment.md, E1).
+    environment: dev
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      NUMBER: ${{ github.event.pull_request.number }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    outputs:
+      app-origin: ${{ steps.names.outputs.app-origin }}
+      api-origin: ${{ steps.names.outputs.api-origin }}
+      applied: ${{ steps.migrate.outputs.applied }}
+      throwaway: ${{ steps.secrets.outputs.throwaway }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
+
+      # Both origins must be known before either Worker is built: the app bakes the API's, and
+      # the API admits only the app's. So the workers.dev subdomain is read from the account
+      # first, with the token this job already holds (D2, research R3).
+      - name: Names and origins
+        id: names
+        run: |
+          set -euo pipefail
+          body=$(curl -sS --max-time 30 -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/subdomain" || true)
+          sub=$(printf '%s' "$body" | jq -r '.result.subdomain // empty' 2>/dev/null || true)
+          if [ -z "$sub" ]; then
+            echo "::error::Could not read the account's workers.dev subdomain: $(printf '%s' "$body" | tr -d '\n' | cut -c1-300)"
+            echo "Enable it (Workers & Pages → Overview → Your subdomain), or give the dev token Workers Scripts Read (delivery-pipeline D2)."
+            exit 1
+          fi
+          {
+            echo "api-worker=api-guideme-pr-$NUMBER"
+            echo "app-worker=app-guideme-pr-$NUMBER"
+            echo "api-origin=https://api-guideme-pr-$NUMBER.$sub.workers.dev"
+            echo "app-origin=https://app-guideme-pr-$NUMBER.$sub.workers.dev"
+          } | tee -a "$GITHUB_OUTPUT"
+
+      # The creator's decision of 2026-10-15: the preview runs in full, so the pull request's
+      # migrations reach dev now, with dev's own script — the same act the merge would do (D3).
+      # Listed first so the comment can say what reached dev; a migration that reached dev keeps
+      # its file name from then on (D19).
+      - name: Apply the pull request's pending migrations to dev
+        id: migrate
+        run: |
+          set -euo pipefail
+          list="$RUNNER_TEMP/pending.txt"
+          if ! pnpm --filter api-turistear exec wrangler d1 migrations list guideme-db --remote --env dev > "$list" 2>&1; then
+            cat "$list"; exit 1
+          fi
+          cat "$list"
+          applied=$( { grep -oE '[0-9]{4}_[A-Za-z0-9_-]+\.sql' "$list" || true; } | sort -u | paste -sd, -)
+          pnpm db:migrate:dev
+          echo "applied=$applied" >> "$GITHUB_OUTPUT"
+
+      # dev's values when the dev environment holds them; otherwise a throwaway value for this
+      # preview only, which the comment names with its cost (D5). JSON, so no character of a
+      # value can be read as dotenv syntax. The file stays in the runner's temp and is never
+      # printed. BETTER_AUTH_SECRET (passkey-auth D5) must be 32+ characters or the API refuses
+      # to start, so a shorter one is replaced like a missing one.
+      - name: Secrets for the preview
+        id: secrets
+        env:
+          QR_SECRET: ${{ secrets.QR_SECRET }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET }}
+        run: |
+          set -euo pipefail
+          throwaway=""
+          for name in QR_SECRET RESEND_API_KEY BETTER_AUTH_SECRET; do
+            if [ -z "${!name}" ] || { [ "$name" = BETTER_AUTH_SECRET ] && [ "${#BETTER_AUTH_SECRET}" -lt 32 ]; }; then
+              export "$name=$(openssl rand -hex 32)"
+              throwaway="${throwaway:+$throwaway,}$name"
+              echo "::warning::$name is not in the dev environment; this preview gets a throwaway value (delivery-pipeline D5)."
+            fi
+          done
+          node -e 'const e = process.env; process.stdout.write(JSON.stringify({ QR_SECRET: e.QR_SECRET, RESEND_API_KEY: e.RESEND_API_KEY, BETTER_AUTH_SECRET: e.BETTER_AUTH_SECRET }))' \
+            > "$RUNNER_TEMP/preview-secrets.json"
+          echo "throwaway=$throwaway" >> "$GITHUB_OUTPUT"
+
+      # The `preview` profile has no routes and no triggers, so this Worker can never claim
+      # api-dev or run a second sweep (D3). Its three origins carry the pull request number, so
+      # they come from --var; the cookie is host-only on this API (D4).
+      - name: Deploy ${{ steps.names.outputs.api-worker }}
+        working-directory: api-turistear
+        env:
+          CLOUDFLARE_ENV: preview
+          API_WORKER: ${{ steps.names.outputs.api-worker }}
+          API_ORIGIN: ${{ steps.names.outputs.api-origin }}
+          APP_ORIGIN: ${{ steps.names.outputs.app-origin }}
+        run: |
+          set -euo pipefail
+          pnpm build
+          pnpm exec wrangler deploy --name "$API_WORKER" \
+            --var "CORS_ORIGIN:$APP_ORIGIN" --var "APP_BASE_URL:$APP_ORIGIN" --var "API_BASE_URL:$API_ORIGIN" \
+            --secrets-file "$RUNNER_TEMP/preview-secrets.json" \
+            --message "pr-$NUMBER $RUN_URL"
+
+      - name: Deploy ${{ steps.names.outputs.app-worker }}
+        working-directory: app-turistear
+        env:
+          CLOUDFLARE_ENV: preview
+          VITE_API_BASE_URL: ${{ steps.names.outputs.api-origin }}
+          APP_WORKER: ${{ steps.names.outputs.app-worker }}
+        run: |
+          set -euo pipefail
+          pnpm build
+          pnpm exec wrangler deploy --name "$APP_WORKER" --message "pr-$NUMBER $RUN_URL"
+
+      # A new workers.dev host can take a few seconds to answer; every host is tried before the
+      # step fails, so one red log names both.
+      - name: Smoke
+        env:
+          API_ORIGIN: ${{ steps.names.outputs.api-origin }}
+          APP_ORIGIN: ${{ steps.names.outputs.app-origin }}
+        run: |
+          probe() {
+            for i in $(seq 1 10); do
+              if curl -sf -o /dev/null --max-time 20 "$1"; then echo "answered: $1"; return 0; fi
+              echo "not up yet (attempt $i): $1"; sleep 15
+            done
+            echo "::error::$1 did not answer"; return 1
+          }
+          failed=0
+          probe "$API_ORIGIN/" || failed=1
+          probe "$APP_ORIGIN/" || failed=1
+          exit $failed
+
+  # The e2e label runs the journeys against this pull request's own preview, not dev (D15).
+  # They share dev's data with every other journey run, so all of them queue in one group.
+  journeys:
+    needs: deploy
+    if: contains(github.event.pull_request.labels.*.name, 'e2e')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: dev
+    concurrency:
+      group: e2e-dev-data
+      cancel-in-progress: false
+    env:
+      E2E_BASE_URL: ${{ needs.deploy.outputs.app-origin }}
+      E2E_API_BASE: ${{ needs.deploy.outputs.api-origin }}
+      # passkey-auth T042 — each account signs in with its llave de acceso, offered for this
+      # preview's host (app-turistear/e2e/passkey.ts); no password exists.
+      E2E_AGENT_PASSKEY: ${{ secrets.E2E_AGENT_PASSKEY }}
+      E2E_ADMIN_PASSKEY: ${{ secrets.E2E_ADMIN_PASSKEY }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
+
+      - name: Install Chromium
+        run: pnpm --filter app-turistear exec playwright install --with-deps chromium
+
+      - name: Run journeys against the preview
+        run: pnpm --filter app-turistear test:e2e
+
+      # Always upload: the trace/video of a failure is the whole reason to keep the report.
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: playwright-report-pr-${{ github.event.pull_request.number }}-${{ github.run_attempt }}
+          path: app-turistear/e2e/.report
+          retention-days: 14
+
+  # One comment, edited in place. Skipped when the run was cancelled: the newer run writes its
+  # own, so two runs never race to create the comment (D7, SC-002).
+  note:
+    needs: [gate, deploy, journeys]
+    if: >-
+      !cancelled() &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      (github.event.action != 'labeled' || github.event.label.name == 'e2e')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          sparse-checkout: .github/scripts
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      - name: Post or update the preview comment
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          COMMIT: ${{ github.event.pull_request.head.sha }}
+          GATE: ${{ needs.gate.result }}
+          DEPLOY: ${{ needs.deploy.result }}
+          JOURNEYS: ${{ needs.journeys.result }}
+          APP_ORIGIN: ${{ needs.deploy.outputs.app-origin }}
+          API_ORIGIN: ${{ needs.deploy.outputs.api-origin }}
+          APPLIED: ${{ needs.deploy.outputs.applied }}
+          THROWAWAY: ${{ needs.deploy.outputs.throwaway }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: node .github/scripts/preview-note.mjs deploy

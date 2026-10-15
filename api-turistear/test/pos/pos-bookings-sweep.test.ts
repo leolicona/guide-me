@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { env, SELF } from 'cloudflare:test'
 import { seedUser, seedTwoOrgs, clearTenancyDb } from '../helpers/tenancy'
-import { buildFakeJwt } from '../helpers/jwt'
+import { sessionCookie } from '../helpers/session'
 import { sweepExpiredBookings } from '../../src/routes/pos/sweep'
 
 // Bookings / down-payments — auto-expiry sweep (US-AG07 P3).
@@ -10,7 +10,7 @@ import { sweepExpiredBookings } from '../../src/routes/pos/sweep'
 
 const PHONE = '+52 55 1234 5678'
 const jsonAuth = (email: string) => ({
-  Cookie: `gm_access=${buildFakeJwt(email)}`,
+  Cookie: sessionCookie(email),
   'Content-Type': 'application/json',
 })
 const base = 'http://api.local/api/pos'

@@ -47,7 +47,7 @@ export interface StatusChipProps extends Omit<ChipProps, 'color' | 'icon' | 'lab
 
 /**
  * Functional-color status pill: tinted background + foreground + leading icon. Used for folio,
- * booking, slot, agent, and affiliate states everywhere. Tone is meaning-only and never teal.
+ * booking, slot, and agent states everywhere. Tone is meaning-only and never teal.
  */
 export function StatusChip({ status, tone, label, icon, size = 'small', sx, ...rest }: StatusChipProps) {
   const preset = status ? PRESET[status] : undefined

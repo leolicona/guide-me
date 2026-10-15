@@ -242,8 +242,7 @@ export function FolioTimeline({
   const eventRows: TimelineRow[] = (events ?? []).map((ev) => {
     // D10 — actor NULL is the system's sweep, except the Visto beacon, which only the tourist fires.
     const who = ev.actor?.name ?? (ev.type === 'tickets_viewed' ? 'Cliente' : 'Sistema')
-    const op = ev.operator_name ? ` (op. ${ev.operator_name})` : ''
-    let caption = `${who}${op} · ${formatDate(ev.at)}`
+    let caption = `${who} · ${formatDate(ev.at)}`
     const reference = str(ev.payload, 'reference')
     if (ev.type === 'payment_verified' && reference) caption += ` · ref. ${reference}`
     const via = str(ev.payload, 'via')

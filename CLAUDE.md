@@ -36,11 +36,15 @@ For a single file without a clone:
 
 ## Commands
 
-> **Running the app locally for the first time in a worktree: read `docs/DEVELOPMENT.md`** (in the archive).
-> `pnpm dev` alone is not enough — without `.dev.vars` the login returns **200 and no session**,
-> because `wrangler.jsonc` pins the cookie to `.turistearya.com` and auth lives in an external
-> Worker reached by a service binding that does not exist locally. `pnpm db:migrate:local` also
-> links the worktree to the clone-wide local database, so data survives switching branches.
+> **Running the app locally for the first time in a worktree:** copy `api-turistear/.dev.vars.example`
+> to `api-turistear/.dev.vars` and fill in `BETTER_AUTH_SECRET` (any 32+ characters) beside its local
+> origins. `pnpm dev` alone is not enough — without `.dev.vars` the sign-in answers **200 and no
+> session**, because `wrangler.jsonc` pins the cookie to `.turistearya.com`, and the llave de acceso
+> needs `APP_BASE_URL=http://localhost:5174`. Sign-in is an email code printed in the API console
+> (`[otp] <email> <code>`); `pnpm seed:local` gives you an admin to sign in as
+> (`specs/004-passkey-auth/quickstart.md` § 3). `pnpm db:migrate:local` also links the worktree to
+> the clone-wide local database, so data survives switching branches; the archive's
+> `docs/DEVELOPMENT.md` covers that part.
 
 ### Workspace-level (Run from root)
 
@@ -113,23 +117,31 @@ design extension offers `/speckit-design-foundations`, point it at the existing 
 
 The pre-Spec-Kit process — `docs/PROCESS.md`, with `docs/SPEC.md` as the product index — is archived
 with the corpus (above): read it for what exists and why, never write into it. The archive's
-`docs/integrations/` still records the contracts of the services we do not own (Agnostic Auth,
-Resend, the QR image service) and what breaks when they are down.
+`docs/integrations/` still records the contracts of the services we do not own (Resend, the QR
+image service) and what breaks when they are down. Its Agnostic Auth contract is historical: sign-in
+moved to Better Auth inside the API Worker (`specs/004-passkey-auth`).
 
-### Local workflow — one worktree, one PR per unit of work
+### Local workflow — one branch, one worktree, one PR per unit of work
 
-Every feature, fix, enhancement or docs change gets **its own worktree and its own pull request**:
+There is one long-lived branch, **`main`** (`specs/005-delivery-pipeline` D1). Every feature, fix,
+enhancement or docs change gets **its own worktree and its own pull request**:
 
 ```bash
-git worktree add .claude/worktrees/<name> -b feat/<slug> origin/develop
+git worktree add .claude/worktrees/<name> -b feat/<slug> origin/main
 ```
 
 Branch `feat/` · `fix/` · `docs/`; commits are Conventional with the domain as scope
-(`feat(cancellation):`); PRs target **`develop`** and are squash-merged, so the PR title becomes the
-commit on `develop`. A release is a PR `develop → main` titled `release: … → prod`. The `verify` CI
-job must pass. Two hard rules: **never bare `git stash`** (the stack is shared across worktrees), and
-**squash `feature → develop`, merge-commit `release → main`** — the archived `docs/PROCESS.md`
-records why.
+(`feat(cancellation):`); PRs target **`main`** and are squash-merged, so the PR title becomes the
+commit on `main`. The `verify` CI job must pass. There is no release pull request: every merge
+deploys dev, and a release is a pushed `v*` tag on a `main` commit whose *Deploy Dev* run is green —
+**the tag is the approval** (D10). Two hard rules: **never bare `git stash`** (the stack is shared
+across worktrees), and **never rename a migration once it has reached dev** (D19).
+
+Every PR from a branch of this repository gets a **preview**: `app-guideme-pr-<n>` and
+`api-guideme-pr-<n>` on `workers.dev`, on dev's data, with the PR's migrations applied to dev; one
+comment on the PR holds its addresses, and closing the PR deletes it. The `e2e` label runs the
+Playwright journeys against that preview. Releasing, undoing a Worker (*Rollback Prod*) and
+restoring data are in the runbook, `specs/005-delivery-pipeline/quickstart.md`.
 
 ## Multitenancy
 
@@ -188,7 +200,7 @@ Prefer these over ad-hoc `Card`/`Paper`/`Chip` usage:
 - **`AlertCard`** — top-of-screen attention card (warning/error semantics).
 - **`BottomSheet`** — the canonical overlay (solid white, real upward shadow; centered ≤640px on desktop).
 - **`FormSheet`** / **`ConfirmSheet`** — the BottomSheet hosts for ALL entity editing and confirmations (no MUI Dialogs for these): FormSheet = title + form scroll region + fixed submit footer; ConfirmSheet = question + stacked confirm/cancel.
-- **`WizardShell`** / **`WizardPage`** — multi-step wizard chrome (shared `WizardChrome`): the Dialog host (affiliate wizard) and the full-page host (service wizard at `/catalog/new`).
+- **`WizardShell`** / **`WizardPage`** — multi-step wizard chrome (shared `WizardChrome`): the Dialog host (no consumer today — `specs/001-retire-affiliates` D12) and the full-page host (service wizard at `/catalog/new`).
 
 Feature-specific shared pieces follow the same idea (e.g. `FolioStatusChip` in `features/folios`).
 

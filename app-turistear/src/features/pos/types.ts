@@ -206,7 +206,6 @@ export interface FolioPaymentEntry {
   amount: number
   reference: string | null
   verification: PaymentVerification
-  operator_name: string | null
   collected_at: number
 }
 
@@ -270,8 +269,6 @@ export interface FolioHistoryItem {
   /** US-AG41/US-A67 — the seller sees the verification state (delivery blocked while pending). */
   payment_method?: PaymentMethod
   payment_verification?: PaymentVerification
-  /** US-AF13 — "Vendido por: {name}" (null if the manager/agent sold directly). */
-  operator_name?: string | null
   /** US-AG49 — what was sold (card title) and the {itinerary} the ticket send renders. */
   lines?: FolioListLine[]
   /** US-AG49 — the portal link the card's ticket send needs; null before the money clears. */

@@ -6,10 +6,8 @@ import {
   Card,
   CardContent,
   Divider,
-  FormControlLabel,
   InputAdornment,
   Stack,
-  Switch,
   TextField,
   ToggleButton,
   ToggleButtonGroup,
@@ -33,9 +31,8 @@ import {
 // back the policy they had configured, on the platform the product is actually used on.
 //
 // So a tier is a BLOCK of stacked, full-width fields. Vertical space on a phone is cheap (you
-// scroll); horizontal space is not. This also makes the affiliate column (US-A72) one more stacked
-// field instead of a fourth column, which is what broke worst. It follows the pattern the sibling
-// settings cards already use: one field per row, help text underneath.
+// scroll); horizontal space is not. It follows the pattern the sibling settings cards already use:
+// one field per row, help text underneath.
 //
 // Two other choices worth knowing:
 //   * The threshold can be TYPED in hours or days (a toggle per tier), but only hours are ever
@@ -65,7 +62,6 @@ interface DraftTier {
   unit: Unit
   refundPct: string
   agentPct: string
-  affiliatePct: string
 }
 
 const TERMINAL_FALLBACK: DraftTier = {
@@ -73,7 +69,6 @@ const TERMINAL_FALLBACK: DraftTier = {
   unit: 'hours',
   refundPct: '0',
   agentPct: '100',
-  affiliatePct: '',
 }
 
 // A stored 168 opens as "7 días", a stored 6 as "6 horas". Whole days are how people say these
@@ -90,8 +85,6 @@ const toDraft = (t: CancellationTier): DraftTier => {
     unit,
     refundPct: String(t.refund_pct),
     agentPct: String(t.agent_commission_pct),
-    affiliatePct:
-      t.affiliate_commission_pct === undefined ? '' : String(t.affiliate_commission_pct),
   }
 }
 
@@ -154,10 +147,6 @@ export function CancellationPolicyCard({ policy }: Props) {
     const t = initial.tiers.find((x) => x.min_hours === null)
     return t ? toDraft(t) : TERMINAL_FALLBACK
   })
-  const [showAffiliate, setShowAffiliate] = useState(() =>
-    initial.tiers.some((t) => t.affiliate_commission_pct !== undefined),
-  )
-
   // What the last tier actually covers: everything closer to the departure than the LOWEST
   // threshold configured above it. `matchTier` walks the bounded tiers and falls through to this
   // one when none are cleared, so with a lowest tier at 24h this block governs the final day —
@@ -182,7 +171,7 @@ export function CancellationPolicyCard({ policy }: Props) {
   const addTier = () =>
     setBounded((rows) => [
       ...rows,
-      { amount: '', unit: 'days', refundPct: '', agentPct: '100', affiliatePct: '' },
+      { amount: '', unit: 'days', refundPct: '', agentPct: '100' },
     ])
 
   // Switch the unit WITHOUT changing what the tier means: the number is rewritten so the resulting
@@ -212,8 +201,6 @@ export function CancellationPolicyCard({ policy }: Props) {
     )
   if (bounded.some((r) => !pctValid(r.refundPct) || !pctValid(r.agentPct)))
     errors.push('Los porcentajes van de 0 a 100.')
-  if (showAffiliate && bounded.some((r) => r.affiliatePct !== '' && !pctValid(r.affiliatePct)))
-    errors.push('El porcentaje de afiliado va de 0 a 100.')
   if (!pctValid(terminal.refundPct) || !pctValid(terminal.agentPct))
     errors.push('Revisa los porcentajes del tramo posterior a la salida.')
   // Duplicates are still an error — two tiers at the same threshold is genuinely ambiguous and the
@@ -231,9 +218,6 @@ export function CancellationPolicyCard({ policy }: Props) {
       min_hours: minHours,
       refund_pct: num(r.refundPct),
       agent_commission_pct: num(r.agentPct),
-      ...(showAffiliate && r.affiliatePct !== ''
-        ? { affiliate_commission_pct: num(r.affiliatePct) }
-        : {}),
     })
     // Sorted here, once, on the way out — the admin types in whatever order they think of.
     const sorted = [...bounded].sort((a, b) => hoursOf(b) - hoursOf(a))
@@ -242,7 +226,7 @@ export function CancellationPolicyCard({ policy }: Props) {
       // Whatever unit was typed, hours are what leaves this component (D16 revised).
       tiers: [...sorted.map((r) => mk(r, hoursOf(r))), mk(terminal, null)],
     }
-  }, [valid, bounded, terminal, showAffiliate])
+  }, [valid, bounded, terminal])
 
   const handleSave = () => {
     if (built) update.mutate({ cancellation_policy: built })
@@ -255,25 +239,18 @@ export function CancellationPolicyCard({ policy }: Props) {
   // explicitly instead, so the stored policy always says what is actually applied.
   const handleReset = () => update.mutate({ cancellation_policy: DEFAULT_CANCELLATION_POLICY })
 
-  const pctField = (
-    label: string,
-    value: string,
-    onChange: (v: string) => void,
-    placeholder?: string,
-  ) => (
+  const pctField = (label: string, value: string, onChange: (v: string) => void) => (
     <TextField
       label={label}
       type="number"
       size="small"
       fullWidth
-      placeholder={placeholder}
       value={value}
       onChange={(e) => onChange(e.target.value)}
       slotProps={{
         // Pinned above the border. These labels are long and the fields carry a `%` adornment, so
-        // an unshrunk label sits INSIDE the field and collides with it — "…conserva el afiliad◯%".
-        // The affiliate field is the one that can legitimately be empty, which is exactly when MUI
-        // would leave the label inline. Pinning also lets its placeholder actually show.
+        // an unshrunk label sits INSIDE the field and collides with it — "…conserva el agent◯%".
+        // An empty field is exactly when MUI would leave the label inline.
         inputLabel: { shrink: true },
         input: { endAdornment: <InputAdornment position="end">%</InputAdornment> },
         htmlInput: { min: 0, max: 100, step: 1, inputMode: 'numeric' },
@@ -315,13 +292,6 @@ export function CancellationPolicyCard({ policy }: Props) {
               {pctField('Comisión que conserva el agente', row.agentPct, (v) =>
                 patch(i, 'agentPct', v),
               )}
-              {showAffiliate &&
-                pctField(
-                  'Comisión que conserva el afiliado',
-                  row.affiliatePct,
-                  (v) => patch(i, 'affiliatePct', v),
-                  'igual que el agente',
-                )}
             </TierBlock>
           ))}
 
@@ -351,13 +321,6 @@ export function CancellationPolicyCard({ policy }: Props) {
             {pctField('Comisión que conserva el agente', terminal.agentPct, (v) =>
               setTerminal({ ...terminal, agentPct: v }),
             )}
-            {showAffiliate &&
-              pctField(
-                'Comisión que conserva el afiliado',
-                terminal.affiliatePct,
-                (v) => setTerminal({ ...terminal, affiliatePct: v }),
-                'igual que el agente',
-              )}
           </TierBlock>
 
           <Divider />
@@ -377,20 +340,6 @@ export function CancellationPolicyCard({ policy }: Props) {
               se le cobra la diferencia al cliente.
             </Typography>
           </Box>
-
-          {/* US-A72 — hidden until asked for, so a company that treats resellers and staff the same
-              never has to think about the distinction. */}
-          <FormControlLabel
-            control={
-              <Switch
-                checked={showAffiliate}
-                onChange={(e) => setShowAffiliate(e.target.checked)}
-              />
-            }
-            label={
-              <Typography variant="body2">¿Los afiliados tienen otra regla de comisión?</Typography>
-            }
-          />
 
           {errors.length > 0 && (
             <Alert severity="warning">

@@ -17,7 +17,6 @@ import { FolioDetailScreen } from './FolioDetailScreen'
 const aDetailFolio = (over: Record<string, unknown> = {}) => ({
   id: 'f1',
   agent: { id: 'a1', name: 'Ana' },
-  operator_name: null,
   status: 'paid',
   customer_name: 'María Fernández',
   customer_email: 'maria@example.com',

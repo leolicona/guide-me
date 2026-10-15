@@ -22,18 +22,27 @@ export default defineConfig({
           TEST_MIGRATIONS: migrations,
           RESEND_API_KEY: 'test_resend_key',
           QR_SECRET: 'test_qr_secret',
-          // Force tests to use the (mocked) AGNOSTIC_AUTH_API service binding,
-          // overriding any DEV_AUTH_SERVICE_URL inherited from .dev.vars.
-          DEV_AUTH_SERVICE_URL: '',
-        },
-        serviceBindings: {
-          AGNOSTIC_AUTH_API: () =>
-            new Response('{"success":false}', { status: 500 }),
+          // passkey-auth D17, constitution VI — pinned, so a local .dev.vars never leaks into a
+          // suite. test/helpers/session.ts signs fixture cookies with this exact secret and prefix.
+          BETTER_AUTH_SECRET: 'test_better_auth_secret_0123456789abcdef',
+          AUTH_COOKIE_PREFIX: 'gm-test',
+          COOKIE_DOMAIN: '',
+          OTP_LOG_TO_CONSOLE: '',
         },
       },
     }),
   ],
   test: {
     setupFiles: ['./test/helpers/apply-migrations.ts'],
+    // passkey-auth — inside workerd, a refusal Better Auth throws from an endpoint handler (a wrong
+    // code, an expired challenge, a registration that does not verify) is answered correctly AND
+    // reported once more as an unhandled rejection by its dispatch pipeline. Reproduced with a
+    // minimal Better Auth config; the HTTP answer is always right, and test/auth/* asserts each one.
+    // Only Better Auth's own refusals — an APIError carrying its `{ code, message }` body — are
+    // ignored: any other unhandled error still fails the run.
+    onUnhandledError(error) {
+      const body = (error as { body?: { code?: unknown } }).body
+      if (error.name === 'APIError' && typeof body?.code === 'string') return false
+    },
   },
 })

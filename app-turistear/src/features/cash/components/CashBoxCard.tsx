@@ -41,7 +41,6 @@ export function CashBoxCard({
   balance,
   onRegisterDrop,
   onRegisterPayout,
-  showExpenses = true,
 }: {
   balance: AgentBalance
   onRegisterDrop: () => void
@@ -49,10 +48,6 @@ export function CashBoxCard({
   // the endpoint is admin-guarded. Absent ⇒ no payout verb, which is every other surface.
   // Passing it is what used to require a whole second card (caja-surface-parity D8).
   onRegisterPayout?: () => void
-  // Neither an affiliate nor an admin may record an expense — `/me/expenses` is `agent`-only, so
-  // both get 403. Callers derive this from ONE flag (D6); defaulting it true is what left the
-  // admin reading a `Gastos −$0.00` row for a capability the API denies them.
-  showExpenses?: boolean
 }) {
   const [open, setOpen] = useState(false)
   const negative = balance.balance < 0
@@ -108,9 +103,7 @@ export function CashBoxCard({
             )}
             <BreakdownRow label="Efectivo cobrado" value={balance.cash_collected} sign="+" />
             <BreakdownRow label="Comisión ganada" value={balance.commission_total} sign="−" />
-            {showExpenses && (
-              <BreakdownRow label="Gastos" value={balance.expense_total} sign="−" />
-            )}
+            <BreakdownRow label="Gastos" value={balance.expense_total} sign="−" />
             {balance.payouts_total > 0 && (
               <BreakdownRow label="Pagos recibidos" value={balance.payouts_total} sign="+" />
             )}
