@@ -16,6 +16,7 @@ import { sweepExpiredBookings } from './routes/pos/sweep'
 import { sweepDepartureReminders } from './routes/pos/reminders'
 import reportsRouter from './routes/reports'
 import notificationsRouter from './routes/notifications'
+import onboardingRouter from './routes/onboarding'
 import servicesRouter from './routes/services'
 import ticketRouter from './routes/ticket'
 import ticketsRouter from './routes/tickets'
@@ -76,6 +77,8 @@ app.use('/api/*', async (c, next) => {
 app.on(['GET', 'POST'], '/api/auth/*', async (c) =>
   withoutSessionToken(await getAuth(c.env).handler(c.req.raw)),
 )
+// passkey-auth D10, D11 — registering an organization and accepting an invitation.
+app.route('/api/onboarding', onboardingRouter)
 app.route('/api/agents', agentsRouter)
 app.route('/api/organizations', organizationsRouter)
 app.route('/api/services', servicesRouter)

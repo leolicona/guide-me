@@ -1,7 +1,8 @@
 import { z } from 'zod'
 
 export const inviteAgentSchema = z.object({
-  identity: z.string().email('Invalid email format'),
+  // passkey-auth R11 — lowercased at our edge, as Better Auth looks every email up lowercased.
+  identity: z.string().trim().toLowerCase().email('Invalid email format'),
 })
 
 export type InviteAgentInput = z.infer<typeof inviteAgentSchema>

@@ -197,14 +197,14 @@ invitation lookup also disappear until US3 (T026) and US4 (T029) restore them un
 
 **Independent Test**: a new email registers, enters the code, and lands as the admin of a new organization that has the D17 policy.
 
-- [ ] T026 [US3] Create `api-turistear/src/routes/onboarding/schema.ts` with `registerSchema` (name, email trimmed and lowercased, company_name, phone; no password). Create `api-turistear/src/routes/onboarding/handler.ts` with `register` (D10):
+- [X] T026 [US3] Create `api-turistear/src/routes/onboarding/schema.ts` with `registerSchema` (name, email trimmed and lowercased, company_name, phone; no password). Create `api-turistear/src/routes/onboarding/handler.ts` with `register` (D10):
   - refuse a taken email with `409 EMAIL_ALREADY_EXISTS`;
   - in one `db.batch`, write the organization (`cancellationPolicy: DEFAULT_CANCELLATION_POLICY`) and its `unverified` admin, with `emailVerified: false` and password columns `''`;
   - run `await getAuth(c.env).api.sendVerificationOTP({ body: { email, type: 'sign-in' } })`;
   - answer `201`.
 
   Create `api-turistear/src/routes/onboarding/index.ts` with `POST /register` behind `zValidator`, and mount `/api/onboarding` in `api-turistear/src/index.tsx`.
-- [ ] T027 [US3] Write `api-turistear/test/onboarding/register.test.ts`, citing `passkey-auth US3`, covering Story 3, scenarios 1–4:
+- [X] T027 [US3] Write `api-turistear/test/onboarding/register.test.ts`, citing `passkey-auth US3`, covering Story 3, scenarios 1–4:
   - no password is needed;
   - a code is sent;
   - `sign-in/email-otp` with it → admin verified, `active` and signed in;
@@ -227,14 +227,14 @@ invitation lookup also disappear until US3 (T026) and US4 (T029) restore them un
 
 **Independent Test**: an admin invites; the agent opens the link, enters a name and then the code, and is signed in. The invitation is accepted.
 
-- [ ] T029 [US4] In `api-turistear/src/routes/agents/schema.ts`, lowercase the invited email (R11). In `api-turistear/src/routes/onboarding/{schema,handler,index}.ts`, add (D11):
+- [X] T029 [US4] In `api-turistear/src/routes/agents/schema.ts`, lowercase the invited email (R11). In `api-turistear/src/routes/onboarding/{schema,handler,index}.ts`, add (D11):
   - **`GET /invitations/:token`**: today's lookup, moved from `routes/auth`, answering `{ invitation: { identity, identity_type, organization_name } }`.
   - **`POST /invitations/:token/accept {name}`**:
     - in one `db.batch`, write the agent (`active`, `emailVerified: true`, password columns `''`) and mark the invitation accepted;
     - refuse with `409 EMAIL_ALREADY_EXISTS` when the address now has an account;
     - send a sign-in code via `getAuth(c.env).api.sendVerificationOTP`;
     - answer `{ email }`.
-- [ ] T030 [US4] Write `api-turistear/test/onboarding/invitations.test.ts`, citing `passkey-auth US4`. It restates the old `test/auth/agent-invitation.test.ts` scenarios 1–8 (`POST /api/agents/invite`, the `401`/`403` guards, `IDENTITY_ALREADY_EXISTS`, previous-invite invalidation, the lookup) on `sessionCookie`, and adds Story 4, scenarios 1–4:
+- [X] T030 [US4] Write `api-turistear/test/onboarding/invitations.test.ts`, citing `passkey-auth US4`. It restates the old `test/auth/agent-invitation.test.ts` scenarios 1–8 (`POST /api/agents/invite`, the `401`/`403` guards, `IDENTITY_ALREADY_EXISTS`, previous-invite invalidation, the lookup) on `sessionCookie`, and adds Story 4, scenarios 1–4:
   - accept → code → signed in as an agent of the organization;
   - an invitation created before migration 0071's lowercasing still resolves;
   - a used or expired token → `400 INVALID_TOKEN`.
@@ -254,7 +254,7 @@ invitation lookup also disappear until US3 (T026) and US4 (T029) restore them un
 
 **Independent Test**: with two passkeys, remove one: it no longer signs in, the other does, and a notice is sent. "Cerrar sesión en todos los dispositivos" ends another browser's session.
 
-- [ ] T032 [US5] Write `api-turistear/test/auth/passkey-management.test.ts`, citing `passkey-auth US5`, covering Story 5, scenarios 1–5:
+- [X] T032 [US5] Write `api-turistear/test/auth/passkey-management.test.ts`, citing `passkey-auth US5`, covering Story 5, scenarios 1–5:
   - `list-user-passkeys` returns name and creation date;
   - with `seedTwoOrgs`, `update-passkey` and `delete-passkey` using the id of a passkey owned by the other organization's user are refused and change nothing (constitution III); the user's own is renamed;
   - `delete-passkey` removes it, after which it no longer signs in, and removing the last one is allowed;
