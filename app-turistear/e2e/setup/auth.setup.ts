@@ -13,7 +13,10 @@ import { addVirtualAuthenticator, loadPasskey, parsePasskeySecret } from '../pas
 //
 // This works across origins because Better Auth sets its session cookie on `COOKIE_DOMAIN`
 // (`.turistearya.com`, api-turistear/wrangler.jsonc), so the session the app's sign-in got from
-// api-dev is sent to api-dev by the seed's API calls and by the journeys' pages alike.
+// api-dev is sent to api-dev by the seed's API calls and by the journeys' pages alike. On a pull
+// request's preview the cookie is host-only on the preview's API, which still works: workers.dev is
+// a public suffix, so the preview's app and API are the same site (delivery-pipeline D4). The
+// credential is offered for the host under test, so one enrolment serves dev and every preview.
 //
 // Private keys come from the environment and are never written anywhere: only cookies are persisted.
 
@@ -25,7 +28,7 @@ async function signIn(browser: Browser, secretName: string, statePath: string) {
   try {
     const page = await context.newPage()
     const { cdp, authenticatorId } = await addVirtualAuthenticator(context, page)
-    await loadPasskey(cdp, authenticatorId, secret)
+    await loadPasskey(cdp, authenticatorId, secret, new URL(BASE_URL).hostname)
 
     await page.goto('/login')
     // Conditional UI may already answer from the email field's autofill and navigate away; then

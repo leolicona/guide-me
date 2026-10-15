@@ -35,7 +35,7 @@ description: "Task list for passkey sign-in with email code backup, on Better Au
   - `api-turistear/package.json`: `better-auth`, `@better-auth/passkey` and `@better-auth/drizzle-adapter`, each at exactly `1.7.7` (no caret), plus dev dependency `@noble/hashes` `^2.2.0`.
   - `app-turistear/package.json`: `better-auth` and `@better-auth/passkey`, each at exactly `1.7.7`.
 - [X] T002 In `api-turistear/wrangler.jsonc`:
-  - add `"compatibility_flags": ["nodejs_als"]` at the top level, which named environments inherit (D3, R3); *implemented as `nodejs_compat` (R15, constitution v1.2.2)*;
+  - add `"compatibility_flags": ["nodejs_als"]` at the top level, which named environments inherit (D3, R3); *implemented as `nodejs_compat` (R15, constitution v1.3.1)*;
   - add `AUTH_COOKIE_PREFIX` to each profile's `vars`: `gm-local` (top level), `gm-dev` (`env.dev`), `gm` (`env.production`) (D5);
   - add `OTP_LOG_TO_CONSOLE: "true"` to the top-level (local) profile only (D7, FR-064).
 
@@ -312,7 +312,7 @@ invitation lookup also disappear until US3 (T026) and US4 (T029) restore them un
   - mark the Agnostic Auth mention under `docs/integrations/` as historical.
 - [X] T045 Register debt `password-material` with `/speckit-debt-log`. `users.password_hash`, `users.password_salt` and `password_reset_tokens` remain in D1, unread. Paying it is the next PR's migration (0072 or the next free number), which drops them (D15, FR-061, SC-006).
 - [ ] T046 **Pre-merge gate, which blocks the merge** (D19, `specs/004-passkey-auth/quickstart.md` § 2):
-  - set `BETTER_AUTH_SECRET` in dev and in prod, with different values (in the GitHub environments `dev` and `production`; the deploy workflows copy it to the Workers);
+  - set `BETTER_AUTH_SECRET` in dev and in prod, with different values (on the Workers `api-guideme-dev` and `api-guideme`; previews take it from the GitHub `dev` environment — constitution v1.3.1, delivery-pipeline D5, D17);
   - run the email-case collision query on both databases;
   - record both results in the PR description.
 - [X] T047 Run the proof in `specs/004-passkey-auth/quickstart.md` § 4:
@@ -363,7 +363,7 @@ Track app: T017 authClient + MSW ─▶ T018 hooks ─▶ T019 EmailCodeForm + S
 4. **US5**: self-service security.
 5. **Polish**: retirement, constitution, the gate (T046) and the full proof (T047).
 
-Everything ships as **one pull request** into `develop`. The password columns are dropped in the
+Everything ships as **one pull request** into `main` (`develop` retired with `specs/005-delivery-pipeline`). The password columns are dropped in the
 next PR (T045, D15).
 
 **Notes**:

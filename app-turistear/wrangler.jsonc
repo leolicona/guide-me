@@ -8,6 +8,11 @@
  * BUILD time via CLOUDFLARE_ENV (NOT `wrangler deploy --env`). The package scripts set it:
  *   pnpm deploy:app:dev   → CLOUDFLARE_ENV=dev        (app-guideme-dev · app-dev.turistearya.com)
  *   pnpm deploy:app:prod  → CLOUDFLARE_ENV=production (app-guideme     · app.turistearya.com)
+ *   preview.yml           → CLOUDFLARE_ENV=preview    (app-guideme-pr-<n> · workers.dev)
+ *
+ * `preview` is one Worker per pull request (delivery-pipeline D2): preview.yml deploys it
+ * with `--name app-guideme-pr-<n>` and bakes that pull request's API origin. It has no
+ * `routes`, so a preview can never claim app-dev or app.
  *
  * TWO build-time inputs per deploy:
  *   - CLOUDFLARE_ENV  → picks the worker name + route (this file).
@@ -42,6 +47,10 @@
 					"custom_domain": true
 				}
 			]
+		},
+		"preview": {
+			"name": "app-guideme-preview",
+			"workers_dev": true
 		},
 		"production": {
 			"name": "app-guideme",

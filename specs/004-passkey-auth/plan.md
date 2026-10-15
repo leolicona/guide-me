@@ -78,7 +78,7 @@ and we write only what Better Auth does not know (organizations, invitations).
 `WeakMap` keyed by the `env` object. It is built with
 `drizzleAdapter(getDb(env), { provider: 'sqlite', transaction: false })`. The Worker gains the
 compatibility flag `nodejs_als`, not the full `nodejs_compat`. *Corrected 2026-10-15 (R15,
-constitution v1.2.2)*: the Worker uses `nodejs_compat`, because `@better-auth/utils` resolves
+constitution v1.3.1)*: the Worker uses `nodejs_compat`, because `@better-auth/utils` resolves
 `node:crypto` for the `workerd` condition.
 
 *Why*:
@@ -304,10 +304,12 @@ CLAUDE.md's local-login caveat is rewritten to match.
 **Done 2026-10-07**, before implementation, so no task runs against the old text
 (`/speckit-analyze` C1): v1.2.0 (`f8ff722`), then v1.2.1 (`ca7b582`), which keeps the BFF.
 
-**D19 — A pre-merge gate.** Before merging into `develop`, which deploys dev at once:
-1. Set `BETTER_AUTH_SECRET` in dev and in prod, with different values. *As implemented
-   (2026-10-15)*: it lives in the GitHub environments `dev` and `production`, and each deploy
-   workflow copies it to its Worker before migrating; a missing one stops the deploy.
+**D19 — A pre-merge gate.** Before merging into `develop`, which deploys dev at once *(since
+`specs/005-delivery-pipeline`: before opening the pull request into `main`, whose preview applies
+the migration to dev's database)*:
+1. Set `BETTER_AUTH_SECRET` as a Worker secret in dev and in prod, with different values. Under
+   constitution v1.3.1 (`specs/005-delivery-pipeline` D17) no workflow plants it; a pull request's
+   preview takes it from the GitHub `dev` environment (D5).
 2. Run the email-case collision query against both databases.
 3. Record both results in the PR.
 

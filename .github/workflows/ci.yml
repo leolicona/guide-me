@@ -1,10 +1,12 @@
 name: CI
 
-# Merge gate for every PR into develop or main: install, lint, test, and build both
-# workspaces. No deploy, no Cloudflare credentials needed.
+# The merge gate: every pull request into main runs `verify`, the one definition of the gate
+# (delivery-pipeline D8). No deploy and no credential, so it runs the same for forks. It never
+# listens to `labeled`: a label must not re-run the required check and turn a red one into a
+# skipped one, which GitHub counts as passing (delivery-pipeline D6).
 on:
   pull_request:
-    branches: [develop, main]
+    branches: [main]
 
 permissions:
   contents: read
@@ -18,40 +20,4 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-
-      # The pre-Spec-Kit corpus is archived in leolicona/guide-me-docs (CLAUDE.md). Old code
-      # comments still cite docs/… and .design/…, so it is easy to recreate them here by habit;
-      # new specs belong in specs/NNN-slug/ (Spec Kit). Fail loudly if either folder creeps back.
-      - name: Corpus stays archived
-        run: |
-          if [ -e docs ] || [ -e .design ]; then
-            echo "::error::docs/ and .design/ are archived in leolicona/guide-me-docs; new specs go in specs/NNN-slug/."
-            exit 1
-          fi
-
-      - uses: pnpm/action-setup@v6
-        with:
-          version: 10
-
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 22
-          cache: pnpm
-
-      - name: Install
-        run: pnpm install --frozen-lockfile
-
-      - name: Lint (app)
-        run: pnpm lint:app
-
-      - name: Test (app)
-        run: pnpm test:app
-
-      - name: Test (api)
-        run: pnpm test:api
-
-      - name: Build (api)
-        run: pnpm build:api
-
-      - name: Build (app)
-        run: pnpm build:app
+      - uses: ./.github/actions/verify

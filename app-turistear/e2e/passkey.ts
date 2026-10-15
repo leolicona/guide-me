@@ -59,18 +59,24 @@ export async function addVirtualAuthenticator(
   return { cdp, authenticatorId }
 }
 
-/** Load an enrolled llave de acceso into the virtual authenticator. */
+/**
+ * Load an enrolled llave de acceso into the virtual authenticator, for the relying party under
+ * test. A pull request's preview (delivery-pipeline D15) is another host than app-dev, but it runs
+ * on dev's database, where the credential's public key lives: the same private key, offered for
+ * the preview's host, verifies there — the API checks the assertion against its own APP_BASE_URL.
+ */
 export async function loadPasskey(
   cdp: CDPSession,
   authenticatorId: string,
   secret: PasskeySecret,
+  rpId: string = secret.rpId,
 ): Promise<void> {
   await cdp.send('WebAuthn.addCredential', {
     authenticatorId,
     credential: {
       credentialId: secret.credentialId,
       isResidentCredential: true,
-      rpId: secret.rpId,
+      rpId,
       privateKey: secret.privateKey,
       userHandle: secret.userHandle,
       // FR-006 — the API refuses a use count at or behind the last one it recorded (the sign of a

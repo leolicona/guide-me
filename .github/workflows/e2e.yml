@@ -4,7 +4,8 @@ name: E2E
 # (docs/TESTING.md D7): a real browser at 90s timeouts would cost the merge queue far more than
 # it catches, and Tiers 1–3 already gate every PR in seconds.
 #
-# Runs nightly, on demand, and on any PR that carries the `e2e` label.
+# Runs nightly and on demand, against dev. A pull request labelled `e2e` runs the same journeys
+# against its own preview instead, inside preview.yml (delivery-pipeline D15).
 on:
   schedule:
     # 08:00 UTC ≈ 02:00 in Cancún — after the dev deploys of the day, before anyone is selling.
@@ -15,21 +16,18 @@ on:
         description: 'App origin to test (defaults to app-dev)'
         required: false
         type: string
-  pull_request:
-    types: [opened, synchronize, reopened, labeled]
 
 permissions:
   contents: read
 
 concurrency:
-  # The suite seeds real data in a shared environment — never let two runs overlap.
-  group: e2e-${{ github.event.inputs.base_url || 'dev' }}
+  # The suite seeds real data in dev's database, which every preview shares — so every journey
+  # run, here or on a preview, queues in this one group and none overlaps (delivery-pipeline D15).
+  group: e2e-dev-data
   cancel-in-progress: false
 
 jobs:
   journeys:
-    # On a PR, only when someone asks for it by label.
-    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'e2e')
     runs-on: ubuntu-latest
     timeout-minutes: 20
     # The `dev` environment holds the credentials; no Cloudflare tokens are needed — nothing deploys.
@@ -43,18 +41,7 @@ jobs:
       E2E_ADMIN_PASSKEY: ${{ secrets.E2E_ADMIN_PASSKEY }}
     steps:
       - uses: actions/checkout@v7
-
-      - uses: pnpm/action-setup@v6
-        with:
-          version: 10
-
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 22
-          cache: pnpm
-
-      - name: Install
-        run: pnpm install --frozen-lockfile
+      - uses: ./.github/actions/setup
 
       - name: Install Chromium
         run: pnpm --filter app-turistear exec playwright install --with-deps chromium

@@ -1,14 +1,15 @@
 name: Deploy Dev
 
-# develop → Dev (automatic). Migrations are applied to the dev D1 BEFORE the workers
-# ship, so the new schema is in place when the new code lands. Keep migrations additive
-# and backward-compatible (D1 has no cross-statement transaction).
+# main → dev, on every push (delivery-pipeline D9). `verify` runs whole first — the same gate as
+# every pull request, never a subset (D8) — then dev's D1 migrations, then the API, then the app,
+# so the new schema is in place when the new code lands. Keep migrations additive and
+# backward-compatible (D1 has no cross-statement transaction).
+#
+# Documentation-only pushes deploy too: a release takes only a main commit whose run of THIS
+# workflow finished green (deploy-prod.yml, D10), so every commit on main must be able to earn one.
 on:
   push:
-    branches: [develop]
-    # Docs-only changes don't affect the workers — skip the deploy for them.
-    paths-ignore:
-      - '**.md'
+    branches: [main]
 
 permissions:
   contents: read
@@ -19,7 +20,14 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/verify
+
   deploy:
+    needs: verify
     runs-on: ubuntu-latest
     # Bind this job to the GitHub "dev" environment (no protection rules).
     environment: dev
@@ -28,36 +36,7 @@ jobs:
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
     steps:
       - uses: actions/checkout@v7
-
-      - uses: pnpm/action-setup@v6
-        with:
-          version: 10
-
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 22
-          cache: pnpm
-
-      - name: Install
-        run: pnpm install --frozen-lockfile
-
-      # Safety net: a broken develop branch never reaches the dev workers.
-      - name: Test (api)
-        run: pnpm test:api
-
-      # passkey-auth D19 — BETTER_AUTH_SECRET lives in this GitHub environment ("dev") and is copied
-      # to the API Worker on every deploy, before anything changes. The API refuses to start without
-      # it (src/auth/index.ts), so a missing or short secret stops the run here, with nothing
-      # migrated or deployed. Each environment holds its own value (constitution VIII).
-      - name: Sync BETTER_AUTH_SECRET to the API Worker (dev)
-        env:
-          BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET }}
-        run: |
-          if [ "${#BETTER_AUTH_SECRET}" -lt 32 ]; then
-            echo "::error::BETTER_AUTH_SECRET is missing or shorter than 32 characters in the 'dev' environment"
-            exit 1
-          fi
-          printf '%s' "$BETTER_AUTH_SECRET" | pnpm --filter api-turistear exec wrangler secret put BETTER_AUTH_SECRET --env dev
+      - uses: ./.github/actions/setup
 
       - name: Apply D1 migrations (dev)
         run: pnpm db:migrate:dev
@@ -69,3 +48,19 @@ jobs:
         env:
           VITE_API_BASE_URL: https://api-dev.turistearya.com
         run: pnpm deploy:app:dev
+
+      # Every host is tried before the step fails, so one red log names each one that did not
+      # answer; the wait covers a certificate race after a custom-domain change (D9).
+      - name: Smoke
+        run: |
+          probe() {
+            for i in $(seq 1 10); do
+              if curl -sf -o /dev/null --max-time 20 "$1"; then echo "answered: $1"; return 0; fi
+              echo "not up yet (attempt $i): $1"; sleep 30
+            done
+            echo "::error::$1 did not answer in 5 minutes"; return 1
+          }
+          failed=0
+          probe https://api-dev.turistearya.com/ || failed=1
+          probe https://app-dev.turistearya.com/ || failed=1
+          exit $failed

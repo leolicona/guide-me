@@ -8,22 +8,33 @@ implementation lives in `tasks.md`.
 
 ## 1. Prerequisites
 
-- Node 22, pnpm 10, and a worktree from `develop` (CLAUDE.md § Local workflow).
+- Node 22, pnpm 10, and a worktree from `origin/main` (CLAUDE.md § Local workflow).
 - `pnpm install`. The lockfile gains Better Auth 1.7.7 (server and client), `@better-auth/passkey`,
   `@better-auth/drizzle-adapter` and `@noble/hashes` (API dev dependency).
 - A Chromium-based browser. `localhost` is a secure context, so WebAuthn works over
   `http://localhost:5174`.
 
-## 2. Pre-merge gate (D19): before the PR merges into `develop`
+## 2. Pre-merge gate (D19): before the PR merges into `main`
 
-Merging deploys dev at once. Do both steps and record the results in the PR.
+Opening the pull request builds its preview, which applies migration 0071 to dev's database
+(`specs/005-delivery-pipeline` D3); merging deploys dev. Do both steps first and record the results
+in the PR.
 
-**Secrets.** `BETTER_AUTH_SECRET` is held in the GitHub environments `dev` and `production`,
-**a different value in each** (constitution VIII), and never committed. Generate each value with
-`openssl rand -base64 48` (32+ characters). On every deploy, `deploy-dev.yml` and
-`deploy-prod.yml` copy it to the API Worker (`wrangler secret put --env dev|production`) before the
-migrations; a missing or short secret stops the run with nothing migrated or deployed, and the API
-itself refuses to start without one (`src/auth/index.ts`).
+**Secrets.** `BETTER_AUTH_SECRET` is a secret **on each Worker**, `api-guideme-dev` and
+`api-guideme`, **a different value in each**, never committed and never planted by a workflow
+(constitution VIII, v1.3.1; `specs/005-delivery-pipeline` D17). Set it once per Worker, from a
+machine signed in to the `liconadev` account, or in the dashboard (Workers & Pages → the Worker →
+Settings → Variables and Secrets):
+
+```bash
+openssl rand -base64 48 | pnpm --filter api-turistear exec wrangler secret put BETTER_AUTH_SECRET --env dev
+openssl rand -base64 48 | pnpm --filter api-turistear exec wrangler secret put BETTER_AUTH_SECRET --env production
+```
+
+A pull request's preview takes `BETTER_AUTH_SECRET` from the GitHub `dev` environment, or a
+throwaway its note names (`preview.yml`, delivery-pipeline D5). The API refuses to start without a
+secret of 32+ characters (`src/auth/index.ts`), so dev's must be on its Worker **before** the merge
+that deploys this feature.
 
 Rotating the secret signs everyone out and invalidates every pending code. It never touches the
 passkeys.
@@ -82,22 +93,26 @@ pnpm lint:app && pnpm build:api && pnpm build:app
 | Register without password, then code, then signed in as admin; D17 policy present; duplicate refused | `test/onboarding/register.test.ts` | US3 |
 | Invitation lookup; accept with name, then code, then signed in as agent; pre-cutover invitation; used or expired token refused | `test/onboarding/invitations.test.ts` | US4 |
 | `/api/auth/update-user` cannot change `organizationId`, `role` or `status` | `test/auth/sessions.test.ts` | constitution III, D2 |
-| Business suites pass with only their session lines changed | `git diff develop -- api-turistear/test ':!api-turistear/test/auth' ':!api-turistear/test/onboarding' ':!api-turistear/test/helpers'` touches 61 files, and only their import, cookie and session-mechanism lines (spec § Amended by the implementation) | Scope Boundary |
+| Business suites pass with only their session lines changed | `git diff origin/main... -- api-turistear/test ':!api-turistear/test/auth' ':!api-turistear/test/onboarding' ':!api-turistear/test/helpers'` touches 61 files, and only their import, cookie and session-mechanism lines (spec § Amended by the implementation) | Scope Boundary |
 | No Agnostic Auth left | `git grep -nIE "AGNOSTIC_AUTH\|agnosticAuth\|Agnostic Auth\|DEV_AUTH_SERVICE_URL" -- api-turistear app-turistear .github` is empty, apart from archive citations | FR-062, SC-003 |
 
 ## 5. Cutover (dev, then prod)
 
-1. The gate (§2) is done and recorded. Merge into `develop`. CI deploys dev: tests, then migration
-   0071, then the API, then the app.
-2. On `app-dev.turistearya.com`:
+1. The gate (§2) is done and recorded. The pull request's preview (`app-guideme-pr-<n>` on
+   `workers.dev`, dev's data, 0071 applied) is the first place to try it: sign in by code there.
+2. Merge into `main`. CI deploys dev: the gate, then dev's migrations (0071 already applied by the
+   preview), then the API, then the app.
+3. On `app-dev.turistearya.com`:
    - Sign in by code with a real mailbox, create a passkey on a phone, sign out, and sign in with
      it.
    - Check that the dev passkey is **not offered** on `app.turistearya.com` (FR-003).
-3. Enroll each end-to-end account once with Playwright's virtual authenticator. Store the
-   credential as `E2E_AGENT_PASSKEY` and `E2E_ADMIN_PASSKEY`, and delete `E2E_*_PASSWORD`. Run the
-   `e2e` label on a PR.
-4. Release `develop → main` (a merge commit) after the `production` approval.
-5. On prod, every active admin and agent can sign in by code (SC-007), and no screen asks for a
+4. Enroll each end-to-end account once against dev (`e2e/enroll-passkey.ts`). Store the
+   credentials as `E2E_AGENT_PASSKEY` and `E2E_ADMIN_PASSKEY` in the GitHub `dev` environment, and
+   delete the four `E2E_*_EMAIL` / `E2E_*_PASSWORD` secrets. The same credential serves every
+   preview, which runs on dev's database. Run the `e2e` label on a PR.
+5. Set `api-guideme`'s `BETTER_AUTH_SECRET` (§2), then release: a `v*` tag on the `main` commit
+   whose dev deploy is green (`specs/005-delivery-pipeline` D10).
+6. On prod, every active admin and agent can sign in by code (SC-007), and no screen asks for a
    password (SC-006).
 
 **Measuring SC-009 after 30 days**: Better Auth's standard schema does not record how a session

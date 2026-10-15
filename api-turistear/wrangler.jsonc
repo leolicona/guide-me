@@ -6,6 +6,7 @@
   // config ignores). The package scripts set it:
   //   pnpm deploy:api:dev   → CLOUDFLARE_ENV=dev        (api-guideme-dev · api-dev.turistearya.com · guideme-db)
   //   pnpm deploy:api:prod  → CLOUDFLARE_ENV=production (api-guideme     · api.turistearya.com     · guideme-db-prod)
+  //   preview.yml           → CLOUDFLARE_ENV=preview    (api-guideme-pr-<n> · workers.dev       · guideme-db)
   // D1 migrations bypass vite, so THEY use `--env` directly (pnpm db:migrate:dev|prod).
   //
   // The TOP LEVEL is the LOCAL profile only (`vite dev`); its fallback name
@@ -83,6 +84,39 @@
         "APP_BASE_URL": "https://app-dev.turistearya.com",
         "RESEND_FROM": "no-reply@turistearya.com",
         "AUTH_COOKIE_PREFIX": "gm-dev"
+      }
+    },
+
+    // ─── PREVIEW ─── api-guideme-pr-<n> · <n>.workers.dev · guideme-db (dev's data) ───
+    // One per pull request (delivery-pipeline D2). preview.yml deploys it with
+    // `--name api-guideme-pr-<n>` and sets the three origins with `--var`, because they
+    // carry the pull request number; the empty values below fail closed (CORS admits
+    // nobody) if a deploy ever forgets them. No `routes`, so a preview can never claim
+    // api-dev or api; no `triggers`, because dev's own sweep already covers the shared
+    // database (D3). `COOKIE_DOMAIN` is empty, so the session cookie is host-only on the
+    // preview's API — workers.dev is a public suffix, so the preview's app is the same
+    // site and the cookie still reaches the API (D4).
+    "preview": {
+      "name": "api-guideme-preview",
+      "workers_dev": true,
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "guideme-db",
+          "database_id": "15cd8f75-c94e-41e8-9ec0-d43b1cf73a04",
+          "migrations_dir": "migrations"
+        }
+      ],
+      "vars": {
+        "COOKIE_DOMAIN": "",
+        "CORS_ORIGIN": "",
+        "API_BASE_URL": "",
+        "APP_BASE_URL": "",
+        "RESEND_FROM": "no-reply@turistearya.com",
+        // passkey-auth D5 — its own cookie name. Host-only on the preview's API, so it never
+        // meets dev's or prod's session cookie; `BETTER_AUTH_SECRET` comes from the GitHub `dev`
+        // environment through preview.yml's secrets file (delivery-pipeline D5, research R2).
+        "AUTH_COOKIE_PREFIX": "gm-preview"
       }
     },
 
