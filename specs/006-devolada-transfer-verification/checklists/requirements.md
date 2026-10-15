@@ -100,3 +100,8 @@
 
   US2 scenario 5 now covers a lost notification, and FR-013 compares a notification's mode with its
   link's. All items still pass.
+- **/speckit-analyze, fifth run (2026-10-15)** found no CRITICAL item, and 1 HIGH, 2 MEDIUM and
+  4 LOW items. All were resolved in place. The developer extended the last clarification to the
+  deposit: an apartado whose deposit payment awaits the admin's decision does not expire by its
+  clock either (FR-016, US3 scenario 7). FR-011 and US4 scenarios 2 and 4 now state the per-line
+  rules the fourth run gave D13. All items still pass.

@@ -16,7 +16,7 @@ the one that created it, unless D21's fallback moved the link to the current one
 
 | Purpose | Call | When | Timeout | `Idempotency-Key` | We use | On failure |
 |---|---|---|---|---|---|---|
-| Probe the credential, its mode and the channel (D2) | `POST /v1/payment-links` `{customerRef: "turistear-conexion", askCents: 100, mode: "one_time", expiresAt: <now − 60 000 ms>, label}` | connect; an admin opening a `broken` connection | 8 s | fresh UUID per attempt | `isTest` | refuse the connection (contracts/turistear-api.md) |
+| Probe the credential, its mode and the channel (D2) | `POST /v1/payment-links` `{customerRef: "turistear-conexion", askCents: 100, mode: "one_time", expiresAt: <now − 60 000 ms>, label}` | connect; an admin opening a `broken` connection, at most once every 15 minutes | 8 s | fresh UUID per attempt | `isTest` | refuse the connection (contracts/turistear-api.md) |
 | Read the notification address (D3) | `GET /v1/webhook` | connect; health | 8 s | — | `url`, failure counters | 404 = none registered |
 | Register our address (D3) | `PUT /v1/webhook` `{url}` | connect | 8 s | — | — | `INSECURE_URL` = our configuration bug |
 | Count failing deliveries (FR-005) | `GET /v1/webhook/deliveries?status=failed&limit=20` | health | 8 s | — | count | health shows `DEVOLADA_UNAVAILABLE` |
@@ -76,7 +76,7 @@ Nothing else about the customer (phone, email) or the seller ever leaves Turiste
 5. Only now parse the JSON and validate its shape. On failure, answer 400.
 6. Resolve the link by `data.paymentLinkId`. Unknown → 200 and a log line.
 7. Check that `data.isTest` matches the link's own mode, then de-duplicate on `eventId`.
-8. Re-read `GET /v1/payments/{data.paymentId}` with the link's credential, one of the owning organization's own (research D21), and apply D9 to that answer. A link whose credential was already erased has only final payments: answer 200 and change nothing.
+8. Re-read `GET /v1/payments/{data.paymentId}` with the link's credential, one of the owning organization's own (research D21), and apply D9 to that answer. A link whose credential was already erased has nothing left to read: answer 200 and change nothing.
 
 Devolada's rules this satisfies:
 - verify before parsing;

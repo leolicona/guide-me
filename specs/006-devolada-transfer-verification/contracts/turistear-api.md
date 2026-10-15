@@ -171,7 +171,7 @@ The connect sheet maps each refusal to copy. A broken connection's reason reuses
 #### `GET /organizations/me/devolada`
 
 - 200 `{ "connection": DevoladaConnectionView | null }`. `null` when never connected.
-- While the connection is `broken`, the read first repeats D2's probe with the current credential. If it passes, the connection is `connected` again, and the view says so (research D2).
+- While the connection is `broken`, the read first repeats D2's probe with the current credential, at most once every 15 minutes. If it passes, the connection is `connected` again, and the view says so (research D2).
 
 #### `PUT /organizations/me/devolada` — connect, or replace the key
 
@@ -188,7 +188,7 @@ Steps (D2, D3):
 4. notification address check;
 5. encrypt and store, as a new credential that becomes the current one.
 
-Replacing the key, even with another Devolada business's, retires the previous credential without forgetting it. The links it created go on being followed with it until they resolve (research D21).
+Replacing the key, even with another Devolada business's, retires the previous credential without forgetting it. The links that use it go on being followed with it until they resolve (research D21).
 
 | Status | Body / code | When |
 |---|---|---|
@@ -282,10 +282,10 @@ For a connected organization with `"method": "transfer"`, no settlement is recor
 | 400 | `VALIDATION_ERROR` |
 | 403 | `FORBIDDEN` |
 | 404 | `NOT_FOUND`: unknown, or another organization's (constitution III) |
-| 409 | `DEVOLADA_PAYMENT_NOT_RESOLVABLE`: the action does not fit the payment's status or kind, or it was already resolved |
+| 409 | `DEVOLADA_PAYMENT_NOT_RESOLVABLE`: the action does not fit the payment's status or kind, it was already resolved, or `accept` on an apartado already settled another way |
 | 409 | `FOLIO_CANCELLED`: `accept` on a cancelled sale |
 
-Sale and deposit exceptions use today's `POST /pos/folios/:id/verify` and `/reject` (FR-018). From PR 3, `/reject` closes the sale's links. `/verify` closes the links of the rows it verifies, except one whose payment is in flight, which stays open until its verdict (D13).
+Sale and deposit exceptions use today's `POST /pos/folios/:id/verify` and `/reject` (FR-018). From PR 3, `/reject` closes the sale's links. `/verify` closes the links of the rows it verifies, except one whose payment is in flight, which stays open until its verdict (D13). While a deposit exception, or a deposit payment no key can read any more, waits for one of them, the apartado does not expire by its clock either (research D8).
 
 ### Webhook — public, Devolada only (`/webhooks` router, no auth)
 
@@ -297,7 +297,7 @@ Sale and deposit exceptions use today's `POST /pos/folios/:id/verify` and `/reje
 
 | Status | Body / code | Devolada's reading |
 |---|---|---|
-| 200 | `{ "received": true }`: applied, duplicate, unknown link, mode mismatch, or a link whose credential was erased once its payments were all final (research D21) | delivered |
+| 200 | `{ "received": true }`: applied, duplicate, unknown link, mode mismatch, or a link whose credential was already erased (research D21) | delivered |
 | 400 | `WEBHOOK_PAYLOAD_INVALID`: not JSON, wrong shape, or over 64 KiB | failed attempt |
 | 401 | `WEBHOOK_SIGNATURE_INVALID` | failed attempt |
 | 503 | `DEVOLADA_UNAVAILABLE`: keys or the re-read unreachable, or the link's credential unreadable here (research D17, D21) | failed attempt, retried |

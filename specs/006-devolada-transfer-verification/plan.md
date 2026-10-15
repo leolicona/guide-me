@@ -15,9 +15,9 @@ Banxico's verdict, which Devolada reports, instead of by an admin. The approach,
 
 - **Credential**: stored encrypted, and never in the organization payload that every role reads
   (D1). Connecting probes the credential, learns its mode and checks the notification address
-  before taking it (D2, D3). Every key the organization connects is kept while a link it created is
-  unresolved, and each link is followed with its own key, so the admin may switch Devolada accounts
-  at any time (D21).
+  before taking it (D2, D3). Every key the organization connects is kept while a link that uses it
+  is unresolved, and each link is followed with its own key, so the admin may switch Devolada
+  accounts at any time (D21).
 - **Links**: each transfer gets a one-time Devolada link, issued *after* the sale's money
   write commits, with today's manual path as the fallback (D6, D7). A link that would stay open less
   than 15 minutes is not issued (D7). A settlement is a link too, and
@@ -35,8 +35,8 @@ Banxico's verdict, which Devolada reports, instead of by an admin. The approach,
     `rejectPayment`'s defects (D11).
   - Everything else → reaches Por verificar or the seller, labelled by the server (D14, D15).
   - The admin can always verify by hand, a settlement still in verification included. While a
-    settlement payment awaits that decision, the apartado does not expire (D8, D15; spec
-    clarifications of 2026-10-15).
+    deposit or settlement payment awaits that decision, the apartado does not expire (D8, D15;
+    spec clarifications of 2026-10-15).
 - **Por verificar holds only work for the admin**: a sale Devolada is still resolving stays out of it, and out of its count, until the admin has something to do (D14; spec clarification of 2026-10-15).
 - **Closing links**: links close whenever their sale stops taking money, but never under a payment in flight while the sale lives (D13; spec clarification of 2026-10-15).
 

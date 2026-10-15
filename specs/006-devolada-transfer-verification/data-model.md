@@ -42,6 +42,7 @@ devolada_payments ·· *    devolada_events       (by devolada_payment_id; no FK
 | `broken_at` | integer NULL | |
 | `credit_paused_at` | integer NULL | set when a payment reports `queued_for_credit`; cleared when one validates again |
 | `last_verdict_at` | integer NULL | last final verdict applied (FR-005) |
+| `probed_at` | integer NULL | last time reading a `broken` connection repeated D2's probe; another read probes again only 15 minutes later |
 | `connected_by` | text NOT NULL → users | |
 | `connected_at` | integer NOT NULL | |
 | `disconnected_by` | text NULL → users | |
@@ -67,7 +68,7 @@ Connecting, replacing the key and disconnecting each retire the previous current
 **Rules**:
 - A sale gets a payment link only while the connection is `connected` (FR-004, FR-010).
 - A `broken` connection makes new transfer sales fall back to the manual path, and the seller is told why (FR-010).
-- An admin opening a `broken` connection repeats D2's probe with the current credential; a success makes it `connected` again.
+- An admin opening a `broken` connection repeats D2's probe with the current credential, at most once every 15 minutes (`probed_at`); a success makes it `connected` again.
 
 ### `devolada_credentials` — every key the organization connects (research D1, D21)
 
@@ -204,7 +205,11 @@ open ── no credential can read it (D21) ────────────
 
 A payment is decided by hand once its `resolution` is set (an admin's *accept* or *dismiss* of a settlement, D15), once its ledger row on a sale or deposit link is verified (the admin's Verificar), or once its sale is cancelled (Rechazar, or any cancellation). Money that then arrives is covered by the *unapplied* clauses above.
 
-A payment of a `settlement` link that needs the admin through the first clause, or through the `failed` link clause, **awaits the admin's decision**. While one does, the apartado does not expire by its clock: the customer may have paid (D8, FR-016).
+A payment **awaits the admin's decision** when it is:
+- a `settlement` payment that needs the admin through the first clause, or through the `failed` link clause;
+- a `deposit` payment that ended `partial` or `invalid`, or that was last seen in flight on a link no credential can read, while its ledger row is still pending and its sale is not cancelled. The admin decides it with today's Verificar or Rechazar.
+
+While one does, the apartado does not expire by its clock: the customer may have paid (D8, FR-016).
 
 A sale or deposit with `partial` or `invalid` is attended through the sale's pending verification, as today.
 
@@ -273,7 +278,7 @@ A sale or deposit with `partial` or `invalid` is attended through the sale's pen
 | One open settlement link per sale; a transfer settlement for another scope (another line, or the whole sale against one line's link, and the reverse) is refused with `SETTLEMENT_IN_PROGRESS` | partial unique index; settle | D8, D13 |
 | A settlement link closes only when the write touches what it collects: its own line, or the whole sale | line cancel, settle | D13 |
 | While the sale lives, no write closes a link under a payment in flight: a line cancellation or a cash settlement that would close it is refused with `SETTLEMENT_IN_PROGRESS`, and a manual Verificar leaves it open | line cancel, settle, verify | FR-011, D13 |
-| An apartado never expires by its clock while it has a link being created or open, or a settlement payment awaiting the admin's decision | bookings expiry sweep | FR-016, D8 |
+| An apartado never expires by its clock while it has a link being created or open, or a deposit or settlement payment awaiting the admin's decision | bookings expiry sweep | FR-016, D8 |
 | A settlement link records at most one settlement: its batch is claimed by `folio_payment_id IS NULL` and every other statement is gated on that claim | settlement core | D8 |
 | A verification releases tickets only in the call whose guarded row flip and rollup update both matched | verify core | D10 |
 | The system cancellation writes nothing unless its own guarded transition matched | `cancelForUnreceivedTransfer` | D11 |

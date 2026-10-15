@@ -68,6 +68,10 @@ curl "http://localhost:5173/cdn-cgi/local/scheduled"
 curl "http://localhost:5173/cdn-cgi/local/scheduled?time=<epoch ms after the link's expiry>"
 ```
 
+The sweep re-reads a link only once 10 minutes have passed since its last check (research D12),
+and nothing is notified locally. Give every new trigger a `time=` at least 10 minutes later than
+the previous one, or the verdict you just advanced is not read.
+
 Find a test payment's id with your test key, then move it to a verdict:
 
 ```bash

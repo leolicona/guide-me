@@ -77,8 +77,8 @@ both as the fallback when Devolada is unavailable and as the admin's override.
 - Q: What happens to a link whose payment is being verified when something would close it? → A:
   It is not closed under that payment. The admin's manual Verificar leaves it open until its
   verdict, which is recorded and releases nothing a second time. Cancelling a line, or settling
-  the balance another way, is refused until the settlement's verdict arrives. Cancelling or
-  rejecting the whole sale still closes it (FR-011).
+  the balance another way, when that would close the link, is refused until the settlement's
+  verdict arrives. Cancelling or rejecting the whole sale still closes it (FR-011).
 - Q: Which word does the UI use for the link? → A: «enlace» («Enlace de pago»), the word the
   customer's ticket message already uses; never «liga» or «link» (constitution VII).
 - Q: What happens if the admin switches to another Devolada account while payments are pending on
@@ -102,6 +102,9 @@ both as the fallback when Devolada is unavailable and as the admin's override.
   the apartado expire by its clock? → A: No. The sale waits in Por verificar, and the apartado does
   not expire until the admin taps «Verificar» or «Descartar»: the customer may have paid.
   «Verificar» records the settlement even after the clock ran out (FR-016, FR-018).
+- Q: And while the admin has an apartado's deposit payment to decide, for the same reasons? → A:
+  The same: the sale waits in Por verificar, and the apartado does not expire until the admin taps
+  «Verificar» or «Rechazar» (FR-016).
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -229,6 +232,9 @@ its test payment (no tickets). Then settle by transfer and confirm the settlemen
    contradicts it, or the system can no longer read it because its key stopped working — **When**
    the apartado's clock runs out, **Then** the apartado does not expire, the sale waits in Por
    verificar, and the admin's «Verificar» still records the settlement.
+7. **Given** an apartado whose deposit payment waits for the admin, for the same reasons, **When**
+   the apartado's clock runs out, **Then** the apartado does not expire, and the sale waits in Por
+   verificar until the admin verifies or rejects it.
 
 ---
 
@@ -250,12 +256,13 @@ admin alert. *(A sale whose transfer is still pending cannot be cancelled, only 
 1. **Given** a sale with an open link, **When** the sale is cancelled by a person, **Then** its link
    is closed. *(The apartado expiry never meets an open link: a deposit or settlement link expires
    with the apartado's own clock.)*
-2. **Given** an open link, **When** a line of the sale is cancelled and the amount due changes,
-   **Then** the link is closed and a new link for the new amount replaces it.
+2. **Given** an open link for the whole balance, **When** a line of the sale is cancelled and the
+   amount due changes, **Then** the link is closed and a new link for the new amount replaces it. A
+   link for one line's balance closes, with no replacement, only when that line is cancelled.
 3. **Given** a payment with an open link, **When** an admin rejects it, **Then** its link is closed.
-4. **Given** an apartado whose settlement transfer is being verified, **When** a seller cancels one
-   of its lines or settles the balance another way, **Then** it is refused until the verdict
-   arrives, and the link stays open.
+4. **Given** an apartado whose settlement transfer is being verified, **When** a seller cancels a
+   line, or settles another way, in a way that would close that link, **Then** it is refused until
+   the verdict arrives, and the link stays open.
 5. **Given** a sale whose transfer is being verified, **When** the admin verifies it by hand,
    **Then** its link stays open until the verdict, which is recorded and releases nothing a second
    time.
@@ -339,8 +346,10 @@ admin alert. *(A sale whose transfer is still pending cannot be cancelled, only 
   by anyone, rejection, apartado expiry, a change in the amount due (which issues a replacement
   link), and the link's own expiry (Assumptions). While the sale stays alive, a link is never closed
   under a payment being verified: the admin's manual Verificar leaves it open until the verdict, and
-  a line cancellation or another settlement is refused until then. Cancelling or rejecting the sale
-  still closes it. *(Clarified 2026-10-15)*
+  a line cancellation or another settlement that would close it is refused until then. Cancelling
+  or rejecting the sale still closes it. A link for one line's balance closes only when that line is
+  cancelled or settled; one for the whole balance closes when the amount due changes, and a line
+  cancellation replaces it. *(Clarified 2026-10-15)*
 
 **Verdicts**
 
@@ -374,9 +383,9 @@ admin alert. *(A sale whose transfer is still pending cannot be cancelled, only 
     A sale holding cleared money is never cancelled automatically. *(Amended by plan D8.)*
 
   A payment that ends *invalid* MUST stay in Por verificar for the admin to verify or reject.
-  *(Clarified 2026-10-06.)* While the admin has an apartado's settlement payment to decide — one
-  that ended *partial* or *invalid*, or one the system can no longer read — the apartado MUST NOT
-  expire by its clock. *(Clarified 2026-10-15)*
+  *(Clarified 2026-10-06.)* While the admin has an apartado's deposit or settlement payment to
+  decide — one that ended *partial* or *invalid*, or one the system can no longer read — the
+  apartado MUST NOT expire by its clock. *(Clarified 2026-10-15)*
 - **FR-017**: A *superseded* payment MUST be ignored in favour of its correction. While a payment
   is *validating*, the sale MUST show «Verificando pago» and release nothing.
 - **FR-018**: The admin's manual Verificar and Rechazar MUST remain available for every awaiting
