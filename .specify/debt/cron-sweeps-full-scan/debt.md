@@ -43,7 +43,7 @@ is about precision, not about an index.
 
 ## Interest
 
-- **Reads grow with history, not with work.** The developer measured these figures on 2026-10-15
+- **Reads grow with history, not with work.** These figures were measured on 2026-10-15
   (`meta.rows_read` of the raw SQL) on `guideme-db-prod`, which then held 1,011 folios, 1,046 lines,
   1,050 allocations and 2 orgs, with 0 live lines carrying a non-null `booking_expires_at`.
   - The `due` query read 3,066 rows and returned 0.
@@ -122,7 +122,7 @@ To confirm the debt is gone:
 
   `pnpm test:api` must pass as a whole.
 
-Running the cron less often does **not** pay this debt. The developer notes that the 15-minute
+Running the cron less often does **not** pay this debt. The 15-minute
 cadence is tied to the default 15-minute grace offset (`organizations.booking_grace_offset_minutes`,
 default 15 in `api-turistear/src/db/schema.ts`). A slower cron would release an unpaid apartado's
 seats after its departure instead of before it.
@@ -188,9 +188,11 @@ seats after its departure instead of before it.
 - **Stale dev database name** (the code wins). The header of the dev section in `wrangler.jsonc`
   reads `guideme-db-dev`. The dev binding, and the file's top comment, name `guideme-db`, which is
   the database the dev cron actually reads.
-- **Provenance.** The developer measured the 2026-10-15 figures and stated the cadence-grace link
-  and the billing context. The local query plans were reproduced for this entry with a throwaway
-  script kept outside the repo.
+- **Provenance.** The 2026-10-15 figures come from read-only queries against the remote databases
+  (`meta.rows_read`), taken in a Claude Code session at the developer's request; the billing context
+  comes from the account's Cloudflare notifications. The cadence-grace link is read from the code
+  above. The local query plans were reproduced for this entry with a throwaway script kept outside
+  the repo.
 - **Archived citations.** The anchored code cites `US-AG07`, `US-A77`, `US-T08`, `TECH_DEBT #25`,
   `docs/folios/folio-state-machine.spec.md` and `apartado-stages.spec.md`. These resolve in
   `leolicona/guide-me-docs` and were not read for this entry.
