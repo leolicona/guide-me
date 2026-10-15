@@ -61,22 +61,22 @@ sign-in works only through Better Auth, so land Phase 2 together with US1. Regis
 invitation lookup also disappear until US3 (T026) and US4 (T029) restore them under
 `/api/onboarding/*`. Everything ships in one PR, so nothing is deployed in between.
 
-- [ ] T006 Write `api-turistear/migrations/0071_better_auth.sql` (D16; use the next free number if `develop` has moved). Follow data-model.md exactly:
+- [X] T006 Write `api-turistear/migrations/0071_better_auth.sql` (D16; use the next free number if `develop` has moved). Follow data-model.md exactly:
   - the tables `sessions`, `accounts`, `verifications`, `passkeys` and `rate_limits`, with `ON DELETE CASCADE` on every `user_id`, and their indexes;
   - `users.email_verified INTEGER NOT NULL DEFAULT 0`, backfilled to 1 where `status = 'active'`, and `users.image TEXT`;
   - `UPDATE users SET email = lower(email)` and `UPDATE invitations SET identity = lower(identity)`;
   - a header comment stating each child table's transitive scope (constitution III).
 
   Do not touch the password columns (D15).
-- [ ] T007 In `api-turistear/src/db/schema.ts`:
+- [X] T007 In `api-turistear/src/db/schema.ts`:
   - add Drizzle tables `sessions`, `accounts`, `verifications`, `passkeys` and `rateLimits`, with snake_case columns, `integer(..., { mode: 'timestamp' })` timestamps and `rate_limits.last_request` as a plain integer (milliseconds);
   - add `emailVerified` (`integer({ mode: 'boolean' })`) and `image` to `users`.
 
   Export the types (D4).
-- [ ] T008 [P] Add two senders to `api-turistear/src/services/resend.ts` (D7, D12):
+- [X] T008 [P] Add two senders to `api-turistear/src/services/resend.ts` (D7, D12):
   - `sendSignInCodeEmail(env, { to, code })`, in es-MX copy: the code, "vence en 5 minutos", and "Turistear Ya! nunca te pedirá este código por teléfono ni WhatsApp" (FR-014). When `env.OTP_LOG_TO_CONSOLE === 'true'` it logs `[otp] <email> <code>` and sends nothing (FR-064).
   - `sendPasskeyNoticeEmail(env, { to, action: 'added' | 'removed' })` (FR-041).
-- [ ] T009 Create `api-turistear/src/auth/index.ts`, exporting `getAuth(env)` memoized in a `WeakMap<CloudflareBindings, Auth>`. Configure `betterAuth` with:
+- [X] T009 Create `api-turistear/src/auth/index.ts`, exporting `getAuth(env)` memoized in a `WeakMap<CloudflareBindings, Auth>`. Configure `betterAuth` with:
   - **Database (D3, D4)**: `database: drizzleAdapter(getDb(env), { provider: 'sqlite', schema, transaction: false })`, with `modelName` and snake_case `fields` for `user`→`users`, `session`→`sessions`, `account`→`accounts` and `verification`→`verifications`. `user.additionalFields` for `organizationId`, `role`, `status`, `phone` and `plan`, all with `input: false` (D2, constitution III).
   - **Core**: `secret: env.BETTER_AUTH_SECRET`, `baseURL: env.API_BASE_URL`, `basePath: '/api/auth'`, `trustedOrigins: [env.APP_BASE_URL]` and `telemetry: { enabled: false }`.
   - **`advanced` (D5, D7)**: `{ database: { generateId: 'uuid' }, useSecureCookies: true, cookiePrefix: env.AUTH_COOKIE_PREFIX, crossSubDomainCookies: { enabled: !!env.COOKIE_DOMAIN, domain: env.COOKIE_DOMAIN }, ipAddress: { ipAddressHeaders: ['cf-connecting-ip'] }, backgroundTasks: { handler: waitUntil } }`, with `waitUntil` imported from `cloudflare:workers`.
@@ -88,21 +88,21 @@ invitation lookup also disappear until US3 (T026) and US4 (T029) restore them un
   - **Notices (D12)**: `hooks.after = createAuthMiddleware(...)`. On `/passkey/verify-registration` or `/passkey/delete-passkey` with a successful result, it sends `sendPasskeyNoticeEmail` in the background, with errors caught (constitution VIII).
 
   Email-and-password stays disabled; `user.changeEmail` and `user.deleteUser` stay at their disabled defaults. Set `disabledPaths: ['/get-session', '/list-sessions']`, so the session is never readable over HTTP (D2, BFF; `auth.api.getSession` keeps working server-side).
-- [ ] T010 In `api-turistear/src/index.tsx`:
+- [X] T010 In `api-turistear/src/index.tsx`:
   - replace `app.route('/api/auth', authRouter)` with `app.on(['GET', 'POST'], '/api/auth/*', ...)`, which calls `getAuth(c.env).handler(c.req.raw)` (D2);
   - for the JSON answers of `/api/auth/sign-in/email-otp` and `/api/auth/passkey/verify-authentication`, rebuild the body without `token` and `session.token`, keeping the status and every header, `Set-Cookie` included (D2, constitution IV v1.2.1, R14);
   - keep `GET /api/me` behind `authMiddleware`.
-- [ ] T011 Rewrite `api-turistear/src/middleware/auth.ts` (D6):
+- [X] T011 Rewrite `api-turistear/src/middleware/auth.ts` (D6):
   - read the session with `getAuth(c.env).api.getSession({ headers: c.req.raw.headers, returnHeaders: true })` and append its `Set-Cookie` headers to the response;
   - no session → `401 UNAUTHORIZED`;
   - `status === 'suspended'` → `403 ACCOUNT_SUSPENDED`;
   - otherwise set `c.var.user` to today's `UserPayload`.
 
   Drop every import of `utils/jwt.ts`, `utils/cookies.ts` and `services/agnosticAuth.ts`.
-- [ ] T012 Build the test harness in `api-turistear/test/helpers/apply-migrations.ts` and `api-turistear/test/helpers/session.ts` (D17, R12):
+- [X] T012 Build the test harness in `api-turistear/test/helpers/apply-migrations.ts` and `api-turistear/test/helpers/session.ts` (D17, R12):
   - The setup file, after migrations, installs `CREATE TRIGGER test_user_session AFTER INSERT ON users BEGIN INSERT INTO sessions (id, user_id, token, expires_at, created_at, updated_at) VALUES (lower(hex(randomblob(16))), NEW.id, 'test-session-' || NEW.email, unixepoch() + 31536000, unixepoch(), unixepoch()); END`.
   - `session.ts` exports a synchronous `sessionCookie(email)`. It returns `__Secure-gm-test.session_token=` followed by `encodeURIComponent(token + '.' + base64(hmac(sha256, secret, token)))`, using `@noble/hashes`, and pairs it with a `sessionCookieFor(token)` variant.
-- [ ] T013 Mechanically switch the 61 business suites, meaning every file under `api-turistear/test/` outside `test/auth/` and `test/helpers/` that imports `buildFakeJwt`:
+- [X] T013 Mechanically switch the 61 business suites, meaning every file under `api-turistear/test/` outside `test/auth/` and `test/helpers/` that imports `buildFakeJwt`:
   - change the import to `import { sessionCookie } from '../helpers/session'`;
   - replace `gm_access=${buildFakeJwt(x)}` with `${sessionCookie(x)}`;
   - drop the Agnostic Auth `/auth/refresh` stub from `api-turistear/test/staff/staff-management.test.ts`.

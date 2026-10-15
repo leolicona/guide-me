@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { env, SELF } from 'cloudflare:test'
 import { seedUser, clearTenancyDb } from '../helpers/tenancy'
-import { buildFakeJwt } from '../helpers/jwt'
+import { sessionCookie } from '../helpers/session'
 
 // US-LG09 (docs/folios/line-autonomy.spec.md, F1) — every payment knows which lines it pays.
 // S-1…S-4 through the REAL endpoints (never hand-inserted allocations), plus the reversal's
@@ -11,7 +11,7 @@ import { buildFakeJwt } from '../helpers/jwt'
 const AGENT_EMAIL = 'agent@empresa.com'
 const ADMIN_EMAIL = 'admin@empresa.com'
 const PHONE = '+52 55 1234 5678'
-const auth = (email: string) => ({ Cookie: `gm_access=${buildFakeJwt(email)}` })
+const auth = (email: string) => ({ Cookie: sessionCookie(email) })
 const jsonAuth = (email: string) => ({ ...auth(email), 'Content-Type': 'application/json' })
 const POS = 'http://api.local/api/pos'
 const FOLIOS = 'http://api.local/api/folios'

@@ -90,6 +90,93 @@ export const sendInvitationEmail = async (
   }
 }
 
+interface SignInCodeEmailInput {
+  to: string
+  code: string
+}
+
+// passkey-auth D7 — Better Auth's emailOTP plugin calls this in the background (waitUntil), so a
+// failure here never reaches the user (spec Edge Cases) and a known and an unknown email answer
+// alike (FR-013).
+export const sendSignInCodeEmail = async (
+  env: CloudflareBindings,
+  { to, code }: SignInCodeEmailInput,
+): Promise<void> => {
+  // FR-064 — local only (wrangler.jsonc top-level profile): the code goes to the API console.
+  if (env.OTP_LOG_TO_CONSOLE === 'true') {
+    console.log(`[otp] ${to} ${code}`)
+    return
+  }
+
+  const res = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${env.RESEND_API_KEY}`,
+    },
+    body: JSON.stringify({
+      from: env.RESEND_FROM,
+      to,
+      subject: `Tu código de acceso a Turistear Ya!: ${code}`,
+      // FR-014 — the code, its expiry, and that we never ask for it by phone or WhatsApp.
+      html: `
+        <p>Hola,</p>
+        <p>Tu código para entrar a Turistear Ya! es:</p>
+        <p style="font-size:28px;font-weight:700;letter-spacing:6px;">${escapeHtml(code)}</p>
+        <p>El código vence en 5 minutos y solo sirve una vez.</p>
+        <p>Turistear Ya! nunca te pedirá este código por teléfono ni WhatsApp. No se lo compartas a nadie.</p>
+        <p>Si tú no pediste este código, puedes ignorar este correo.</p>
+      `,
+    }),
+  })
+
+  if (!res.ok) {
+    const body = await res.text()
+    throw new ApiError('INTERNAL_ERROR', 502, `Resend error: ${body}`)
+  }
+}
+
+interface PasskeyNoticeEmailInput {
+  to: string
+  action: 'added' | 'removed'
+}
+
+// passkey-auth D12, FR-041 — sent after the change succeeded, in the background: a Resend failure
+// never undoes an added or removed llave de acceso (constitution VIII).
+export const sendPasskeyNoticeEmail = async (
+  env: CloudflareBindings,
+  { to, action }: PasskeyNoticeEmailInput,
+): Promise<void> => {
+  const what =
+    action === 'added'
+      ? 'Se agregó una llave de acceso a tu cuenta de Turistear Ya!'
+      : 'Se eliminó una llave de acceso de tu cuenta de Turistear Ya!'
+
+  const res = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${env.RESEND_API_KEY}`,
+    },
+    body: JSON.stringify({
+      from: env.RESEND_FROM,
+      to,
+      subject: what,
+      html: `
+        <p>Hola,</p>
+        <p>${what}</p>
+        <p>Si fuiste tú, no tienes que hacer nada.</p>
+        <p>Si no fuiste tú, entra con un código por correo, revisa tus llaves de acceso en Seguridad y cierra la sesión en todos los dispositivos.</p>
+      `,
+    }),
+  })
+
+  if (!res.ok) {
+    const body = await res.text()
+    throw new ApiError('INTERNAL_ERROR', 502, `Resend error: ${body}`)
+  }
+}
+
 interface PasswordResetEmailInput {
   to: string
   name: string

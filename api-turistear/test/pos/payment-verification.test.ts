@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { env, SELF } from 'cloudflare:test'
 import { seedUser, seedTwoOrgs, clearTenancyDb } from '../helpers/tenancy'
-import { buildFakeJwt } from '../helpers/jwt'
+import { sessionCookie } from '../helpers/session'
 
 // US-AG41 / US-A67 — record a transfer reference + admin verification before QR release.
 // Spec: docs/payment-verification/payment-verification.spec.md. The suite clock is frozen (see apply-migrations.ts); a
@@ -11,7 +11,7 @@ const AGENT_EMAIL = 'agent@empresa.com'
 const ADMIN_EMAIL = 'admin@empresa.com'
 const PHONE = '+52 55 1234 5678'
 const REF = 'BBVA-0099887766'
-const auth = (email: string) => ({ Cookie: `gm_access=${buildFakeJwt(email)}` })
+const auth = (email: string) => ({ Cookie: sessionCookie(email) })
 const jsonAuth = (email: string) => ({ ...auth(email), 'Content-Type': 'application/json' })
 const base = 'http://api.local/api/pos'
 

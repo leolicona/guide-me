@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { env, SELF } from 'cloudflare:test'
 import { seedUser, seedTwoOrgs, clearTenancyDb, seedFolioLedgerRows } from '../helpers/tenancy'
-import { buildFakeJwt } from '../helpers/jwt'
+import { sessionCookie } from '../helpers/session'
 
 // Agent Continuous Cash Balance with Cash Drops — US-AG12, AG13, AG14, A19, AG23/24, A25/26.
 // Spec: docs/cash-drops/agent-balance-cash-drops.spec.md
@@ -18,7 +18,7 @@ const ADMIN_EMAIL = 'admin@empresa.com'
 const AGENT_EMAIL = 'agent@empresa.com'
 const AGENT2_EMAIL = 'agent2@empresa.com'
 
-const auth = (email: string) => ({ Cookie: `gm_access=${buildFakeJwt(email)}` })
+const auth = (email: string) => ({ Cookie: sessionCookie(email) })
 const jsonAuth = (email: string) => ({ ...auth(email), 'Content-Type': 'application/json' })
 
 const CASH = 'http://api.local/api/cash'

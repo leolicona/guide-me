@@ -3,7 +3,7 @@ import { env, SELF } from 'cloudflare:test'
 // @ts-expect-error — vite's ?raw import; the test replays migration 0070 (delete-legacy-affiliates D9).
 import migrationSql from '../../migrations/0070_delete_legacy_affiliates.sql?raw'
 import { seedUser, seedTwoOrgs, seedFolioLedgerRows } from '../helpers/tenancy'
-import { buildFakeJwt } from '../helpers/jwt'
+import { sessionCookie } from '../helpers/session'
 
 // delete-legacy-affiliates US1 — specs/003-delete-legacy-affiliates/spec.md.
 //
@@ -603,18 +603,18 @@ describe('delete-legacy-affiliates US2 — the product knows two roles, with no 
     await runMigration()
 
     const me = await SELF.fetch(`${API}/me`, {
-      headers: { Cookie: `gm_access=${buildFakeJwt(LEGACY_EMAIL)}` },
+      headers: { Cookie: sessionCookie(LEGACY_EMAIL) },
     })
     expect(me.status).toBe(401)
     expect(((await me.json()) as any).error.code).toBe('UNAUTHORIZED')
 
-    const login = await SELF.fetch(`${API}/auth/login`, {
+    const login = await SELF.fetch(`${API}/auth/sign-in/email-otp`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: LEGACY_EMAIL, password: 'cualquiera' }),
+      body: JSON.stringify({ email: LEGACY_EMAIL, otp: '000000' }),
     })
-    expect(login.status).toBe(401)
-    expect(((await login.json()) as any).error.code).toBe('INVALID_CREDENTIALS')
+    expect(login.status).toBe(400)
+    expect(((await login.json()) as any).code).toBe('INVALID_OTP')
   })
 
   it('refuses a suspended account and clears its session; lets an active one in (D5)', async () => {
@@ -628,17 +628,16 @@ describe('delete-legacy-affiliates US2 — the product knows two roles, with no 
     })
 
     for (const email of ['admin@empresa.com', AGENT_EMAIL]) {
-      const res = await SELF.fetch(`${API}/me`, { headers: { Cookie: `gm_access=${buildFakeJwt(email)}` } })
+      const res = await SELF.fetch(`${API}/me`, { headers: { Cookie: sessionCookie(email) } })
       expect(res.status, email).toBe(200)
     }
     const res = await SELF.fetch(`${API}/me`, {
-      headers: { Cookie: `gm_access=${buildFakeJwt('suspendido@empresa.com')}` },
+      headers: { Cookie: sessionCookie('suspendido@empresa.com') },
     })
     expect(res.status).toBe(403)
     expect(((await res.json()) as any).error.code).toBe('ACCOUNT_SUSPENDED')
     const cookies = res.headers.get('Set-Cookie') ?? ''
-    expect(cookies).toMatch(/gm_access=;/)
-    expect(cookies).toMatch(/gm_refresh=;/)
+    expect(cookies).toMatch(/__Secure-gm-test\.session_token=;/)
   })
 
   it('labels every seller of the commission CSV as Administrador or Agente (D6)', async () => {
@@ -663,7 +662,7 @@ describe('delete-legacy-affiliates US2 — the product knows two roles, with no 
     }
 
     const res = await SELF.fetch(`${API}/reports/commissions/export?from=2026-07-01&to=2026-07-31`, {
-      headers: { Cookie: `gm_access=${buildFakeJwt('admin@empresa.com')}` },
+      headers: { Cookie: sessionCookie('admin@empresa.com') },
     })
     expect(res.status).toBe(200)
     // Header first, TOTALS last; the seller rows between.

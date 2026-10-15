@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { env, SELF } from 'cloudflare:test'
 import { seedUser, seedTwoOrgs, clearFullDb } from '../helpers/tenancy'
-import { buildFakeJwt } from '../helpers/jwt'
+import { sessionCookie } from '../helpers/session'
 import { stayFloor } from '../../src/utils/lodging'
 
 // US-A92 / US-AG57 — docs/pos/discount-min-price.spec.md.
@@ -15,7 +15,7 @@ import { stayFloor } from '../../src/utils/lodging'
 
 const ADMIN_EMAIL = 'admin@empresa.com'
 
-const auth = (email: string) => ({ Cookie: `gm_access=${buildFakeJwt(email)}` })
+const auth = (email: string) => ({ Cookie: sessionCookie(email) })
 const jsonAuth = (email: string) => ({ ...auth(email), 'Content-Type': 'application/json' })
 
 let orgId: string

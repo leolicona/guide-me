@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { SELF } from 'cloudflare:test'
 import { seedUser, clearFullDb } from '../helpers/tenancy'
-import { buildFakeJwt } from '../helpers/jwt'
+import { sessionCookie } from '../helpers/session'
 
 // retire-affiliates US1–US2 — specs/001-retire-affiliates/spec.md.
 //
@@ -15,7 +15,7 @@ import { buildFakeJwt } from '../helpers/jwt'
 const ADMIN_EMAIL = 'admin@empresa.com'
 const AGENT_EMAIL = 'agent@empresa.com'
 
-const auth = (email: string) => ({ Cookie: `gm_access=${buildFakeJwt(email)}` })
+const auth = (email: string) => ({ Cookie: sessionCookie(email) })
 const jsonAuth = (email: string) => ({ ...auth(email), 'Content-Type': 'application/json' })
 const API = 'http://api.local/api'
 const errCode = (json: any): string | undefined => json?.error?.code
@@ -86,7 +86,7 @@ describe('retire-affiliates US2 — the shift session is closed', () => {
   it('ignores a shift-operator cookie beside a real session: the user is who they are (D4)', async () => {
     const { agentId } = await seedOrg()
     const res = await SELF.fetch(`${API}/me`, {
-      headers: { Cookie: `gm_op=any.signed.token; gm_access=${buildFakeJwt(AGENT_EMAIL)}` },
+      headers: { Cookie: `gm_op=any.signed.token; ${sessionCookie(AGENT_EMAIL)}` },
     })
     expect(res.status).toBe(200)
     expect(((await res.json()) as any).user.userId).toBe(agentId)

@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { env, SELF } from 'cloudflare:test'
 import { seedUser, seedTwoOrgs, clearTenancyDb, seedFolioLedgerRows } from '../helpers/tenancy'
-import { buildFakeJwt } from '../helpers/jwt'
+import { sessionCookie } from '../helpers/session'
 
 // Administrator Vendor Capabilities — US-A31, A32, A33, A34, A35.
 // Spec: docs/admin-vendor/admin-vendor-capabilities.spec.md (Scenarios S1–S11).
@@ -16,7 +16,7 @@ import { buildFakeJwt } from '../helpers/jwt'
 const ADMIN_EMAIL = 'admin@empresa.com'
 const AGENT_EMAIL = 'agent@empresa.com'
 
-const auth = (email: string) => ({ Cookie: `gm_access=${buildFakeJwt(email)}` })
+const auth = (email: string) => ({ Cookie: sessionCookie(email) })
 const jsonAuth = (email: string) => ({ ...auth(email), 'Content-Type': 'application/json' })
 
 const POS = 'http://api.local/api/pos'

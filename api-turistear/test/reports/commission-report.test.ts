@@ -6,7 +6,7 @@ import { materializeSeededFolio,
   clearFullDb,
   seedFolioLedgerRows,
 } from '../helpers/tenancy'
-import { buildFakeJwt } from '../helpers/jwt'
+import { sessionCookie } from '../helpers/session'
 
 // Commission & settlement report by period — US-A17/A18/A20.
 // Spec: docs/reports/commission-report.spec.md. Read-only date-range aggregate over
@@ -17,7 +17,7 @@ const ADMIN_EMAIL = 'admin@empresa.com'
 const AGENT_EMAIL = 'agent@empresa.com'
 const AGENT2_EMAIL = 'agent2@empresa.com'
 
-const auth = (email: string) => ({ Cookie: `gm_access=${buildFakeJwt(email)}` })
+const auth = (email: string) => ({ Cookie: sessionCookie(email) })
 
 const REPORTS = 'http://api.local/api/reports'
 const nowSec = () => Math.floor(Date.now() / 1000)

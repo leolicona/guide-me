@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { env, SELF } from 'cloudflare:test'
 import { materializeSeededFolio, seedUser, seedTwoOrgs, clearTenancyDb } from '../helpers/tenancy'
-import { buildFakeJwt } from '../helpers/jwt'
+import { sessionCookie } from '../helpers/session'
 
 // US-A83 — finding one sale among a hundred.
 // Spec: docs/oversight/folio-list-search.spec.md (S-1…S-9, S-12).
@@ -11,7 +11,7 @@ import { buildFakeJwt } from '../helpers/jwt'
 // installed. A search that quietly kept the window would be a search with a hidden date filter.
 
 const ADMIN_EMAIL = 'admin@empresa.com'
-const auth = (email: string) => ({ Cookie: `gm_access=${buildFakeJwt(email)}` })
+const auth = (email: string) => ({ Cookie: sessionCookie(email) })
 const FOLIOS = 'http://api.local/api/folios'
 
 const nowSec = () => Math.floor(Date.now() / 1000)

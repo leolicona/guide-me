@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { env, SELF } from 'cloudflare:test'
 import { seedUser, seedTwoOrgs, clearTenancyDb , readDerivedFolio} from '../helpers/tenancy'
-import { buildFakeJwt } from '../helpers/jwt'
+import { sessionCookie } from '../helpers/session'
 import { sweepExpiredBookings } from '../../src/routes/pos/sweep'
 // @ts-expect-error — vite's ?raw import; the test replays the migration's backfill INSERTs (S-5).
 import migrationSql from '../../migrations/0061_folio_events.sql?raw'
@@ -18,7 +18,7 @@ const AGENT_EMAIL = 'agent@empresa.com'
 const OTHER_AGENT_EMAIL = 'otro@empresa.com'
 const ADMIN_EMAIL = 'admin@empresa.com'
 const PHONE = '+52 55 1234 5678'
-const auth = (email: string) => ({ Cookie: `gm_access=${buildFakeJwt(email)}` })
+const auth = (email: string) => ({ Cookie: sessionCookie(email) })
 const jsonAuth = (email: string) => ({ ...auth(email), 'Content-Type': 'application/json' })
 const POS = 'http://api.local/api/pos'
 const FOLIOS = 'http://api.local/api/folios'
