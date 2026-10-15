@@ -13,7 +13,7 @@ import {
   sessionCookieFor,
   signSessionToken,
 } from '../helpers/session'
-import { API, AUTH, post, sessionTokenOf, withCookies } from '../helpers/auth-flows'
+import { API, AUTH, clearAuthDb, post, sessionTokenOf, withCookies } from '../helpers/auth-flows'
 
 const ADMIN_EMAIL = 'admin@empresa.com'
 const AGENT_EMAIL = 'agent@empresa.com'
@@ -42,6 +42,7 @@ const sessionRow = (token: string) =>
 
 beforeEach(async () => {
   await clearTenancyDb()
+  await clearAuthDb()
 })
 afterEach(() => vi.restoreAllMocks())
 

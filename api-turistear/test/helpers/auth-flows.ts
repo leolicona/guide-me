@@ -7,6 +7,15 @@ import { createCredential, getAssertion, type SoftCredential } from './authentic
 export const API = 'http://api.local/api'
 export const AUTH = `${API}/auth`
 
+// Storage is shared by the tests of a file; the auth tables are cleared alongside the tenancy
+// ones. Sessions and passkeys also go with their users (ON DELETE CASCADE).
+export const clearAuthDb = async () => {
+  await env.DB.exec('DELETE FROM rate_limits')
+  await env.DB.exec('DELETE FROM verifications')
+  await env.DB.exec('DELETE FROM passkeys')
+  await env.DB.exec('DELETE FROM sessions')
+}
+
 // ─── Cookies ───────────────────────────────────────────────────────────────────────────────────
 // Folds a response's Set-Cookie into a Cookie header: new values replace old ones, and an expired
 // cookie (Max-Age=0) is dropped, as a browser would.

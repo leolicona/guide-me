@@ -42,15 +42,14 @@ export default defineConfig({
   test: {
     setupFiles: ['./test/helpers/apply-migrations.ts'],
     // passkey-auth — inside workerd, a refusal Better Auth throws from an endpoint handler (a wrong
-    // code, an expired challenge) is answered correctly AND reported once more as an unhandled
-    // rejection by its dispatch pipeline. Reproduced with a minimal Better Auth config; the HTTP
-    // answer is always right, and test/auth/* asserts each one. Only Better Auth's 4xx APIError is
+    // code, an expired challenge, a registration that does not verify) is answered correctly AND
+    // reported once more as an unhandled rejection by its dispatch pipeline. Reproduced with a
+    // minimal Better Auth config; the HTTP answer is always right, and test/auth/* asserts each one.
+    // Only Better Auth's own refusals — an APIError carrying its `{ code, message }` body — are
     // ignored: any other unhandled error still fails the run.
     onUnhandledError(error) {
-      const status = (error as { statusCode?: unknown }).statusCode
-      if (error.name === 'APIError' && typeof status === 'number' && status >= 400 && status < 500) {
-        return false
-      }
+      const body = (error as { body?: { code?: unknown } }).body
+      if (error.name === 'APIError' && typeof body?.code === 'string') return false
     },
   },
 })

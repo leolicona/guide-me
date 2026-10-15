@@ -135,7 +135,7 @@ invitation lookup also disappear until US3 (T026) and US4 (T029) restore them un
 
 **Independent Test**: an active agent requests a code, enters it and reaches home. The session renews, and ends on sign-out.
 
-- [ ] T016 [US1] Write `api-turistear/test/auth/email-code.test.ts`, citing `passkey-auth US1`, with Resend stubbed at its origin as `test/email/` does. It covers Story 1, scenarios 1–7:
+- [X] T016 [US1] Write `api-turistear/test/auth/email-code.test.ts`, citing `passkey-auth US1`, with Resend stubbed at its origin as `test/email/` does. It covers Story 1, scenarios 1–7:
   - unknown email → `{ success: true }` and no Resend call;
   - newest code wins;
   - after 5 minutes → `OTP_EXPIRED`;
@@ -168,7 +168,7 @@ invitation lookup also disappear until US3 (T026) and US4 (T029) restore them un
 
 **Independent Test**: sign in by code → accept the offer → create → sign out → sign in with the passkey and no email. A dev passkey is not recognized by another `rpID`.
 
-- [ ] T021 [US2] Write `api-turistear/test/auth/passkeys.test.ts`, citing `passkey-auth US2`, using `test/helpers/authenticator.ts`. It covers:
+- [X] T021 [US2] Write `api-turistear/test/auth/passkeys.test.ts`, citing `passkey-auth US2`, using `test/helpers/authenticator.ts`. It covers:
   - registration on a session less than a day old → 200;
   - a session older than `freshAge` → `403 SESSION_NOT_FRESH` (FR-005);
   - a discoverable sign-in with no email → session cookie;
