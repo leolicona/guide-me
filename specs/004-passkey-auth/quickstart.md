@@ -18,13 +18,12 @@ implementation lives in `tasks.md`.
 
 Merging deploys dev at once. Do both steps and record the results in the PR.
 
-**Secrets.** `BETTER_AUTH_SECRET` is a Worker secret, **different in each environment**
-(constitution VIII), and never committed.
-
-```bash
-openssl rand -base64 48 | pnpm --filter api-turistear exec wrangler secret put BETTER_AUTH_SECRET --env dev
-openssl rand -base64 48 | pnpm --filter api-turistear exec wrangler secret put BETTER_AUTH_SECRET --env production
-```
+**Secrets.** `BETTER_AUTH_SECRET` is held in the GitHub environments `dev` and `production`,
+**a different value in each** (constitution VIII), and never committed. Generate each value with
+`openssl rand -base64 48` (32+ characters). On every deploy, `deploy-dev.yml` and
+`deploy-prod.yml` copy it to the API Worker (`wrangler secret put --env dev|production`) before the
+migrations; a missing or short secret stops the run with nothing migrated or deployed, and the API
+itself refuses to start without one (`src/auth/index.ts`).
 
 Rotating the secret signs everyone out and invalidates every pending code. It never touches the
 passkeys.

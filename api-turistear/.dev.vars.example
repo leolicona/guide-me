@@ -21,7 +21,8 @@ CORS_ORIGIN=http://localhost:5173,http://localhost:5174
 
 # Signs the session cookie and encrypts the stored sign-in codes (passkey-auth D5, D7). Any 32+
 # random characters work locally (`openssl rand -base64 48`). In dev and prod it is a Worker secret
-# (`wrangler secret put BETTER_AUTH_SECRET --env …`), DIFFERENT in each environment, never committed.
+# held in the GitHub environments `dev` and `production` — DIFFERENT in each, never committed — and
+# copied to the Worker by the deploy workflows (.github/workflows/deploy-*.yml).
 # Changing it signs everyone out and voids pending codes; passkeys survive it.
 BETTER_AUTH_SECRET=
 

@@ -45,6 +45,20 @@ jobs:
       - name: Test (api)
         run: pnpm test:api
 
+      # passkey-auth D19 — BETTER_AUTH_SECRET lives in this GitHub environment ("dev") and is copied
+      # to the API Worker on every deploy, before anything changes. The API refuses to start without
+      # it (src/auth/index.ts), so a missing or short secret stops the run here, with nothing
+      # migrated or deployed. Each environment holds its own value (constitution VIII).
+      - name: Sync BETTER_AUTH_SECRET to the API Worker (dev)
+        env:
+          BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET }}
+        run: |
+          if [ "${#BETTER_AUTH_SECRET}" -lt 32 ]; then
+            echo "::error::BETTER_AUTH_SECRET is missing or shorter than 32 characters in the 'dev' environment"
+            exit 1
+          fi
+          printf '%s' "$BETTER_AUTH_SECRET" | pnpm --filter api-turistear exec wrangler secret put BETTER_AUTH_SECRET --env dev
+
       - name: Apply D1 migrations (dev)
         run: pnpm db:migrate:dev
 

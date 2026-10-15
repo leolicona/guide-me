@@ -305,7 +305,9 @@ CLAUDE.md's local-login caveat is rewritten to match.
 (`/speckit-analyze` C1): v1.2.0 (`f8ff722`), then v1.2.1 (`ca7b582`), which keeps the BFF.
 
 **D19 — A pre-merge gate.** Before merging into `develop`, which deploys dev at once:
-1. Set `BETTER_AUTH_SECRET` as a Worker secret in dev and in prod, with different values.
+1. Set `BETTER_AUTH_SECRET` in dev and in prod, with different values. *As implemented
+   (2026-10-15)*: it lives in the GitHub environments `dev` and `production`, and each deploy
+   workflow copies it to its Worker before migrating; a missing one stops the deploy.
 2. Run the email-case collision query against both databases.
 3. Record both results in the PR.
 

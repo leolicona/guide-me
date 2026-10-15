@@ -312,7 +312,7 @@ invitation lookup also disappear until US3 (T026) and US4 (T029) restore them un
   - mark the Agnostic Auth mention under `docs/integrations/` as historical.
 - [X] T045 Register debt `password-material` with `/speckit-debt-log`. `users.password_hash`, `users.password_salt` and `password_reset_tokens` remain in D1, unread. Paying it is the next PR's migration (0072 or the next free number), which drops them (D15, FR-061, SC-006).
 - [ ] T046 **Pre-merge gate, which blocks the merge** (D19, `specs/004-passkey-auth/quickstart.md` § 2):
-  - set `BETTER_AUTH_SECRET` in dev and in prod, with different values;
+  - set `BETTER_AUTH_SECRET` in dev and in prod, with different values (in the GitHub environments `dev` and `production`; the deploy workflows copy it to the Workers);
   - run the email-case collision query on both databases;
   - record both results in the PR description.
 - [X] T047 Run the proof in `specs/004-passkey-auth/quickstart.md` § 4:
