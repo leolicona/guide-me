@@ -8,8 +8,9 @@ This file records three things, as constitution VIII asks of any service we do n
 - what breaks when it is down.
 
 Devolada is reached only through `api-turistear/src/services/devolada.ts` (research D5). It is
-called with the connected organization's own credential (`Authorization: Bearer dk_…`), never a
-shared one.
+called with the organization's own credentials (`Authorization: Bearer dk_…`), never a shared one:
+new links with its current credential, and every call about a link with the credential that
+created it (research D21).
 
 ## Calls we make
 
@@ -23,6 +24,7 @@ shared one.
 | Learn whether a timed-out link exists (D12) | the same `POST`, same key | sweep | 8 s | link row id | a replayed answer means it exists | retry next run |
 | Close a link (D13) | `PATCH /v1/payment-links/{id}` `{close: true}` | after cancel, reject or another settlement, never under a payment in flight while the sale lives; sweep retry | 8 s | `close:` + link row id | — | `LINK_CLOSED`, or an answer showing it paid or expired, means already closed |
 | Read one payment (D4) | `GET /v1/payments/{paymentId}` | every webhook | 8 s | — | everything D9 needs | `NOT_FOUND` = not this organization's (or other mode): change nothing |
+| Read one link (D21) | `GET /v1/payment-links/{id}`, with the current credential | a link's own credential is rejected | 8 s | — | whether the current credential can read it | it cannot: the link becomes `failed` and its sale goes to the admin |
 | Read a sale's payments (D12) | `GET /v1/payments?customerRef=<folio id>` | sweep | 8 s | — | every payment of every link of the sale | retry next run |
 | Signing keys (D4) | `GET /.well-known/jwks.json` (no credential) | unknown `kid`; respects `Cache-Control` | 8 s | — | JWK by `kid` | webhook answers 503 so Devolada retries |
 
@@ -53,7 +55,8 @@ Nothing else about the customer (phone, email) or the seller ever leaves Turiste
 
 | Devolada answers | On | Turistear does |
 |---|---|---|
-| `AUTHENTICATION_ERROR` (401) | any call | connection → `broken` (`DEVOLADA_CREDENTIAL_REJECTED`); checkout falls back; the admin is warned in Ajustes |
+| `AUTHENTICATION_ERROR` (401) | a call with the current credential | connection → `broken` (`DEVOLADA_CREDENTIAL_REJECTED`); checkout falls back; the admin is warned in Ajustes |
+| `AUTHENTICATION_ERROR` (401) | a call with a retired credential | the link moves to the current credential if that one can read it; otherwise it becomes `failed` and goes to the admin (research D21) |
 | `BUSINESS_SUSPENDED` (409) | any call | connection → `broken`; checkout falls back |
 | `CHANNEL_UNAVAILABLE` (409) | issue link | connection → `broken`, recording `clabe` or `bank`; checkout falls back |
 | `VALIDATION_ERROR` (400) | any call | our bug: logged with Devolada's `message`; the link → `failed`; the key gets a new suffix |
@@ -71,8 +74,8 @@ Nothing else about the customer (phone, email) or the seller ever leaves Turiste
 4. Verify the base64url-decoded raw `r‖s` signature over `` `${timestamp}.${rawBody}` `` with SHA-256. On failure, answer 401.
 5. Only now parse the JSON and validate its shape. On failure, answer 400.
 6. Resolve the link by `data.paymentLinkId`. Unknown → 200 and a log line.
-7. Check that `data.isTest` matches the connection's mode, then de-duplicate on `eventId`.
-8. Re-read `GET /v1/payments/{data.paymentId}` with the owning organization's credential, and apply D9 to that answer.
+7. Check that `data.isTest` matches the link's own mode, then de-duplicate on `eventId`.
+8. Re-read `GET /v1/payments/{data.paymentId}` with the credential that created the link, one of the owning organization's own (research D21), and apply D9 to that answer.
 
 Devolada's rules this satisfies:
 - verify before parsing;
@@ -88,7 +91,7 @@ Devolada's rules this satisfies:
 | Unreachable at checkout or settlement | No link is created. The sale completes on today's manual path | Seller: an alert on the receipt. Admin: Por verificar «Sin enlace de pago — verificar a mano» | None needed: the admin verifies as today |
 | Its notifications stop (outage, address taken by another system) | Verdicts arrive late | Ajustes health: `consecutive_failures`, `is_ours = false` | The sweep re-reads every open link at least every 15 minutes (SC-003) |
 | Keys endpoint unreachable | The webhook answers 503 | — | Devolada retries for 4 h; the sweep needs no keys |
-| Credential revoked or business suspended | Connection `broken`; new transfers fall back | Admin, in Ajustes | The admin replaces the key, or Devolada lifts the suspension |
+| Credential revoked or business suspended | Connection `broken`; new transfers fall back. Links created with a revoked retired key move to the current key, or go to the admin | Admin, in Ajustes | The admin replaces the key, or Devolada lifts the suspension |
 | Validation credit exhausted | Payments wait as `queued_for_credit`; tickets wait with them | Admin: «Verificación en pausa» in Ajustes | The business tops up at Devolada; validation resumes by itself |
 | Down longer than a link's lifetime | Nothing is cancelled: the unpaid branch needs a successful re-read showing no payment in flight (D9) | — | When Devolada answers again, the sweep applies whatever happened |
 | Devolada answers wrongly (a verdict a human disputes) | — | Admin | Verificar or Rechazar by hand remain available (FR-018) |

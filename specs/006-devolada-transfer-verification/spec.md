@@ -81,6 +81,17 @@ both as the fallback when Devolada is unavailable and as the admin's override.
   rejecting the whole sale still closes it (FR-011).
 - Q: Which word does the UI use for the link? → A: «enlace» («Enlace de pago»), the word the
   customer's ticket message already uses; never «liga» or «link» (constitution VII).
+- Q: What happens if the admin switches to another Devolada account while payments are pending on
+  the previous one? → A: The admin can switch at any time. Each payment link is followed with the
+  key of the account that created it, so the previous account's pending payments still clear. If
+  that key stops working and the current one cannot see the link, the sale goes to the admin to
+  verify by hand; it is never cancelled automatically (FR-004).
+- Q: A customer already paid an apartado's balance, but Devolada has not confirmed it yet. Can the
+  admin record it by hand? → A: Yes. «Verificar» records the settlement as verified by the admin
+  and releases the tickets if the sale is paid. Devolada's later verdict records nothing a second
+  time (FR-018).
+- Q: After the admin disconnects Devolada, are the pending links' notifications still applied? →
+  A: Yes, as while connected: the key is kept until the last pending link is resolved (FR-004).
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -200,6 +211,9 @@ its test payment (no tickets). Then settle by transfer and confirm the settlemen
 4. **Given** an apartado whose deposit still awaits its verdict, **When** it is settled by transfer,
    **Then** both payments are followed independently and tickets are released only once every
    transfer of the sale is cleared.
+5. **Given** a settlement Devolada is still verifying, **When** the admin verifies it by hand,
+   **Then** the settlement is recorded with the admin as the actor, the tickets are released if the
+   sale is paid, and Devolada's later verdict records nothing a second time.
 
 ---
 
@@ -212,13 +226,15 @@ its way is flagged (Story 2, scenario 5) instead of lost.
 **Why this priority**: rare, but each occurrence is real money owed back to a customer; preventing
 it is cheaper than chasing it.
 
-**Independent Test**: with test credentials, create a transfer sale, cancel it and observe its link
-closed; then advance a test payment to *unapplied* and observe the admin alert.
+**Independent Test**: with test credentials, settle an apartado by transfer, cancel the sale and
+observe its settlement link closed; then advance a test payment to *unapplied* and observe the
+admin alert. *(A sale whose transfer is still pending cannot be cancelled, only rejected.)*
 
 **Acceptance Scenarios**:
 
-1. **Given** a transfer sale with an open link, **When** the sale is cancelled — by a person or by
-   the apartado expiry — **Then** its link is closed.
+1. **Given** a sale with an open link, **When** the sale is cancelled by a person, **Then** its link
+   is closed. *(The apartado expiry never meets an open link: a deposit or settlement link expires
+   with the apartado's own clock.)*
 2. **Given** an open link, **When** a line of the sale is cancelled and the amount due changes,
    **Then** the link is closed and a new link for the new amount replaces it.
 3. **Given** a payment with an open link, **When** an admin rejects it, **Then** its link is closed.
@@ -252,7 +268,10 @@ closed; then advance a test payment to *unapplied* and observe the admin alert.
   amount.
 - **The credential is revoked, or the organization's Devolada business is suspended** → the
   connection shows as broken in Ajustes, the admin is warned, and new transfer sales fall back to
-  the manual path until it is fixed.
+  the manual path until it is fixed. A link created with a key that no longer works is followed
+  with the current key when it can see it; otherwise its sale goes to the admin to verify by hand.
+- **The admin switches to another Devolada account while payments are pending** → each link is
+  still followed with the key of the account that created it (FR-004).
 - **The Devolada account already sends its notifications to another system** → connecting warns the
   admin before replacing that address, because Devolada keeps one address per business.
 - **Devolada answers slowly at checkout** → the seller waits no longer than SC-006 allows before
@@ -275,8 +294,10 @@ closed; then advance a test payment to *unapplied* and observe the admin alert.
 - **FR-003**: Once saved, the credential MUST never be shown again or returned to any client; the
   admin sees only that it is connected and a masked hint. It MUST be stored so that reading the
   database alone does not reveal it.
-- **FR-004**: The admin MUST be able to disconnect. New transfer sales then use the manual path,
-  while payments that already have a link are followed until their verdict.
+- **FR-004**: The admin MUST be able to disconnect, and to replace the credential, even with
+  another Devolada business's. New transfer sales then use the manual path, or the new credential.
+  Payments that already have a link are followed until their verdict, by notification and by the
+  system's own checks, with the credential that created the link. *(Clarified 2026-10-15)*
 - **FR-005**: The connection screen MUST show its health: the last verdict received, failing
   notification deliveries, a rejected credential or suspended business, and paused validation
   credit.
@@ -342,7 +363,8 @@ closed; then advance a test payment to *unapplied* and observe the admin alert.
   is *validating*, the sale MUST show «Verificando pago» and release nothing.
 - **FR-018**: The admin's manual Verificar and Rechazar MUST remain available for every awaiting
   payment of a connected organization, behave as today, and record the admin as the actor and the
-  verification as manual.
+  verification as manual. A settlement by link, which is recorded only once proven, is verified by
+  hand through «Verificar» too, also while Devolada is still verifying it. *(Clarified 2026-10-15)*
 - **FR-019**: The sale's timeline MUST record each verdict that changes the sale; automatic ones are
   attributed to «Sistema».
 
@@ -376,12 +398,15 @@ closed; then advance a test payment to *unapplied* and observe the admin alert.
 
 ### Key Entities *(include if feature involves data)*
 
-- **Devolada connection** — at most one per organization: the credential (write-only), its mode
-  (real or test), its status (connected · broken · disconnected), the health of its notification
-  address, and who connected it and when.
+- **Devolada connection** — at most one per organization: its current credential, its status
+  (connected · broken · disconnected), the health of its notification address, and who connected
+  it and when.
+- **Devolada credential** — each API key the organization has connected: write-only, with its mode
+  (real or test) and masked hint. A replaced key is kept, unreadable to anyone, while a link it
+  created is unresolved, and then erased.
 - **Payment link** — one per transfer of a sale: the sale and which payment it collects
-  (sale · deposit · settlement), the amount asked, the link's address, its expiry, and its state
-  (open · paid · expired · closed).
+  (sale · deposit · settlement), the credential that created it, the amount asked, the link's
+  address, its expiry, and its state (open · paid · expired · closed).
 - **Devolada payment (verdict)** — what Devolada reports for a link: its id, status, the amounts
   asked, claimed and received, the match (exact · short · over), Devolada's receipt number, the
   verdict's time, and what it awaits from the customer, if anything.

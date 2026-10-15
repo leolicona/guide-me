@@ -1,6 +1,6 @@
 # Contract: Turistear API changes
 
-**Feature**: `specs/006-devolada-transfer-verification`. **Decisions**: research D1–D20.
+**Feature**: `specs/006-devolada-transfer-verification`. **Decisions**: research D1–D21.
 
 **Base URL**: `https://api.turistearya.com/api`; dev: `https://api-dev.turistearya.com/api`; a pull request's preview: `https://api-guideme-pr-<n>.<subdomain>.workers.dev/api`.
 
@@ -97,10 +97,10 @@ never appear (research D16).
 | Link not created (alert) | No se pudo crear el enlace de pago; un administrador verificará la transferencia |
 | Link too short (alert, `PAYMENT_LINK_TOO_SHORT`) | Ya no hay tiempo para cobrar con enlace; un administrador verificará la transferencia |
 | Checkout and SettleSheet, connected | Se generará un enlace de pago para cobrar por WhatsApp |
-| Settlement link open, BookingActions chip | Liquidación en verificación |
+| BookingActions chip, in place of the settle buttons: while a settlement link is open (PR 2), and from PR 3 only while its payment is in flight | Liquidación en verificación |
 | Line cancellation or settlement refused (`SETTLEMENT_IN_PROGRESS`) | La venta ya tiene un enlace de pago para liquidar; espera su resultado |
 | Line cancel replaced the link | El enlace de pago cambió — vuelve a enviarlo |
-| Settlement exception, accept | Verificar |
+| Settlement exception, or a settlement Devolada is still verifying, accept | Verificar |
 | Settlement exception, dismiss | Descartar (the sale stays an apartado; unlike «Rechazar pago», it cancels nothing) |
 | Unapplied money, returned | Ya lo devolví |
 | Receipt header while the money is unverified | Pago en verificación (instead of «Venta confirmada» and the «Pagado» chip) |
@@ -159,6 +159,7 @@ The connect sheet maps each refusal to copy. A broken connection's reason reuses
 }
 ```
 
+- `mode` and `key_hint` are the current credential's, and `null` while disconnected (research D21).
 - `webhook` is read live from Devolada with an 8 s limit. When Devolada cannot be reached, `webhook` is `null` and `health_error` is `"DEVOLADA_UNAVAILABLE"`. Health never fails the request.
 - `webhook.is_ours` is `null` where this environment registers no address (`DEVOLADA_WEBHOOK_URL` empty: local and pull-request previews). There, verdicts arrive only through the sweep, which is expected rather than a failure (research D3, D17).
 
@@ -183,7 +184,9 @@ Steps (D2, D3):
 2. probe link;
 3. mode policy;
 4. notification address check;
-5. encrypt and store.
+5. encrypt and store, as a new credential that becomes the current one.
+
+Replacing the key, even with another Devolada business's, retires the previous credential without forgetting it. The links it created go on being followed with it until they resolve (research D21).
 
 | Status | Body / code | When |
 |---|---|---|
@@ -201,7 +204,7 @@ Steps (D2, D3):
 #### `DELETE /organizations/me/devolada` — disconnect
 
 - 200 `{ "connection": DevoladaConnectionView | null }`, with status `disconnected`.
-- Idempotent. Links already issued are followed to their verdict (FR-004), and the credential is erased once none is left (D12).
+- Idempotent. Links already issued are followed to their verdict, by notification and by the sweep, with the credential that created them (FR-004). That credential is erased once none is left (research D12, D21).
 
 ### Checkout and settlement — sellers (agents) and admins
 
@@ -265,7 +268,7 @@ For a connected organization with `"method": "transfer"`, no settlement is recor
 
 | `action` | Allowed when | Effect |
 |---|---|---|
-| `accept` | settlement link, payment `partial` or `invalid`, unresolved | records the settlement as the admin (`verified_by` = admin) and releases tickets if the sale is now paid and cleared |
+| `accept` | settlement link, payment `partial` or `invalid`, or still in flight (*validating*, awaiting a tracking key, `queued_for_credit`), unresolved | records the settlement as the admin (`verified_by` = admin) and releases tickets if the sale is now paid and cleared. For a payment in flight the link stays open until the verdict, which records nothing more and then closes it (D13, D15) |
 | `dismiss` | settlement link, payment `partial` or `invalid`, unresolved | closes the link; the apartado continues |
 | `returned` | payment `unapplied` (or `confirmed` on a cancelled sale), unresolved | records that the money was returned outside the system |
 
@@ -295,7 +298,7 @@ Sale and deposit exceptions use today's `POST /pos/folios/:id/verify` and `/reje
 | 200 | `{ "received": true }`: applied, duplicate, unknown link or mode mismatch | delivered |
 | 400 | `WEBHOOK_PAYLOAD_INVALID`: not JSON, wrong shape, or over 64 KiB | failed attempt |
 | 401 | `WEBHOOK_SIGNATURE_INVALID` | failed attempt |
-| 503 | `DEVOLADA_UNAVAILABLE`: keys or the re-read unreachable, or the organization's credential unreadable here (research D17) | failed attempt, retried |
+| 503 | `DEVOLADA_UNAVAILABLE`: keys or the re-read unreachable, or the link's credential unreadable here (research D17, D21) | failed attempt, retried |
 | 500 | `INTERNAL_ERROR` | failed attempt, retried |
 
 ## Error codes (spec FR-023 — constitution IV)

@@ -13,9 +13,11 @@ An organization connects its own Devolada account. From then on, its transfers a
 Banxico's verdict, which Devolada reports, instead of by an admin. The approach, all from
 [research.md](./research.md):
 
-- **Credential**: stored encrypted, one per organization, and never in the organization payload
-  that every role reads (D1). Connecting probes the credential, learns its mode and checks the
-  notification address before taking it (D2, D3).
+- **Credential**: stored encrypted, and never in the organization payload that every role reads
+  (D1). Connecting probes the credential, learns its mode and checks the notification address
+  before taking it (D2, D3). Every key the organization connects is kept while a link it created is
+  unresolved, and each link is followed with its own key, so the admin may switch Devolada accounts
+  at any time (D21).
 - **Links**: each transfer gets a one-time Devolada link, issued *after* the sale's money
   write commits, with today's manual path as the fallback (D6, D7). A link that would stay open less
   than 15 minutes is not issued (D7). A settlement is a link too, and
@@ -23,13 +25,16 @@ Banxico's verdict, which Devolada reports, instead of by an admin. The approach,
   in the code can undo a settlement (D8).
 - **Verdicts**: they arrive two ways.
   - A signed webhook. It is verified, routed by the link's global id, then **re-read with the
-    owning organization's own credential** before anything changes (D4).
+    credential that created the link**, one of the owning organization's own, before anything
+    changes (D4, D21).
   - A 15-minute recovery sweep on the existing cron (D12).
 - **Applying a verdict** (D9):
   - *confirmed* → verifies one ledger row, through cores extracted from `verifyPayment` (D10).
   - Money that never arrived → cancels the sale through a guarded system cancellation, with none of
     `rejectPayment`'s defects (D11).
   - Everything else → reaches Por verificar or the seller, labelled by the server (D14, D15).
+  - The admin can always verify by hand, a settlement still in verification included (D15; spec
+    clarification of 2026-10-15).
 - **Por verificar holds only work for the admin**: a sale Devolada is still resolving stays out of it, and out of its count, until the admin has something to do (D14; spec clarification of 2026-10-15).
 - **Closing links**: links close whenever their sale stops taking money, but never under a payment in flight while the sale lives (D13; spec clarification of 2026-10-15).
 
@@ -56,7 +61,7 @@ otherwise stand.
 - **No new npm dependency.**
 
 **Storage**:
-- **Database**: Cloudflare D1 (`guideme-db` for dev and every preview, `guideme-db-prod`). Migration `0073` adds four tenant-scoped tables ([data-model.md](./data-model.md)). It reaches dev's D1 with PR 1's preview, before the merge.
+- **Database**: Cloudflare D1 (`guideme-db` for dev and every preview, `guideme-db-prod`). Migration `0073` adds five tenant-scoped tables ([data-model.md](./data-model.md)). It reaches dev's D1 with PR 1's preview, before the merge.
 - **Secrets**: new secret `DEVOLADA_CREDENTIAL_KEY`, kept in the GitHub environments `dev` and `production` and planted by every deploy. A preview gets dev's value or none, never a throwaway (D17).
 
 **Testing**:
@@ -89,7 +94,7 @@ otherwise stand.
 **Scale/Scope**:
 - **Production today** (read 2026-10-06): 2 organizations; 5 transfers in 75 days, 0.5% of payments.
 - **Design target**: ≤ 200 links per organization per day.
-- **Work**: 4 new tables, 5 new endpoints (4 admin, 1 public webhook), 3 cores extracted from existing handlers, 1 new sweep, 1 new frontend feature module, about 20 frontend files touched.
+- **Work**: 5 new tables, 5 new endpoints (4 admin, 1 public webhook), 3 cores extracted from existing handlers, 1 new sweep, 1 new frontend feature module, about 20 frontend files touched.
 
 ## Constitution Check
 
@@ -97,9 +102,9 @@ otherwise stand.
 
 | Principle | Gate | Before research | After design | Evidence |
 |---|---|---|---|---|
-| I. Spec-Driven, Every Decision Cited | Spec, plan and numbered decisions with a why; a mechanical scope boundary; amended in place | PASS | PASS | Decisions D1–D20 ([research.md](./research.md)). Code cites `devolada-transfer-verification D<n>`; tests cite `US<n>`. The scope boundary is three named suites, unedited (spec Context; [quickstart.md](./quickstart.md) §1). FR-016 amended in place (D8) |
+| I. Spec-Driven, Every Decision Cited | Spec, plan and numbered decisions with a why; a mechanical scope boundary; amended in place | PASS | PASS | Decisions D1–D21 ([research.md](./research.md)). Code cites `devolada-transfer-verification D<n>`; tests cite `US<n>`. The scope boundary is three named suites, unedited (spec Context; [quickstart.md](./quickstart.md) §1). FR-016 amended in place (D8) |
 | II. Money Law | Integer minor units; the ledger is the truth; no stored money state beside movements | PASS | PASS | Devolada's fee and received amount never touch the ledger (FR-020). Settlements are recorded when proven (D8). Attention is derived, never stored (data-model) |
-| III. Tenant Isolation (NON-NEGOTIABLE) | Org-scoped tables and indexes; the organization only from the actor, except globally unique keys; `seedTwoOrgs` on every new route | PASS | PASS | All four tables carry `organization_id` with a leading index. The public webhook resolves the organization by `paymentLinkId`, a globally unique key, then re-reads with that organization's own credential (D4). III enumerates its exempt keys, so the amendment (T006) adds this one, as v1.2.0 added Better Auth's, and names the actor-less sweeps that already select across organizations. Isolation suites: `test/devolada/isolation.test.ts` and each route's file |
+| III. Tenant Isolation (NON-NEGOTIABLE) | Org-scoped tables and indexes; the organization only from the actor, except globally unique keys; `seedTwoOrgs` on every new route | PASS | PASS | All five tables carry `organization_id` with a leading index. The public webhook resolves the organization by `paymentLinkId`, a globally unique key, then re-reads with that organization's own credential (D4). III enumerates its exempt keys, so the amendment (T006) adds this one, as v1.2.0 added Better Auth's, and names the actor-less sweeps that already select across organizations. Isolation suites: `test/devolada/isolation.test.ts` and each route's file |
 | IV. The Server Decides | Rules server-side; routes in `src/routes/<resource>/`; error codes declared first; mirrors held | PASS | PASS | The server decides link issuance, mode policy, labels and resolution rules. The public webhook is its own resource, `src/routes/webhooks/` (`index.ts` with the signature-and-schema middleware, `handler.ts`, `schema.ts`), so its input is validated before the handler runs (D4). Error codes are declared in the spec (FR-023) and detailed in [contracts/turistear-api.md](./contracts/turistear-api.md). Responses use named keys (`{connection}`, `{folio, payment_link}`). Types and MSW mirror the contracts |
 | V. Capacity Is Guarded by the Database | Guarded single statements; a request gives back what it took | PASS | PASS | No new capacity consumption. No read is ever the only guard: the system cancellation claims the link, then writes one batch whose every statement is gated on that batch's own guarded transition, releasing seats only for live lines (D11). A settlement or an admin *accept* is one batch gated on a single-row claim of the link (D8, D15). A verification releases tickets only in the call whose guarded flip matched (D10). Rechazar's own missing guard stays defect 3 |
 | VI. A Rule Is Proven Where It Is Enforced | API suites for rules and isolation; app tests for presentation only; axe; citations | PASS | PASS | D18. Transfer fields and the receipt's status rule move out of `pages/` so they can be tested |
@@ -124,8 +129,8 @@ and resolved by one MINOR amendment through `/speckit-constitution` (T006):
 specs/006-devolada-transfer-verification/
 ├── spec.md                 # /speckit-specify (+ clarifications 2026-10-06 and 2026-10-15; FR-016 amended by D8)
 ├── plan.md                 # This file
-├── research.md             # Phase 0: D1–D20, defects found, requests to Devolada
-├── data-model.md           # Phase 1: four tables, states, validation rules
+├── research.md             # Phase 0: D1–D21, defects found, requests to Devolada
+├── data-model.md           # Phase 1: five tables, states, validation rules
 ├── quickstart.md           # Phase 1: automated and manual validation
 ├── contracts/
 │   ├── devolada-collections-v1.openapi.yaml   # Devolada's contract, verbatim
@@ -139,11 +144,11 @@ specs/006-devolada-transfer-verification/
 
 ```text
 api-turistear/
-├── migrations/0073_devolada_transfer_verification.sql      NEW  four tables (data-model)
+├── migrations/0073_devolada_transfer_verification.sql      NEW  five tables (data-model)
 ├── src/
 │   ├── bindings.d.ts                                        + DEVOLADA_* bindings (D17)
 │   ├── index.tsx                                            mount /api/webhooks and /api/devolada; third waitUntil sweep
-│   ├── db/schema.ts                                         + four tables; enum values (event types, cancellation source)
+│   ├── db/schema.ts                                         + five tables; enum values (event types, cancellation source)
 │   ├── types/errors.ts                                      + eleven new error codes (spec FR-023), and the undeclared FOLIO_CANCELLED
 │   ├── services/devolada.ts                                 NEW  the only Devolada client (D5)
 │   ├── utils/
@@ -156,7 +161,7 @@ api-turistear/
 │   └── routes/
 │       ├── devolada/
 │       │   ├── index.ts, handler.ts, schema.ts              NEW  admin: POST /payments/:id/resolve (D15)
-│       │   ├── connection.ts                                NEW  connect/disconnect/health logic (D1–D3)
+│       │   ├── connection.ts                                NEW  connect/disconnect/health; credentials per link (D1–D3, D21)
 │       │   ├── links.ts                                     NEW  issue, close, replace links (D6, D7, D13)
 │       │   ├── apply.ts                                     NEW  applyDevoladaPayment state machine (D9)
 │       │   └── sweep.ts                                     NEW  sweepDevoladaPayments(env, now) (D12)

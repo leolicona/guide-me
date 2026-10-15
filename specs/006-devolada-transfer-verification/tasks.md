@@ -8,7 +8,7 @@ description: "Task list for Automatic Transfer Verification with Devolada"
 **Input**: Design documents from `/specs/006-devolada-transfer-verification/`. Read these before starting:
 - [plan.md](./plan.md);
 - [spec.md](./spec.md);
-- [research.md](./research.md) — decisions D1–D20;
+- [research.md](./research.md) — decisions D1–D21;
 - [data-model.md](./data-model.md);
 - [contracts/turistear-api.md](./contracts/turistear-api.md);
 - [contracts/devolada-integration.md](./contracts/devolada-integration.md);
@@ -113,18 +113,20 @@ Write each story's tests first and watch them fail.
 
 **⚠️ CRITICAL**: No user story work can begin until this phase is complete
 
-- [ ] T007 Write `api-turistear/migrations/0073_devolada_transfer_verification.sql` (or the next free number, data-model.md). Create `devolada_connections`, `devolada_links`, `devolada_payments` and `devolada_events` with exactly the columns, foreign keys and indexes of data-model.md, including:
+- [ ] T007 Write `api-turistear/migrations/0073_devolada_transfer_verification.sql` (or the next free number, data-model.md). Create `devolada_connections`, `devolada_credentials`, `devolada_links`, `devolada_payments` and `devolada_events` with exactly the columns, foreign keys and indexes of data-model.md, including:
   - `UNIQUE(organization_id)` on connections;
+  - `devolada_links.credential_id` NOT NULL → `devolada_credentials`, and the `(organization_id, retired_at)` index on credentials (D21);
   - `UNIQUE(devolada_link_id)`;
   - the partial unique indexes on links: one open settlement link per sale, one open link per `folio_payment_id`;
   - `(state, expires_at)`;
   - every `(organization_id, …)` composite.
 
-  The migration is additive only, with a prose header citing `devolada-transfer-verification D1-D9`, like the other migrations.
+  The migration is additive only, with a prose header citing `devolada-transfer-verification D1-D9, D21`, like the other migrations.
 - [ ] T008 Mirror migration 0073 in `api-turistear/src/db/schema.ts`:
-  - four `sqliteTable` definitions with their `$inferSelect`/`$inferInsert` types;
+  - five `sqliteTable` definitions with their `$inferSelect`/`$inferInsert` types;
   - the TypeScript enums from data-model.md:
-    - connection: status, mode;
+    - connection: status;
+    - credential: mode;
     - link: kind, state, closed_reason;
     - payment: status, proof_door, match, awaiting, awaiting_reason, resolution;
     - event: outcome;
@@ -153,6 +155,7 @@ Write each story's tests first and watch them fail.
   - `createPaymentLink(body, {idempotencyKey, fast})`
   - `closePaymentLink(id, {idempotencyKey})`
   - `getPayment(id)`
+  - `getPaymentLink(id)`, which D21 uses to learn whether the current credential can read a link
   - `listPaymentsByCustomer(customerRef)`
   - `getWebhook()`, `putWebhook(url)`
   - `listFailedDeliveries()`
@@ -167,8 +170,8 @@ Write each story's tests first and watch them fail.
 
   Map errors per contracts/devolada-integration.md § Error mapping. Never log the API key.
 - [ ] T013 Implement the stateful fake Devolada in `api-turistear/test/helpers/devolada.ts` (D18). `installFakeDevolada()` spies `globalThis.fetch` for `https://devolada.test` and passes every other URL through; call `vi.restoreAllMocks()` in `afterEach`. It chains to the spy's current implementation (`getMockImplementation()`) instead of replacing it, so a test that called `stubResend()` (`api-turistear/test/helpers/auth-flows.ts:54-69`) first still captures the ticket emails. It emulates the v1 contract:
-  - **businesses** keyed by API key: mode, channel `ok|clabe|bank`, suspended;
-  - **one-time links**: `expiresAt` may be in the past; idempotent replay by key, refusals included; `PATCH close`;
+  - **businesses** keyed by API key: mode, channel `ok|clabe|bank`, suspended, and a key that can be revoked or rotated, so one business may hold several keys;
+  - **one-time links**: `expiresAt` may be in the past; idempotent replay by key, refusals included; `PATCH close`; `GET /v1/payment-links/{id}`, which answers `NOT_FOUND` across businesses;
   - **payments**:
     - `submitProof(devoladaLinkId, {claimedCents})` creates a `validating` payment;
     - `advance(paymentId, to, receivedCents?)` follows the test-mode rules;
@@ -234,7 +237,8 @@ Write each story's tests first and watch them fail.
     - Devolada down → 502 `DEVOLADA_UNAVAILABLE`.
   - **Address conflict**: a foreign address returns 409 `DEVOLADA_WEBHOOK_CONFLICT` (message = that URL); the same request with `replace_webhook: true` returns 200 and stores `replaced_webhook_url`.
   - **Health**: GET returns live webhook health, and `health_error` when Devolada is down.
-  - **Disconnect**: DELETE sets `disconnected` and is idempotent.
+  - **Disconnect**: DELETE sets `disconnected`, retires the current credential, and is idempotent.
+  - **Replacing the key** (D21): a PUT with another key, of the same business or of another one, creates a new current credential and retires the previous one, which stays readable while a link it created is unresolved. The view shows the new `key_hint` and `mode`.
   - **No address in this environment** (`env.DEVOLADA_WEBHOOK_URL = ''`, as locally and on previews): connecting neither reads nor writes Devolada's address, and the health's `webhook.is_ours` is `null`.
   - **Unreadable key** (`env.DEVOLADA_CREDENTIAL_KEY` missing): connecting answers 500 `INTERNAL_ERROR`, and the fake records no call.
   - **Secrecy**: no response ever contains the key or the ciphertext. `GET /api/organizations/me` returns only `devolada: {status, mode}`, for an admin and for an agent alike.
@@ -261,7 +265,7 @@ Write each story's tests first and watch them fail.
     - malformed JSON → 400;
     - more than 64 KiB → 400;
     - unknown `paymentLinkId` → 200, no rows written;
-    - `isTest` mismatching the connection → 200, event outcome `mode_mismatch`.
+    - `isTest` mismatching the link's `mode` → 200, event outcome `mode_mismatch`.
   - **A confirmed verdict**:
     - the link's payment row becomes `verified` with `verified_by` NULL, and the folio becomes `verified`;
     - live slot lines get a QR and a portal token is issued;
@@ -274,6 +278,9 @@ Write each story's tests first and watch them fail.
     - a body that says *confirmed* while the re-read says *validating* yields only a snapshot;
     - a re-read answering `NOT_FOUND` changes nothing;
     - an unreachable re-read returns 503, and a retry later applies the verdict.
+  - **The link's own key** (D21):
+    - after the admin replaced the key with another business's, a verdict for a link the previous key created is re-read with that key and applied;
+    - a disconnected organization's link is applied the same way, while its credential is kept (FR-004).
   - **Waiting statuses**:
     - *validating* → label `validating`;
     - `queued_for_credit` → the connection's `credit_paused_at` is set (`credit_paused_since` in its view);
@@ -296,7 +303,9 @@ Write each story's tests first and watch them fail.
   - one organization failing does not stop another (fail-soft), including one whose credential cannot be decrypted, which is skipped and logged;
   - with 60 links due, a run checks 50 (past `expires_at` first, then never checked, then the oldest `last_checked_at`) and the next run the other 10;
   - a disconnected organization's open link is still followed;
-  - a disconnected organization with no unresolved link has its credential erased.
+  - a link is checked with the credential that created it, after the admin replaced the key with another business's too (D21);
+  - a retired credential with no unresolved link is erased, a disconnected organization's included, and one with an unresolved link is kept;
+  - a link whose credential Devolada rejects moves to the current credential when that one can read it; otherwise it becomes `failed`, goes to the admin, and is never cancelled.
 - [ ] T022 [P] [US1] Write `api-turistear/test/devolada/link-view.test.ts`:
   - `deriveLinkLabel` follows the precedence table in contracts/turistear-api.md § Labels, one case per row;
   - `loadPaymentLinkViews` picks the latest non-superseded payment and orders links newest first.
@@ -310,23 +319,25 @@ Write each story's tests first and watch them fail.
     - current payment = latest non-`superseded` by `devolada_created_at`;
     - instants in epoch seconds;
     - the exact `PaymentLinkView` shape of the contract.
-- [ ] T024 [US1] Implement `api-turistear/src/routes/devolada/connection.ts` (D1-D3), with `deps = {db, env}`:
+- [ ] T024 [US1] Implement `api-turistear/src/routes/devolada/connection.ts` (D1-D3, D21), with `deps = {db, env}`:
   - `connectDevolada(deps, {organizationId, adminId, apiKey, replaceWebhook})`:
     0. check that this environment can encrypt the key (`DEVOLADA_CREDENTIAL_KEY` present, 32 bytes); otherwise 500 `INTERNAL_ERROR` before any call to Devolada (D17);
     1. check the format;
     2. probe with `createPaymentLink({customerRef: 'turistear-conexion', askCents: 100, mode: 'one_time', expiresAt: now - 60s, label: 'Prueba de conexión — Turistear Ya!'})` and a fresh UUID `Idempotency-Key`, mapping refusals to the contract's `ApiError`s;
     3. compare `isTest` with `env.DEVOLADA_KEY_MODE`;
     4. if `env.DEVOLADA_WEBHOOK_URL` is not empty: `getWebhook` → 404 means `putWebhook`; the same URL is kept; a different URL is refused with `DEVOLADA_WEBHOOK_CONFLICT` unless `replaceWebhook`, which then `putWebhook`s;
-    5. encrypt the key;
-    6. upsert `devolada_connections` (status `connected`, `broken_reason` NULL).
-  - `disconnectDevolada(deps, {organizationId, adminId})`: idempotent; keeps the credential (FR-004).
-  - `readConnectionView(deps, organizationId)`: live `getWebhook` + `listFailedDeliveries`, fail-soft to `health_error: 'DEVOLADA_UNAVAILABLE'`.
-  - `loadActiveCredential(deps, organizationId)`: returns `{connection, apiKey} | null`.
+    5. encrypt the key into a new `devolada_credentials` row, with the probe's mode and the key hint;
+    6. upsert `devolada_connections` (status `connected`, `broken_reason` NULL, `current_credential_id` = the new row), and set `retired_at` on the previous current credential, if any.
+  - `disconnectDevolada(deps, {organizationId, adminId})`: idempotent; retires the current credential and clears `current_credential_id`. The retired key stays readable while a link it created is unresolved (FR-004, D21).
+  - `readConnectionView(deps, organizationId)`: `mode` and `key_hint` from the current credential; live `getWebhook` + `listFailedDeliveries`, fail-soft to `health_error: 'DEVOLADA_UNAVAILABLE'`.
+  - `loadCurrentCredential(deps, organizationId)`: `{connection, credentialId, apiKey} | null`, only while `connected`. New links use it.
+  - `loadLinkCredential(deps, link)`: `{credentialId, apiKey} | null`, the key that created the link, while its ciphertext exists, whatever the connection's status. Every call about a link uses it (D21).
+  - `fallBackLinkCredential(deps, link)`: for a link whose credential Devolada rejected. If the current credential can read it (`getPaymentLink`), move the link to it; otherwise mark the link `failed`, so its sale goes to the admin (D21).
   - `markConnectionBroken(db, organizationId, reason)` and `setCreditPaused(db, organizationId, paused)`.
 - [ ] T025 [US1] Add the admin-only routes `GET /me/devolada`, `PUT /me/devolada` and `DELETE /me/devolada` to `api-turistear/src/routes/organizations/index.ts`, with handlers in `handler.ts` and the PUT schema `{api_key: z.string(), replace_webhook: z.boolean().optional()}` in `schema.ts`:
   - each route: `requireRole('admin')` and a `zValidator` hook like `pos/index.ts:33-37`;
   - each answers `{connection}` per the contract;
-  - add `devolada: {status, mode}` to `getMyOrganization` / `serializeOrg` (`handler.ts:40-111`), with `not_connected` / `null` when no row exists. Read it with a separate query and never add a credential column to `orgColumns`.
+  - add `devolada: {status, mode}` to `getMyOrganization` / `serializeOrg` (`handler.ts:40-111`), with the mode of the current credential, and `not_connected` / `null` when no row exists. Read it with a separate query and never add a credential column to `orgColumns`.
 - [ ] T026 [US1] Implement `api-turistear/src/routes/devolada/links.ts` (D6, D7):
   - `computeLinkExpiry({issuedAt, liveLines, timezone, kind})`:
     - the earliest of: issued + 24 h; the first live service start (slot `slot_date` + `slot_start_time` in the org time zone; a stay = the end of its check-in day);
@@ -334,8 +345,8 @@ Write each story's tests first and watch them fail.
   - `MIN_LINK_LIFETIME` = 15 minutes, one constant citing D7.
   - `issuePaymentLink(deps, {organizationId, folioId, folioPaymentId, folioLineId, kind, amount, requestedBy, customerName, concept})`:
     0. compute the expiry; if it is less than `MIN_LINK_LIFETIME` away, return `{error: 'PAYMENT_LINK_TOO_SHORT'}` without inserting a row or calling Devolada, so the payment takes the manual path (D7);
-    1. read the credential; if it cannot be decrypted (D17: no key, or not the key it was encrypted with), return `{error: 'DEVOLADA_UNAVAILABLE'}` without inserting a row, logging it without the key, so the sale stays on the manual path and never answers 500 after it committed;
-    2. insert the link row in state `creating`;
+    1. read the current credential (`loadCurrentCredential`); if it cannot be decrypted (D17: no key, or not the key it was encrypted with), return `{error: 'DEVOLADA_UNAVAILABLE'}` without inserting a row, logging it without the key, so the sale stays on the manual path and never answers 500 after it committed;
+    2. insert the link row in state `creating`, with that `credential_id` and its `mode` (D21);
     3. call `createPaymentLink(…, {idempotencyKey: id + (attempt > 1 ? '#' + attempt : ''), fast: true})` with `mode: 'one_time'` and `customerRef` = folio id;
     4. success → `open`, storing `devolada_link_id` and `url`;
     5. refused → `failed`, and `markConnectionBroken` for `AUTHENTICATION_ERROR`, `BUSINESS_SUSPENDED` or `CHANNEL_UNAVAILABLE`;
@@ -360,7 +371,7 @@ Write each story's tests first and watch them fail.
     5. update the connection's `last_verdict_at`.
   - Every other status: snapshot only. Stories 2 and 3 complete them.
   - *confirmed* on a `deposit` or `settlement` link: snapshot only, and the sale is not touched. PR 2 brings those kinds, and its preview writes them into dev's database while dev still runs PR 1 (research D19).
-  - Set `applied_status` and `applied_at` only when a branch acted: *validating*, `queued_for_credit` and awaiting, whose snapshot is their whole action, and *confirmed* on a `sale` link. The statuses and kinds this PR only snapshots stay unmarked, so PR 2 applies them (research D9, D19). Always set `link.last_checked_at`.
+  - Set `applied_status` and `applied_at` only when a branch acted: *validating*, `queued_for_credit` and awaiting, whose snapshot is their whole action, and *confirmed* on a `sale` link whose sale is not cancelled. The statuses and kinds this PR only snapshots stay unmarked, so PR 2 applies them (research D9, D19). Always set `link.last_checked_at`.
 - [ ] T029 [US1] Implement the public webhook as its own resource `api-turistear/src/routes/webhooks/` (D4, constitution IV) and mount it with `app.route('/api/webhooks', webhooks)` in `api-turistear/src/index.tsx` (77-91), next to the other `/api` routers:
   - `index.ts`: the router (`POST /devolada`, no `authMiddleware`) with one validation middleware that runs the *before parsing* and *parse* steps below and stores the parsed event in the context;
   - `schema.ts`: the Zod schema of Devolada's `WebhookEvent`;
@@ -376,10 +387,10 @@ Write each story's tests first and watch them fail.
     - mode mismatch → event outcome `mode_mismatch`, 200;
     - insert into `devolada_events`, or bump `attempts` when the stored outcome is `failed`; skip when it is `applied` or `no_change`.
   - **Act on the re-read**:
-    - `loadActiveCredential`, then `getPayment` (8 s) → `applyDevoladaPayment`;
+    - `loadLinkCredential` (the key that created the link, whatever the connection's status; D21), then `getPayment` (8 s) → `applyDevoladaPayment`;
     - a credential that cannot be decrypted → 503 `DEVOLADA_UNAVAILABLE`, outcome `failed` (D17);
     - `DevoladaUnavailableError` or an unreachable re-read → 503 `DEVOLADA_UNAVAILABLE`, outcome `failed`;
-    - an `AUTHENTICATION_ERROR` or `BUSINESS_SUSPENDED` re-read → `markConnectionBroken`, outcome `failed`, 503 (Devolada retries; the sweep catches up once the admin fixes the key).
+    - an `AUTHENTICATION_ERROR` or `BUSINESS_SUSPENDED` re-read → outcome `failed`, 503 (Devolada retries). With the current credential, `markConnectionBroken` too, and the sweep catches up once the admin fixes the key; with a retired one, the sweep applies D21's fallback.
   - **Answer** 200 `{received: true}`.
 - [ ] T030 [US1] Add the read model in `api-turistear/src/utils/folioDetail.ts` and `api-turistear/src/utils/folioListRows.ts`:
   - `payment_links: PaymentLinkView[]` in `readFolioDetail` (`api-turistear/src/utils/folioDetail.ts`);
@@ -390,14 +401,13 @@ Write each story's tests first and watch them fail.
 - [ ] T031 [US1] Add `verification_auto` to `GET /api/folios/counts` in `api-turistear/src/routes/folios/handler.ts` (286-317). It counts the sales whose `verification_auto` flag holds (T030; data-model § Flags and counts): pending with a live line, and every pending payment row collected by an `open` link that either has no payment yet and is not past `expires_at`, or whose current payment is *validating* without `awaiting`, even past `expires_at`. PR 1 has no attention item yet; T050 adds that clause to the same predicate. Back it with the `(organization_id, folio_id)` indexes (D14).
 - [ ] T032 [US1] Implement `sweepDevoladaPayments(env, now)` in `api-turistear/src/routes/devolada/sweep.ts` (D12, recovery):
   - **Selection**: links `open` with `last_checked_at` NULL or older than now − 10 min, grouped by organization, then by folio, in this order: past `expires_at` first, then never checked, then the oldest `last_checked_at` (D12).
-  - **Per organization** (connected, broken, or disconnected with unresolved links):
-    - load the credential;
-    - for each folio, `listPaymentsByCustomer(folioId)` → `applyDevoladaPayment` for every payment whose `paymentLinkId` is one of our links;
+  - **Per organization**, whatever its connection's status, checking each link with the credential that created it (`loadLinkCredential`, D21):
+    - for each folio, `listPaymentsByCustomer(folioId)` once per credential that created one of its open links → `applyDevoladaPayment` for every payment whose `paymentLinkId` is one of our links;
     - update `last_checked_at`;
     - stop after 50 calls, or on `RATE_LIMITED`;
-    - on `AUTHENTICATION_ERROR` or `BUSINESS_SUSPENDED`, call `markConnectionBroken` and stop that organization for this run.
-  - **Fail-soft**: try/catch per organization, loading its credential included, and per folio, counting `failed`. An unreadable credential skips that organization and is logged (D17).
-  - **Cleanup**: erase the `credential_ciphertext` and `credential_iv` of disconnected organizations with no unresolved link (`creating`, `open`, `closing` or `abandoned`; data-model).
+    - on `AUTHENTICATION_ERROR` or `BUSINESS_SUSPENDED` from the current credential, call `markConnectionBroken` and stop that organization for this run. From a retired credential, run `fallBackLinkCredential` for its links (D21).
+  - **Fail-soft**: try/catch per organization, loading each credential included, and per folio, counting `failed`. An unreadable credential skips its links and is logged (D17).
+  - **Cleanup**: erase the `ciphertext` and `iv` of every retired credential with no unresolved link (`creating`, `open`, `closing` or `abandoned`; data-model), setting `erased_at`.
   - **Returns** `{checked, applied, failed}`.
   - **Wiring**: a third independent `ctx.waitUntil` in `scheduled()` in `api-turistear/src/index.tsx` (116-149), with `now = new Date(controller.scheduledTime)`, logging `[devolada] …`.
 - [ ] T033 [P] [US1] Mirror the contract types in the app, starting with the new `app-turistear/src/features/devolada/types.ts`:
@@ -530,7 +540,7 @@ Write each story's tests first and watch them fail.
        - a `transfer_not_received` event with a NULL actor.
 
      Test it: when the sale is cancelled between step 2 and the batch, the batch writes nothing.
-  4. **After the batch**: `emitNotification(…, 'payment_rejected')`, whose «tu folio» copy is fixed by defect 11's lite path before PR 2 (T077), then the new helper `closePaymentLinkRemote(deps, link)` in `api-turistear/src/routes/devolada/links.ts`, for the claimed link and for each link the batch marked `closing`. The helper is fail-soft, sends `PATCH close` with `Idempotency-Key 'close:' + id`, and treats `LINK_CLOSED` as closed.
+  4. **After the batch**: `emitNotification(…, 'payment_rejected')`, whose «tu folio» copy is fixed by defect 11's lite path before PR 2 (T077), then the new helper `closePaymentLinkRemote(deps, link)` in `api-turistear/src/routes/devolada/links.ts`, for the claimed link and for each link the batch marked `closing`. The helper uses the link's own credential (D21), is fail-soft, sends `PATCH close` with `Idempotency-Key 'close:' + id`, and treats `LINK_CLOSED` as closed.
 
   It returns `'cancelled'`, `'kept'` or `'noop'`.
 - [ ] T048 [US2] Complete `applyDevoladaPayment` in `api-turistear/src/routes/devolada/apply.ts` (D9 table, sale and deposit columns):
@@ -605,6 +615,7 @@ Write each story's tests first and watch them fail.
   - **Settlement exceptions**: *partial* or *invalid* → link closed plus an attention item.
     - resolve `accept` records the settlement with `verified_by` = the admin;
     - resolve `dismiss` keeps the apartado.
+  - **Settlement verified by hand while in flight** (D15): resolve `accept` on a settlement payment that is *validating*, awaiting a tracking key or `queued_for_credit` records the settlement with `verified_by` = the admin and releases the tickets when the sale is paid. The link stays open; a later *confirmed* verdict records nothing more and ends the link `paid`. `dismiss` on a payment in flight answers 409 `DEVOLADA_PAYMENT_NOT_RESOLVABLE`.
   - **Apartado sweep guard**: `sweepExpiredBookings` skips an apartado whose clock passed while it has an open link or a *validating* payment. A settlement confirmed after the clock, but submitted in time, is still recorded.
   - **Link creation fails at settle**: today's manual settlement is recorded, together with `payment_link_error`.
   - **Settlement after departure** (a negative `booking_grace_offset_minutes`, so the link would stay open less than 15 minutes): today's manual settlement is recorded, with `payment_link_error: 'PAYMENT_LINK_TOO_SHORT'` (D7).
@@ -646,19 +657,20 @@ Write each story's tests first and watch them fail.
   - ***expired*, or an unpaid expiry in the sweep**: link `expired`, nothing else.
 - [ ] T061 [US3] Guard the apartado expiry sweep in `api-turistear/src/routes/pos/sweep.ts`. In the due-folio query (49-67), skip folios that have a `devolada_links` row in `creating` or `open`, or a `devolada_payments` row that is *validating* (awaiting included) or `queued_for_credit`. Cite D8. `test/pos/pos-bookings-sweep.test.ts` must still pass.
 - [ ] T062 [US3] Implement resolve `accept` and `dismiss` in `api-turistear/src/routes/devolada/handler.ts`:
-  - **`accept`**: allowed for a `settlement` link whose payment is *partial* or *invalid* and unresolved. On a sale that is not cancelled, call `applySettlement` with the link `claim`, `verifiedBy` = the admin and `collectedBy` = `link.requested_by`; the same claimed batch sets the payment's `resolution 'accepted'`. A claim that does not match (a double tap) → 409 `DEVOLADA_PAYMENT_NOT_RESOLVABLE`. On a cancelled sale → 409 `FOLIO_CANCELLED`.
-  - **`dismiss`**: set `resolution 'dismissed'` with `… WHERE resolution IS NULL RETURNING` (no row → 409), then `closePaymentLinkRemote` (fail-soft).
+  - **`accept`**: allowed for a `settlement` link whose payment is *partial*, *invalid*, or still in flight (*validating*, awaiting a tracking key, `queued_for_credit`), and unresolved (D15). On a sale that is not cancelled, call `applySettlement` with the link `claim`, `verifiedBy` = the admin and `collectedBy` = `link.requested_by`; the same claimed batch sets the payment's `resolution 'accepted'`. A claim that does not match (a double tap) → 409 `DEVOLADA_PAYMENT_NOT_RESOLVABLE`. On a cancelled sale → 409 `FOLIO_CANCELLED`. For a payment in flight the link is not closed: its verdict later finds the claim taken, records nothing more and closes the link (D13).
+  - **`dismiss`**: only for *partial* or *invalid*, since closing a link under a payment in flight would make it *unapplied* (D13). Set `resolution 'dismissed'` with `… WHERE resolution IS NULL RETURNING` (no row → 409), then `closePaymentLinkRemote` (fail-soft).
   - **Both**: set `resolved_by` / `resolved_at` and answer `{folio}`.
 - [ ] T063 [US3] Settle by link in the app (`app-turistear/src/features/bookings/components/SettleSheet.tsx`):
   - `app-turistear/src/features/bookings/components/SettleSheet.tsx` renders `TransferPaymentFields`;
-  - for a connected transfer, submitting shows the returned `PaymentLinkCard`, or the alert on `payment_link_error`, instead of closing as settled;
+  - for a connected transfer, submitting shows the returned `PaymentLinkCard` instead of closing as settled. On `payment_link_error` the settlement was recorded on the manual path, so the sheet closes as settled and shows the alert;
   - type the settle responses `{folio, payment_link?, payment_link_error?}` in `app-turistear/src/services/bookingsService.ts:24-44`.
-- [ ] T064 [US3] Show the settlement link and its exceptions (`app-turistear/src/features/bookings/components/BookingActions.tsx`, `app-turistear/src/features/folios/components/FolioWorkActions.tsx`):
+- [ ] T064 [US3] Show the settlement link and its exceptions (`app-turistear/src/features/bookings/components/BookingActions.tsx`, `app-turistear/src/features/folios/components/FolioWorkActions.tsx`, `app-turistear/src/features/folios/components/FolioDetailScreen.tsx`):
   - **`BookingActions.tsx`**: while a settlement link is open, show its `PaymentLinkCard` and replace «Liquidar saldo» / «Liquidar todo» with the chip «Liquidación en verificación».
-  - **`FolioWorkActions.tsx`**: in T053's Devolada rung, settlement exceptions get «Verificar» (resolve `accept`) and «Descartar» (resolve `dismiss`) `ConfirmSheet`s, using `useResolveDevoladaPayment`. Copy from contracts/turistear-api.md § Action copy: one verb per action (constitution VII, research D15).
+  - **Refusals**: `SETTLEMENT_IN_PROGRESS`, which T059 raises from this PR, shows its copy from contracts § Action copy wherever a line cancellation or a settlement is refused: `BookingActions.tsx` and `SettleSheet.tsx` for the seller, `FolioDetailScreen.tsx` for the admin's line cancellation.
+  - **`FolioWorkActions.tsx`**: in T053's Devolada rung, settlement exceptions get «Verificar» (resolve `accept`) and «Descartar» (resolve `dismiss`) `ConfirmSheet`s, using `useResolveDevoladaPayment`. A settlement payment still in flight gets that rung on the sale's detail with «Verificar» only, whether or not the sale is in Por verificar (D15). Copy from contracts/turistear-api.md § Action copy: one verb per action (constitution VII, research D15).
 - [ ] T065 [P] [US3] Extend the app tests in `app-turistear/src/features/bookings/components/SettleSheet.test.tsx` and `FolioWorkActions.test.tsx`, citing `devolada-transfer-verification US3` and running axe:
-  - `app-turistear/src/features/bookings/components/SettleSheet.test.tsx`, connected mode: no reference field; the link card after submit; the fallback alert.
-  - `FolioWorkActions.test.tsx`: accept and dismiss.
+  - `app-turistear/src/features/bookings/components/SettleSheet.test.tsx`, connected mode: no reference field; the link card after submit; on the fallback, the sheet closes as settled and shows its alert; the `SETTLEMENT_IN_PROGRESS` copy.
+  - `FolioWorkActions.test.tsx`: accept and dismiss for an exception, and «Verificar» alone for a settlement still in flight.
 
 **Checkpoint**: Stories 1, 2 and 3 work (quickstart §2 steps 8-9). This is PR 2 together with Story 2 (D19).
 
@@ -713,8 +725,8 @@ Write each story's tests first and watch them fail.
 - [ ] T070 [US4] Replace the settlement link on line cancellation in `cancelBookingLine` (`api-turistear/src/routes/pos/handler.ts:2702`) and `cancelFolioLine` (`api-turistear/src/routes/folios/handler.ts:1193`). When the apartado had an open settlement link, issue a replacement for the new balance after the write (`issuePaymentLink`, kind `settlement`), and add `payment_link` / `payment_link_error` to the response. A link whose payment is in flight never gets here: T068 refuses that cancellation.
 - [ ] T071 [US4] Add the closing and abandoned branches to `api-turistear/src/routes/devolada/sweep.ts` (D12 step 3):
   - `closing` → `closePaymentLinkRemote` until `closed`;
-  - `abandoned` → replay `createPaymentLink` with the same `Idempotency-Key`. If it exists, store `devolada_link_id`, close it and record `closed_reason 'abandoned'`. If refused, mark it `failed`.
-- [ ] T072 [US4] When a cancel response carries `payment_link`, show «El enlace de pago cambió — vuelve a enviarlo» with the new `PaymentLinkCard` in `app-turistear/src/features/bookings/components/BookingActions.tsx`. Type those cancel responses in `app-turistear/src/services/bookingsService.ts` and `app-turistear/src/services/foliosService.ts`. Now that a cash settlement closes the link, «Liquidar saldo» comes back while the settlement link waits for its first payment; the chip «Liquidación en verificación» stays only while its payment is in flight, and `SETTLEMENT_IN_PROGRESS` maps to its copy in contracts § Action copy.
+  - `abandoned` → replay `createPaymentLink`, with the link's own credential (D21) and the same `Idempotency-Key`. If it exists, store `devolada_link_id`, close it and record `closed_reason 'abandoned'`. If refused, mark it `failed`.
+- [ ] T072 [US4] When a cancel response carries `payment_link`, show «El enlace de pago cambió — vuelve a enviarlo» with the new `PaymentLinkCard` in `app-turistear/src/features/bookings/components/BookingActions.tsx`. Type those cancel responses in `app-turistear/src/services/bookingsService.ts` and `app-turistear/src/services/foliosService.ts`. Now that a cash settlement closes the link, «Liquidar saldo» comes back while the settlement link waits for its first payment; the chip «Liquidación en verificación» stays only while its payment is in flight (research D16).
 - [ ] T073 [P] [US4] Extend `app-turistear/src/features/bookings/components/BookingActions.test.tsx`, citing `devolada-transfer-verification US4` and running axe: the replacement-link notice after a line cancellation; «Liquidar saldo» while the settlement link waits for its first payment, and the chip while its payment is in flight.
 
 **Checkpoint**: All four stories work independently. This is PR 3 (D19).
@@ -735,7 +747,7 @@ Write each story's tests first and watch them fail.
   - no key or ciphertext in any log or response;
   - the signature is verified before parsing;
   - the organization is resolved only through `devolada_link_id`;
-  - every re-read uses the owning organization's credential;
+  - every call about a link uses the credential that created it, one of the owning organization's own (D21), and a retired credential is erased once no link needs it;
   - no file but `api-turistear/src/services/devolada.ts` names Devolada's host or paths, the key set included (constitution VIII; grep);
   - the 64 KiB limit is enforced;
   - the production mode policy holds.

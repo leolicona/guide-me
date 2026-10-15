@@ -14,8 +14,10 @@
 ## Relationships
 
 ```text
-organizations 1 ──── 0..1 devolada_connections
+organizations 1 ──── 0..1 devolada_connections ── current ──▶ 0..1 devolada_credentials
+organizations 1 ──── *    devolada_credentials  (every key connected; D21)
 folios        1 ──── *    devolada_links ──── *  devolada_payments
+devolada_links * ─── 1    devolada_credentials  (the key that created the link; D21)
 devolada_links * ─── 0..1 folio_payments        (the ledger row a sale/deposit link collects,
                                                   or the settlement row it produced — D8)
 devolada_links * ─── 0..1 folio_lines           (per-line settlement)
@@ -32,10 +34,7 @@ devolada_payments ·· *    devolada_events       (by devolada_payment_id; no FK
 | `id` | text PK | |
 | `organization_id` | text NOT NULL → organizations | **UNIQUE**: at most one connection |
 | `status` | text NOT NULL | `connected` · `broken` · `disconnected` |
-| `mode` | text NOT NULL | `real` · `test`, learned from the probe (D2) |
-| `credential_ciphertext` | text NULL | base64url AES-256-GCM output; NULL once erased (D12) |
-| `credential_iv` | text NULL | base64url 96-bit IV, fresh per write; NULL with the ciphertext |
-| `key_hint` | text NOT NULL | last four characters of the key, the only part ever returned |
+| `current_credential_id` | text NULL → devolada_credentials | the key new links use; NULL while disconnected (D21). Its `mode` and `key_hint` are the connection's |
 | `webhook_url` | text NULL | the address we registered at Devolada (`DEVOLADA_WEBHOOK_URL`); NULL where none is registered (local) |
 | `replaced_webhook_url` | text NULL | the address the admin agreed to replace (FR-006) |
 | `broken_reason` | text NULL | `DEVOLADA_CREDENTIAL_REJECTED` · `DEVOLADA_BUSINESS_SUSPENDED` · `DEVOLADA_CHANNEL_UNAVAILABLE` |
@@ -52,17 +51,42 @@ devolada_payments ·· *    devolada_events       (by devolada_payment_id; no FK
 
 ```text
 (none) ─ admin connects ───────────────────────────────▶ connected
-connected ─ any call answers AUTHENTICATION_ERROR,
-            BUSINESS_SUSPENDED or CHANNEL_UNAVAILABLE ──▶ broken
+connected ─ a call with the current credential answers
+            AUTHENTICATION_ERROR, BUSINESS_SUSPENDED
+            or CHANNEL_UNAVAILABLE ─────────────────────▶ broken
 broken ─ admin replaces the key, or a later call succeeds ▶ connected
 connected | broken ─ admin disconnects ─────────────────▶ disconnected
 disconnected ─ admin connects ─────────────────────────▶ connected
-disconnected ∧ no unresolved link ─ sweep ─────────────▶ credential erased (row kept for audit)
 ```
+
+Connecting, replacing the key and disconnecting each retire the previous current credential
+(`devolada_credentials`, below).
 
 **Rules**:
 - A sale gets a payment link only while the connection is `connected` (FR-004, FR-010).
 - A `broken` connection makes new transfer sales fall back to the manual path.
+
+### `devolada_credentials` — every key the organization connects (research D1, D21)
+
+| Column | Type | Rules |
+|---|---|---|
+| `id` | text PK | |
+| `organization_id` | text NOT NULL → organizations | |
+| `mode` | text NOT NULL | `real` · `test`, learned from the probe (D2) |
+| `ciphertext` | text NULL | base64url AES-256-GCM output; NULL once erased |
+| `iv` | text NULL | base64url 96-bit IV, fresh per write; NULL with the ciphertext |
+| `key_hint` | text NOT NULL | last four characters of the key, the only part ever returned |
+| `created_by` | text NOT NULL → users | |
+| `created_at` | integer NOT NULL | |
+| `retired_at` | integer NULL | when another key replaced it, or the admin disconnected |
+| `erased_at` | integer NULL | when the sweep erased its ciphertext |
+
+**Index**: `(organization_id, retired_at)`.
+
+**Rules**:
+- Every call about a link uses the credential that created it; only new links use the connection's current credential (D21).
+- A retired credential is kept while a link it created is unresolved; the sweep erases its ciphertext after (D12). The row stays for audit.
+- When Devolada rejects a link's credential, the link moves to the current credential if that one can read it, or else becomes `failed` (D21).
 
 ### `devolada_links` — one per transfer we asked for (D6–D8, D13)
 
@@ -74,7 +98,8 @@ disconnected ∧ no unresolved link ─ sweep ───────────�
 | `folio_line_id` | text NULL → folio_lines | set for a per-line settlement |
 | `folio_payment_id` | text NULL → folio_payments | sale/deposit: the pending row at issue; settlement: the row recorded on confirmation (D8) |
 | `kind` | text NOT NULL | `sale` · `deposit` · `settlement` |
-| `mode` | text NOT NULL | `real` · `test`, copied from the connection |
+| `credential_id` | text NOT NULL → devolada_credentials | the key that created it; every call about the link uses it (D21) |
+| `mode` | text NOT NULL | `real` · `test`, copied from its credential |
 | `amount` | integer NOT NULL | > 0; Devolada's `askCents` |
 | `devolada_link_id` | text NULL | **UNIQUE** globally; webhooks are routed by it (D4) |
 | `url` | text NULL | the payer's page, sent by WhatsApp |
@@ -110,6 +135,7 @@ open ── the sale stops taking it (D13), or a
         partial/invalid settlement verdict ──────────▶ closing  (never under a payment in flight
                                                                  while the sale lives, D13)
 closing ── Devolada acknowledges (or LINK_CLOSED) ───▶ closed   (final)
+open ── no credential can read it (D21) ─────────────▶ failed   (final; the sale goes to the admin)
 ```
 
 **Rules**:
@@ -120,7 +146,7 @@ closing ── Devolada acknowledges (or LINK_CLOSED) ───▶ closed   (fin
 - It never changes; a new amount means a new link (D13).
 - `expires_at` ≤ the first live service start, and ≤ the earliest live line clock for `deposit` and `settlement` (D7).
 - A link that would stay open less than 15 minutes is never written: the payment takes the manual path (D7).
-- A link is **unresolved** while it is `creating`, `open`, `closing` or `abandoned`: something may still happen to it at Devolada. `paid`, `expired`, `closed` and `failed` are final. A disconnected organization keeps its credential while it has an unresolved link (D12).
+- A link is **unresolved** while it is `creating`, `open`, `closing` or `abandoned`: something may still happen to it at Devolada. `paid`, `expired`, `closed` and `failed` are final. A credential is kept while a link it created is unresolved (D21).
 
 ### `devolada_payments` — what Devolada reported for a link (D9)
 
@@ -163,8 +189,10 @@ closing ── Devolada acknowledges (or LINK_CLOSED) ───▶ closed   (fin
 - `status ∈ {partial, invalid}` ∧ link `kind = 'settlement'` ∧ `resolution IS NULL`;
 - `status = 'unapplied'` ∧ `resolution IS NULL`;
 - `status = 'confirmed'` on a cancelled sale ∧ `resolution IS NULL` (treated as `unapplied`, D9);
-- `status = 'validating'` ∧ `awaiting IS NOT NULL`;
-- `status = 'queued_for_credit'`: validation credit is paused, and the admin tops it up at Devolada.
+- `status = 'validating'` ∧ `awaiting IS NOT NULL`, while nobody has decided the payment by hand;
+- `status = 'queued_for_credit'`, while nobody has decided the payment by hand: validation credit is paused, and the admin tops it up at Devolada.
+
+A payment is decided by hand once its `resolution` is set (an admin's *accept* of a settlement, D15), once its ledger row on a sale or deposit link is verified (the admin's Verificar), or once its sale is cancelled (Rechazar, or any cancellation). Money that then arrives is covered by the *unapplied* clauses above.
 
 A sale or deposit with `partial` or `invalid` is attended through the sale's pending verification, as today.
 
@@ -227,11 +255,13 @@ A sale or deposit with `partial` or `invalid` is attended through the sale's pen
 | A connected organization's transfer is collected by a link; any `payment_reference` sent is ignored | confirm, settle | FR-009 |
 | A link's amount equals the payment it collects | link issue | FR-007 |
 | A link is issued only if it stays open at least 15 minutes | link issue | FR-010, D7 |
+| Every call about a link uses the credential that created it; a rejected one hands the link to the current credential, or to the admin | webhook, sweep, link close | FR-004, D21 |
+| The admin's *accept* records a settlement for an exception or for a payment still in flight; *dismiss* applies to exceptions only | resolve | FR-018, D15 |
 | One open settlement link per sale; a settlement for another line is refused with `SETTLEMENT_IN_PROGRESS` | partial unique index; settle | D8, D13 |
 | While the sale lives, no write closes a link under a payment in flight: a line cancellation or another settlement is refused with `SETTLEMENT_IN_PROGRESS`, and a manual Verificar leaves it open | line cancel, settle, verify | FR-011, D13 |
 | A settlement link records at most one settlement: its batch is claimed by `folio_payment_id IS NULL` and every other statement is gated on that claim | settlement core | D8 |
 | A verification releases tickets only in the call whose guarded row flip and rollup update both matched | verify core | D10 |
 | The system cancellation writes nothing unless its own guarded transition matched | `cancelForUnreceivedTransfer` | D11 |
-| A webhook acts only after the signature, the link lookup, the mode check and a re-read with the owning organization's credential | webhook | FR-013 |
+| A webhook acts only after the signature, the link lookup, the mode check and a re-read with the credential that created the link, one of the owning organization's own | webhook | FR-013, D21 |
 | A cancelled sale is never verified. No sale is cancelled automatically while it holds other money, an admin verified it, another of its payments is in flight, or its payment ended *partial* or *invalid* | D9, D11, D12 | FR-016 |
 | Every row read or written carries the organization filter beside the id | everywhere; the webhook resolves the organization from the link | constitution III |

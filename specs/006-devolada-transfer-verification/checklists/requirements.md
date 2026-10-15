@@ -77,3 +77,14 @@
 
   FR-007 now says *transfer* where it said *electronic payment*, and FR-023 declares the error
   codes. All items still pass.
+- **/speckit-analyze, third run (2026-10-15)** found no CRITICAL item, and 2 HIGH, 2 MEDIUM and
+  4 LOW items. All were resolved in place. The developer decided three more clarifications
+  (Session 2026-10-15):
+  - the admin may switch Devolada accounts at any time, because each link is followed with the key
+    that created it (FR-004, research D21);
+  - «Verificar» records a settlement by hand, also while Devolada is still verifying it (FR-018, US3
+    scenario 5);
+  - a disconnected organization's pending links still clear by notification (FR-004).
+
+  US4's Independent Test now uses an apartado, because a pending transfer sale cannot be cancelled.
+  All items still pass.
