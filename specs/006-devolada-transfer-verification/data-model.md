@@ -1,6 +1,7 @@
 # Data Model: Automatic Transfer Verification with Devolada
 
-**Migration**: `0069_devolada_transfer_verification.sql`.
+**Migration**: `0073_devolada_transfer_verification.sql`.
+- The number is the next free one: `0071` is Better Auth, and `0072` is reserved for the drop of the password columns (`.specify/debt/password-material`). If that changes before this lands, take the next free number.
 - It is additive and hand-written, like every migration here; `api-turistear/src/db/schema.ts` mirrors it by hand.
 - It runs before the code on deploy, and the code already deployed never reads the new tables.
 
@@ -81,7 +82,6 @@ disconnected ∧ no unresolved link ─ sweep ───────────�
 | `state` | text NOT NULL | see below |
 | `closed_reason` | text NULL | `cancelled` · `rejected` · `amount_changed` · `settled_otherwise` · `verified_by_admin` · `abandoned` |
 | `requested_by` | text NOT NULL → users | the seller who issued it; becomes `collected_by` of a settlement recorded under D8 |
-| `operator_id` | text NULL → affiliate_operators | the PIN shift, if any |
 | `create_attempts` | integer NOT NULL DEFAULT 1 | suffixes the idempotency key after a refusal (D5) |
 | `last_checked_at` | integer NULL | last re-read (D12); NULL = never checked, so the next sweep checks it |
 | `created_at`, `updated_at` | integer NOT NULL | |
@@ -186,7 +186,7 @@ A sale or deposit with `partial` or `invalid` is attended through the sale's pen
 
 | Where | Change |
 |---|---|
-| `folio_events.type` — `FolioEventType` (`utils/folioEvents.ts:14-24`) and its Drizzle mirror (`schema.ts:1046-1059`) | New types, listed below the table |
+| `folio_events.type` — `FolioEventType` (`utils/folioEvents.ts:14-24`) and its Drizzle mirror (`schema.ts:998-1011`) | New types, listed below the table |
 | Existing event `payment_verified` | When automatic: actor NULL, payload `{source: 'devolada', receipt_number, received}` |
 | Existing event `payment` (kind `settlement`) | Written by D8 with actor NULL |
 | `folios.cancellation_source` and `folio_lines.cancellation_source` | New value `payment_not_received` (D11). Consumers to update: `utils/folioDetail.ts`, `routes/folios/handler.ts`, `routes/pos/handler.ts`, `app:features/folios/types.ts` |
@@ -203,7 +203,7 @@ A sale or deposit with `partial` or `invalid` is attended through the sale's pen
 
 **`folio_payments` rows this feature writes**:
 - **A row verified by Devolada**: `verification = 'verified'`, `verified_by` NULL, `verified_at` = the verdict, `reference` = the receipt number.
-- **A settlement recorded under D8**: `method = 'transfer'`, `verification = 'verified'`, `collected_by` = `link.requested_by`, `operator_id` = `link.operator_id`, `created_at` = the verdict.
+- **A settlement recorded under D8**: `method = 'transfer'`, `verification = 'verified'`, `collected_by` = `link.requested_by`, `created_at` = the verdict.
 
 ## Validation rules (enforced server-side — constitution IV)
 

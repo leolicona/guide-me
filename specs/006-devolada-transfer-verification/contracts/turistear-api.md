@@ -1,14 +1,15 @@
 # Contract: Turistear API changes
 
-**Feature**: `specs/001-devolada-transfer-verification`. **Decisions**: research D1–D20.
+**Feature**: `specs/006-devolada-transfer-verification`. **Decisions**: research D1–D20.
 
-**Base URL**: `https://api.turistearya.com/api` (dev: `https://api-dev.turistearya.com/api`).
+**Base URL**: `https://api.turistearya.com/api`; dev: `https://api-dev.turistearya.com/api`; a pull request's preview: `https://api-guideme-pr-<n>.<subdomain>.workers.dev/api`.
 
 Conventions are those of the existing API:
-- **Sessions**: HttpOnly cookies.
+- **Sessions**: the Better Auth session cookie (`__Secure-<AUTH_COOKIE_PREFIX>.session_token`, HttpOnly), read by `authMiddleware`. The app sends every request with `credentials: 'include'` (constitution IV).
+- **Methods**: `GET`, `POST`, `PUT` and `DELETE` only, the ones the API's CORS policy allows (`api-turistear/src/index.tsx:62-73`).
 - **Successes**: answer under a named key.
 - **Failures**: answer `{ "error": { "code", "message" } }`; clients branch on `code` (constitution IV).
-- **Instants**: epoch **seconds** (`utils/folioDetail.ts:59`).
+- **Instants**: epoch **seconds** (`utils/folioDetail.ts:58`).
 - **Money**: integer minor units.
 
 Every change is additive, and existing fields keep their meaning. An organization that has not
@@ -83,7 +84,7 @@ checked always uses the word the UI already has, *verificación*; «validar» ne
 
 - `status`: `not_connected` · `connected` · `broken` · `disconnected`.
 - `mode`: `real` · `test` · `null`.
-- It never carries the credential, its hint or the notification address. Agents and shift operators read this payload (D1).
+- It never carries the credential, its hint or the notification address. Agents read this payload (D1).
 
 ### `DevoladaConnectionView` — admin only
 
@@ -150,7 +151,7 @@ Steps (D2, D3):
 - 200 `{ "connection": DevoladaConnectionView | null }`, with status `disconnected`.
 - Idempotent. Links already issued are followed to their verdict (FR-004), and the credential is erased once none is left (D12).
 
-### Checkout and settlement — sellers (agent, affiliate, shift operator) and admins
+### Checkout and settlement — sellers (agents) and admins
 
 #### `POST /pos/folios` (`confirmSale`)
 
@@ -266,11 +267,19 @@ settlement and line-cancel responses.
 The action that sends it is labelled **«Cobrar por WhatsApp»**: sending the link is collecting the
 payment, and *Cobrar* is the canonical verb for that (constitution VII, research D16).
 `paymentLinkWhatsAppUrl` in `app-turistear/src/features/pos/delivery.ts` builds it from
-`PaymentLinkView` and the sale, normalising the phone like `ticketWhatsAppUrl`. Default text:
+`PaymentLinkView` and the sale. It goes through the same phone normalisation as `ticketWhatsAppUrl`,
+and returns `null` for an unusable phone. The texts are shipped defaults, one per link kind, that
+the organization does not edit, like `DEPOSIT_VERIFIED_TEMPLATE`:
 
-> Hola {nombre}, para confirmar tu compra con {empresa} transfiere {monto} desde tu banco con esta
-> liga: {liga} — vence {vence}. En cuanto se confirme el pago te enviamos tus boletos.
+| `kind` | Default text |
+|---|---|
+| `sale` | Hola {customer_name}, te escribe {agent_name} de {org_name}. Para confirmar tu compra, transfiere {link_amount} desde tu banco con esta liga: {payment_link} (vence {link_expires}). En cuanto se confirme el pago te enviamos tus boletos. |
+| `deposit` | Hola {customer_name}, te escribe {agent_name} de {org_name}. Para apartar tu reserva, transfiere el anticipo de {link_amount} desde tu banco con esta liga: {payment_link} (vence {link_expires}). Tus boletos se envían al liquidar el saldo de {pending_balance}. |
+| `settlement` | Hola {customer_name}, te escribe {agent_name} de {org_name}. Para liquidar tu reserva, transfiere {link_amount} desde tu banco con esta liga: {payment_link} (vence {link_expires}). En cuanto se confirme el pago te enviamos tus boletos. |
 
-- `{monto}` goes through the single money formatter (`components/money.ts`, constitution II).
-- `{vence}` is the expiry's time in the organization's time zone.
+- `{customer_name}`, `{agent_name}`, `{org_name}` and `{pending_balance}` are `fillTemplate`'s tokens, filled as in every other message.
+- `{link_amount}` is the link's `amount`, through the single money formatter (`components/money.ts`, constitution II).
+- `{payment_link}` is the link's `url`.
+- `{link_expires}` reads «hoy a las HH:MM» or «mañana a las HH:MM» in the organization's time zone. A link lives at most 24 h (research D7).
+- A deposit's text never promises tickets, because an apartado's tickets wait for its settlement (bug `verify-send-empty-link`).
 - The message opens in the seller's own WhatsApp; Turistear sends nothing by itself.

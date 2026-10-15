@@ -64,8 +64,8 @@ both as the fallback when Devolada is unavailable and as the admin's override.
 
 ### User Story 1 - A transfer sale clears itself when Banxico confirms the money (Priority: P1)
 
-An admin connects the organization's Devolada account once. From then on, when a seller (agent,
-affiliate or shift operator) completes a sale by Transferencia, the sale gets its own Devolada
+An admin connects the organization's Devolada account once. From then on, when a seller (an agent,
+or an admin selling) completes a sale by Transferencia, the sale gets its own Devolada
 payment link for exactly the amount due. The seller sends the link to the customer by WhatsApp. The
 customer transfers from their bank and confirms the transfer on Devolada's link page. When
 Devolada reports that Banxico confirms the money, the system verifies the sale: the
@@ -226,8 +226,6 @@ closed; then advance a test payment to *unapplied* and observe the admin alert.
   the sale completes on the manual path (Story 1, scenario 4).
 - **A same-day departure leaves before the verdict** → the rule is unchanged: no tickets until the
   money is cleared, and the admin can still verify by hand on the spot.
-- **A shift operator sells by transfer** → same flow; the money goes to the organization's account,
-  as every electronic payment does today.
 
 ## Requirements *(mandatory)*
 

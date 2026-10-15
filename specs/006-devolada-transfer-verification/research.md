@@ -1,35 +1,53 @@
 # Research: Automatic Transfer Verification with Devolada
 
-**Feature**: `specs/001-devolada-transfer-verification` · **Phase**: 0 of `/speckit-plan` · **Date**: 2026-10-06
+**Feature**: `specs/006-devolada-transfer-verification` · **Phase**: 0 of `/speckit-plan` · **Date**: 2026-10-06
 
 Every decision below is numbered `D<n>` and carries its *why*. Code that implements one cites it in a
 comment as `devolada-transfer-verification D<n>` (constitution I).
 
 **Sources**:
 - the spec;
-- constitution v1.0.0;
+- constitution v1.0.0 at planning, re-checked against v1.4.0 on 2026-10-15;
 - Devolada's v1 contract (`contracts/devolada-collections-v1.openapi.yaml`);
-- a read of the code on 2026-10-06.
+- a read of the code on 2026-10-06, re-read on `main` on 2026-10-15 (§ Re-baseline below).
 
 Paths are relative to `api-turistear/src/` unless prefixed `app:` (`app-turistear/src/`) or `test:`
 (`api-turistear/test/`).
+
+## Re-baseline against `main` (2026-10-15)
+
+The plan was written on 2026-10-06. Before any task started, `main` absorbed the changes below, and
+this folder was re-read against it:
+
+| What changed on `main` | Effect here |
+|---|---|
+| Spec Kit numbering: `specs/001`–`005` are taken | This folder is `specs/006-devolada-transfer-verification`. Citations keep the slug `devolada-transfer-verification` |
+| Affiliates and shift operators are retired (specs/001–003, migrations `0069`–`0070`). The roles are admin and agent, and `folio_payments.operator_id` is gone | `operator_id` leaves `devolada_links` and D8. The sellers are agents and admins |
+| Better Auth replaces Agnostic Auth (specs/004-passkey-auth, migration `0071`; `0072` is reserved for the drop of the password columns). A session is a database row behind a signed HttpOnly cookie | Nothing in the design depended on the old token. The migration is `0073`, tests authenticate with `sessionCookie(email)` (D18), and `BETTER_AUTH_SECRET` joins D1's facts and alternatives |
+| Delivery runs from one branch, `main` (specs/005-delivery-pipeline; constitution v1.4.0). Each pull request gets a preview on dev's D1, every push deploys dev, a `v*` tag releases production, and the API's secrets live in GitHub environments | D17 and D19 are rewritten. There are now four wrangler profiles, and every deploy plants the key. A preview gets dev's key or none, and registers no address. PRs target `main` |
+| Bug `verify-send-empty-link`: an apartado's verification sends a deposit confirmation, not tickets, and marking tickets sent needs a portal token | D16: a deposit link's message never promises tickets |
+
+Every code reference below was re-located on `main`. The decisions stand, except where this table
+says otherwise.
 
 ## What the code does today — the facts the decisions rest on
 
 | Fact | Where | Consequence |
 |---|---|---|
-| A transfer sale writes a `pending` ledger row **and** its allocations at confirm, so it derives `paid` at once. QR, portal token and ticket email wait for clearance | `routes/pos/handler.ts:1491-1510, 1803, 1895-1912, 2008-2048` | Full sales and deposits keep today's money model. Devolada only changes *who* clears them |
-| `verifyPayment` flips **every** pending row of the sale, needs `c.get('user')` and `c.executionCtx`, and never checks `cancelled_at` | `routes/pos/handler.ts:2882-3091` (flip at 2921-2931) | A per-payment core without a request context is needed (D10) |
-| `rejectPayment` is hand-written. It fully reverses the money (`buildCancellationReversal`, clawback) and releases seats for **all** lines, cancelled ones included, with no guard. It leaves `cancellation_source` NULL and the payment rows `pending` forever | `routes/pos/handler.ts:3096-3221`, `utils/folioPayments.ts:217` | The automatic cancellation must not inherit this (D11) |
-| A settlement writes its row and allocations when settled. **Nothing in the code can undo a settlement**, and settling never clears the line clock | `routes/pos/handler.ts:2220-2569, 2577-2800` | An unpaid settlement can't be "withdrawn" without new ledger semantics, so it is recorded only once proven (D8) |
+| A transfer sale writes a `pending` ledger row **and** its allocations at confirm, so it derives `paid` at once. QR, portal token and ticket email wait for clearance | `routes/pos/handler.ts:1399-1418, 1707, 1799-1815, 1908-1948` | Full sales and deposits keep today's money model. Devolada only changes *who* clears them |
+| `verifyPayment` flips **every** pending row of the sale, needs `c.get('user')` and `c.executionCtx`, and never checks `cancelled_at` | `routes/pos/handler.ts:2779-2988` (flip at 2818-2828) | A per-payment core without a request context is needed (D10) |
+| `rejectPayment` is hand-written. It fully reverses the money (`buildCancellationReversal`, clawback) and releases seats for **all** lines, cancelled ones included, with no guard. It leaves `cancellation_source` NULL and the payment rows `pending` forever | `routes/pos/handler.ts:2993-3118`, `utils/folioPayments.ts:215` | The automatic cancellation must not inherit this (D11) |
+| A settlement writes its row and allocations when settled. **Nothing in the code can undo a settlement**, and settling never clears the line clock | `routes/pos/handler.ts:2122-2468, 2476-2697` | An unpaid settlement can't be "withdrawn" without new ledger semantics, so it is recorded only once proven (D8) |
 | Status derives from allocations whatever their verification | `utils/folioStatus.ts:16-29` | Same as above |
-| Every manual cancel path refuses a sale whose transfer is unverified (`PAYMENT_UNVERIFIED`); the expiry sweep does not | `routes/folios/handler.ts:912-918, 1221-1227`; `routes/pos/handler.ts:2828-2834, 3264-3270`; `routes/pos/sweep.ts:41` | While a sale or deposit link waits, what the sale owes cannot change; the sweep needs a guard (D8, D13) |
-| Public routes are routers that never `use(authMiddleware)`. No route reads the raw body, and there is no body limit | `index.tsx:43-77`, `routes/auth/index.ts:25` | The webhook is its own router reading `c.req.text()` (D4) |
-| Outbound HTTP has no timeouts. Tests stub it with `vi.spyOn(globalThis, 'fetch')`; unstubbed calls reach the real provider | `services/resend.ts`; `test:auth/admin-registration.test.ts:13-40` | One Devolada module with explicit timeouts; a fake Devolada behind the same spy, on a host that cannot resolve (D5, D17, D18) |
-| `QR_SECRET` is the one app secret, split by HMAC labels. Nothing is encrypted at rest | `utils/qr.ts:84-107`, `utils/operatorSession.ts:41-57` | A dedicated key and AES-GCM for the credential (D1) |
-| `GET /organizations/me` is readable by every role, shift operators included | `routes/organizations/index.ts:21-31` | The credential never enters the organization payload (D1) |
-| One cron trigger runs two independent `waitUntil` sweeps | `index.tsx:83-116`, `wrangler.jsonc:63-65, 106-108` | A third independent sweep (D12) |
-| Migrations are hand-written; the highest is `0068` | `api-turistear/migrations/` | This feature claims `0069` |
+| Every manual cancel path refuses a sale whose transfer is unverified (`PAYMENT_UNVERIFIED`); the expiry sweep does not | `routes/folios/handler.ts:909-915, 1218-1224`; `routes/pos/handler.ts:2725-2731, 3161-3167`; `routes/pos/sweep.ts:41` | While a sale or deposit link waits, what the sale owes cannot change; the sweep needs a guard (D8, D13) |
+| Public routes are routers mounted without `authMiddleware`; `/api/auth/*` hands the raw request to Better Auth. No route of ours reads the raw body, and there is no body limit | `index.tsx:60-110` | The webhook is its own router reading `c.req.text()` (D4) |
+| Outbound HTTP has no timeouts. Tests stub it with `vi.spyOn(globalThis, 'fetch')` (`stubResend`, which passes every other URL through); unstubbed calls reach the real provider | `services/resend.ts`; `test:helpers/auth-flows.ts:54-69` | One Devolada module with explicit timeouts; a fake Devolada behind the same spy, on a host that cannot resolve (D5, D17, D18) |
+| Two app secrets, each with a cost to rotate: `QR_SECRET`, split by HMAC labels, signs every ticket; `BETTER_AUTH_SECRET` signs the session cookie and encrypts the stored sign-in codes, so changing it signs everyone out | `utils/qr.ts:84-107`; `auth/index.ts:17-23, 175-177` | A dedicated key and AES-GCM for the credential (D1) |
+| `GET /organizations/me` is readable by both roles, admin and agent | `routes/organizations/index.ts:21-24` | The credential never enters the organization payload (D1) |
+| One cron trigger runs two independent `waitUntil` sweeps, in dev and production only: a pull request's preview has no trigger | `index.tsx:116-149`, `wrangler.jsonc:66-68, 91-98, 133-135` | A third independent sweep (D12); nothing a preview issues is swept by the preview itself (D17) |
+| Migrations are hand-written; the highest is `0071`, and `0072` is reserved for the drop of the password columns. A pull request's migrations reach dev's D1 with its preview, before the merge | `api-turistear/migrations/`; `.specify/debt/password-material`; constitution § Additional constraints | This feature claims `0073`, and it must be harmless under the code already on dev (D19) |
+| Secrets are managed in the GitHub environments `dev` and `production`; every deploy plants the API's secrets with the version it ships (`--secrets-file`, additive). A preview takes dev's values, or a throwaway when dev lacks one | `.github/workflows/deploy-dev.yml:47-62`, `deploy-prod.yml:82-97`, `preview.yml:101-124`; constitution VIII | The credential key is planted the same way, and a preview never gets a throwaway (D17) |
+| An apartado's verification confirms the deposit only: tickets and the portal link wait for the settlement, the admin's «Verificar y enviar» sends a deposit confirmation instead, and marking tickets sent refuses a sale with no portal token (409) | `app:features/folios/components/VerifyAndSendButton.tsx:45-75`; `app:features/pos/delivery.ts:117-143`; `routes/pos/handler.ts:2078-2101`; bug `verify-send-empty-link` | A deposit's payment-link message never promises tickets (D16) |
 
 ## Decisions
 
@@ -39,17 +57,18 @@ Paths are relative to `api-turistear/src/` unless prefixed `app:` (`app-turistea
   - A new table, `devolada_connections`, holds one row per organization. The credential is stored there encrypted with AES-256-GCM.
   - The key is derived per organization as `HMAC-SHA256(DEVOLADA_CREDENTIAL_KEY, "guideme:devolada:v1:" + organizationId)`, the label pattern of `utils/qr.ts:84-107`.
   - The organization id is also bound as GCM additional data, and every write uses a fresh 96-bit IV.
-  - `DEVOLADA_CREDENTIAL_KEY` is a new Worker secret, different in each environment.
+  - `DEVOLADA_CREDENTIAL_KEY` is a new Worker secret, different in each environment, managed like the others (D17).
   - The API only ever returns a hint: the last four characters.
   - The organization payload carries a non-secret summary, `devolada: {status, mode}`, and never a credential column.
 - **Rationale**:
   - FR-003: reading the database alone must not reveal the credential.
-  - Constitution VIII: secrets live in Worker secrets and are never shared across environments.
+  - Constitution VIII: secrets are managed in the GitHub environments, planted on each Worker, and never shared across environments.
   - Constitution III: ciphertext copied into another organization's row fails to decrypt.
-  - `GET /organizations/me` answers every role, so a credential there would reach agents and operators.
+  - `GET /organizations/me` answers both roles, so a credential there would reach every agent.
 - **Alternatives considered**:
   - A plaintext column fails FR-003.
   - `QR_SECRET` with a new label ties the two rotations together: rotating the ticket key would make every stored credential unreadable.
+  - `BETTER_AUTH_SECRET`, or Better Auth's own encryption, ties the credentials to the session secret: changing it signs everyone out by design, and would also make every stored credential unreadable.
   - A Worker secret per organization cannot be created at runtime.
   - A new KV or secrets binding adds a binding for one value per organization, with nothing gained over D1 plus AES-GCM.
 
@@ -66,7 +85,7 @@ Paths are relative to `api-turistear/src/` unless prefixed `app:` (`app-turistea
      | 409 `BUSINESS_SUSPENDED` | `DEVOLADA_BUSINESS_SUSPENDED` |
      | 201 | the link's `isTest` is the credential's mode |
 
-  3. **Mode policy**: `DEVOLADA_KEY_MODE` is `real` in production and `test` in dev and local. A credential of the other mode gets `DEVOLADA_MODE_NOT_ALLOWED`.
+  3. **Mode policy**: `DEVOLADA_KEY_MODE` is `real` in production and `test` in dev, previews and local. A credential of the other mode gets `DEVOLADA_MODE_NOT_ALLOWED`.
 - **Rationale**:
   - FR-002 needs the mode and a credential Devolada accepts, and the v1 contract offers no way to inspect a credential.
   - A one-time link born expired is the only call that does three things at once: uses the credential, reports the mode, and fails exactly where a real sale would fail (a business without its CLABE configured). It relies only on promised behaviour: "`expiresAt` … may be in the past (a link born expired)".
@@ -85,8 +104,10 @@ Paths are relative to `api-turistear/src/` unless prefixed `app:` (`app-turistea
     - 404 → it registers our address with `PUT`;
     - the same URL → it keeps it;
     - a different URL → it refuses with `DEVOLADA_WEBHOOK_CONFLICT` (409, whose message is the current URL). Only when the request says `replace_webhook: true` does it `PUT` ours and record the replaced address.
-  - Our address is the environment's `DEVOLADA_WEBHOOK_URL` (D17), not one derived from `API_BASE_URL`: the local profile sets `API_BASE_URL` to production's URL (`wrangler.jsonc:40-50`).
-  - Where `DEVOLADA_WEBHOOK_URL` is empty (local), no address is registered and verdicts arrive only through the sweep (D12).
+  - Our address is the environment's `DEVOLADA_WEBHOOK_URL` (D17), not one derived from `API_BASE_URL`: the local profile sets `API_BASE_URL` to production's URL (`wrangler.jsonc:40-53`).
+  - Where `DEVOLADA_WEBHOOK_URL` is empty (local and pull-request previews), no address is registered or replaced.
+    - Locally, verdicts arrive only through the sweep (D12).
+    - A preview serves dev's database and runs no cron, so the business keeps dev's address. Dev's Worker, through its webhook and its sweep, applies the verdicts of the links a preview issued once dev runs this code (D17).
   - Disconnecting does **not** remove Devolada's address.
 - **Rationale**:
   - FR-006. Devolada keeps one address per business, shared by real and test credentials.
@@ -201,7 +222,6 @@ Paths are relative to `api-turistear/src/` unless prefixed `app:` (`app-turistea
     | `verification` | `verified` |
     | `verified_by` | NULL |
     | `collected_by` | the seller who issued the link |
-    | `operator_id` | as recorded on the link |
     | date | the verdict |
 
     It then runs the release core (D10) if the sale is now paid and cleared.
@@ -259,7 +279,7 @@ Paths are relative to `api-turistear/src/` unless prefixed `app:` (`app-turistea
   - The sale's `payment_verification` becomes `verified` through a guarded `UPDATE folios … WHERE payment_verification = 'pending' AND NOT EXISTS (<a pending payment row of the sale>) RETURNING`.
   - `verifyFolioPayment` returns `{flipped, rollupVerified}`. The release runs only in the call that got **both** — its row flip and the rollup update matched — and only when the sale is paid and not cancelled. A second processor can therefore never sign the tickets again (which would invalidate QR codes already delivered) or send the email twice.
   - The admin endpoint calls the same cores with `'all'`, so its behaviour does not change.
-  - `deps` = `{db, env, waitUntil}`, following the precedent of `queueCancellationEmail({env, executionCtx})` (`routes/folios/handler.ts:822`).
+  - `deps` = `{db, env, waitUntil}`, following the precedent of `queueCancellationEmail({env, executionCtx})` (`routes/folios/handler.ts:819`).
 - **Rationale**:
   - Story 3 scenario 4: a pending deposit and a confirmed settlement are separate facts.
   - The webhook has no request context.
@@ -286,11 +306,11 @@ Paths are relative to `api-turistear/src/` unless prefixed `app:` (`app-turistea
 
   The seat and reservation release statements are extracted from `rejectPayment` into a builder both use. The admin's Rechazar is otherwise untouched.
 - **Rationale**:
-  - FR-016 says "the way Rechazar cancels", but without Rechazar's defects: it releases seats for lines already cancelled, has no not-cancelled guard, and would erase a cleared deposit (`routes/pos/handler.ts:3096-3221`).
+  - FR-016 says "the way Rechazar cancels", but without Rechazar's defects: it releases seats for lines already cancelled, has no not-cancelled guard, and would erase a cleared deposit (`routes/pos/handler.ts:2993-3118`).
   - A separate `cancellation_source` keeps these out of the expired-apartado counts (`system_expiry`).
   - A concurrent manual Rechazar cannot make this path write twice: whichever cancels first wins, and the gated batch above writes nothing if it was Rechazar. Rechazar itself still has no guard of its own when it runs second; that is defect 3 below.
 - **Alternatives considered**:
-  - `cancelFolioPriced` prices by the cancellation policy, which is wrong for money that never arrived (the BUG-030 reasoning, `routes/folios/handler.ts:908-911`).
+  - `cancelFolioPriced` prices by the cancellation policy, which is wrong for money that never arrived (the BUG-030 reasoning, `routes/folios/handler.ts:905-908`).
   - Calling `rejectPayment` as it is inherits its defects.
 
 ### D12 — The recovery and expiry sweep
@@ -307,7 +327,7 @@ Paths are relative to `api-turistear/src/` unless prefixed `app:` (`app-turistea
   - Budget: at most 50 Devolada calls per organization per run (the limit is 120 a minute, shared with live traffic). `RATE_LIMITED` stops that organization until the next run.
 - **Rationale**:
   - FR-012; SC-003 (at most 15 minutes to the next run plus 10 to the recheck stays under 30); SC-009; FR-004.
-  - It mirrors `sweepExpiredBookings` (`routes/pos/sweep.ts:41`): it needs only `env`, is fail-soft, and is tested by calling it with an explicit `now` (dates are frozen in tests, `test:helpers/apply-migrations.ts:28-34`).
+  - It mirrors `sweepExpiredBookings` (`routes/pos/sweep.ts:41`): it needs only `env`, is fail-soft, and is tested by calling it with an explicit `now` (dates are frozen in tests, `test:helpers/apply-migrations.ts:39-45`).
   - Taking `now` from `scheduledTime` lets local validation advance the clock with the `?time=` parameter of `/cdn-cgi/local/scheduled`.
 - **Alternatives considered**:
   - Devolada's `GET /v1/transfers` lists only money that arrived, not waits or expiries.
@@ -384,8 +404,8 @@ Paths are relative to `api-turistear/src/` unless prefixed `app:` (`app-turistea
   - **Checkout and SettleSheet**: when `devolada.status` is `connected`, the Referencia field is not offered and the consequence line announces the link.
     - The transfer fields move into `features/pos/components/TransferPaymentFields.tsx` so they can be tested. Constitution VI does not allow tests of `pages/`.
   - **Receipt, sale detail and BookingActions**: a `PaymentLinkCard` with:
-    - the amount, «Vence a las HH:MM» and a status chip;
-    - the primary action «Cobrar por WhatsApp» (`paymentLinkWhatsAppUrl` in `features/pos/delivery.ts`, with a default template);
+    - the amount, «Vence hoy a las HH:MM» or «Vence mañana a las HH:MM» (a link lives at most 24 h, D7) and a status chip;
+    - the primary action «Cobrar por WhatsApp» (`paymentLinkWhatsAppUrl` in `features/pos/delivery.ts`, with a shipped default text per link kind);
     - polling every 15 s while the link waits.
 
     The receipt shows «Pago en verificación» instead of «Venta confirmada» and «Pagado» while the money is unverified.
@@ -394,6 +414,7 @@ Paths are relative to `api-turistear/src/` unless prefixed `app:` (`app-turistea
     - sending the link is collecting the payment, so its action uses the canonical verb **Cobrar**: «Cobrar por WhatsApp».
   - **Por verificar**: FolioCard and FolioWorkActions show the labels and amounts. The timeline adds the new event types to its three exhaustive records, and AppLayout uses the new badge sum.
   - **Copy**: the table in `contracts/turistear-api.md` § Labels.
+  - **The link's message depends on its kind** (contracts § WhatsApp message). A deposit's message never promises tickets, because an apartado's tickets wait for its settlement. Bug `verify-send-empty-link`, fixed on `main` on 2026-10-06, removed exactly that promise from the admin's «Verificar y enviar».
 - **Rationale**:
   - FR-008 and FR-022.
   - Constitution VII: primitives first, «Venta» never "folio", every state paired with an icon and text.
@@ -401,17 +422,43 @@ Paths are relative to `api-turistear/src/` unless prefixed `app:` (`app-turistea
 ### D17 — Environments and configuration
 
 - **Decision**:
-  - **Vars**, repeated in every wrangler profile because named environments inherit none (`wrangler.jsonc:13-15`):
-    - `DEVOLADA_API_BASE_URL` = `https://api.devoladapago.com` in every profile. Dev uses Devolada's production API with test credentials, which is the contract's test mode.
-    - `DEVOLADA_KEY_MODE` = `real` in production, `test` in dev and local.
-    - `DEVOLADA_WEBHOOK_URL` = `https://api.turistearya.com/api/webhooks/devolada` in production, `https://api-dev.turistearya.com/api/webhooks/devolada` in dev, empty in local. Devolada cannot reach a laptop, and local `API_BASE_URL` points at production (D3).
-  - **Secret** `DEVOLADA_CREDENTIAL_KEY`: 32 random bytes, base64, set per environment with `wrangler secret put`. Locally it lives in `.dev.vars`, documented in `.dev.vars.example`.
+  - **Vars**, repeated in every wrangler profile because named environments inherit none (`wrangler.jsonc:14-16`):
+
+    | Profile | `DEVOLADA_API_BASE_URL` | `DEVOLADA_KEY_MODE` | `DEVOLADA_WEBHOOK_URL` |
+    |---|---|---|---|
+    | local | `https://api.devoladapago.com` | `test` | empty |
+    | dev | `https://api.devoladapago.com` | `test` | `https://api-dev.turistearya.com/api/webhooks/devolada` |
+    | preview (one per pull request) | `https://api.devoladapago.com` | `test` | empty |
+    | production | `https://api.devoladapago.com` | `real` | `https://api.turistearya.com/api/webhooks/devolada` |
+
+    - Dev and previews use Devolada's production API with test credentials, which is the contract's test mode.
+    - The address is empty where Devolada cannot or must not deliver:
+      - a laptop, whose `API_BASE_URL` points at production (D3);
+      - a preview, which shares dev's database; its own address would take the business's one address away from dev (D3).
+    - Previews have no cron (`wrangler.jsonc:91-98`). A link issued on a preview lives in dev's database, so dev's webhook and sweep follow it once dev runs this code. Until PR 1 merges, verdicts are validated locally (quickstart §2).
+  - **Secret** `DEVOLADA_CREDENTIAL_KEY`: 32 random bytes, base64 (`openssl rand -base64 32`), generated once per environment and never shared between environments. It is managed the way constitution VIII manages every API secret:
+    - it lives in the GitHub environments `dev` and `production`, and every deploy plants it with the version it ships (`deploy-dev.yml` and `deploy-prod.yml`, `--secrets-file`, additive);
+    - if the value is present but does not decode to 32 bytes, the deploy stops before it migrates;
+    - if the value is absent, the Worker keeps its current one, as for `QR_SECRET`;
+    - it is never pasted again: a different value makes every stored credential unreadable, and every organization would have to connect again;
+    - a preview takes the `dev` environment's value, or **none, never a throwaway**. A preview writes into dev's D1, so a credential encrypted under a throwaway key could be read neither by dev's Worker nor by the preview's own next deploy;
+    - locally it lives in `.dev.vars`, documented in `.dev.vars.example`.
+  - **Without a readable key**, the API fails closed. That covers a key that was never planted, and one that is not the key a credential was encrypted with:
+    - connecting answers 500 `INTERNAL_ERROR`;
+    - a sale issues no link and stays on the manual path (FR-010), never answering 500 after it committed;
+    - the webhook answers 503, and the sweep skips that organization.
+
+    Every case is logged without the key.
   - **Tests** pin all four in `vitest.config.ts`: `DEVOLADA_API_BASE_URL = https://devolada.test`, so an unstubbed call fails instead of reaching Devolada, and `DEVOLADA_WEBHOOK_URL = https://api.test/api/webhooks/devolada`.
   - **Bindings** go in `src/bindings.d.ts`, followed by `pnpm cf-typegen:api`.
 - **Rationale**:
-  - Constitution VIII: no shared secrets, and none in the repository.
+  - Constitution VIII (v1.4.0): secrets live in the GitHub environments, every deploy plants them, no two environments share one, and none is in the repository. Its rule that a preview may get a throwaway value does not fit a key that encrypts rows in dev's database; the amendment (T006) records the exception.
   - The test pin closes the gap the infrastructure read found: unstubbed calls reach the real provider.
-- **Alternatives considered**: Devolada's shared dev environment is Devolada's own playground; test mode on its production API is what the contract offers integrators. The var keeps either one open.
+  - Failing closed keeps constitution VIII's promise: a missing key never blocks or undoes a sale.
+- **Alternatives considered**:
+  - Devolada's shared dev environment is Devolada's own playground; test mode on its production API is what the contract offers integrators. The var keeps either one open.
+  - `wrangler secret put` per environment, the plan of 2026-10-06. Constitution v1.4.0 superseded it by managing every API secret in the GitHub environments.
+  - A preview with its own address (`--var DEVOLADA_WEBHOOK_URL:<preview origin>/api/webhooks/devolada`). It would take the test business's one address from dev, and leave it pointing at a deleted Worker once the pull request closes.
 
 ### D18 — Tests
 
@@ -420,24 +467,33 @@ Paths are relative to `api-turistear/src/` unless prefixed `app:` (`app-turistea
     - A stateful fake Devolada in `test:helpers/devolada.ts`, behind `vi.spyOn(globalThis, 'fetch')` for `https://devolada.test`. It covers links, payments, the test-mode advance, the notification address, a generated P-256 key pair served as JWKS, and a builder for signed webhook requests.
     - Suites in `test:devolada/`: connection, checkout-link, webhook, verdicts, apartados, link-closing, sweep, isolation, credential-cipher and signature.
     - Each file cites `devolada-transfer-verification US<n>`, and every new route has `seedTwoOrgs` cases.
+    - Requests authenticate the way production does: `headers: { Cookie: sessionCookie(email) }` (`test:helpers/session.ts`), a real Better Auth session row behind a signed cookie. `seedTwoOrgs` returns each admin's email for it.
+    - The fake composes with `stubResend` (`test:helpers/auth-flows.ts:54-69`). A test that needs both calls `stubResend()` first, and `installFakeDevolada()` chains to the spy's current implementation instead of replacing it, so ticket emails still reach the Resend stand-in.
   - **App**: tests for DevoladaConnectionCard, PaymentLinkCard, TransferPaymentFields, the SettleSheet connected mode and the FolioCard labels, each with `expectNoA11yViolations`. MSW handlers live in `app:test/handlers/devolada.ts`.
   - **Scope boundary**: `test:pos/payment-verification.test.ts`, `test:pos/optional-payment-reference.test.ts` and `test:paid-ledger/settle-method.test.ts` pass unedited.
 - **Rationale**: constitution VI. Rules are proven in the API, and stand-ins sit at the provider's boundary.
 
 ### D19 — Delivery
 
-- **Decision**: three PRs to `develop`, each deployable.
+- **Decision**: three PRs to `main`, each deployable.
 
   | PR | Stories | Contents |
   |---|---|---|
-  | 1 | Story 1 | migration 0069 (all four tables); D1–D7; D9 for `validating` and `confirmed`; D10; D12 recovery; D14; D16 for Ajustes, checkout and receipt; D17; the constitution amendment |
+  | 1 | Story 1 | migration 0073 (all four tables); D1–D7; D9 for `validating` and `confirmed`; D10; D12 recovery; D14; D16 for Ajustes, checkout and receipt; D17; the constitution amendment |
   | 2 | Stories 2 and 3 | the rest of D9; D8; D11; D15; the sweep guard; queue labels and counts |
   | 3 | Story 4 | D13 |
 
   Between PR 1 and PR 2, an exception or an unpaid link leaves the sale in Por verificar for the admin, exactly as today.
+
+  How each PR ships (constitution § Development Workflow):
+  - each PR is its own worktree off `origin/main` and targets `main`;
+  - its preview applies its pending migrations to dev's D1 **before** the merge, so PR 1's `0073` reaches dev while dev still runs `main`'s code;
+  - the merge deploys dev, and a `v*` tag releases production;
+  - PR 1 is released to production only after `DEVOLADA_CREDENTIAL_KEY` is in the `production` environment (D17, T003);
+  - a later PR's preview writes rows into dev's database that dev's earlier code does not handle yet: a deposit or settlement link while dev runs PR 1. PR 1's code keeps any verdict on a kind it does not handle as a snapshot (T028), and these are test-mode rows on dev.
 - **Rationale**:
   - The spec makes each story independently testable.
-  - The migration is additive, so tables created in PR 1 sit harmlessly unused until PR 2 uses them.
+  - The migration is additive, so tables created in PR 1 sit harmlessly unused until PR 2 uses them. That holds on dev too, where `0073` lands before any code reads it.
 
 ### D20 — What we deliberately leave out, and why that is safe
 
@@ -447,6 +503,7 @@ Paths are relative to `api-turistear/src/` unless prefixed `app:` (`app-turistea
 | Re-issuing a link after a fallback | The sale is on today's manual path, which works |
 | Automatic refunds of `unapplied` or overpaid money | The admin is alerted with the amounts (D9, D15), and transfers are 0.5% of payments |
 | Day-by-day reconciliation with `GET /v1/transfers` | D6 makes an orphan link impossible, and D12 follows every link we issued |
+| A deposit confirmation sent to the customer after Devolada confirms a deposit | The seller sees «Pago confirmado» on the sale, and Turistear sends no WhatsApp by itself (FR-008). `depositVerifiedWhatsAppUrl` (bug `verify-send-empty-link`) is ready if a send is wanted |
 | A QR of the link on the seller's screen | Dropped by the 2026-10-06 clarification. If it comes back, the Express "Mostrar QR" overlay (`app:features/pos/components/ExpressTicketOverlay.tsx:26`) is the pattern |
 
 ## Requests to Devolada
@@ -462,14 +519,14 @@ Devolada is our own product (`leolicona/devolada`), so these are cheaper to add 
 
 Each should go through the lite path (`/speckit-bug-assess`). This feature guards its own paths against them.
 
-1. `verifyPayment` succeeds on a rejected or swept sale (no `cancelled_at` check). `routes/pos/handler.ts:2882-2906`.
-2. `rejectPayment` erases a cash or verified deposit with no refund owed. `routes/pos/handler.ts:3207-3215`.
-3. `rejectPayment` releases seats for lines already cancelled and has no not-cancelled guard. `routes/pos/handler.ts:3118-3192`.
+1. `verifyPayment` succeeds on a rejected or swept sale (no `cancelled_at` check). `routes/pos/handler.ts:2779-2803`.
+2. `rejectPayment` erases a cash or verified deposit with no refund owed. `routes/pos/handler.ts:3104-3112`.
+3. `rejectPayment` releases seats for lines already cancelled and has no not-cancelled guard. `routes/pos/handler.ts:3015-3089`.
 4. `sweepExpiredBookings` cancels apartados whose transfer deposit is still pending, and credits money that was never received. `routes/pos/sweep.ts:146-158`; asserted as current behaviour at `test:folios/cancel-unverified-guard.test.ts:184-209`.
-5. A rejected or swept transfer stays `pending` forever, like the production payment of 2026-07-31. `routes/pos/handler.ts:3128-3216`.
-6. A pending full transfer sale enqueues a `tickets_delivered` WhatsApp row at checkout. `routes/pos/handler.ts:2053-2058`.
+5. A rejected or swept transfer stays `pending` forever, like the production payment of 2026-07-31. `routes/pos/handler.ts:3025-3113`.
+6. A pending full transfer sale enqueues a `tickets_delivered` WhatsApp row at checkout. `routes/pos/handler.ts:1953-1958`.
 7. `FolioReceiptPage` shows «Venta confirmada», «Pagado» and «Folio {id}» for an unverified transfer. `app:pages/FolioReceiptPage.tsx:74-85, 143-148`. Fixed here only on the surfaces this feature touches (D16).
 8. `wa_reminder_template` is edited in Ajustes but never read. `app:features/bookings/components/BookingWhatsAppButton.tsx:39-51`.
-9. Nothing type-checks the API (no `tsc` in CI), and 27 error codes in use are missing from `ErrorCode`. `src/types/errors.ts:1-39`.
-10. Unstubbed outbound calls in API tests reach the real provider (Resend). For example, `test:pos/payment-verification.test.ts` has no stubs.
+9. Nothing type-checks the API (no `tsc` in CI), and 20 error codes in use are missing from `ErrorCode` (27 on 2026-10-06; the retired affiliate and operator codes left with their routes). `src/types/errors.ts:1-36`.
+10. Unstubbed outbound calls in API tests reach the real provider (Resend), with the test key `vitest.config.ts` pins, so nothing is delivered. For example, `test:pos/payment-verification.test.ts` does not call `stubResend`.
 11. The `payment_rejected` customer message, which D11 reuses, says «tu folio…» where constitution VII says «Venta». `src/utils/notifications.ts:80`.

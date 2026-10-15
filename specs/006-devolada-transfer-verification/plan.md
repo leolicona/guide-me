@@ -1,9 +1,9 @@
 # Implementation Plan: Automatic Transfer Verification with Devolada
 
-**Branch**: `claude/flujo-pago-referencia-nlndbe` (spec folder `specs/001-devolada-transfer-verification`)
+**Branch**: `claude/flujo-pago-referencia-nlndbe` (spec folder `specs/006-devolada-transfer-verification`)
 | **Date**: 2026-10-06 | **Spec**: [spec.md](./spec.md)
 
-**Input**: Feature specification from `/specs/001-devolada-transfer-verification/spec.md`
+**Input**: Feature specification from `/specs/006-devolada-transfer-verification/spec.md`
 
 **Note**: This template is filled in by the `/speckit-plan` command; its definition describes the execution workflow.
 
@@ -36,6 +36,12 @@ Delivery is three PRs, one per story group (D19).
 **Spec amendment made while planning**: FR-016 and Story 2 scenario 4 now say an unpaid settlement
 leaves the sale an apartado, rather than one "returned" to it (D8).
 
+**Re-baselined against `main` on 2026-10-15** (research § Re-baseline): Better Auth, the retirement
+of affiliates and shift operators, the one-branch delivery pipeline with previews and secrets in
+GitHub environments, and bug `verify-send-empty-link`. This folder moved to `specs/006-…`, and the
+migration to `0073`. D17 and D19 are rewritten, D16 gains per-kind link messages, and the decisions
+otherwise stand.
+
 ## Technical Context
 
 **Language/Version**: TypeScript (ESM), Node 22 toolchain; Cloudflare Workers runtime, `compatibility_date` 2025-08-03
@@ -44,19 +50,20 @@ leaves the sale an apartado, rather than one "returned" to it (D8).
 - **API**: Hono ^4.12, `@hono/zod-validator` ^0.8, Zod ^4.4, Drizzle ORM ^0.45 on D1.
 - **Platform crypto**: WebCrypto. ECDSA P-256 verify for webhooks, AES-256-GCM for the credential, and HMAC-SHA256 as the key-derivation function, as in `utils/qr.ts`.
 - **App**: React 19, MUI 9, TanStack Query 5, React Hook Form 7 + Zod 4.
+- **Auth**: Better Auth 1.7.7, unchanged by this feature. Admin routes use `authMiddleware` and `requireRole('admin')`; the webhook is the one route of ours without a session.
 - **No new npm dependency.**
 
 **Storage**:
-- **Database**: Cloudflare D1 (`guideme-db`, `guideme-db-prod`). Migration `0069` adds four tenant-scoped tables ([data-model.md](./data-model.md)).
-- **Secrets**: new Worker secret `DEVOLADA_CREDENTIAL_KEY` per environment.
+- **Database**: Cloudflare D1 (`guideme-db` for dev and every preview, `guideme-db-prod`). Migration `0073` adds four tenant-scoped tables ([data-model.md](./data-model.md)). It reaches dev's D1 with PR 1's preview, before the merge.
+- **Secrets**: new secret `DEVOLADA_CREDENTIAL_KEY`, kept in the GitHub environments `dev` and `production` and planted by every deploy. A preview gets dev's value or none, never a throwaway (D17).
 
 **Testing**:
-- **API**: Vitest 4 with `@cloudflare/vitest-pool-workers` 0.16, in workerd against a real D1. A stateful fake Devolada sits behind `vi.spyOn(globalThis, 'fetch')` on an unresolvable host.
+- **API**: Vitest 4 with `@cloudflare/vitest-pool-workers` 0.16, in workerd against a real D1. Requests authenticate with Better Auth fixture sessions (`sessionCookie(email)`). A stateful fake Devolada sits behind `vi.spyOn(globalThis, 'fetch')` on an unresolvable host, and composes with `stubResend`.
 - **App**: jsdom, Testing Library, MSW 2 and axe.
 
 **Target Platform**:
-- **Workers**: `api-guideme` and `api-guideme-dev`, cron `*/15 * * * *`.
-- **Devolada**: collections API v1 at `https://api.devoladapago.com`. Real credentials in production, test credentials in dev and local.
+- **Workers**: `api-guideme` (production, from `v*` tags) and `api-guideme-dev` (every push to `main`), both with the cron `*/15 * * * *`. Each pull request also gets `api-guideme-pr-<n>` on `workers.dev`, on dev's D1, with no cron and no Devolada notification address.
+- **Devolada**: collections API v1 at `https://api.devoladapago.com`. Real credentials in production; test credentials in dev, previews and local.
 
 **Project Type**: web service + web app (pnpm monorepo: `api-turistear`, `app-turistear`)
 
@@ -95,9 +102,9 @@ leaves the sale an apartado, rather than one "returned" to it (D8).
 | V. Capacity Is Guarded by the Database | Guarded single statements; a request gives back what it took | PASS | PASS | No new capacity consumption. No read is ever the only guard: the system cancellation claims the link, then writes one batch whose every statement is gated on that batch's own guarded transition, releasing seats only for live lines (D11). A settlement or an admin *accept* is one batch gated on a single-row claim of the link (D8, D15). A verification releases tickets only in the call whose guarded flip matched (D10). Rechazar's own missing guard stays defect 3 |
 | VI. A Rule Is Proven Where It Is Enforced | API suites for rules and isolation; app tests for presentation only; axe; citations | PASS | PASS | D18. Transfer fields move out of `pages/` so they can be tested |
 | VII. Elegant Field Minimalism (NON-NEGOTIABLE) | Primitives, tokens, state icon-paired, «Venta» never "folio", es-MX copy | PASS | PASS | FormSheet, ConfirmSheet, StatusChip, AlertCard and MoneyText. Label copy table in the contracts. The receipt's «Pagado» on unverified money is fixed (D16) |
-| VIII. A Service We Do Not Own Never Undoes a Sale | One module; outside money writes; failure modes recorded; secrets per environment | PASS* | PASS* | Only `services/devolada.ts` calls Devolada, with timeouts and fallbacks (D5, D6). Failure modes: [contracts/devolada-integration.md](./contracts/devolada-integration.md). Secret per environment (D17). *Devolada must be added to the list of services we do not own: see Complexity Tracking |
-| Technology Stack & Constraints | Stack fixed unless justified; migrations additive; bounded reads | JUSTIFIED | JUSTIFIED | New integration, new secret, third sweep on the existing trigger (Complexity Tracking). Migration `0069` is additive. New reads are bounded and indexed |
-| Workflow & Quality Gates | PRs to `develop`, `verify` green, `/speckit-analyze` before implement | PASS | PASS | Three PRs (D19). The constitution amendment rides PR 1 |
+| VIII. A Service We Do Not Own Never Undoes a Sale | One module; outside money writes; failure modes recorded; secrets per environment | PASS* | PASS* | Only `services/devolada.ts` calls Devolada, with timeouts and fallbacks (D5, D6). Failure modes: [contracts/devolada-integration.md](./contracts/devolada-integration.md). The key is managed in the GitHub environments and planted by every deploy. A preview gets dev's key or none, an exception to VIII's throwaway rule, and without a key the API fails closed (D17). *Devolada must be added to the list of services we do not own: see Complexity Tracking |
+| Technology Stack & Constraints | Stack fixed unless justified; migrations additive and safe under the code already deployed; bounded reads | JUSTIFIED | JUSTIFIED | New integration, new secret, third sweep on the existing trigger (Complexity Tracking). Migration `0073` is additive, and nothing on `main` reads its tables when the preview applies it to dev. New reads are bounded and indexed |
+| Workflow & Quality Gates | One worktree and one PR per unit, off and into `main`; `verify` green; a preview per PR; dev on merge, production on a `v*` tag; `/speckit-analyze` before implement | PASS | PASS | Three PRs to `main` (D19), each validated on its preview and on dev before a `v*` release. The constitution amendment rides PR 1 |
 
 **Result**: the gates pass. The one departure is the stack's list of external services, which is
 justified below and is resolved by a MINOR amendment through `/speckit-constitution`.
@@ -107,7 +114,7 @@ justified below and is resolved by a MINOR amendment through `/speckit-constitut
 ### Documentation (this feature)
 
 ```text
-specs/001-devolada-transfer-verification/
+specs/006-devolada-transfer-verification/
 ├── spec.md                 # /speckit-specify (+ clarifications 2026-10-06; FR-016 amended by D8)
 ├── plan.md                 # This file
 ├── research.md             # Phase 0: D1–D20, defects found, requests to Devolada
@@ -125,7 +132,7 @@ specs/001-devolada-transfer-verification/
 
 ```text
 api-turistear/
-├── migrations/0069_devolada_transfer_verification.sql      NEW  four tables (data-model)
+├── migrations/0073_devolada_transfer_verification.sql      NEW  four tables (data-model)
 ├── src/
 │   ├── bindings.d.ts                                        + DEVOLADA_* bindings (D17)
 │   ├── index.tsx                                            mount /api/webhooks and /api/devolada; third waitUntil sweep
@@ -162,14 +169,18 @@ api-turistear/
 │   └── devolada/*.test.ts                                   NEW  connection, checkout-link, webhook, verdicts, apartados,
 │                                                                 link-closing, sweep, isolation, credential-cipher, signature
 ├── vitest.config.ts                                         pin DEVOLADA_* bindings (D17)
-├── wrangler.jsonc                                           DEVOLADA_* vars in local, dev and production
+├── wrangler.jsonc                                           DEVOLADA_* vars in local, dev, preview and production
 └── .dev.vars.example                                        document DEVOLADA_CREDENTIAL_KEY
+
+.github/workflows/
+├── deploy-dev.yml, deploy-prod.yml                          plant DEVOLADA_CREDENTIAL_KEY; a malformed one stops the deploy (D17)
+└── preview.yml                                              dev's DEVOLADA_CREDENTIAL_KEY or none, never a throwaway (D17)
 
 app-turistear/src/
 ├── features/devolada/                                       NEW  components/{DevoladaConnectionCard, ConnectDevoladaSheet,
 │                                                                 PaymentLinkCard, PaymentLinkStatusChip}, hooks/, types.ts, index.ts
 ├── features/pos/components/TransferPaymentFields.tsx        NEW  reference field vs link notice, testable outside pages/
-├── features/pos/delivery.ts                                 + paymentLinkWhatsAppUrl + default template
+├── features/pos/delivery.ts                                 + paymentLinkWhatsAppUrl + one shipped text per link kind
 ├── features/pos/types.ts, features/folios/types.ts          + PaymentLinkView mirrors; `payment_not_received`; event types
 ├── features/bookings/components/SettleSheet.tsx, BookingActions.tsx    connected mode; settlement link card
 ├── features/folios/components/FolioCard.tsx, FolioWorkActions.tsx,
@@ -196,4 +207,4 @@ app-turistear/src/
 
 | Violation | Why Needed | Simpler Alternative Rejected Because |
 |---|---|---|
-| **Departure from the fixed stack.** A new external service (Devolada), a new Worker secret (`DEVOLADA_CREDENTIAL_KEY`) and a third sweep on the API's one cron trigger. The constitution's *Technology Stack* table and Principle VIII list the services we do not own, and the Runtime row describes the cron as running the bookings sweep | The feature *is* the integration: Banxico's verdict reaches us only through Devolada. The secret is the only way to meet FR-003. The sweep is FR-012's recovery path | No alternative verifies a transfer without the provider. Resolved by a **MINOR** amendment through `/speckit-constitution` in PR 1: Devolada joins the Integrations row and VIII's list, with its module and failure modes, and the Runtime row names the three sweeps |
+| **Departure from the fixed stack.** A new external service (Devolada), a new secret (`DEVOLADA_CREDENTIAL_KEY`) and a third sweep on the API's one cron trigger. The constitution's *Technology Stack* table and Principle VIII list the services we do not own, and the Runtime row describes the cron as running the bookings sweep. VIII also lets a preview take a throwaway value for any secret dev lacks | The feature *is* the integration: Banxico's verdict reaches us only through Devolada. The secret is the only way to meet FR-003. The sweep is FR-012's recovery path. A throwaway key would encrypt rows in dev's database that dev could never read | No alternative verifies a transfer without the provider. Resolved by a **MINOR** amendment (1.4.0 → 1.5.0) through `/speckit-constitution` in PR 1 (T006). Devolada joins the Integrations row and VIII's list, with its module and failure modes. The Runtime row names the three sweeps. VIII's secrets paragraph names the key, says what changing it costs, and gives a preview dev's value or none |

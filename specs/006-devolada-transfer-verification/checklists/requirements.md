@@ -54,3 +54,8 @@
   «Verificando pago» (constitution VII: the UI's existing word for the concept); the out-of-org
   notification edge case says *logged*; SC-002 measures tickets *released*, not *received*; SC-009
   holds while Devolada answers. All items still pass.
+- **Re-baseline against `main` (2026-10-15)**: the folder moved from `specs/001-…` to
+  `specs/006-…` (main took 001–005). The spec lost its affiliate and shift-operator sellers (both
+  retired on `main`); no requirement changed. The plan's environment, delivery and auth facts were
+  re-read: Better Auth sessions, the one-branch pipeline with previews, and secrets in GitHub
+  environments (research § Re-baseline). All items still pass.
