@@ -86,6 +86,8 @@ says otherwise.
      | 201 | the link's `isTest` is the credential's mode |
 
   3. **Mode policy**: `DEVOLADA_KEY_MODE` is `real` in production and `test` in dev, previews and local. A credential of the other mode gets `DEVOLADA_MODE_NOT_ALLOWED`.
+
+  A `broken` connection is probed again the same way when an admin opens it (`GET /organizations/me/devolada`). A success makes it `connected` again, so a suspension lifted or a channel configured at Devolada heals the next time the admin looks. *(Amended 2026-10-15 by /speckit-analyze.)*
 - **Rationale**:
   - FR-002 needs the mode and a credential Devolada accepts, and the v1 contract offers no way to inspect a credential.
   - A one-time link born expired is the only call that does three things at once: uses the credential, reports the mode, and fails exactly where a real sale would fail (a business without its CLABE configured). It relies only on promised behaviour: "`expiresAt` … may be in the past (a link born expired)".
@@ -96,6 +98,7 @@ says otherwise.
   - The test-mode route (a real credential gets `NOT_FOUND`) depends on the order Devolada validates things in, which the contract does not promise.
   - Asking the admin to declare the mode trusts input the server can check.
   - See *Requests to Devolada* for `GET /v1/me`, which would replace the probe.
+  - Probing a `broken` connection on every sweep heals it without the admin, but leaves a dead link in the business's panel every 15 minutes for as long as it stays broken. The admin, who fixes the cause at Devolada, is the one who looks again.
 
 ### D3 — Who owns the notification address
 
@@ -133,9 +136,9 @@ says otherwise.
   4. Find our link by `data.paymentLinkId`. This is a globally unique key, the one kind of lookup constitution III exempts from actor scoping. An unknown link → 200, logged, nothing stored, because there is no organization to scope a row to.
   5. Check the mode: `data.isTest` must match the link's own `mode`, copied from the credential that created it. Otherwise → 200, recorded as `mode_mismatch`.
   6. De-duplicate on `eventId` (a `devolada_events` row). An event whose earlier processing failed is processed again.
-  7. Re-read `GET /v1/payments/{paymentId}` **with the credential that created the link** (D21), one of the owning organization's own, and apply D9 to the re-read, never to the body. A disconnected organization's link is re-read the same way while its credential is kept (FR-004).
+  7. Re-read `GET /v1/payments/{paymentId}` **with the link's own credential** (D21), one of the owning organization's own, and apply D9 to the re-read, never to the body. A disconnected organization's link is re-read the same way, because its credential is kept while anything about the link is unresolved (FR-004).
   8. Answer:
-     - 200 when done;
+     - 200 when done, and when the link's credential was already erased: every payment of the link is final, so there is nothing left to re-read (D21);
      - 500 on an internal failure;
      - 503 `DEVOLADA_UNAVAILABLE` when the keys or the re-read are unreachable.
 
@@ -188,7 +191,7 @@ says otherwise.
 - **Rationale**:
   - FR-007, FR-009, FR-010.
   - Constitution VIII: the sale is the fact, and the link is a call outside its batch.
-  - Writing our row before calling makes an orphan link impossible. A timed-out create is replayed with the same key within 24 hours to learn whether the link exists, and is then closed (D12).
+  - Writing our row before calling makes an orphan link impossible. A timed-out create is replayed with the same key within 24 hours to learn whether the link exists, and is then closed (D12). So is a row whose request died before recording any outcome: after 5 minutes in `creating`, the sweep treats it as `abandoned` (D12).
 - **Alternatives considered**:
   - Inside the sale's batch: impossible, since HTTP is not a statement, and against VIII.
   - After responding: the seller would have no URL to send.
@@ -237,9 +240,9 @@ says otherwise.
 
     A second processor — the webhook and the sweep at once, a Devolada retry, an admin's double tap on *accept* (D15) — matches nothing and writes nothing.
   - **An unpaid settlement link** simply closes.
-  - **One open settlement link per sale**: a repeated transfer settlement for the same line, or for the whole sale, returns that link. A settlement for another line answers 409 `SETTLEMENT_IN_PROGRESS`, like the writes D13 refuses while the link's payment is in flight. *(Amended 2026-10-15 by /speckit-analyze.)*
-  - **The expiry sweep** skips a sale with an open link or a payment in flight.
-  - **One bypass**: a settlement whose payment was in flight when the apartado's clock ran out is still recorded. The `BOOKING_EXPIRED` pre-check is skipped for that case only.
+  - **One open settlement link per sale**: a repeated transfer settlement for the same scope as the open link (the same line, or the whole sale) returns that link. Any other transfer settlement answers 409 `SETTLEMENT_IN_PROGRESS`, like the writes D13 refuses while the link's payment is in flight: another line, the whole sale while one line's link is open, or one line while the whole sale's link is open. *(Amended 2026-10-15 by /speckit-analyze.)*
+  - **The expiry sweep** skips a sale while it has a link being created or open. It also skips it while a settlement payment awaits the admin's decision: an exception (D9), or a payment in flight on a link no credential can read (D21). The customer may have paid, so the apartado waits for the admin's *accept* or *dismiss* (D15). Decided by the developer on 2026-10-15.
+  - **One bypass**: a settlement whose payment was submitted before its link expired is still recorded after the apartado's clock ran out, by its verdict or by the admin's *accept* (D15). The `BOOKING_EXPIRED` pre-check is skipped for that case only.
 - **Rationale**:
   - FR-016's settlement branch requires an unpaid settlement to leave the apartado intact.
   - Settling writes allocations that derive `paid` at once (`utils/folioStatus.ts`), and nothing in the code can undo a settlement.
@@ -256,15 +259,15 @@ says otherwise.
   - The webhook and the sweep share one function, `applyDevoladaPayment(link, payment)`.
   - Applying it twice changes nothing, and a final status never goes back. `applied_status` lets a repeat skip early, but that read is an optimization, never the guarantee: the guarantee is the guarded write each branch makes (D8, D10, D11).
   - `applied_status` is set only when a branch acted. A status or link kind that a PR only snapshots, because a later PR handles it, stays unmarked, so the PR that handles it applies it (D19). *(Amended 2026-10-15 by /speckit-analyze.)*
-  - It never cancels on the clock alone. The unpaid branch requires a successful re-read, with the credential that created the link (D21), showing no payment at all, or an *expired* one. A payment in flight keeps the link open, and any other final verdict stays with the admin (FR-016). *(Amended 2026-10-15 by /speckit-analyze: a payment that ended invalid no longer cancels its sale when the link expires.)*
+  - It never cancels on the clock alone. The unpaid branch requires a successful re-read, with the link's credential (D21), showing no payment at all, or an *expired* one. A payment in flight keeps the link open, and any other final verdict stays with the admin (FR-016). *(Amended 2026-10-15 by /speckit-analyze: a payment that ended invalid no longer cancels its sale when the link expires.)*
 
   | Devolada status | Sale or deposit link | Settlement link |
   |---|---|---|
   | `validating` | snapshot; the sale shows «Verificando pago» | same |
   | `queued_for_credit` | snapshot; the sale shows «Verificación en pausa» in Por verificar, and so does the connection health | same |
   | `validating` + `awaiting: payer_tracking_key` | snapshot; seller and admin see «Pide al cliente su clave de rastreo»; no expiry while it waits | same |
-  | `confirmed` | verify that payment row (D10), which matches nothing if an admin already verified it by hand, so nothing is released twice; the receipt number becomes its reference; link `paid` | record the settlement (D8), whose claim matches nothing if the admin already recorded it (D15); link `paid` |
-  | `partial`, `invalid` | snapshot; the sale stays pending, so it shows in Por verificar with asked and received amounts and its label; the admin uses Verificar or Rechazar as today (FR-018) | link closed; an attention item the admin *accepts* (records the settlement as the admin) or *dismisses* (the apartado continues) (D15) |
+  | `confirmed` | verify that payment row (D10), which matches nothing if an admin already verified it by hand, so nothing is released twice; the receipt number becomes its reference; link `paid` | record the settlement (D8). If the admin already recorded it (D15), the claim matches nothing and nothing is recorded twice. Either way the link ends `paid` |
+  | `partial`, `invalid` | snapshot; the sale stays pending, so it shows in Por verificar with asked and received amounts and its label; the admin uses Verificar or Rechazar as today (FR-018) | link closed; an attention item the admin *accepts* (records the settlement as the admin) or *dismisses* (the apartado continues) (D15). The apartado does not expire until then (D8) |
   | `expired`, or the link expired with no payment | FR-016 system cancellation (D11) | link `expired`; the apartado continues |
   | the link expired after a `partial`, `invalid` or `unapplied` verdict | link `expired`; nothing else: the admin decides (FR-016) | the link is already closed |
   | `unapplied` | attention item «Dinero recibido sin venta»; the admin marks it *returned* (D15) | same |
@@ -331,13 +334,18 @@ says otherwise.
 
 - **Decision**:
   - `sweepDevoladaPayments(env, now)` lives in `routes/devolada/sweep.ts` and runs as a third independent `ctx.waitUntil` in `scheduled()`, with `now = new Date(controller.scheduledTime)`.
-  - Each run covers every unresolved link, whatever its organization's status, and checks it with the credential that created it (D21). It is fail-soft per organization (loading each credential included) and per sale, and does four things:
-    1. Sales with a link that is `open` and either unchecked for 10 minutes or past `expires_at` get `GET /v1/payments?customerRef=<folioId>`, one call per credential that created one of the sale's open links, and D9 for each payment. A credential Devolada rejects takes D21's fallback.
+  - Each run covers every unresolved link (data-model), whatever its organization's status, and checks it with the link's credential (D21). It is fail-soft per organization (loading each credential included) and per sale, and does four things:
+    1. Sales get `GET /v1/payments?customerRef=<folioId>`, one call per credential of the links below, and D9 for each payment, when they have a link that is either:
+       - `open`, and unchecked for 10 minutes or past `expires_at`;
+       - `closed` while its current payment is still in flight, and unchecked for 10 minutes. A cancellation or Rechazar closed it under that payment (D13), whose verdict, usually *unapplied*, is money to return (FR-012).
+
+       A credential Devolada rejects takes D21's fallback; a suspended business is retried at the next run.
     2. A link past expiry whose current payment is absent or *expired* takes D9's unpaid branch. One whose payment is in flight stays open. Any other final verdict (*partial*, *invalid*, *unapplied*) moves the link to `expired` and leaves the sale to the admin (FR-016), so the sweep stops re-reading it.
     3. Links in the remaining states are retried:
+       - `creating` for more than 5 minutes: the request that wrote it died before recording an outcome, so the link becomes `abandoned` (D6);
        - `abandoned`: replay the create with the same key; if the link exists, close it;
        - `closing`: send `PATCH {close: true}` until Devolada acknowledges.
-    4. A retired credential with no unresolved link is erased (D21). Disconnecting retires the current one, so a disconnected organization's key goes once its last link resolves.
+    4. A retired credential with no unresolved link is erased (D21). Disconnecting retires the current one, so a disconnected organization's key goes once its last link resolves and every payment of its links has its verdict. *(Amended 2026-10-15 by /speckit-analyze: closed links whose payment is in flight, and links left in `creating`.)*
   - Budget: at most 50 Devolada calls per organization per run (the limit is 120 a minute, shared with live traffic). `RATE_LIMITED` stops that organization until the next run.
   - Order, so the budget never starves a sale: links past `expires_at` first, then never-checked links, then the oldest `last_checked_at`. Every notification applied also stamps `last_checked_at`, so the sweep spends its budget only on links nothing has reported on for 10 minutes.
   - Scale: SC-003 and SC-009 hold while an organization has at most 50 such links per run. Production today has 5 transfers in 75 days. Past that, each extra 50 links adds one run (15 minutes) to a lost verdict's delay; raising the budget toward Devolada's limit is the lever. *(Amended 2026-10-15 by /speckit-analyze.)*
@@ -357,15 +365,16 @@ says otherwise.
     - `rejectPayment`;
     - the admin's manual Verificar, for the links that collect the rows it verified;
     - D11, for the sale's other links;
-    - a cash settlement while a settlement link is open.
+    - a cash settlement of what an open settlement link collects: its line, or the whole sale.
 
-    The reason is recorded in `closed_reason`: `cancelled` when the sale is cancelled; `amount_changed` when a line cancellation leaves the sale alive with a new balance; `rejected`; `verified_by_admin`; `settled_otherwise`; and `abandoned` when the sweep finds that a timed-out create did exist. D11's own link ends `expired`, with no reason. *(Amended 2026-10-15 by /speckit-analyze.)*
+    The reason is recorded in `closed_reason`: `cancelled` when the sale, or the link's own line, is cancelled; `amount_changed` when a line cancellation leaves the sale alive with a new balance for a whole-sale link; `rejected`; `verified_by_admin`; `settled_otherwise`; and `abandoned` when the sweep finds that a timed-out create did exist. D11's own link ends `expired`, with no reason. *(Amended 2026-10-15 by /speckit-analyze.)*
+  - **A settlement link closes only when the write touches what it collects.** A whole-sale link (no `folio_line_id`) closes on any line cancellation or cash settlement, since its amount no longer matches the balance. One line's link closes only when that line is cancelled or settled. It stays open when another line is cancelled or settled in cash, since its line still owes what the link asks. *(Amended 2026-10-15 by /speckit-analyze.)*
   - **While the sale stays alive, a link is never closed under a payment in flight** (*validating*, awaiting a tracking key, or `queued_for_credit`). Decided by the developer on 2026-10-15:
     - the admin's manual Verificar leaves that link open. Its verdict is recorded and releases nothing a second time (D10), and the link is closed once that verdict is final;
-    - while a settlement link's payment is in flight, a line cancellation and a cash settlement answer 409 `SETTLEMENT_IN_PROGRESS`, and the seller waits for the verdict;
-    - cancelling the sale, and Rechazar, still close it: the sale is gone, so money that arrives after is rightly *unapplied* (D9).
-  - After the write, the handler closes them at Devolada (`PATCH {close: true}`) under `waitUntil`. The sweep retries until Devolada acknowledges.
-  - When a line cancellation changes an apartado's balance while its settlement link is open, a replacement settlement link (D6) is issued and returned.
+    - while a settlement link's payment is in flight, a line cancellation or a cash settlement that would close that link answers 409 `SETTLEMENT_IN_PROGRESS`, and the seller waits for the verdict;
+    - cancelling the sale, and Rechazar, still close it: the sale is gone, so money that arrives after is rightly *unapplied* (D9). The sweep follows that payment until its verdict (D12).
+  - After the write, the handler closes them at Devolada (`PATCH {close: true}`) under `waitUntil`. The sweep retries until Devolada acknowledges, and a `closing` link whose credential Devolada rejects takes D21's fallback.
+  - When a line cancellation closes a whole-sale settlement link and the sale still owes, a replacement settlement link (D6) for the new balance is issued and returned. A line's own link closes without a replacement when its line is cancelled.
 - **Rationale**:
   - FR-011 and Story 4.
   - Marking inside the batch keeps the link's state consistent with the money; the HTTP close stays outside it (VIII).
@@ -385,7 +394,7 @@ says otherwise.
     - `verification_auto`: the sale is pending verification with a live line, and Devolada is handling it with nothing for the admin to do. Every pending payment row is collected by an `open` link that either waits for its first payment before `expires_at`, or whose current payment is *validating* without `awaiting`. A payment still *validating* past `expires_at` keeps the flag: the customer paid in time and Banxico has not answered yet. The sale also has no unresolved attention item.
     - `devolada_attention`: the sale has an unresolved attention item (data-model § Attention).
 
-    The «Por verificar» facet lists the sales pending verification that are not `verification_auto`, plus every `devolada_attention` sale. A `verification_auto` sale offers no «Verificar y enviar» on its card, and the admin can still verify it from the sale (FR-018). It returns to the queue by itself as soon as its link expires with no payment, its credit pauses, the customer owes a tracking key, or an exception arrives.
+    The «Por verificar» facet lists the sales pending verification that are not `verification_auto`, plus every `devolada_attention` sale. A `verification_auto` sale offers no «Verificar y enviar» on its card, and the admin can still verify it from the sale (FR-018). It returns to the queue by itself as soon as its link expires with no payment, its credit pauses, the customer owes a tracking key, an exception arrives, or no credential can read its link any more (D21).
 
     The words follow the flag. On a `verification_auto` sale, the detail's header shows the link's chip instead of «Por verificar», and the receipt's pending payment rows read «En verificación»: «Por verificar» names the admin's work (`app:features/folios/components/FolioStateSheet.tsx:57-58`).
 
@@ -418,8 +427,8 @@ says otherwise.
 
   | Action | For | Effect |
   |---|---|---|
-  | `accept` | a settlement exception, or a settlement payment Devolada is still verifying (*validating*, awaiting a tracking key, `queued_for_credit`) | records the settlement as the admin; `verified_by` = admin. For a payment still in flight, the link stays open until the verdict, which records nothing more and then closes it (D13) |
-  | `dismiss` | a settlement exception | closes it; the apartado continues |
+  | `accept` | a settlement exception, or a settlement payment Devolada is still verifying (*validating*, awaiting a tracking key, `queued_for_credit`) | records the settlement as the admin; `verified_by` = admin. It is recorded past the apartado's clock too, when the payment was submitted before its link expired (D8's bypass). For a payment still in flight, the link stays open until the verdict, which records nothing more and ends the link as D9 says (`paid` when confirmed) |
+  | `dismiss` | a settlement exception, or a settlement payment in flight on a link no credential can read (D21) | closes the link, when a credential can still reach it; the apartado continues. Money that arrived, as with a *partial* payment, is returned outside the system, like *unapplied* money |
   | `returned` | an `unapplied` payment | the admin returned the money outside the system |
 
   Every action is claimed by a guarded write before it acts:
@@ -433,7 +442,8 @@ says otherwise.
   Sale and deposit exceptions keep using today's Verificar and Rechazar. When those are used, the link is closed (D13).
 - **Rationale**:
   - FR-015 and FR-018: the admin can always decide by hand. A settlement has no pending row until it is proven (D8), so without `accept` on a payment in flight, a stalled validation (paused credit, a tracking key the customer never gives) would leave a paid apartado with no way to release its tickets. Decided by the developer on 2026-10-15.
-  - `dismiss` stays limited to exceptions: closing a link under a payment in flight would turn that payment *unapplied* (D13).
+  - A stalled validation is exactly when the apartado's clock runs out, so `accept` takes D8's bypass, and the apartado waits for the admin's decision instead of expiring under it (D8). Decided by the developer on 2026-10-15.
+  - `dismiss` stays limited to exceptions: closing a link under a payment in flight would turn that payment *unapplied* (D13). A link no credential can read cannot be closed anyway, so its payment can be dismissed.
   - Under D8 a settlement exception has no pending row for Verificar to flip.
 - **Alternatives considered**:
   - Reusing `/verify` and `/reject` for settlement exceptions: they act on pending rows that don't exist here, and Rechazar cancels the sale, against FR-016's principle.
@@ -527,11 +537,11 @@ says otherwise.
 
   | PR | Stories | Contents |
   |---|---|---|
-  | 1 | Story 1 | migration 0073 (all five tables); D1–D7; D21; D9 for `validating` and `confirmed`; D10; D12 recovery; D14; D16 for Ajustes, checkout and receipt; D17; the constitution amendment |
-  | 2 | Stories 2 and 3 | the rest of D9; D8; D11; D15; the sweep guard; queue labels and counts |
-  | 3 | Story 4 | D13 |
+  | 1 | Story 1 | migration 0073 (all five tables); D1–D7; D21; D9 for `validating` and `confirmed`; D10; D12 recovery, with links left in `creating` marked `abandoned`; D14; D16 for Ajustes, checkout and receipt; D17; the constitution amendment |
+  | 2 | Stories 2 and 3 | the rest of D9; D8; D11; D15; the sweep guard; the sweep's retry of `closing` links; queue labels and counts |
+  | 3 | Story 4 | D13; the replay of `abandoned` links and the follow-up of payments on closed links (D12) |
 
-  Between PR 1 and PR 2, an exception or an unpaid link leaves the sale in Por verificar for the admin, exactly as today.
+  Between PR 1 and PR 2, an exception or an unpaid link leaves the sale in Por verificar for the admin, exactly as today. In PR 1 the sweep moves an unpaid link past its expiry to `expired` once a successful re-read shows no payment, or an *expired* one, and cancels nothing. Its sale is already back in Por verificar (D14), and the sweep stops re-reading it. PR 2 replaces that step with D9's unpaid branch. *(Amended 2026-10-15 by /speckit-analyze.)*
 
   How each PR ships (constitution § Development Workflow):
   - each PR is its own worktree off `origin/main` and targets `main`;
@@ -540,7 +550,7 @@ says otherwise.
   - PR 1 is released to production only after `DEVOLADA_CREDENTIAL_KEY` is in the `production` environment (D17, T003);
   - a later PR's preview writes rows into dev's database that dev's earlier code does not handle yet: a deposit or settlement link while dev runs PR 1. PR 1's code keeps any verdict on a kind or status it does not handle as a snapshot, without marking it applied (T028), so dev applies it once it runs PR 2. These are test-mode rows on dev;
   - until PR 3, Rechazar does not close the link. A customer who pays a rejected sale before the link expires is recorded as a snapshot, and only surfaces once PR 2 brings `unapplied`. This is accepted: it is today's risk, since a rejected customer can transfer anyway, and the link expires within 24 hours;
-  - until PR 3, nothing closes or replaces a settlement link. So in PR 2, while a sale has an open settlement link, a line cancellation, a cash settlement and a settlement for another line answer 409 `SETTLEMENT_IN_PROGRESS`, and the settle buttons stay hidden. PR 3 narrows the refusal to a link whose payment is in flight (D13). *(Amended 2026-10-15 by /speckit-analyze.)*
+  - until PR 3, no cancellation, Rechazar, line cancellation or cash settlement closes or replaces a settlement link. In PR 2 only D11 and the settlement exceptions close links (D9, D15), and the sweep already retries those closes. So in PR 2, while a sale has an open settlement link, a line cancellation, a cash settlement and any other transfer settlement answer 409 `SETTLEMENT_IN_PROGRESS`, and the settle buttons stay hidden. PR 3 narrows the refusal to a write that would close a link whose payment is in flight (D13). *(Amended 2026-10-15 by /speckit-analyze.)*
 - **Rationale**:
   - The spec makes each story independently testable.
   - The migration is additive, so tables created in PR 1 sit harmlessly unused until PR 2 uses them. That holds on dev too, where `0073` lands before any code reads it.
@@ -559,12 +569,18 @@ says otherwise.
 ### D21 — Each link is followed with the key that created it
 
 - **Decision**:
-  - Every API key the organization connects is a row of `devolada_credentials`, encrypted as D1 says. The connection points to its current credential, the one new links use. Each link records the credential that created it (`devolada_links.credential_id`).
+  - Every API key the organization connects is a row of `devolada_credentials`, encrypted as D1 says. The connection points to its current credential, the one new links use. Each link records its credential (`devolada_links.credential_id`): the one that created it, until the fallback below moves the link to the current one.
   - Every call about a link uses that link's credential: the webhook's re-read (D4), the sweep's checks (D12), closing it (D13) and replaying an abandoned create. Only new links use the current credential.
-  - Replacing the key, for the same business or another one, retires the previous credential. So does disconnecting. A retired credential is kept while a link it created is unresolved, and the sweep erases it after (D12). Decided by the developer on 2026-10-15: the admin may switch Devolada accounts at any time.
-  - **When a link's credential is rejected** (`AUTHENTICATION_ERROR`, a revoked key), the system asks the current credential for that link with `GET /v1/payment-links/{id}`:
+  - Replacing the key, for the same business or another one, retires the previous credential. So does disconnecting. A retired credential is kept while a link that uses it is unresolved, a closed link whose payment is still in flight included (data-model), and the sweep erases it after (D12). Decided by the developer on 2026-10-15: the admin may switch Devolada accounts at any time, and every payment is followed to its verdict.
+  - **When a link's credential is rejected** (`AUTHENTICATION_ERROR`, a revoked key) on any call about the link (a re-read, a close or a replay), the system asks the current credential for that link with `GET /v1/payment-links/{id}`:
     - if it can read it, as after a rotation within the same business, the link moves to the current credential;
-    - if no credential can read it, the link becomes `failed`. Its sale goes to the admin, «Sin enlace de pago — verificar a mano», and is never cancelled automatically.
+    - if no credential can read it, the link becomes `failed`, and its payment keeps its last known state.
+      - A sale or deposit link leaves its payment row pending, so the sale waits in Por verificar, «Sin enlace de pago — verificar a mano».
+      - A settlement link whose payment was in flight becomes an attention item the admin *accepts* or *dismisses* (D15), and the apartado waits for that decision (D8).
+      - A `closing` link becomes `failed` too: its sale had already stopped taking that money.
+
+      D11 never cancels a sale over a link that no credential can read.
+  - **A suspended business is not a rejected key.** `BUSINESS_SUSPENDED` on a retired credential's call changes nothing: a suspension may be lifted, so those links are retried at the next run, and the connection, which belongs to the current key, is untouched. *(Amended 2026-10-15 by /speckit-analyze.)*
   - The webhook's mode check compares the event with the link's own `mode`, copied from its credential (D4).
 - **Rationale**:
   - Devolada v1 does not say which business a key belongs to (Requests to Devolada, 1), so the system cannot tell a key rotation from a switch to another business.

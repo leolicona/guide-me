@@ -7,6 +7,7 @@ This guide only runs and checks things. Implementation detail lives in `tasks.md
 
 - **Toolchain and local data**: Node 22, `pnpm install`, the local database (`docs/DEVELOPMENT.md` in the archive), and `api-turistear/.dev.vars` from `.dev.vars.example`, `BETTER_AUTH_SECRET` included.
 - **A Devolada test credential** (`dk_…`) from a Devolada business set aside for testing, from its panel under **Integraciones → API**. Never use a business that a real integration also uses: Devolada keeps one notification address per business (research D3).
+- **For step 14**, a second test business set aside the same way, and its test key.
 - **`api-turistear/.dev.vars`** gains:
 
   ```bash
@@ -92,6 +93,7 @@ curl -s -X POST "https://api.devoladapago.com/v1/test/payments/<payment id>/adva
 | 11 | Pay a link after its sale was cancelled (advance to `unapplied`) | Por verificar: «Dinero recibido sin venta»; «Ya lo devolví» clears it |
 | 12 | Set `DEVOLADA_API_BASE_URL=https://devolada.invalid` and sell by transfer. Then restore it, and sell by transfer a service that departs in less than 15 minutes | The sale completes. The receipt shows «No se pudo crear el enlace de pago…», and Por verificar shows «Sin enlace de pago — verificar a mano» (FR-010). The second sale completes with no link: the receipt shows «Ya no hay tiempo para cobrar con enlace…», and the sale waits in Por verificar like any manual transfer |
 | 13 | Register a second organization at `/register` and sign in as its admin | Sees none of the first organization's connection, links or payments; resolving one of them by id answers 404 (FR-021) |
+| 14 | Connect business A's test key and sell two sales by transfer. Confirm a test transfer on the first sale's link page, then replace the key with business B's. Advance that payment to `confirmed` with A's key, and trigger the sweep. Then revoke A's key in A's panel and trigger the sweep again | Ajustes shows B's «Clave …». The first sale is verified: its link is followed with A's key (research D21). After the revocation, the second sale moves to Por verificar as «Sin enlace de pago — verificar a mano», and nothing is cancelled |
 
 ## 3 · On the pull request's preview, then on dev
 

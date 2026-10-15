@@ -25,16 +25,18 @@ Banxico's verdict, which Devolada reports, instead of by an admin. The approach,
   in the code can undo a settlement (D8).
 - **Verdicts**: they arrive two ways.
   - A signed webhook. It is verified, routed by the link's global id, then **re-read with the
-    credential that created the link**, one of the owning organization's own, before anything
-    changes (D4, D21).
-  - A 15-minute recovery sweep on the existing cron (D12).
+    link's own credential**, one of the owning organization's own, before anything changes (D4,
+    D21).
+  - A 15-minute recovery sweep on the existing cron. It follows every payment to its verdict, one
+    on a link already closed included, so money owed back is always flagged (D12).
 - **Applying a verdict** (D9):
   - *confirmed* → verifies one ledger row, through cores extracted from `verifyPayment` (D10).
   - Money that never arrived → cancels the sale through a guarded system cancellation, with none of
     `rejectPayment`'s defects (D11).
   - Everything else → reaches Por verificar or the seller, labelled by the server (D14, D15).
-  - The admin can always verify by hand, a settlement still in verification included (D15; spec
-    clarification of 2026-10-15).
+  - The admin can always verify by hand, a settlement still in verification included. While a
+    settlement payment awaits that decision, the apartado does not expire (D8, D15; spec
+    clarifications of 2026-10-15).
 - **Por verificar holds only work for the admin**: a sale Devolada is still resolving stays out of it, and out of its count, until the admin has something to do (D14; spec clarification of 2026-10-15).
 - **Closing links**: links close whenever their sale stops taking money, but never under a payment in flight while the sale lives (D13; spec clarification of 2026-10-15).
 

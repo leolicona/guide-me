@@ -91,7 +91,17 @@ both as the fallback when Devolada is unavailable and as the admin's override.
   and releases the tickets if the sale is paid. Devolada's later verdict records nothing a second
   time (FR-018).
 - Q: After the admin disconnects Devolada, are the pending links' notifications still applied? →
-  A: Yes, as while connected: the key is kept until the last pending link is resolved (FR-004).
+  A: Yes, as while connected: the key is kept until the last pending link is resolved, and every
+  payment of its links has its verdict (FR-004).
+- Q: If a sale is cancelled or rejected while Devolada is still verifying its payment, does the
+  system keep following that payment? → A: Yes. The payment is followed until its verdict, by
+  notification and by the system's own checks, and its key is kept until then. Money that arrives
+  for a sale that no longer exists always reaches the admin, to be returned (FR-004, FR-012).
+- Q: While the admin has an apartado's settlement payment to decide — one that fell short or that
+  Banxico contradicts, or one the system can no longer read because its key stopped working — can
+  the apartado expire by its clock? → A: No. The sale waits in Por verificar, and the apartado does
+  not expire until the admin taps «Verificar» or «Descartar»: the customer may have paid.
+  «Verificar» records the settlement even after the clock ran out (FR-016, FR-018).
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -175,8 +185,9 @@ by «Sistema» with its seats released.
    deposit and its own hold rules intact. A sale is never cancelled automatically while it holds
    money that was cleared. *(Amended by plan D8: a settlement is recorded only once confirmed.)*
 5. **Given** money that arrives for a link already closed (*unapplied*) — including a sale
-   cancelled under scenario 3 whose customer paid late — **Then** the admin is alerted that money
-   arrived for a sale that no longer takes it, with the amount, so they can return it.
+   cancelled under scenario 3 whose customer paid late, and a sale cancelled while its payment was
+   being verified — **Then** the admin is alerted that money arrived for a sale that no longer
+   takes it, with the amount, so they can return it, even if Devolada's notification was lost.
 6. **Given** a payment waiting for the customer's tracking key, **Then** the seller sees «Pide al
    cliente su clave de rastreo» on the sale, and the sale keeps waiting without expiring.
 7. **Given** the organization's validation credit at Devolada has run out, **Then** the admin sees
@@ -214,6 +225,10 @@ its test payment (no tickets). Then settle by transfer and confirm the settlemen
 5. **Given** a settlement Devolada is still verifying, **When** the admin verifies it by hand,
    **Then** the settlement is recorded with the admin as the actor, the tickets are released if the
    sale is paid, and Devolada's later verdict records nothing a second time.
+6. **Given** an apartado whose settlement payment waits for the admin — it fell short, Banxico
+   contradicts it, or the system can no longer read it because its key stopped working — **When**
+   the apartado's clock runs out, **Then** the apartado does not expire, the sale waits in Por
+   verificar, and the admin's «Verificar» still records the settlement.
 
 ---
 
@@ -330,12 +345,13 @@ admin alert. *(A sale whose transfer is still pending cannot be cancelled, only 
 **Verdicts**
 
 - **FR-012**: The system MUST learn each payment's verdict from Devolada's notifications, and MUST
-  also check by itself any payment still awaiting a verdict, so a lost notification never leaves a
-  sale stuck.
+  also check by itself any payment still awaiting a verdict, one whose link was already closed
+  included, so a lost notification never leaves a sale stuck, nor money owed back to a customer
+  unflagged. *(Clarified 2026-10-15)*
 - **FR-013**: The system MUST NOT act on a notification alone. It MUST establish that the
   notification is authentic, then confirm the verdict with Devolada using the organization's own
   credential before changing a sale. A notification about a payment the organization does not own,
-  or whose mode (real or test) does not match the organization's connection, MUST change nothing.
+  or whose mode (real or test) does not match its payment link's, MUST change nothing.
 - **FR-014**: A *confirmed* verdict MUST verify that payment exactly as an admin's Verificar does
   today — release the tickets when the sale is fully paid, email them, unlock WhatsApp; for a
   deposit, clear the money without releasing tickets — with the system recorded as the actor and
@@ -358,13 +374,16 @@ admin alert. *(A sale whose transfer is still pending cannot be cancelled, only 
     A sale holding cleared money is never cancelled automatically. *(Amended by plan D8.)*
 
   A payment that ends *invalid* MUST stay in Por verificar for the admin to verify or reject.
-  *(Clarified 2026-10-06.)*
+  *(Clarified 2026-10-06.)* While the admin has an apartado's settlement payment to decide — one
+  that ended *partial* or *invalid*, or one the system can no longer read — the apartado MUST NOT
+  expire by its clock. *(Clarified 2026-10-15)*
 - **FR-017**: A *superseded* payment MUST be ignored in favour of its correction. While a payment
   is *validating*, the sale MUST show «Verificando pago» and release nothing.
 - **FR-018**: The admin's manual Verificar and Rechazar MUST remain available for every awaiting
   payment of a connected organization, behave as today, and record the admin as the actor and the
   verification as manual. A settlement by link, which is recorded only once proven, is verified by
-  hand through «Verificar» too, also while Devolada is still verifying it. *(Clarified 2026-10-15)*
+  hand through «Verificar» too, also while Devolada is still verifying it, and also once the
+  apartado's clock has run out. *(Clarified 2026-10-15)*
 - **FR-019**: The sale's timeline MUST record each verdict that changes the sale; automatic ones are
   attributed to «Sistema».
 
@@ -403,7 +422,7 @@ admin alert. *(A sale whose transfer is still pending cannot be cancelled, only 
   it and when.
 - **Devolada credential** — each API key the organization has connected: write-only, with its mode
   (real or test) and masked hint. A replaced key is kept, unreadable to anyone, while a link it
-  created is unresolved, and then erased.
+  serves, or a payment of such a link, is unresolved, and then erased.
 - **Payment link** — one per transfer of a sale: the sale and which payment it collects
   (sale · deposit · settlement), the credential that created it, the amount asked, the link's
   address, its expiry, and its state (open · paid · expired · closed).

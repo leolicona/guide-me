@@ -88,3 +88,15 @@
 
   US4's Independent Test now uses an apartado, because a pending transfer sale cannot be cancelled.
   All items still pass.
+- **/speckit-analyze, fourth run (2026-10-15)** found no CRITICAL item, and 3 HIGH, 7 MEDIUM and
+  9 LOW items. All were resolved in place. The developer decided two more clarifications (Session
+  2026-10-15):
+  - a payment whose sale was cancelled or rejected while it was being verified is followed to its
+    verdict, by notification and by the system's own checks, with its key kept until then (FR-004,
+    FR-012);
+  - an apartado whose settlement payment awaits the admin's decision does not expire by its clock,
+    and «Verificar» records that settlement even after the clock ran out (FR-016, FR-018, US3
+    scenario 6).
+
+  US2 scenario 5 now covers a lost notification, and FR-013 compares a notification's mode with its
+  link's. All items still pass.
