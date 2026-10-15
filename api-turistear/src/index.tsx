@@ -35,6 +35,9 @@ app.use('/api/*', async (c, next) => {
     credentials: true,
     allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     allowHeaders: ['Content-Type'],
+    // passkey-auth D9 — Better Auth's rate limiter answers 429 with the wait in this header; the
+    // app reads it to count down "Reenviar código".
+    exposeHeaders: ['X-Retry-After'],
   })(c, next)
 })
 

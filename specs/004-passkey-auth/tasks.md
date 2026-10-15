@@ -31,26 +31,26 @@ description: "Task list for passkey sign-in with email code backup, on Better Au
 
 ## Phase 1: Setup (shared infrastructure)
 
-- [ ] T001 Add the dependencies (D1, R1), then run `pnpm install` so `pnpm-lock.yaml` updates:
+- [X] T001 Add the dependencies (D1, R1), then run `pnpm install` so `pnpm-lock.yaml` updates:
   - `api-turistear/package.json`: `better-auth`, `@better-auth/passkey` and `@better-auth/drizzle-adapter`, each at exactly `1.7.7` (no caret), plus dev dependency `@noble/hashes` `^2.2.0`.
   - `app-turistear/package.json`: `better-auth` and `@better-auth/passkey`, each at exactly `1.7.7`.
-- [ ] T002 In `api-turistear/wrangler.jsonc`:
+- [X] T002 In `api-turistear/wrangler.jsonc`:
   - add `"compatibility_flags": ["nodejs_als"]` at the top level, which named environments inherit (D3, R3);
   - add `AUTH_COOKIE_PREFIX` to each profile's `vars`: `gm-local` (top level), `gm-dev` (`env.dev`), `gm` (`env.production`) (D5);
   - add `OTP_LOG_TO_CONSOLE: "true"` to the top-level (local) profile only (D7, FR-064).
 
   Do not remove the Agnostic Auth binding yet; T039 does.
-- [ ] T003 [P] Document local setup in `api-turistear/.dev.vars.example`:
+- [X] T003 [P] Document local setup in `api-turistear/.dev.vars.example`:
   - add `BETTER_AUTH_SECRET=<32+ random chars>`, with a comment that it is a Worker secret in dev and prod, different in each environment;
   - note that `APP_BASE_URL` must stay `http://localhost:5174`, because the llave de acceso's domain comes from it (D8, SC-011).
 
   Run `pnpm cf-typegen:api` so `api-turistear/worker-configuration.d.ts` gains `BETTER_AUTH_SECRET`, `AUTH_COOKIE_PREFIX` and `OTP_LOG_TO_CONSOLE`, and mirror them in `api-turistear/src/bindings.d.ts`.
-- [ ] T004 [P] In `api-turistear/vitest.config.ts`, pin these miniflare bindings, so `.dev.vars` never leaks into a suite (constitution VI):
+- [X] T004 [P] In `api-turistear/vitest.config.ts`, pin these miniflare bindings, so `.dev.vars` never leaks into a suite (constitution VI):
   - `BETTER_AUTH_SECRET: 'test_better_auth_secret_0123456789abcdef'`
   - `AUTH_COOKIE_PREFIX: 'gm-test'`
   - `COOKIE_DOMAIN: ''`
   - `OTP_LOG_TO_CONSOLE: ''`
-- [ ] T005 [P] In the CORS middleware of `api-turistear/src/index.tsx`, add `exposeHeaders: ['X-Retry-After']`, so the app can read Better Auth's rate-limit wait (D9, FR-012).
+- [X] T005 [P] In the CORS middleware of `api-turistear/src/index.tsx`, add `exposeHeaders: ['X-Retry-After']`, so the app can read Better Auth's rate-limit wait (D9, FR-012).
 
 ---
 

@@ -22,6 +22,12 @@ export default defineConfig({
           TEST_MIGRATIONS: migrations,
           RESEND_API_KEY: 'test_resend_key',
           QR_SECRET: 'test_qr_secret',
+          // passkey-auth D17, constitution VI — pinned, so a local .dev.vars never leaks into a
+          // suite. test/helpers/session.ts signs fixture cookies with this exact secret and prefix.
+          BETTER_AUTH_SECRET: 'test_better_auth_secret_0123456789abcdef',
+          AUTH_COOKIE_PREFIX: 'gm-test',
+          COOKIE_DOMAIN: '',
+          OTP_LOG_TO_CONSOLE: '',
           // Force tests to use the (mocked) AGNOSTIC_AUTH_API service binding,
           // overriding any DEV_AUTH_SERVICE_URL inherited from .dev.vars.
           DEV_AUTH_SERVICE_URL: '',

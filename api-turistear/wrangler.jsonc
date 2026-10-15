@@ -19,6 +19,9 @@
   // ─────────────────────────────────────────────────────────────────────────────
   "name": "api-guideme-local",
   "compatibility_date": "2025-08-03",
+  // passkey-auth D3 — Better Auth keeps its request context in AsyncLocalStorage
+  // (`node:async_hooks`, its only runtime Node import). Inherited by the named envs.
+  "compatibility_flags": ["nodejs_als"],
   "main": "./src/index.tsx",
 
   // Local (`vite dev`) bindings + vars. Secrets come from `.dev.vars`. Migrations run
@@ -46,7 +49,14 @@
     "RESEND_FROM": "no-reply@turistearya.com",
     // Idle-session window (seconds). Keep in sync with `refreshTokenTtlSeconds`
     // in the agnostic-auth APP_REGISTRY KV entry for app "guide-me".
-    "SESSION_REFRESH_TTL_SECONDS": "5184000"
+    "SESSION_REFRESH_TTL_SECONDS": "5184000",
+    // passkey-auth D5 — the session cookie is `__Secure-<prefix>.session_token`. Each
+    // environment has its own prefix: dev and prod both set cookies on `.turistearya.com`,
+    // so a shared name would let one overwrite the other's session.
+    "AUTH_COOKIE_PREFIX": "gm-local",
+    // passkey-auth D7, FR-064 — LOCAL ONLY: print sign-in codes in the API console instead
+    // of emailing them. Never set it in `env.dev` or `env.production`.
+    "OTP_LOG_TO_CONSOLE": "true"
   },
 
   "env": {
@@ -89,7 +99,8 @@
         "API_BASE_URL": "https://api-dev.turistearya.com",
         "APP_BASE_URL": "https://app-dev.turistearya.com",
         "RESEND_FROM": "no-reply@turistearya.com",
-        "SESSION_REFRESH_TTL_SECONDS": "5184000"
+        "SESSION_REFRESH_TTL_SECONDS": "5184000",
+        "AUTH_COOKIE_PREFIX": "gm-dev"
       }
     },
 
@@ -129,7 +140,8 @@
         "API_BASE_URL": "https://api.turistearya.com",
         "APP_BASE_URL": "https://app.turistearya.com",
         "RESEND_FROM": "no-reply@turistearya.com",
-        "SESSION_REFRESH_TTL_SECONDS": "5184000"
+        "SESSION_REFRESH_TTL_SECONDS": "5184000",
+        "AUTH_COOKIE_PREFIX": "gm"
       }
     }
   }
