@@ -371,3 +371,9 @@ next PR (T045, D15).
   middleware (T011) is wrong, not the test.
 - Commit per task or logical group, with Conventional Commits scoped `auth` (`feat(auth): …`) or
   `onboarding`.
+
+## Phase 9: Convergence
+
+- [ ] T048 CRITICAL — Open `api-turistear/test/auth/password-material.test.ts` with a citation of what it proves, `passkey-auth US1, US2, US3, US4` (code sign-in, passkeys, registration and invitations on the far side of the drop), alongside `D15` and `FR-061`; today it cites only `passkey-auth D15` per Constitution VI (contradicts)
+- [ ] T049 Once a `v*` release carrying step 1 (`usersWithPasswordColumns` and `acrossTheDrop` in `api-turistear/src/routes/onboarding/handler.ts`) has deployed green to prod, add `api-turistear/migrations/0072_drop_password_material.sql` (or the next free number) with `DROP TABLE password_reset_tokens`, then `ALTER TABLE users DROP COLUMN password_hash` and `ALTER TABLE users DROP COLUMN password_salt`. In the same change: delete the onboarding fallback so `register` and `acceptInvitation` insert through `users`; delete `api-turistear/test/auth/password-material.test.ts`; drop the columns from `api-turistear/test/helpers/tenancy.ts::seedUser` and `api-turistear/scripts/seed-local.mjs`, and the table from `clearFullDb`; remove the D15 comments from `api-turistear/src/db/schema.ts`; and settle how `api-turistear/test/retire-affiliates/delete-legacy-affiliates.test.ts` replays migration 0070's delete from `password_reset_tokens`, per FR-061, plan D15 (missing)
+- [ ] T050 After T049 deploys to dev and to prod, run the debt's check on `guideme-db` and `guideme-db-prod` (no `password%` column in `users`, no `password_reset_tokens` table) and its `git grep` on the tree, then pay debt `password-material` with `/speckit-debt-pay`, per SC-006 (missing)
