@@ -4,7 +4,7 @@
 
 **Created**: 2026-10-15
 
-**Status**: Planned — this documentation goes into `develop`; the implementation follows in its own pull request into `main`
+**Status**: Built — verification on the real repository pending (tasks T011–T023)
 
 **Input**: the developer: *"Implementa la misma estrategia de CI/CD que tiene devolada, con los
 preview de miabot, para este repo, guide me. Utiliza los comandos de speckit para planear esta
