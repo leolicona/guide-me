@@ -66,6 +66,18 @@ describe('passkey-auth US2 — create a llave de acceso', () => {
       residentKey: 'required',
       userVerification: 'required',
     })
+    // The rest of the shape app-turistear/src/test/handlers/auth.ts copies.
+    expect(options).toMatchObject({
+      pubKeyCredParams: [
+        { alg: -8, type: 'public-key' },
+        { alg: -7, type: 'public-key' },
+        { alg: -257, type: 'public-key' },
+      ],
+      timeout: 60000,
+      attestation: 'none',
+      excludeCredentials: [],
+      extensions: { credProps: true },
+    })
   })
 
   it('scenario 1 — a session less than a day old registers one (200, the passkey, a notice)', async () => {
@@ -149,11 +161,16 @@ describe('passkey-auth US2 — sign in with a llave de acceso', () => {
       challenge: expect.any(String),
       rpId: new URL(env.APP_BASE_URL).hostname,
       userVerification: 'preferred',
+      timeout: 60000,
     })
+    expect(options).not.toHaveProperty('allowCredentials')
     const body = (await res.json()) as any
     expectNoToken(body)
     expect(Object.keys(body).sort()).toEqual(['session', 'user'])
     expect(body.user).toMatchObject({ email: AGENT_EMAIL, role: 'agent' })
+    expect(Object.keys(body.session).sort()).toEqual(
+      ['createdAt', 'expiresAt', 'id', 'ipAddress', 'updatedAt', 'userAgent', 'userId'],
+    )
     expect(body.session).toMatchObject({ userId: body.user.id })
   })
 

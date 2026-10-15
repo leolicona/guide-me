@@ -147,16 +147,16 @@ invitation lookup also disappear until US3 (T026) and US4 (T029) restore them un
   - the 4th send within 60 s from one IP → `429` with `X-Retry-After` (FR-012);
   - the 4th `sign-in/email-otp` within 10 s from one IP → `429` with `X-Retry-After` (FR-012; Better Auth's `/sign-in*` rule, 3 per 10 s);
   - a successful `sign-in/email-otp` answers `{ user }`, with `user.email` and `user.name`, and no `token` anywhere in the body: the shape `test/handlers/auth.ts` copies (constitution IV, BFF).
-- [ ] T017 [P] [US1] Create `app-turistear/src/services/authClient.ts` with `createAuthClient` from `better-auth/react`, configured with `baseURL` (`VITE_API_BASE_URL || window.location.origin`), `basePath: '/api/auth'`, `plugins: [emailOTPClient(), passkeyClient()]` and `fetchOptions: { credentials: 'include' }` (D14). Create `app-turistear/src/test/handlers/auth.ts` with MSW handlers for `email-otp/send-verification-otp`, `sign-in/email-otp` and `sign-out`, mirroring contracts/api.md, and register them in `app-turistear/src/test/server.ts`. Fixtures copy only shapes asserted in T016, T021 and T032, never a `token` (constitution IV).
-- [ ] T018 [US1] Create `app-turistear/src/features/auth/hooks/useEmailCodeSignIn.ts`, with TanStack mutations over `authClient.emailOtp.sendVerificationOtp` and `authClient.signIn.emailOtp`. On success it invalidates `['me']` and navigates to the redirect or home, with the passkey offer flag set (US2). Rewrite `app-turistear/src/features/auth/hooks/useLogout.ts` to use `authClient.signOut()`. The app reads its user only from `/api/me` (`useMe`), never through `authClient.getSession` or `useSession`, whose routes are disabled (D2, D14).
-- [ ] T019 [US1] Create `app-turistear/src/features/auth/components/EmailCodeForm.tsx`:
+- [X] T017 [P] [US1] Create `app-turistear/src/services/authClient.ts` with `createAuthClient` from `better-auth/react`, configured with `baseURL` (`VITE_API_BASE_URL || window.location.origin`), `basePath: '/api/auth'`, `plugins: [emailOTPClient(), passkeyClient()]` and `fetchOptions: { credentials: 'include' }` (D14). Create `app-turistear/src/test/handlers/auth.ts` with MSW handlers for `email-otp/send-verification-otp`, `sign-in/email-otp` and `sign-out`, mirroring contracts/api.md, and register them in `app-turistear/src/test/server.ts`. Fixtures copy only shapes asserted in T016, T021 and T032, never a `token` (constitution IV).
+- [X] T018 [US1] Create `app-turistear/src/features/auth/hooks/useEmailCodeSignIn.ts`, with TanStack mutations over `authClient.emailOtp.sendVerificationOtp` and `authClient.signIn.emailOtp`. On success it invalidates `['me']` and navigates to the redirect or home, with the passkey offer flag set (US2). Rewrite `app-turistear/src/features/auth/hooks/useLogout.ts` to use `authClient.signOut()`. The app reads its user only from `/api/me` (`useMe`), never through `authClient.getSession` or `useSession`, whose routes are disabled (D2, D14).
+- [X] T019 [US1] Create `app-turistear/src/features/auth/components/EmailCodeForm.tsx`:
   - an email step ("Recibir código");
   - a 6-digit step with `inputmode="numeric"` and `autocomplete="one-time-code"`;
   - "Reenviar código" disabled for the `X-Retry-After` seconds;
   - messages keyed on Better Auth's codes: `INVALID_OTP`, `OTP_EXPIRED`, `TOO_MANY_ATTEMPTS`, `ACCOUNT_SUSPENDED` and `429`.
 
   Create `app-turistear/src/features/auth/components/SignInScreen.tsx` hosting it, and render it in `app-turistear/src/pages/LoginPage.tsx` in place of `LoginForm`, keeping the `reason=suspended` notice.
-- [ ] T020 [US1] Write `app-turistear/src/features/auth/components/EmailCodeForm.test.tsx`, citing `passkey-auth US1`: request, sign-in, each error message, the retry countdown, and `expectNoA11yViolations`.
+- [X] T020 [US1] Write `app-turistear/src/features/auth/components/EmailCodeForm.test.tsx`, citing `passkey-auth US1`: request, sign-in, each error message, the retry countdown, and `expectNoA11yViolations`.
 
 **Checkpoint**: quickstart § 3, steps 1–2.
 
@@ -177,15 +177,15 @@ invitation lookup also disappear until US3 (T026) and US4 (T029) restore them un
   - an assertion for another origin or `rpID` → refused (FR-003);
   - a suspended owner → `403` with no session row;
   - `generate-authenticate-options` and `generate-register-options` answer the options shape MSW copies (`challenge`, `rpId`, `userVerification`), and `verify-authentication` answers `{ session, user }`, with no `token` anywhere in the body (BFF).
-- [ ] T022 [P] [US2] Add MSW handlers for `passkey/generate-authenticate-options`, `passkey/verify-authentication`, `passkey/generate-register-options` and `passkey/verify-registration` to `app-turistear/src/test/handlers/auth.ts`. Fixtures copy only shapes asserted in T016, T021 and T032 (constitution IV).
-- [ ] T023 [US2] Create `app-turistear/src/features/auth/components/PasskeySignInButton.tsx` ("Entrar con llave de acceso", primary, 48 px). It calls `authClient.signIn.passkey()` and is placed above `EmailCodeForm` in `SignInScreen.tsx`. Enable conditional UI on the email input (`autocomplete="username webauthn"`, `signIn.passkey({ autoFill: true })`) when `PublicKeyCredential.isConditionalMediationAvailable()` resolves true. Hide it when `typeof PublicKeyCredential !== 'function'`. A user cancel returns silently, and `PASSKEY_NOT_FOUND` offers the email code.
-- [ ] T024 [US2] Create `app-turistear/src/features/auth/components/PasskeyOffer.tsx`, the offer (FR-007, SC-008):
+- [X] T022 [P] [US2] Add MSW handlers for `passkey/generate-authenticate-options`, `passkey/verify-authentication`, `passkey/generate-register-options` and `passkey/verify-registration` to `app-turistear/src/test/handlers/auth.ts`. Fixtures copy only shapes asserted in T016, T021 and T032 (constitution IV).
+- [X] T023 [US2] Create `app-turistear/src/features/auth/components/PasskeySignInButton.tsx` ("Entrar con llave de acceso", primary, 48 px). It calls `authClient.signIn.passkey()` and is placed above `EmailCodeForm` in `SignInScreen.tsx`. Enable conditional UI on the email input (`autocomplete="username webauthn"`, `signIn.passkey({ autoFill: true })`) when `PublicKeyCredential.isConditionalMediationAvailable()` resolves true. Hide it when `typeof PublicKeyCredential !== 'function'`. A user cancel returns silently, and `PASSKEY_NOT_FOUND` offers the email code.
+- [X] T024 [US2] Create `app-turistear/src/features/auth/components/PasskeyOffer.tsx`, the offer (FR-007, SC-008):
   - it opens in a `BottomSheet` after an email-code sign-in when `typeof PublicKeyCredential === 'function'`;
   - "Crear llave de acceso" calls `authClient.passkey.addPasskey()`; "Ahora no" closes it;
   - `SESSION_NOT_FRESH` asks the user to sign in again.
 
   Mount it from `app-turistear/src/layout/AppLayout.tsx` on the flag set by T018.
-- [ ] T025 [US2] Write `app-turistear/src/features/auth/components/PasskeySignInButton.test.tsx` and `PasskeyOffer.test.tsx`, citing `passkey-auth US2`, with `navigator.credentials` mocked. They cover: success, cancel, "Ahora no", and `expectNoA11yViolations`.
+- [X] T025 [US2] Write `app-turistear/src/features/auth/components/PasskeySignInButton.test.tsx` and `PasskeyOffer.test.tsx`, citing `passkey-auth US2`, with `navigator.credentials` mocked. They cover: success, cancel, "Ahora no", and `expectNoA11yViolations`.
 
 **Checkpoint**: MVP. US1 + US2 replace password sign-in (quickstart § 3, steps 1–5).
 
@@ -213,7 +213,7 @@ invitation lookup also disappear until US3 (T026) and US4 (T029) restore them un
   - a mixed-case email is stored lowercased.
 
   Exclude `test-session-%` fixture rows (T012) whenever a session is counted or looked up.
-- [ ] T028 [P] [US3] In `app-turistear/src/features/auth/components/RegisterForm.tsx`, `app-turistear/src/features/auth/hooks/useRegister.ts`, `app-turistear/src/features/auth/schemas.ts`, `app-turistear/src/services/authService.ts` (call `/api/onboarding/register`) and `app-turistear/src/pages/RegisterPage.tsx`:
+- [X] T028 [P] [US3] In `app-turistear/src/features/auth/components/RegisterForm.tsx`, `app-turistear/src/features/auth/hooks/useRegister.ts`, `app-turistear/src/features/auth/schemas.ts`, `app-turistear/src/services/authService.ts` (call `/api/onboarding/register`) and `app-turistear/src/pages/RegisterPage.tsx`:
   - remove the password field and `PasswordStrength`;
   - on 201, show `EmailCodeForm` at its code step with the email filled in.
 
@@ -240,7 +240,7 @@ invitation lookup also disappear until US3 (T026) and US4 (T029) restore them un
   - a used or expired token → `400 INVALID_TOKEN`.
 
   Exclude `test-session-%` fixture rows (T012) whenever a session is counted or looked up.
-- [ ] T031 [P] [US4] In `app-turistear/src/features/auth/components/InviteCompleteForm.tsx`, `app-turistear/src/features/auth/hooks/{useInviteAccept,useInviteComplete}.ts`, `app-turistear/src/services/authService.ts` (the `/api/onboarding/invitations/*` calls) and `app-turistear/src/pages/InviteAcceptPage.tsx`:
+- [X] T031 [P] [US4] In `app-turistear/src/features/auth/components/InviteCompleteForm.tsx`, `app-turistear/src/features/auth/hooks/{useInviteAccept,useInviteComplete}.ts`, `app-turistear/src/services/authService.ts` (the `/api/onboarding/invitations/*` calls) and `app-turistear/src/pages/InviteAcceptPage.tsx`:
   - remove the password field;
   - on accept, show `EmailCodeForm` at its code step for the returned email.
 
@@ -261,8 +261,8 @@ invitation lookup also disappear until US3 (T026) and US4 (T029) restore them un
   - add and delete each send a notice, and a Resend failure does not undo the change;
   - `revoke-sessions` ends a second session;
   - `list-user-passkeys` answers an array of `{ id, name, createdAt, deviceType, backedUp }`.
-- [ ] T033 [P] [US5] Add MSW handlers for `passkey/list-user-passkeys`, `passkey/update-passkey`, `passkey/delete-passkey` and `revoke-sessions` to `app-turistear/src/test/handlers/auth.ts`. Fixtures copy only shapes asserted in T016, T021 and T032 (constitution IV).
-- [ ] T034 [US5] Create the security surface in `app-turistear/src/features/auth/components/` and `app-turistear/src/pages/SecurityPage.tsx`:
+- [X] T033 [P] [US5] Add MSW handlers for `passkey/list-user-passkeys`, `passkey/update-passkey`, `passkey/delete-passkey` and `revoke-sessions` to `app-turistear/src/test/handlers/auth.ts`. Fixtures copy only shapes asserted in T016, T021 and T032 (constitution IV).
+- [X] T034 [US5] Create the security surface in `app-turistear/src/features/auth/components/` and `app-turistear/src/pages/SecurityPage.tsx`:
   - **`PasskeyList.tsx`**: `SectionCard` rows with the name, "Creada <fecha>", and a synced or security-key icon paired with text.
   - **`RenamePasskeySheet.tsx`** (`FormSheet`).
   - **`RemovePasskeySheet.tsx`** (`ConfirmSheet`).
@@ -270,7 +270,7 @@ invitation lookup also disappear until US3 (T026) and US4 (T029) restore them un
   - **"Agregar llave de acceso"**, which reuses `PasskeyOffer`'s add flow, including `SESSION_NOT_FRESH`.
 
   Add `SECURITY: '/seguridad'` to `app-turistear/src/config/routes.ts` and its route to `app-turistear/src/App.tsx` (both roles), and a "Seguridad" entry to `app-turistear/src/layout/AccountMenu.tsx`.
-- [ ] T035 [US5] Write `PasskeyList.test.tsx`, `RemovePasskeySheet.test.tsx` and `SignOutEverywhereSheet.test.tsx` in `app-turistear/src/features/auth/components/`, citing `passkey-auth US5`: rename, remove, revoke-all, and `expectNoA11yViolations`. Test components, never `SecurityPage` (constitution VI).
+- [X] T035 [US5] Write `PasskeyList.test.tsx`, `RemovePasskeySheet.test.tsx` and `SignOutEverywhereSheet.test.tsx` in `app-turistear/src/features/auth/components/`, citing `passkey-auth US5`: rename, remove, revoke-all, and `expectNoA11yViolations`. Test components, never `SecurityPage` (constitution VI).
 
 ---
 
@@ -281,14 +281,14 @@ invitation lookup also disappear until US3 (T026) and US4 (T029) restore them un
   - `sendMagicLinkEmail` and `sendPasswordResetEmail` from `services/resend.ts`;
   - `INVALID_CREDENTIALS` and `EMAIL_NOT_VERIFIED` from `types/errors.ts`;
   - the `passwordResetTokens` mapping from `db/schema.ts`. Add a comment naming `password_hash`, `password_salt` and `password_reset_tokens` as dropped by the follow-up (D15).
-- [ ] T037 [P] Delete the password files under `app-turistear/src/` (D14, FR-060):
+- [X] T037 [P] Delete the password files under `app-turistear/src/` (D14, FR-060):
   - the components `LoginForm.tsx`, `PasswordInput.tsx`, `PasswordStrength.tsx`, `ForgotPasswordForm.tsx` and `ResetPasswordForm.tsx`;
   - the hooks `useLogin.ts`, `useForgotPassword.ts`, `useResetPassword.ts` and `useVerify.ts`;
   - the pages `VerifyPage.tsx`, `ForgotPasswordPage.tsx` and `ResetPasswordPage.tsx`;
   - the password schemas and their tests;
   - `login`, `verify`, `forgotPassword`, `resetPassword` and the old invite calls in `services/authService.ts`;
   - the matching exports from `features/auth/index.ts`.
-- [ ] T038 Create `app-turistear/src/features/auth/components/LegacyLinkNotice.tsx` ("Ya no usamos contraseñas. Entra con tu llave de acceso o con un código por correo.", with a button to `ROUTES.LOGIN`) and `app-turistear/src/pages/LegacyLinkPage.tsx`. Route `ROUTES.VERIFY`, `ROUTES.FORGOT_PASSWORD` and `ROUTES.RESET_PASSWORD` to it in `app-turistear/src/App.tsx` (FR-063). Add a component test citing `passkey-auth US1` (scenario 9), with axe.
+- [X] T038 Create `app-turistear/src/features/auth/components/LegacyLinkNotice.tsx` ("Ya no usamos contraseñas. Entra con tu llave de acceso o con un código por correo.", with a button to `ROUTES.LOGIN`) and `app-turistear/src/pages/LegacyLinkPage.tsx`. Route `ROUTES.VERIFY`, `ROUTES.FORGOT_PASSWORD` and `ROUTES.RESET_PASSWORD` to it in `app-turistear/src/App.tsx` (FR-063). Add a component test citing `passkey-auth US1` (scenario 9), with axe.
 - [X] T039 Remove Agnostic Auth from `api-turistear/wrangler.jsonc`, `api-turistear/vitest.config.ts`, `api-turistear/src/bindings.d.ts` and `api-turistear/.dev.vars.example` (FR-062, SC-003):
   - delete the `AGNOSTIC_AUTH_API` service binding, `AGNOSTIC_AUTH_APP_ID`, `DEV_AUTH_SERVICE_URL` and `SESSION_REFRESH_TTL_SECONDS` from all three profiles, plus the "Shared auth realm" comment;
   - delete the stand-in and the keys from the vitest config;
@@ -298,7 +298,7 @@ invitation lookup also disappear until US3 (T026) and US4 (T029) restore them un
   - drop the agnostic-auth hashing and the password argument;
   - insert users with password columns `''` and `email_verified = 1`;
   - print "Entra en http://localhost:5174/login con <email>; el código aparece en la consola del API".
-- [ ] T042 [P] Move end-to-end sign-in to the virtual authenticator in `app-turistear/e2e/setup/auth.setup.ts` (D17, R13):
+- [X] T042 [P] Move end-to-end sign-in to the virtual authenticator in `app-turistear/e2e/setup/auth.setup.ts` (D17, R13):
   - sign in each account through the browser with CDP `WebAuthn.addVirtualAuthenticator` and `WebAuthn.addCredential`, from the `E2E_AGENT_PASSKEY` and `E2E_ADMIN_PASSKEY` JSON secrets, then save `storageState`;
   - add `app-turistear/e2e/enroll-passkey.ts`, run once per account against dev;
   - update `app-turistear/e2e/README.md` and `.github/workflows/e2e.yml`, replacing `E2E_*_PASSWORD` with `E2E_*_PASSKEY`.
