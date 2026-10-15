@@ -315,7 +315,7 @@ invitation lookup also disappear until US3 (T026) and US4 (T029) restore them un
   - set `BETTER_AUTH_SECRET` in dev and in prod, with different values;
   - run the email-case collision query on both databases;
   - record both results in the PR description.
-- [ ] T047 Run the proof in `specs/004-passkey-auth/quickstart.md` § 4:
+- [X] T047 Run the proof in `specs/004-passkey-auth/quickstart.md` § 4:
   - `pnpm test:api`, `pnpm test:app`, `pnpm lint:app`, `pnpm build:api` and `pnpm build:app` are all green;
   - the scope-boundary diff shows only the session lines in the 61 business suites;
   - the Agnostic Auth `git grep` is empty;
