@@ -1,0 +1,969 @@
+openapi: 3.1.0
+# The machine-readable shape of the public collections API (/v1).
+# The zod schemas in apps/api/src/routes/v1/<area>/schema.ts are the
+# contract (constitution III); this file describes what they produce and
+# must follow them. Where the two disagree, the zod schema is right and
+# this file is the bug. Human-readable companions: public-api.md (shape
+# summary for reviewers) and reference.md (the developer reference).
+info:
+  title: Devolada collections API
+  version: "1"
+  summary: Collect SPEI payments through payment links and learn, by webhook or on request, whether the money really arrived.
+  description: |
+    Your system creates a **payment link** for a customer. The customer
+    transfers by SPEI to the business's own CLABE from the page the link
+    opens, then confirms the transfer's details or uploads the receipt.
+    Devolada validates the transfer against Banxico's record (the CEP) and
+    tells you the verdict by webhook; you can also ask at any moment.
+
+    **Conventions**
+    - Money is integer cents, always in a field ending in `Cents` (`49900` is $499.00 MXN).
+    - Time is milliseconds since the Unix epoch. The one exception is `from`/`to`
+      on `GET /v1/transfers`: calendar days in the business's own timezone.
+    - Every answer uses one envelope: `{ "success": true, "data": … }` or
+      `{ "success": false, "error": { "code", "retryable", "message"? } }`.
+      `retryable: true` means the same request may succeed later; `false`
+      means the request itself must change.
+    - Any `POST` or `PATCH` that accepts `Idempotency-Key` replays its first
+      answer (status and body) for 24 hours, with `Idempotency-Replayed: true`.
+    - 120 requests per minute per business, every endpoint counted together,
+      real and test credentials sharing the budget.
+    - Server to server only: no CORS, no cookies.
+    - A credential is either **real** or **test**. Each only sees the links,
+      payments and deliveries of its own mode.
+servers:
+  - url: https://api.devoladapago.com
+    description: Production
+  - url: https://api.dev.devoladapago.com
+    description: Shared dev environment
+security:
+  - apiKey: []
+tags:
+  - name: Payment links
+    description: The page where a customer pays. One reusable link per customer, or one-time links per invoice.
+  - name: Payments
+    description: The verify path — the state of each payment, whatever webhooks you missed.
+  - name: Transfers
+    description: The reconciliation path — money Banxico confirmed, by day range.
+  - name: Webhook
+    description: Where Devolada posts each change of a payment's state, and the record of every delivery.
+  - name: Test mode
+    description: Test credentials only. Move a test payment to a verdict without a real transfer.
+  - name: Keys
+    description: Devolada's public signing keys, to verify webhook signatures.
+
+paths:
+  /v1/payment-links:
+    post:
+      tags: [Payment links]
+      operationId: createPaymentLink
+      summary: Create a payment link
+      description: |
+        Asking again for a **reusable** link with the same `customerRef` answers
+        the existing link with `200` — never an error, never a second link.
+        A `customerRef` is one namespace per business across both credential
+        modes: if it already holds a reusable link under the other mode, the
+        answer is `VALIDATION_ERROR` naming which mode holds it.
+
+        The amount the customer is asked for is `askCents` plus the transfer
+        fee the business configured in its panel, if any.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreatePaymentLinkRequest" }
+            examples:
+              reusable:
+                summary: One link per customer, re-priced every period
+                value: { customerRef: CLI-4471, askCents: 49900, label: Ana Ruiz, concept: Mensualidad octubre }
+              oneTime:
+                summary: One link per invoice, with a deadline
+                value: { customerRef: CLI-4471, askCents: 49900, mode: one_time, expiresAt: 1760000000000 }
+      responses:
+        "201":
+          description: Created
+          headers:
+            Idempotency-Replayed: { $ref: "#/components/headers/IdempotencyReplayed" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PaymentLinkEnvelope" }
+        "200":
+          description: A reusable link for this `customerRef` already existed; the answer is that link.
+          headers:
+            Idempotency-Replayed: { $ref: "#/components/headers/IdempotencyReplayed" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PaymentLinkEnvelope" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/AuthenticationError" }
+        "409":
+          description: |
+            `CHANNEL_UNAVAILABLE` — the business has not configured a piece of its
+            SPEI channel; `message` is `clabe` or `bank`. Or `BUSINESS_SUSPENDED`.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+              examples:
+                channel:
+                  value: { success: false, error: { code: CHANNEL_UNAVAILABLE, retryable: false, message: clabe } }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/InternalError" }
+    get:
+      tags: [Payment links]
+      operationId: listPaymentLinks
+      summary: Find a customer's links
+      description: Newest first. A reference with no link answers an empty list, never `NOT_FOUND`.
+      parameters:
+        - $ref: "#/components/parameters/CustomerRefQuery"
+      responses:
+        "200":
+          description: The customer's links
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Ok"
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        type: object
+                        required: [links]
+                        properties:
+                          links:
+                            type: array
+                            items: { $ref: "#/components/schemas/PaymentLink" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/AuthenticationError" }
+        "409": { $ref: "#/components/responses/BusinessSuspended" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /v1/payment-links/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, example: lnk_2f8c0a9e4b7d4c1fa3e6b5d2c9f8a7e1 }
+    get:
+      tags: [Payment links]
+      operationId: getPaymentLink
+      summary: Read one link
+      responses:
+        "200":
+          description: The link
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PaymentLinkEnvelope" }
+        "401": { $ref: "#/components/responses/AuthenticationError" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/BusinessSuspended" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/InternalError" }
+    patch:
+      tags: [Payment links]
+      operationId: patchPaymentLink
+      summary: Re-price a reusable link, or close a one-time link
+      description: |
+        Send `askCents` to re-price (reusable links only) or `close: true` to
+        close (one-time links only). An empty body is refused.
+        Re-pricing a one-time link, or closing a reusable one, is
+        `VALIDATION_ERROR`. Closing an already paid or expired one-time link
+        changes nothing and answers the link as it is.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PatchPaymentLinkRequest" }
+            examples:
+              reprice: { value: { askCents: 52000 } }
+              close: { value: { close: true } }
+      responses:
+        "200":
+          description: The link after the change
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PaymentLinkEnvelope" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/AuthenticationError" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: "`LINK_CLOSED` (re-pricing a link that is no longer open) or `BUSINESS_SUSPENDED`."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /v1/payments:
+    get:
+      tags: [Payments]
+      operationId: listPayments
+      summary: A customer's payments
+      description: Newest first. A reference with nothing received answers an empty list, never `NOT_FOUND`.
+      parameters:
+        - $ref: "#/components/parameters/CustomerRefQuery"
+      responses:
+        "200":
+          description: The customer's payments
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Ok"
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        type: object
+                        required: [payments]
+                        properties:
+                          payments:
+                            type: array
+                            items: { $ref: "#/components/schemas/Payment" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/AuthenticationError" }
+        "409": { $ref: "#/components/responses/BusinessSuspended" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /v1/payments/{id}:
+    get:
+      tags: [Payments]
+      operationId: getPayment
+      summary: Read one payment
+      description: |
+        The same facts the webhook carries, rendered by the same code, plus
+        `status`, `createdAt` and what the payment waits on. A payment of
+        another business, or of a link not created through this API, is
+        `NOT_FOUND`.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: The payment
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PaymentEnvelope" }
+        "401": { $ref: "#/components/responses/AuthenticationError" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/BusinessSuspended" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /v1/transfers:
+    get:
+      tags: [Transfers]
+      operationId: listTransfers
+      summary: Money Banxico confirmed, by verdict day
+      description: |
+        Only `confirmed`, `partial` and `unapplied` payments are listed, by the
+        day of their verdict (`confirmedAt`) on the business's wall clock;
+        `from` and `to` are both inclusive. Oldest verdict first, then by id.
+        Each item has the same shape as `GET /v1/payments/{id}`.
+        `nextCursor` is null on the last page; a payment confirmed while you
+        walk the pages is neither skipped nor repeated.
+      parameters:
+        - name: from
+          in: query
+          required: true
+          schema: { type: string, pattern: '^\d{4}-\d{2}-\d{2}$', example: "2026-09-01" }
+        - name: to
+          in: query
+          required: true
+          description: Must not be before `from`.
+          schema: { type: string, pattern: '^\d{4}-\d{2}-\d{2}$', example: "2026-09-30" }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+        - name: cursor
+          in: query
+          description: The `nextCursor` of the previous page, as given. A cursor this history never handed out is `VALIDATION_ERROR`.
+          schema: { type: string, minLength: 1 }
+      responses:
+        "200":
+          description: One page of the history
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Ok"
+                  - type: object
+                    required: [data]
+                    properties:
+                      data: { $ref: "#/components/schemas/TransferList" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/AuthenticationError" }
+        "409": { $ref: "#/components/responses/BusinessSuspended" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /v1/webhook:
+    put:
+      tags: [Webhook]
+      operationId: registerWebhook
+      summary: Register or replace the webhook address
+      description: |
+        One address per business, shared by real and test credentials.
+        Replacing it resets its health counters; pending deliveries go to the
+        new address on their next attempt. There is no secret: deliveries are
+        signed with Devolada's own key (see `GET /.well-known/jwks.json`).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RegisterWebhookRequest" }
+            example: { url: "https://gym.example/hooks/devolada" }
+      responses:
+        "200":
+          description: The registered endpoint
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WebhookEndpointEnvelope" }
+        "400":
+          description: "`VALIDATION_ERROR`, or `INSECURE_URL` when the address is not an absolute https URL."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+              example: { success: false, error: { code: INSECURE_URL, retryable: false, message: url must be an absolute https URL } }
+        "401": { $ref: "#/components/responses/AuthenticationError" }
+        "409": { $ref: "#/components/responses/BusinessSuspended" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/InternalError" }
+    get:
+      tags: [Webhook]
+      operationId: getWebhook
+      summary: Read the webhook address and its health
+      responses:
+        "200":
+          description: The registered endpoint
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WebhookEndpointEnvelope" }
+        "401": { $ref: "#/components/responses/AuthenticationError" }
+        "404":
+          description: No address is registered.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "409": { $ref: "#/components/responses/BusinessSuspended" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/InternalError" }
+    delete:
+      tags: [Webhook]
+      operationId: deleteWebhook
+      summary: Remove the webhook address
+      description: Idempotent. Deliveries still pending end as `failed` with `lastError` `ENDPOINT_REMOVED` and stay readable.
+      responses:
+        "200":
+          description: Whether an address was removed
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Ok"
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        type: object
+                        required: [removed]
+                        properties:
+                          removed: { type: boolean }
+        "401": { $ref: "#/components/responses/AuthenticationError" }
+        "409": { $ref: "#/components/responses/BusinessSuspended" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /v1/webhook/deliveries:
+    get:
+      tags: [Webhook]
+      operationId: listWebhookDeliveries
+      summary: Every delivery and its latest result
+      description: Newest first. A credential sees the deliveries of payments in its own mode.
+      parameters:
+        - name: status
+          in: query
+          schema: { $ref: "#/components/schemas/DeliveryStatus" }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+      responses:
+        "200":
+          description: The deliveries
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Ok"
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        type: object
+                        required: [deliveries]
+                        properties:
+                          deliveries:
+                            type: array
+                            items: { $ref: "#/components/schemas/WebhookDelivery" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/AuthenticationError" }
+        "409": { $ref: "#/components/responses/BusinessSuspended" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /v1/webhook/deliveries/{id}/retry:
+    post:
+      tags: [Webhook]
+      operationId: retryWebhookDelivery
+      summary: Send a failed delivery again
+      description: |
+        Only a `failed` delivery can be re-sent, and only while an address is
+        registered; anything else is `VALIDATION_ERROR`. It goes back to
+        `pending` with the same event id and the same body, signed with the
+        key active now.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "202":
+          description: Scheduled; the delivery as it is now (`pending`).
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Ok"
+                  - type: object
+                    required: [data]
+                    properties:
+                      data: { $ref: "#/components/schemas/WebhookDelivery" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/AuthenticationError" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/BusinessSuspended" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /v1/test/payments/{id}/advance:
+    post:
+      tags: [Test mode]
+      operationId: advanceTestPayment
+      summary: Move a test payment to its next state
+      description: |
+        **Test credentials only.** A real credential gets `NOT_FOUND`: for it
+        this route does not exist. Writes the state exactly as a real
+        validation would and fires the real webhook.
+
+        - `receivedCents` is read by `confirmed`, `partial` and `unapplied`
+          and refused on any other state. Omitted, it is the ask plus the fee.
+        - `confirmed` with an amount below the ask is refused (that verdict is
+          `partial`); `partial` with an amount that covers it is refused.
+        - A verdict is final: a payment that already ended cannot move again.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AdvanceTestPaymentRequest" }
+            example: { to: confirmed, receivedCents: 49900 }
+      responses:
+        "200":
+          description: The payment after the move
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PaymentEnvelope" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/AuthenticationError" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/BusinessSuspended" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /.well-known/jwks.json:
+    get:
+      tags: [Keys]
+      operationId: getJwks
+      summary: Devolada's public signing keys
+      description: |
+        No credential, no envelope: the plain JSON Web Key Set every JOSE
+        library reads. One set for the whole platform. Cache it by `kid`;
+        when a delivery names a `kid` you do not have, fetch the set again
+        once. A retired key stays listed for 7 days.
+      security: []
+      responses:
+        "200":
+          description: The key set
+          headers:
+            Cache-Control:
+              schema: { type: string, example: "public, max-age=300" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Jwks" }
+
+webhooks:
+  paymentEvent:
+    post:
+      tags: [Webhook]
+      operationId: receivePaymentEvent
+      summary: What Devolada posts to your address
+      description: |
+        One message each time a payment enters a state, typed
+        `payment.<status>`. Delivered **at least once**, never exactly once.
+
+        1. Verify `Devolada-Signature` before parsing: ES256 (ECDSA P-256,
+           SHA-256) over `"<Devolada-Timestamp>.<raw body>"`, base64url without
+           padding after `v1=`, raw `r || s` form. Use the key whose `kid`
+           equals `Devolada-Key-Id`.
+        2. Ignore an `eventId` you already processed (answer 2xx anyway).
+        3. Answer 2xx within 10 seconds. Otherwise the delivery is retried
+           after 1, 5, 15, 60 and 240 minutes, then marked `failed`.
+        4. Order by `createdAt`, not by arrival.
+        5. Nothing before the verdict is money: credit on `payment.confirmed`
+           (or `payment.partial`, by your policy), never on `payment.validating`.
+      parameters:
+        - name: Devolada-Event-Id
+          in: header
+          required: true
+          schema: { type: string, example: evt_9b2e4c1d7a8f4e3b9c6d5a2f1e0b8c7d }
+        - name: Devolada-Timestamp
+          in: header
+          required: true
+          description: Milliseconds since the epoch; part of the signed string.
+          schema: { type: string, example: "1759999000000" }
+        - name: Devolada-Key-Id
+          in: header
+          required: true
+          description: The `kid` in `/.well-known/jwks.json` that signed this attempt.
+          schema: { type: string, example: 2026-09-a }
+        - name: Devolada-Signature
+          in: header
+          required: true
+          schema: { type: string, example: v1=MEUCIQ… }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/WebhookEvent" }
+      responses:
+        "2XX":
+          description: Accepted. Any other answer, or none within 10 seconds, is a failed attempt.
+
+components:
+  securitySchemes:
+    apiKey:
+      type: http
+      scheme: bearer
+      bearerFormat: "dk_ + 32 hex characters"
+      description: |
+        Issued in the business's panel under **Integraciones → API**, shown
+        once. A missing, malformed, unknown or revoked credential all answer
+        `AUTHENTICATION_ERROR`. A credential is real or test.
+
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: false
+      description: 1–255 characters. A repeat from the same business within 24 hours replays the first answer, refusals included.
+      schema: { type: string, minLength: 1, maxLength: 255 }
+    CustomerRefQuery:
+      name: customerRef
+      in: query
+      required: true
+      description: Your own identifier for the customer. Trimmed.
+      schema: { $ref: "#/components/schemas/CustomerRef" }
+
+  headers:
+    IdempotencyReplayed:
+      description: "`true` when this answer is a replay of an earlier request with the same `Idempotency-Key`."
+      schema: { type: string, enum: ["true"] }
+    RetryAfter:
+      description: Seconds until the current minute ends and the budget resets.
+      schema: { type: integer, minimum: 1 }
+
+  responses:
+    ValidationError:
+      description: "`VALIDATION_ERROR` — `message` names the field (`field.path: reason`)."
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+          example: { success: false, error: { code: VALIDATION_ERROR, retryable: false, message: "askCents: Expected integer, received float" } }
+    AuthenticationError:
+      description: "`AUTHENTICATION_ERROR` — missing, malformed, unknown or revoked credential."
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+          example: { success: false, error: { code: AUTHENTICATION_ERROR, retryable: false } }
+    NotFound:
+      description: "`NOT_FOUND` — does not exist, belongs to another business, or to the other credential mode."
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+          example: { success: false, error: { code: NOT_FOUND, retryable: false } }
+    BusinessSuspended:
+      description: "`BUSINESS_SUSPENDED` — every request of a suspended business is refused."
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+          example: { success: false, error: { code: BUSINESS_SUSPENDED, retryable: false } }
+    RateLimited:
+      description: "`RATE_LIMITED` — more than 120 requests this minute."
+      headers:
+        Retry-After: { $ref: "#/components/headers/RetryAfter" }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+          example: { success: false, error: { code: RATE_LIMITED, retryable: true } }
+    InternalError:
+      description: "`INTERNAL_SERVER_ERROR` — ours, not yours; retry later."
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+          example: { success: false, error: { code: INTERNAL_SERVER_ERROR, retryable: true } }
+
+  schemas:
+    # ---- envelope (routes/v1/envelope.ts) ----
+    Ok:
+      type: object
+      required: [success]
+      properties:
+        success: { const: true }
+    Error:
+      type: object
+      required: [success, error]
+      properties:
+        success: { const: false }
+        error:
+          type: object
+          required: [code, retryable]
+          properties:
+            code: { $ref: "#/components/schemas/ErrorCode" }
+            retryable:
+              type: boolean
+              description: "`true` only for `RATE_LIMITED` and `INTERNAL_SERVER_ERROR`."
+            message:
+              type: string
+              description: Which field (`VALIDATION_ERROR`) or which piece the business has not configured (`CHANNEL_UNAVAILABLE`), for your logs.
+    ErrorCode:
+      type: string
+      enum:
+        - AUTHENTICATION_ERROR   # 401
+        - VALIDATION_ERROR       # 400
+        - NOT_FOUND              # 404
+        - LINK_CLOSED            # 409
+        - CHANNEL_UNAVAILABLE    # 409
+        - BUSINESS_SUSPENDED     # 409
+        - INSECURE_URL           # 400
+        - RATE_LIMITED           # 429, retryable
+        - INTERNAL_SERVER_ERROR  # 500, retryable
+    Notice:
+      type: object
+      required: [code]
+      description: A platform condition, never a refusal and never the business's to fix.
+      properties:
+        code:
+          type: string
+          enum: [VALIDATION_UNAVAILABLE]
+
+    # ---- payment links (routes/v1/payment-links/schema.ts) ----
+    CustomerRef:
+      type: string
+      minLength: 1
+      maxLength: 128
+      description: Your own identifier for the customer. Stored and echoed, never interpreted. Trimmed.
+      example: CLI-4471
+    CreatePaymentLinkRequest:
+      type: object
+      required: [customerRef, askCents]
+      properties:
+        customerRef: { $ref: "#/components/schemas/CustomerRef" }
+        askCents:
+          type: integer
+          exclusiveMinimum: 0
+          description: Whole cents. `499.5` or `"49900"` are refused.
+          example: 49900
+        mode:
+          type: string
+          enum: [reusable, one_time]
+          default: reusable
+        expiresAt:
+          type: integer
+          exclusiveMinimum: 0
+          description: Milliseconds since the epoch. Required for `one_time`, forbidden for `reusable`. May be in the past (a link born expired).
+        label:
+          type: string
+          minLength: 1
+          maxLength: 120
+          description: Shown to the payer, e.g. the customer's name.
+        concept:
+          type: string
+          minLength: 1
+          maxLength: 200
+          description: Shown to the payer, e.g. "Mensualidad octubre".
+    PatchPaymentLinkRequest:
+      type: object
+      minProperties: 1
+      description: Send `askCents` or `close`; at least one.
+      properties:
+        askCents:
+          type: integer
+          exclusiveMinimum: 0
+          description: Reusable links only.
+        close:
+          const: true
+          description: One-time links only. Idempotent.
+    PaymentLink:
+      type: object
+      required: [id, url, customerRef, askCents, mode, expiresAt, state, closedAt, label, concept, isTest, createdAt, notices, payerReference]
+      properties:
+        id: { type: string, example: lnk_2f8c0a9e4b7d4c1fa3e6b5d2c9f8a7e1 }
+        url:
+          type: string
+          format: uri
+          description: The payer's page. Put it in your own message to the customer.
+          example: https://link.devoladapago.com/p/kq7m2x9d4tbn3wpa
+        customerRef: { type: string }
+        askCents: { type: integer, exclusiveMinimum: 0 }
+        mode: { type: string, enum: [reusable, one_time] }
+        expiresAt:
+          type: [integer, "null"]
+          description: Null on a reusable link.
+        state:
+          type: string
+          enum: [open, paid, expired]
+          description: Derived. A reusable link is always `open`.
+        closedAt:
+          type: [integer, "null"]
+          description: When a one-time link stopped accepting payments (paid or closed by you). Null while open, and always on a reusable link.
+        label: { type: [string, "null"] }
+        concept: { type: [string, "null"] }
+        isTest: { type: boolean }
+        createdAt: { type: integer }
+        notices:
+          type: array
+          items: { $ref: "#/components/schemas/Notice" }
+          description: Empty unless a platform condition applies.
+        payerReference:
+          type: [string, "null"]
+          pattern: '^[1-9]\d{6}$'
+          description: |
+            The seven digits the customer types in the transfer's «Referencia
+            numérica». Belongs to the customer, so every link of one
+            `customerRef` shares it. Null while the business has pay-by-reference off.
+          example: "4817293"
+    PaymentLinkEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/Ok"
+        - type: object
+          required: [data]
+          properties:
+            data: { $ref: "#/components/schemas/PaymentLink" }
+
+    # ---- payments (routes/v1/payments/schema.ts, webhook/schema.ts) ----
+    PaymentStatus:
+      type: string
+      description: |
+        The payment record's own word.
+        - `validating` — proof accepted and being checked against Banxico. Nothing is money yet.
+        - `queued_for_credit` — the business's validation credit is paused; continues as `validating` after a top-up.
+        - `confirmed` (final) — the money arrived and covered the ask (`match` is `exact` or `over`).
+        - `partial` (final) — the money arrived but fell short (`match` is `short`).
+        - `unapplied` (final) — validated money that settled nothing (the link had closed).
+        - `invalid` (final) — Banxico's record contradicts the claim.
+        - `expired` (final) — the transfer was never found in time.
+        - `superseded` (final) — a misread receipt the payer corrected; the correction is a new payment with its own id. Never money.
+      enum: [validating, queued_for_credit, confirmed, partial, unapplied, invalid, expired, superseded]
+    PaymentFacts:
+      type: object
+      description: What both the webhook and the read carry. The four verdict fields are null until a final status.
+      required: [paymentLinkId, customerRef, askedCents, claimedCents, proofDoor, receivedCents, match, folio, confirmedAt, isTest]
+      properties:
+        paymentLinkId: { type: string }
+        customerRef: { type: string }
+        askedCents:
+          type: integer
+          description: What the link asked when the customer submitted.
+        claimedCents:
+          type: [integer, "null"]
+          description: What the receipt or the typed form says — a claim, never money.
+        proofDoor:
+          type: string
+          enum: [transfer, receipt]
+          description: "`transfer`: the customer confirmed or typed the details (an image may be attached). `receipt`: the image alone."
+        receivedCents:
+          type: [integer, "null"]
+          description: What Banxico says arrived. Null until the verdict.
+        match:
+          type: [string, "null"]
+          enum: [exact, short, over, null]
+          description: How the arriving money compared to the ask, within the business's tolerance. Null until the verdict.
+        folio:
+          type: [string, "null"]
+          description: Devolada's receipt number. Null until the verdict.
+          example: DV-3K8Q2M
+        confirmedAt:
+          type: [integer, "null"]
+          description: The verdict moment. Null until the verdict.
+        isTest: { type: boolean }
+    Payment:
+      allOf:
+        - $ref: "#/components/schemas/PaymentFacts"
+        - type: object
+          required: [id, status, createdAt, awaiting, awaitingReason]
+          properties:
+            id:
+              type: string
+              description: Opaque; the same id webhooks call `paymentId`.
+            status: { $ref: "#/components/schemas/PaymentStatus" }
+            createdAt: { type: integer }
+            awaiting:
+              type: [string, "null"]
+              enum: [payer_tracking_key, null]
+              description: |
+                What a `validating` payment waits on from the payer. Today only
+                the clave de rastreo, when Banxico's answer did not say which
+                transfer is the payer's. Such a payment never expires, and no
+                webhook announces it. Null otherwise.
+            awaitingReason:
+              type: [string, "null"]
+              enum: [all_used, ambiguous, no_match, unreadable, null]
+              description: Why it waits. Null when `awaiting` is null.
+    PaymentEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/Ok"
+        - type: object
+          required: [data]
+          properties:
+            data: { $ref: "#/components/schemas/Payment" }
+    TransferList:
+      type: object
+      required: [transfers, nextCursor]
+      properties:
+        transfers:
+          type: array
+          items: { $ref: "#/components/schemas/Payment" }
+        nextCursor: { type: [string, "null"] }
+
+    # ---- webhook (routes/v1/webhook/schema.ts) ----
+    RegisterWebhookRequest:
+      type: object
+      required: [url]
+      properties:
+        url:
+          type: string
+          minLength: 1
+          maxLength: 2048
+          description: An absolute https URL; anything else is `INSECURE_URL`.
+    WebhookEndpoint:
+      type: object
+      required: [url, createdAt, consecutiveFailures, lastFailureAt, lastSuccessAt]
+      properties:
+        url: { type: string }
+        createdAt: { type: integer }
+        consecutiveFailures: { type: integer, minimum: 0 }
+        lastFailureAt: { type: [integer, "null"] }
+        lastSuccessAt: { type: [integer, "null"] }
+    WebhookEndpointEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/Ok"
+        - type: object
+          required: [data]
+          properties:
+            data: { $ref: "#/components/schemas/WebhookEndpoint" }
+    WebhookEventType:
+      type: string
+      enum:
+        - payment.validating
+        - payment.queued_for_credit
+        - payment.confirmed
+        - payment.partial
+        - payment.unapplied
+        - payment.invalid
+        - payment.expired
+        - payment.superseded
+    WebhookEvent:
+      type: object
+      required: [eventId, type, createdAt, data]
+      properties:
+        eventId: { type: string, example: evt_9b2e4c1d7a8f4e3b9c6d5a2f1e0b8c7d }
+        type: { $ref: "#/components/schemas/WebhookEventType" }
+        createdAt:
+          type: integer
+          description: The moment of the state it announces. Use it, not arrival order, to tell which message is newer.
+        data:
+          allOf:
+            - $ref: "#/components/schemas/PaymentFacts"
+            - type: object
+              required: [paymentId]
+              properties:
+                paymentId: { type: string }
+    DeliveryStatus:
+      type: string
+      enum: [pending, delivered, failed]
+    WebhookDelivery:
+      type: object
+      required: [id, eventId, type, paymentId, status, attempts, nextAttemptAt, responseStatus, lastError, keyId, deliveredAt, createdAt]
+      properties:
+        id: { type: string }
+        eventId: { type: string }
+        type: { $ref: "#/components/schemas/WebhookEventType" }
+        paymentId: { type: [string, "null"] }
+        status: { $ref: "#/components/schemas/DeliveryStatus" }
+        attempts: { type: integer, minimum: 0 }
+        nextAttemptAt: { type: [integer, "null"] }
+        responseStatus:
+          type: [integer, "null"]
+          description: What your endpoint answered on the latest attempt; null when it never answered.
+        lastError:
+          type: [string, "null"]
+          description: e.g. `HTTP_500`, `TIMEOUT`, `UNREACHABLE`, `ENDPOINT_REMOVED`.
+        keyId:
+          type: [string, "null"]
+          description: The `kid` that signed the latest attempt.
+        deliveredAt: { type: [integer, "null"] }
+        createdAt: { type: integer }
+
+    # ---- test mode (routes/v1/test-mode/schema.ts) ----
+    AdvanceTestPaymentRequest:
+      type: object
+      required: [to]
+      properties:
+        to: { $ref: "#/components/schemas/PaymentStatus" }
+        receivedCents:
+          type: integer
+          exclusiveMinimum: 0
+          description: Read by `confirmed`, `partial` and `unapplied` only.
+
+    # ---- keys (routes/v1/well-known) ----
+    Jwks:
+      type: object
+      required: [keys]
+      properties:
+        keys:
+          type: array
+          items:
+            type: object
+            required: [kty, crv, alg, use, kid, x, y]
+            properties:
+              kty: { const: EC }
+              crv: { const: P-256 }
+              alg: { const: ES256 }
+              use: { const: sig }
+              kid: { type: string, example: 2026-09-a }
+              x: { type: string }
+              y: { type: string }
