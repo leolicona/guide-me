@@ -307,10 +307,10 @@ invitation lookup also disappear until US3 (T026) and US4 (T029) restore them un
   - Principle VI: the stand-in leaves and the secret is pinned;
   - Principle VIII: Agnostic Auth out, Resend on the sign-in path;
   - the stack table: the "Auth" row and `nodejs_als`.
-- [ ] T044 [P] Update `CLAUDE.md`:
+- [X] T044 [P] Update `CLAUDE.md`:
   - replace the "Running the app locally" caveat with: the local sign-in is an email code printed in the API console, and `.dev.vars` needs `BETTER_AUTH_SECRET` beside its local origins;
   - mark the Agnostic Auth mention under `docs/integrations/` as historical.
-- [ ] T045 Register debt `password-material` with `/speckit-debt-log`. `users.password_hash`, `users.password_salt` and `password_reset_tokens` remain in D1, unread. Paying it is the next PR's migration (0072 or the next free number), which drops them (D15, FR-061, SC-006).
+- [X] T045 Register debt `password-material` with `/speckit-debt-log`. `users.password_hash`, `users.password_salt` and `password_reset_tokens` remain in D1, unread. Paying it is the next PR's migration (0072 or the next free number), which drops them (D15, FR-061, SC-006).
 - [ ] T046 **Pre-merge gate, which blocks the merge** (D19, `specs/004-passkey-auth/quickstart.md` § 2):
   - set `BETTER_AUTH_SECRET` in dev and in prod, with different values;
   - run the email-case collision query on both databases;

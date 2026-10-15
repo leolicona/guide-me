@@ -36,11 +36,15 @@ For a single file without a clone:
 
 ## Commands
 
-> **Running the app locally for the first time in a worktree: read `docs/DEVELOPMENT.md`** (in the archive).
-> `pnpm dev` alone is not enough — without `.dev.vars` the login returns **200 and no session**,
-> because `wrangler.jsonc` pins the cookie to `.turistearya.com` and auth lives in an external
-> Worker reached by a service binding that does not exist locally. `pnpm db:migrate:local` also
-> links the worktree to the clone-wide local database, so data survives switching branches.
+> **Running the app locally for the first time in a worktree:** copy `api-turistear/.dev.vars.example`
+> to `api-turistear/.dev.vars` and fill in `BETTER_AUTH_SECRET` (any 32+ characters) beside its local
+> origins. `pnpm dev` alone is not enough — without `.dev.vars` the sign-in answers **200 and no
+> session**, because `wrangler.jsonc` pins the cookie to `.turistearya.com`, and the llave de acceso
+> needs `APP_BASE_URL=http://localhost:5174`. Sign-in is an email code printed in the API console
+> (`[otp] <email> <code>`); `pnpm seed:local` gives you an admin to sign in as
+> (`specs/004-passkey-auth/quickstart.md` § 3). `pnpm db:migrate:local` also links the worktree to
+> the clone-wide local database, so data survives switching branches; the archive's
+> `docs/DEVELOPMENT.md` covers that part.
 
 ### Workspace-level (Run from root)
 
@@ -113,8 +117,9 @@ design extension offers `/speckit-design-foundations`, point it at the existing 
 
 The pre-Spec-Kit process — `docs/PROCESS.md`, with `docs/SPEC.md` as the product index — is archived
 with the corpus (above): read it for what exists and why, never write into it. The archive's
-`docs/integrations/` still records the contracts of the services we do not own (Agnostic Auth,
-Resend, the QR image service) and what breaks when they are down.
+`docs/integrations/` still records the contracts of the services we do not own (Resend, the QR
+image service) and what breaks when they are down. Its Agnostic Auth contract is historical: sign-in
+moved to Better Auth inside the API Worker (`specs/004-passkey-auth`).
 
 ### Local workflow — one worktree, one PR per unit of work
 
