@@ -53,9 +53,9 @@ organization. Replay `0070` and read every table.
 ## Phase 3: Proof and close
 
 - [x] T009 Run `quickstart.md` § Before merging.
-- [ ] T010 For each environment, run `quickstart.md` § In each environment right before its deploy
+- [x] T010 For each environment, run `quickstart.md` § In each environment right before its deploy
   (dev on merge to `develop`, prod on the release) and right after it.
-- [ ] T011 After prod: `/speckit-debt-pay affiliate-tables`.
+- [x] T011 After prod: `/speckit-debt-pay affiliate-tables`.
 
 ## Dependencies
 
