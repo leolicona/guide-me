@@ -6,7 +6,8 @@ redirects, SPA navigation, the camera path. Everything else belongs one tier dow
 [`docs/TESTING.md`](https://github.com/leolicona/guide-me-docs/blob/main/docs/TESTING.md) (in `guide-me-docs`).
 
 **Not a merge gate.** `verify` runs `test:app` (Vitest) on every PR in seconds. This suite runs
-nightly, on demand, and on any PR labelled `e2e` — `.github/workflows/e2e.yml`.
+nightly and on demand against dev (`.github/workflows/e2e.yml`), and on any PR labelled `e2e`
+against that PR's own preview (`.github/workflows/preview.yml`, `specs/005-delivery-pipeline` D15).
 
 ## The suite seeds its own data
 
@@ -16,7 +17,7 @@ auth ──▶ seed ──▶ chromium ──▶ cleanup
 
 | Project | File | What it does |
 |---|---|---|
-| `auth` | `setup/auth.setup.ts` | Signs the agent and the admin in **through the API** and saves cookies to `.auth/*.json`. Works across origins because the API sets its session cookies on `.turistearya.com` (`COOKIE_DOMAIN`), so a session minted at `api-dev` is sent to `app-dev`. |
+| `auth` | `setup/auth.setup.ts` | Signs the agent and the admin in **through the API** and saves cookies to `.auth/*.json`. Works across origins because the API sets its session cookies on `.turistearya.com` (`COOKIE_DOMAIN`), so a session minted at `api-dev` is sent to `app-dev`. On a preview the cookie is host-only on the preview's API, which still works: `workers.dev` is a public suffix, so the preview's app and API are the same site (`specs/005-delivery-pipeline` D4). |
 | `seed` | `setup/seed.setup.ts` | Picks the cheapest bookable tour with a departure **at least 2 days out** and creates an **apartado with a cash deposit**, writing `.auth/fixture.json`. It then asserts the folio's `booking_expires_at` is still ahead — see *A fixture the journey can actually settle* below. |
 | `chromium` | `*.spec.ts` | The journeys, already signed in as the agent. |
 | `cleanup` | `teardown/cleanup.teardown.ts` | Cancels the seeded folio. Never fails the run — a stale folio in dev is untidy, not a regression. |

@@ -1,0 +1,85 @@
+name: Rollback Prod
+
+# Return ONE production Worker to ONE named version, from CI (delivery-pipeline D14). "Deploys go
+# through CI" covers the undo too: the act stays in a run's log, behind the same environment and
+# credentials as the release. The click is the deliberate act.
+#
+# What it touches: the live version of api-guideme or app-guideme. What it never touches: the
+# database, the secrets, the other Worker. Migrations are backward-compatible with the code
+# already deployed, so an older Worker keeps working on a newer schema. Restoring DATA is a
+# separate, deliberate act on a release's restore point (specs/005-delivery-pipeline/quickstart.md
+# §6), and it loses everything written after that point.
+#
+# The version id comes from a release's "What landed" summary, or from the Worker's deployments
+# in the Cloudflare dashboard.
+#
+# wrangler can decline a rollback without a non-zero exit (devolada measured it: the second
+# confirmation, when secrets changed since that version, answers "no" in CI). So this job reads
+# the live deployment afterwards and fails unless that version serves all traffic: its exit code
+# means what it says.
+on:
+  workflow_dispatch:
+    inputs:
+      worker:
+        description: Which Worker
+        type: choice
+        required: true
+        options: [api, app]
+      version_id:
+        description: Version id to make live (from a release's What landed)
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+# Same group as the release: a rollback waits for a release in flight instead of racing it.
+concurrency:
+  group: deploy-prod
+  cancel-in-progress: false
+
+jobs:
+  rollback:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Admits only main and v* tags (contracts/environment.md, E3): a dispatch from any other
+    # branch is refused before this job starts.
+    environment: production
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
+
+      # `--name` always wins over the config's name, so the API directory's local profile
+      # (api-guideme-local) can never be the target (research R9).
+      - name: Roll back and verify
+        working-directory: api-turistear
+        env:
+          WORKER: ${{ inputs.worker }}
+          VERSION_ID: ${{ inputs.version_id }}
+          MESSAGE: "${{ github.actor }} · ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+        run: |
+          set -euo pipefail
+          case "$WORKER" in
+            api) NAME=api-guideme ;;
+            app) NAME=app-guideme ;;
+            *) echo "::error::Unknown worker '$WORKER'"; exit 1 ;;
+          esac
+          pnpm exec wrangler rollback "$VERSION_ID" --name "$NAME" -y -m "$MESSAGE"
+
+          live=$(pnpm exec wrangler deployments status --name "$NAME" --json \
+            | jq -r '[.versions[] | select(.percentage == 100) | .version_id][0] // empty')
+          if [ "$live" != "$VERSION_ID" ]; then
+            echo "::error::Rollback did not take: $NAME serves ${live:-an unknown version}, asked for $VERSION_ID. Nothing moved (delivery-pipeline D14)."
+            exit 1
+          fi
+          echo "$NAME now serves $VERSION_ID"
+          {
+            echo "## Rollback — $NAME"
+            echo
+            echo "Now serving version \`$VERSION_ID\`, read back from Cloudflare."
+            echo
+            echo "The database, the secrets and the other Worker are untouched. Data comes back only from a release's restore point, as a separate act (specs/005-delivery-pipeline/quickstart.md §6)."
+          } >> "$GITHUB_STEP_SUMMARY"

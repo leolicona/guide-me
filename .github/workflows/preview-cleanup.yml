@@ -1,0 +1,80 @@
+name: Preview cleanup
+
+# When a pull request into main closes, merged or not, both of its preview Workers are deleted
+# (delivery-pipeline D7). Idempotent: a Worker that is already gone counts as deleted, so this
+# runs on every close — a pull request that never had a preview (documentation only) leaves no
+# note. Dev's data is never touched: what a preview sold, and any migration it applied, stays on
+# dev (spec Edge Cases), and the note says so for an unmerged pull request.
+on:
+  pull_request:
+    branches: [main]
+    types: [closed]
+
+permissions:
+  contents: read
+
+# Same group as preview.yml, not cancelled: a deploy still in flight finishes first, then this
+# deletes what it made.
+concurrency:
+  group: preview-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: dev
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      NUMBER: ${{ github.event.pull_request.number }}
+    steps:
+      # The pull request's merge ref may be gone once it closes; the script lives on main.
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          sparse-checkout: .github/scripts
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      # The REST call wrangler itself makes for `wrangler delete`, because wrangler can only say
+      # "absent" as an error: 200 is deleted, 404 is already absent, anything else failed (D7).
+      - name: Delete api-guideme-pr-${{ github.event.pull_request.number }} and app-guideme-pr-${{ github.event.pull_request.number }}
+        id: delete
+        run: |
+          failed=""
+          for name in "api-guideme-pr-$NUMBER" "app-guideme-pr-$NUMBER"; do
+            status=$(curl -sS -o "$RUNNER_TEMP/delete.json" -w '%{http_code}' --max-time 60 -X DELETE \
+              -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+              "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/services/$name?force=true" || echo 000)
+            # 10007 and 10090 are Cloudflare's "no such script" and "no such service" codes,
+            # whatever HTTP status carries them.
+            if grep -qE '"code": ?(10007|10090)' "$RUNNER_TEMP/delete.json" 2>/dev/null; then status=404; fi
+            case "$status" in
+              200) echo "deleted: $name" ;;
+              404) echo "already absent: $name" ;;
+              *)
+                echo "::error::$name not deleted: HTTP $status $(tr -d '\n' < "$RUNNER_TEMP/delete.json" | cut -c1-300)"
+                failed="${failed:+$failed,}$name (HTTP $status)"
+                ;;
+            esac
+          done
+          echo "failed=$failed" >> "$GITHUB_OUTPUT"
+          [ -z "$failed" ]
+
+      - name: Note the outcome on the pull request
+        if: always()
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          MERGED: ${{ github.event.pull_request.merged }}
+          FAILED: ${{ steps.delete.outputs.failed }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: node .github/scripts/preview-note.mjs cleanup

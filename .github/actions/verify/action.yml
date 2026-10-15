@@ -1,0 +1,47 @@
+name: verify
+description: >-
+  The gate (constitution, Development Workflow). One definition, run whole by every pull request,
+  every preview and every deploy, so a deploy's checks can never again be a subset of the pull
+  request's (delivery-pipeline D8). Needs the repository checked out; uses no credential.
+
+runs:
+  using: composite
+  steps:
+    # The pre-Spec-Kit corpus is archived in leolicona/guide-me-docs (CLAUDE.md). Old code
+    # comments still cite docs/… and .design/…, so it is easy to recreate them here by habit;
+    # new specs belong in specs/NNN-slug/ (Spec Kit). Fail loudly if either folder creeps back.
+    - name: Corpus stays archived
+      shell: bash
+      run: |
+        if [ -e docs ] || [ -e .design ]; then
+          echo "::error::docs/ and .design/ are archived in leolicona/guide-me-docs; new specs go in specs/NNN-slug/."
+          exit 1
+        fi
+
+    - uses: ./.github/actions/setup
+
+    - name: Lint (app)
+      shell: bash
+      run: pnpm lint:app
+
+    - name: Test (app)
+      shell: bash
+      run: pnpm test:app
+
+    - name: Test (api)
+      shell: bash
+      run: pnpm test:api
+
+    # The preview comment's script is the one piece of pipeline logic with pure parts worth a
+    # unit test (delivery-pipeline D7).
+    - name: Test (pipeline scripts)
+      shell: bash
+      run: node --test '.github/scripts/*.test.mjs'
+
+    - name: Build (api)
+      shell: bash
+      run: pnpm build:api
+
+    - name: Build (app)
+      shell: bash
+      run: pnpm build:app
