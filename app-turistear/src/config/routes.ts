@@ -6,6 +6,7 @@ export const ROUTES = {
   FORGOT_PASSWORD: '/forgot-password',
   RESET_PASSWORD: '/reset-password',
   INVITE_ACCEPT: '/invite/accept',
+  SECURITY: '/seguridad', // both roles — llaves de acceso and sessions (passkey-auth US5)
   DASHBOARD: '/dashboard',
   AGENTS: '/agents',
   INVITE_AGENT: '/agents/invite',

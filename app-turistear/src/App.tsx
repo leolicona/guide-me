@@ -34,6 +34,7 @@ const CashBalancesPage = lazy(() => import('./pages/CashBalancesPage'))
 const CashDropDetailPage = lazy(() => import('./pages/CashDropDetailPage'))
 const CashDropsHistoryPage = lazy(() => import('./pages/CashDropsHistoryPage'))
 const ReportsPage = lazy(() => import('./pages/ReportsPage'))
+const SecurityPage = lazy(() => import('./pages/SecurityPage'))
 
 function PageLoader() {
   return (
@@ -227,6 +228,16 @@ function App() {
               element={
                 <RoleGuard role="admin">
                   <ReportsPage />
+                </RoleGuard>
+              }
+            />
+
+            {/* Seguridad — every role's own llaves de acceso and sessions (passkey-auth US5). */}
+            <Route
+              path={ROUTES.SECURITY}
+              element={
+                <RoleGuard role={['agent', 'admin']}>
+                  <SecurityPage />
                 </RoleGuard>
               }
             />
