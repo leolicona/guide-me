@@ -13,7 +13,9 @@ There are two families of routes, with two conventions.
 - It is `__Secure-<AUTH_COOKIE_PREFIX>.session_token`: HttpOnly, Secure and `SameSite=Lax`, on
   `COOKIE_DOMAIN` (D5).
 - The app sends it with `credentials: 'include'`.
-- Better Auth's sign-in answers echo `token` in the body. The app never reads or stores it.
+- No answer carries the session token (constitution IV, v1.2.1). The API strips `token` from the
+  sign-in answers, and `/get-session` and `/list-sessions` answer `404` (`disabledPaths`). The app
+  reads its user from `/api/me`.
 
 **Rate limits**: a refused call answers `429 { "message": "Too many requests…" }` with an
 `X-Retry-After` header in seconds, which CORS exposes (D9).
@@ -30,7 +32,7 @@ mirrors exactly this list.
 | Client call | HTTP | Body | Success |
 |---|---|---|---|
 | `authClient.emailOtp.sendVerificationOtp({ email, type: 'sign-in' })` | `POST /api/auth/email-otp/send-verification-otp` | `{ email, type: "sign-in" }` | `200 { success: true }`, the same for unknown emails |
-| `authClient.signIn.emailOtp({ email, otp })` | `POST /api/auth/sign-in/email-otp` | `{ email, otp }` | `200 { token, user }` plus the session cookie |
+| `authClient.signIn.emailOtp({ email, otp })` | `POST /api/auth/sign-in/email-otp` | `{ email, otp }` | `200 { user }` plus the session cookie (the API strips Better Auth's `token`) |
 
 Failures of `sign-in/email-otp`:
 - `400 INVALID_OTP`: wrong, used or superseded.
@@ -42,7 +44,7 @@ Failures of `sign-in/email-otp`:
 
 | Client call | HTTP | Notes |
 |---|---|---|
-| `authClient.signIn.passkey({ autoFill })` | `GET /api/auth/passkey/generate-authenticate-options`, then `POST /api/auth/passkey/verify-authentication { response }` | A discoverable sign-in. `200 { session, user }` plus the cookie. `401 PASSKEY_NOT_FOUND`; `400 AUTHENTICATION_FAILED` / `CHALLENGE_NOT_FOUND`; `403 ACCOUNT_SUSPENDED` |
+| `authClient.signIn.passkey({ autoFill })` | `GET /api/auth/passkey/generate-authenticate-options`, then `POST /api/auth/passkey/verify-authentication { response }` | A discoverable sign-in. `200 { session, user }`, without `session.token`, plus the cookie. `401 PASSKEY_NOT_FOUND`; `400 AUTHENTICATION_FAILED` / `CHALLENGE_NOT_FOUND`; `403 ACCOUNT_SUSPENDED` |
 | `authClient.passkey.addPasskey({ name })` | `GET /api/auth/passkey/generate-register-options`, then `POST /api/auth/passkey/verify-registration { response, name }` | Needs a fresh session (1 day). Without one: `403 SESSION_NOT_FRESH`, after which the app signs in again. `200` answers the passkey. A notice email follows (D12) |
 | `authClient.passkey.listUserPasskeys()` | `GET /api/auth/passkey/list-user-passkeys` | `200 Passkey[]` |
 | `authClient.passkey.updatePasskey({ id, name })` | `POST /api/auth/passkey/update-passkey` | `200 { passkey }` |
@@ -60,9 +62,10 @@ The options both ceremonies return carry `rpId` set to the host of `APP_BASE_URL
 
 ### Exposed but not used by the app
 
-- **Reachable**: `/get-session`, `/list-sessions`, `/revoke-session`, `/revoke-other-sessions` and
-  `/update-user`. The last accepts `name` only, because the tenant fields are `input: false`.
-- **Disabled**: email-and-password, `changeEmail` and `deleteUser`.
+- **Reachable**: `/revoke-session`, `/revoke-other-sessions` and `/update-user`. The last accepts
+  `name` only, because the tenant fields are `input: false`.
+- **Disabled (`404`)**: `/get-session` and `/list-sessions` (`disabledPaths`, which keeps the BFF);
+  email-and-password; `changeEmail`; `deleteUser`.
 
 ---
 

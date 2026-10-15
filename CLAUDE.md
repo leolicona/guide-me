@@ -116,20 +116,27 @@ with the corpus (above): read it for what exists and why, never write into it. T
 `docs/integrations/` still records the contracts of the services we do not own (Agnostic Auth,
 Resend, the QR image service) and what breaks when they are down.
 
-### Local workflow — one worktree, one PR per unit of work
+### Local workflow — one branch, one worktree, one PR per unit of work
 
-Every feature, fix, enhancement or docs change gets **its own worktree and its own pull request**:
+There is one long-lived branch, **`main`** (`specs/005-delivery-pipeline` D1). Every feature, fix,
+enhancement or docs change gets **its own worktree and its own pull request**:
 
 ```bash
-git worktree add .claude/worktrees/<name> -b feat/<slug> origin/develop
+git worktree add .claude/worktrees/<name> -b feat/<slug> origin/main
 ```
 
 Branch `feat/` · `fix/` · `docs/`; commits are Conventional with the domain as scope
-(`feat(cancellation):`); PRs target **`develop`** and are squash-merged, so the PR title becomes the
-commit on `develop`. A release is a PR `develop → main` titled `release: … → prod`. The `verify` CI
-job must pass. Two hard rules: **never bare `git stash`** (the stack is shared across worktrees), and
-**squash `feature → develop`, merge-commit `release → main`** — the archived `docs/PROCESS.md`
-records why.
+(`feat(cancellation):`); PRs target **`main`** and are squash-merged, so the PR title becomes the
+commit on `main`. The `verify` CI job must pass. There is no release pull request: every merge
+deploys dev, and a release is a pushed `v*` tag on a `main` commit whose *Deploy Dev* run is green —
+**the tag is the approval** (D10). Two hard rules: **never bare `git stash`** (the stack is shared
+across worktrees), and **never rename a migration once it has reached dev** (D19).
+
+Every PR from a branch of this repository gets a **preview**: `app-guideme-pr-<n>` and
+`api-guideme-pr-<n>` on `workers.dev`, on dev's data, with the PR's migrations applied to dev; one
+comment on the PR holds its addresses, and closing the PR deletes it. The `e2e` label runs the
+Playwright journeys against that preview. Releasing, undoing a Worker (*Rollback Prod*) and
+restoring data are in the runbook, `specs/005-delivery-pipeline/quickstart.md`.
 
 ## Multitenancy
 

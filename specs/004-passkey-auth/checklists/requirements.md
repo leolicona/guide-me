@@ -75,6 +75,12 @@
   - L6: the Phase 2 note is widened.
 
   Zero CRITICAL or HIGH findings remain.
+- Iteration 8 (2026-10-07): the developer chose to **keep the BFF**.
+  - Clarifications record the decision, and FR-020 now requires that no response body carries the session token.
+  - Constitution v1.2.1 restores the rule.
+  - The plan (D2, D14), research (R14), contract, quickstart and tasks (T009, T010, T015, T016, T017, T018, T021) add `disabledPaths` and the filter at the mount, and test for them.
+
+  All items still pass.
 - Some references to the code base and the constitution are deliberate, not leaked implementation. The constitution requires them:
   - The scope boundary names test suites and the shared session helper, because Principle I requires a mechanical test.
   - The error codes are declared in FR-070, because Principle IV says they must exist in the spec before they exist in code.

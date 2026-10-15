@@ -33,6 +33,7 @@
   - An agent who lost a phone removes its llave from another device.
   - A tenant-scoped restore can be specified later as its own feature.
 - **How long does a session last without use?** Answer: **7 days, Better Auth's default.** Every day of use renews it.
+- **Do we keep the BFF?** Answer: **yes.** The API stays the only holder of the session, and no response body carries the session token. Better Auth's standard answers echo the token, so the API strips it and does not expose Better Auth's session-reading routes. The app reads its user from `/api/me` (constitution IV, v1.2.1).
 
 ### Amended by the plan
 
@@ -205,7 +206,7 @@ From their account surface, a staff member sees every llave de acceso on their a
 
 **Sessions**
 
-- **FR-020**: The API MUST issue, renew and revoke every session itself, through Better Auth running in the Worker, with no external authentication service. Sessions MUST live in HttpOnly cookies. The app MUST never store or send a token itself: Better Auth's sign-in answers echo the session token in their body, and the app ignores it (constitution IV, amended).
+- **FR-020**: The API MUST issue, renew and revoke every session itself, through Better Auth running in the Worker, with no external authentication service. Sessions MUST live in HttpOnly cookies, and no response body MUST carry the session token. The API strips it from Better Auth's sign-in answers and does not expose Better Auth's session-reading routes over HTTP (constitution IV).
 - **FR-021**: A session MUST be honored only after the API verifies it issued it, using a signing key unique to each environment (constitution VIII). A session cookie that was altered, minted elsewhere, or comes from another environment MUST be refused with `UNAUTHORIZED`.
 - **FR-022**: A session MUST last 7 days without use, and MUST be renewed by use (Better Auth's defaults).
 - **FR-023**: Signing out MUST end the session on the server, so its cookie can never be used again.
@@ -290,8 +291,8 @@ This feature changes how admins and agents prove who they are. Nothing about wha
   - Limits are per client address, not per email.
   - The session cookie, codes and the passkey table follow its schema.
 - **End-to-end journeys**: `app-turistear/e2e/setup/auth.setup.ts` signs in with a password today. It moves to the new sign-in, using a virtual authenticator.
-- **The constitution was amended to v1.2.0 in this pull request** (`/speckit-constitution`, 2026-10-07, MINOR). The amendment covers:
-  - **Principle IV**: `/api/auth/*` is served by Better Auth's handler, with its validation, its `{ code, message }` format and its codes. Every other route keeps the `routes/<resource>/` rule and the `ApiError` envelope. Session cookies are Better Auth's, still HttpOnly on `.turistearya.com`. Its sign-in answers may echo the token in the body; the app never reads it.
+- **The constitution was amended in this pull request** (`/speckit-constitution`, 2026-10-07): v1.2.0 (MINOR), then v1.2.1 (PATCH, keeping the BFF). The amendment covers:
+  - **Principle IV**: `/api/auth/*` is served by Better Auth's handler, with its validation, its `{ code, message }` format and its codes. Every other route keeps the `routes/<resource>/` rule and the `ApiError` envelope. Session cookies are Better Auth's, still HttpOnly on `.turistearya.com`. No response body carries the token: the API strips it from the sign-in answers, and `/get-session` and `/list-sessions` are not exposed (v1.2.1).
   - **Principle VI**: the `AGNOSTIC_AUTH_API` stand-in leaves.
   - **Principle VIII**: Agnostic Auth leaves the list of services we do not own, and Resend's place on the sign-in path is recorded.
   - **The stack table**: the "Auth" row and the `nodejs_als` flag.
