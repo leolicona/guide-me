@@ -67,6 +67,11 @@ and we write only what Better Auth does not know (organizations, invitations).
   answers echo the session token, which would let a script in the page carry the session elsewhere;
   the cookie alone must authenticate (constitution IV, v1.2.1; R14). `auth.api.getSession` still
   works server-side, because `disabledPaths` only closes the HTTP routes.
+  *Implemented 2026-10-15 (R15)*: the filter applies to every JSON object answer under
+  `/api/auth/*`, so an echo added by an upgrade (or `verify-registration` with `createSession`) is
+  stripped too; and `disabledPaths` also closes every route the app does not use that touches
+  passwords, email changes, social accounts or self-deletion — including the emailOTP plugin's
+  code-based password reset, which would write a `credential` account (FR-060).
 - Principle IV is amended for `/api/auth/*` (D18). (R2)
 
 **D3 — One auth instance per isolate.** `src/auth/index.ts` exports `getAuth(env)`, memoized in a
@@ -168,7 +173,8 @@ behaviour. (R9)
 **D9 — Better Auth's rate limiter, stored in D1.**
 - Settings: `rateLimit: { enabled: true, storage: 'database', modelName: 'rate_limits' }`.
 - Built-in rules apply per client IP (`cf-connecting-ip`): `/sign-in*` allows 3 per 10 s, the
-  email-code send allows 3 per 60 s, and everything else 100 per 60 s.
+  email-code send allows 3 per 60 s, and everything else 100 per 60 s. *Measured 2026-10-15 (R15)*:
+  `/sign-in/email-otp` takes the emailOTP plugin's own rule instead, 3 per 60 s.
 - A refusal is `429` with `X-Retry-After`, which `src/index.tsx`'s CORS exposes to the app.
 
 *Why*:

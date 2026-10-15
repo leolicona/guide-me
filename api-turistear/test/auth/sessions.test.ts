@@ -127,6 +127,28 @@ describe('passkey-auth FR-025 — a suspended or deleted account is refused at i
   })
 })
 
+describe('the session carries the role the routes check (old admin-login-session S6, S10)', () => {
+  it('an admin reaches an admin-only route; an agent gets 403 FORBIDDEN', async () => {
+    const { organizationId } = await seedUser({ email: ADMIN_EMAIL, role: 'admin' })
+    await seedUser({ email: AGENT_EMAIL, role: 'agent', organizationId })
+    const call = (email: string) =>
+      SELF.fetch(`${API}/admin-only`, { method: 'POST', headers: { Cookie: sessionCookie(email) } })
+
+    expect((await call(ADMIN_EMAIL)).status).toBe(200)
+    const agent = await call(AGENT_EMAIL)
+    expect(agent.status).toBe(403)
+    expect(((await agent.json()) as any).error.code).toBe('FORBIDDEN')
+  })
+
+  it('GET /api/me answers the signed-in user from the session', async () => {
+    const { userId, organizationId } = await seedUser({ email: ADMIN_EMAIL, role: 'admin', name: 'Ana' })
+    const res = await me(sessionCookie(ADMIN_EMAIL))
+    expect(await res.json()).toEqual({
+      user: { userId, name: 'Ana', email: ADMIN_EMAIL, role: 'admin', organizationId },
+    })
+  })
+})
+
 describe('passkey-auth FR-022 — 7 days, renewed by use (Better Auth’s defaults)', () => {
   it('a request a day after the last renewal extends expires_at to 7 days and keeps the token', async () => {
     const { userId } = await seedUser({ email: ADMIN_EMAIL, role: 'admin' })
@@ -177,6 +199,11 @@ describe('passkey-auth FR-023, FR-024 — signing out ends the session on the se
     expect(out.headers.get('set-cookie')).toMatch(/__Secure-gm-test\.session_token=;/)
 
     expect((await me(cookie)).status).toBe(401)
+  })
+
+  it('signing out with no session answers 200, idempotently (old admin-login-session S12)', async () => {
+    const res = await post('/sign-out', {})
+    expect(res.status).toBe(200)
   })
 
   it('POST /api/auth/revoke-sessions ends every session of the user, another device’s included', async () => {

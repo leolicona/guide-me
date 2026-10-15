@@ -121,7 +121,8 @@ Paths like `dist/…` refer to those tarballs.
 - **Decision**: Better Auth's limiter, `enabled: true` and `storage: 'database'`.
 - **Rationale**:
   - **Built-in rules** (`api/rate-limiter/index.mjs:308–314`): `/sign-in*` at 3 per 10 s; the
-    email-code send at 3 per 60 s; everything else at 100 per 60 s.
+    email-code send at 3 per 60 s; everything else at 100 per 60 s. A plugin's rule wins over the
+    built-in one, so `/sign-in/email-otp` is 3 per 60 s (R15).
   - **Key**: the client IP (`cf-connecting-ip`).
   - **Refusal**: `429` with `X-Retry-After` (`index.mjs:64–72`).
   - **Storage**: memory storage counts per isolate on Workers. Database storage shares one count,
@@ -214,6 +215,52 @@ Paths like `dist/…` refer to those tarballs.
   A test asserts that no `/api/auth/*` answer carries a token, so an upgrade that changes the shapes
   fails CI instead of silently re-exposing it.
 
+## R15 — Measured while implementing (2026-10-15)
+
+Each point was found running Better Auth 1.7.7 in workerd, and is proved by the test named.
+
+- **One copy of the core**: `@better-auth/passkey` and `@better-auth/drizzle-adapter` peer-depend on
+  `@better-auth/utils` **0.4.2** exactly, and `better-auth` needs `zod ^4.5.4`. Left alone, pnpm
+  resolved `utils` 0.5.0 and the API's `zod` 4.4.3, giving two copies of `@better-auth/core` and
+  `better-call`. The API pins `@better-auth/utils@0.4.2` and `zod ^4.5.4`, so every package resolves
+  one copy (R1). The app needs no change: the passkey client never imports `better-call`.
+- **`better-auth/minimal`**: Better Auth's entry for adapters that are not Kysely; it keeps Kysely
+  out of the Worker (574 KB gzipped in all).
+- **The Drizzle adapter addresses the Drizzle schema, not SQL**: models by their export name in
+  `db/schema.ts` (`modelName: 'users'`, `'rateLimits'`, …) and fields by property name. Drizzle
+  maps those to the snake_case columns, so no `fields` mapping is configured.
+- **The runtime schema check**: Better Auth refuses a `NOT NULL` column it never writes unless it
+  has a default. `users.password_hash`/`password_salt` get a Drizzle `$defaultFn(() => '')`, which is
+  also the `''` D15 asks inserts to write.
+- **Routes Better Auth registers anyway**: with email-and-password off, core still registers
+  `/sign-in/email`, `/sign-up/email`, `/reset-password` and more (they answer "not enabled"), and
+  the emailOTP plugin brings `/email-otp/request-password-reset` → `/email-otp/reset-password`,
+  which **creates a `credential` account with a password**. `disabledPaths` closes all of them, with
+  the email-change, social, account and self-deletion routes (contract § Exposed;
+  `test/auth/sessions.test.ts`). `sendVerificationOTP` mails only `type: 'sign-in'`.
+- **The token echo is wider than two routes**: `verify-registration` with `createSession: true`
+  answers a session with its token. The mount's filter covers every JSON object answer under
+  `/api/auth/*` (`test/auth/passkeys.test.ts`).
+- **Rate limits**: a plugin's rule wins over the built-in one, so `/sign-in/email-otp` is 3 per 60 s,
+  not the `/sign-in*` 3 per 10 s (`test/auth/email-code.test.ts`).
+- **Sign-in options**: the plugin fixes `userVerification: "preferred"` for the sign-in ceremony;
+  only registration takes `authenticatorSelection` (`test/auth/passkeys.test.ts`). It still asks
+  every device that can verify its user to do so (FR-002).
+- **A registration that does not verify** answers Better Auth's `500 FAILED_TO_VERIFY_REGISTRATION`.
+- **Cross-site POSTs**: Better Auth refuses a cookie-bearing `POST` without the trusted `Origin`
+  (`403`). The tests send the app's Origin, as its browser does.
+- **Unverified accounts**: on the first code, Better Auth sets `emailVerified` itself
+  (`revokeUnprovenAccountAccess`, which also deletes the account's sessions); the D6 hook only moves
+  `status` to `active`.
+- **A duplicate rejection report in tests**: inside workerd, an `APIError` thrown from an endpoint
+  handler is answered correctly and also reported as an unhandled rejection by Better Auth's
+  dispatch. `vitest.config.ts` ignores only `APIError`s carrying Better Auth's `{ code, message }`
+  body; any other unhandled error still fails the run.
+- **Storage is shared by a file's tests** (`isolatedStorage` isolates files): the auth tests clear
+  `rate_limits`, `verifications`, `passkeys` and `sessions` with `clearAuthDb()`.
+- **A suspended account keeps "refused and its cookie cleared"** (delete-legacy-affiliates D5): the
+  middleware expires the session cookie on the `403`, and leaves the rows (FR-025).
+
 ## Withdrawn
 
 These were withdrawn on 2026-10-07, when the developer chose Better Auth's standards:
@@ -233,8 +280,9 @@ The spec's Clarifications record each one.
 | Today's suite | Scenarios withdrawn | Replaced by |
 |---|---|---|
 | `test/auth/admin-login-session.test.ts` | 1–9 (password login, JWT access and refresh) | US1, US2 and the session tests |
-| `test/auth/admin-login-session.test.ts` | 10–12 | Restated on the new session |
-| `test/auth/admin-registration.test.ts` | 1–7 | US3 |
-| `test/auth/agent-invitation.test.ts` | 1–8 | Kept: the invite is unchanged; acceptance moves to `/api/onboarding` |
-| `test/auth/agent-invitation.test.ts` | 9–11 | US4 |
-| `test/auth/password-recovery.test.ts` | 1–8 | US1 |
+| `test/auth/admin-login-session.test.ts` | 6, 10–12 | Restated on the new session in `test/auth/sessions.test.ts` |
+| `test/auth/admin-registration.test.ts` | 1–7 | US3, `test/onboarding/register.test.ts` |
+| `test/auth/agent-invitation.test.ts` | 1, 3–8, BUG-011 | Restated in `test/onboarding/invitations.test.ts`: the invite is unchanged; the lookup moved to `/api/onboarding` |
+| `test/auth/agent-invitation.test.ts` | 9–11 | US4, `test/onboarding/invitations.test.ts` |
+| `test/auth/password-recovery.test.ts` | 1–8 | US1, `test/auth/email-code.test.ts` |
+| `test/staff/staff-management.test.ts` | Scenario 9 (refresh branch) and its control | Withdrawn with the Agnostic Auth stub; a suspended user due for renewal is still refused in `test/auth/sessions.test.ts` |
