@@ -258,6 +258,12 @@ and `password_reset_tokens` is the next PR's migration, registered at implementa
 *Why*: a migration runs before the code it ships with, and the code being replaced still reads them.
 This is the same path as `specs/001-retire-affiliates` → `specs/002-drop-affiliate-tables`.
 
+*Amended 2026-10-15*: the drop is two pull requests, not one. The cutover's code still inserted
+users through the mapped password columns, so a drop would have broken registration and invitations
+on dev from the moment its preview applied it, and on prod between its migration and its API
+deploy. The first stops mapping the columns and inserts on both sides of the drop; the second, once
+the first is live in prod, is migration 0072 (debt `password-material`, quickstart § 6).
+
 **D16 — Migration `0071_better_auth.sql` is additive.** It takes the next free number at
 implementation; it is 0071 today, after `0070_delete_legacy_affiliates.sql`. It adds:
 - the tables of D4;

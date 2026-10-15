@@ -1,7 +1,8 @@
 import type { Context } from 'hono'
 import { and, eq } from 'drizzle-orm'
+import { integer, sqliteTable, text } from 'drizzle-orm/sqlite-core'
 import { getAuth } from '../../auth'
-import { getDb } from '../../db/client'
+import { getDb, type Db } from '../../db/client'
 import { invitations, organizations, users } from '../../db/schema'
 import { DEFAULT_CANCELLATION_POLICY } from '../../utils/cancellationPolicy'
 import { ApiError } from '../../types/errors'
@@ -14,6 +15,52 @@ const emailTaken = () =>
 
 const isUniqueViolation = (err: unknown) =>
   err instanceof Error && /UNIQUE constraint failed/i.test(err.message + String(err.cause ?? ''))
+
+// passkey-auth D15, debt `password-material` — migration 0072 drops `users.password_hash` and
+// `password_salt`, and a migration runs before the code it ships with, so a new user has to be
+// insertable on both sides of the drop. Until it, the columns are NOT NULL with no default and the
+// insert writes '' into both through this insert-only view of the table (kept out of db/schema.ts,
+// so neither Drizzle's relational schema nor Better Auth sees a second `users`); after it, an
+// insert that names them fails before anything is written, and the same rows go in through `users`.
+// The drop's own pull request deletes this view and the fallback.
+const usersWithPasswordColumns = sqliteTable('users', {
+  id: text('id').primaryKey(),
+  organizationId: text('organization_id').notNull(),
+  name: text('name').notNull(),
+  email: text('email').notNull(),
+  passwordHash: text('password_hash')
+    .notNull()
+    .$defaultFn(() => ''),
+  passwordSalt: text('password_salt')
+    .notNull()
+    .$defaultFn(() => ''),
+  emailVerified: integer('email_verified', { mode: 'boolean' }).notNull(),
+  phone: text('phone'),
+  role: text('role', { enum: ['admin', 'agent'] }).notNull(),
+  status: text('status', { enum: ['unverified', 'active', 'suspended'] }).notNull(),
+  plan: text('plan').notNull(),
+})
+
+type NewUser = typeof usersWithPasswordColumns.$inferInsert
+
+const insertUser = (db: Db, withPasswordColumns: boolean, user: NewUser) =>
+  withPasswordColumns
+    ? db.insert(usersWithPasswordColumns).values(user)
+    : db.insert(users).values(user)
+
+const passwordColumnsDropped = (err: unknown) =>
+  err instanceof Error &&
+  /no column named password_(hash|salt)/i.test(err.message + String(err.cause ?? ''))
+
+// D1 runs a batch as one transaction, so a first attempt refused by the drop leaves nothing behind.
+const acrossTheDrop = async (write: (withPasswordColumns: boolean) => Promise<unknown>) => {
+  try {
+    await write(true)
+  } catch (err) {
+    if (!passwordColumnsDropped(err)) throw err
+    await write(false)
+  }
+}
 
 // passkey-auth D10, D11 — the sign-in code goes out through Better Auth's own emailOTP plugin, so
 // one code path verifies every address (FR-015). It sends in the background, like any other.
@@ -41,26 +88,27 @@ export const register = async (c: OnboardingContext) => {
   const organizationId = crypto.randomUUID()
   try {
     // One batch: D1 runs it as one transaction, so an organization never exists without its admin.
-    await db.batch([
-      db.insert(organizations).values({
-        id: organizationId,
-        name: input.company_name,
-        // D17 (cancellation policy) — a new org is born WITH a cancellation policy, as before.
-        cancellationPolicy: JSON.stringify(DEFAULT_CANCELLATION_POLICY),
-      }),
-      // The password columns are left to their '' default until the follow-up drops them (D15).
-      db.insert(users).values({
-        id: crypto.randomUUID(),
-        organizationId,
-        name: input.name,
-        email,
-        emailVerified: false,
-        phone: input.phone,
-        role: 'admin',
-        status: 'unverified',
-        plan: 'free',
-      }),
-    ])
+    await acrossTheDrop((withPasswordColumns) =>
+      db.batch([
+        db.insert(organizations).values({
+          id: organizationId,
+          name: input.company_name,
+          // D17 (cancellation policy) — a new org is born WITH a cancellation policy, as before.
+          cancellationPolicy: JSON.stringify(DEFAULT_CANCELLATION_POLICY),
+        }),
+        insertUser(db, withPasswordColumns, {
+          id: crypto.randomUUID(),
+          organizationId,
+          name: input.name,
+          email,
+          emailVerified: false,
+          phone: input.phone,
+          role: 'admin',
+          status: 'unverified',
+          plan: 'free',
+        }),
+      ]),
+    )
   } catch (err) {
     if (isUniqueViolation(err)) throw emailTaken()
     throw err
@@ -130,22 +178,24 @@ export const acceptInvitation = async (c: OnboardingContext) => {
 
   const db = getDb(c.env)
   try {
-    await db.batch([
-      db.insert(users).values({
-        id: crypto.randomUUID(),
-        organizationId: invitation.organizationId,
-        name: input.name,
-        email,
-        emailVerified: true,
-        role: 'agent',
-        status: 'active',
-        plan: 'free',
-      }),
-      db
-        .update(invitations)
-        .set({ status: 'accepted', updatedAt: new Date() })
-        .where(and(eq(invitations.id, invitation.id), eq(invitations.status, 'pending'))),
-    ])
+    await acrossTheDrop((withPasswordColumns) =>
+      db.batch([
+        insertUser(db, withPasswordColumns, {
+          id: crypto.randomUUID(),
+          organizationId: invitation.organizationId,
+          name: input.name,
+          email,
+          emailVerified: true,
+          role: 'agent',
+          status: 'active',
+          plan: 'free',
+        }),
+        db
+          .update(invitations)
+          .set({ status: 'accepted', updatedAt: new Date() })
+          .where(and(eq(invitations.id, invitation.id), eq(invitations.status, 'pending'))),
+      ]),
+    )
   } catch (err) {
     if (isUniqueViolation(err)) throw emailTaken()
     throw err
