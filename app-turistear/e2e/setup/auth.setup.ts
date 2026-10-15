@@ -1,36 +1,58 @@
-import { test as setup, expect, request as pwRequest } from '@playwright/test'
+import { test as setup, expect, type Browser } from '@playwright/test'
 import { mkdirSync } from 'node:fs'
 import { env } from '../helpers'
-import { AUTH_DIR, AGENT_STATE, ADMIN_STATE, API_BASE } from '../paths'
+import { AUTH_DIR, AGENT_STATE, ADMIN_STATE, BASE_URL } from '../paths'
+import { addVirtualAuthenticator, loadPasskey, parsePasskeySecret } from '../passkey'
 
-// Sign in through the API and save the resulting cookies as a Playwright storageState.
+// Sign each account in through the browser with its llave de acceso, and save the session cookie
+// as a Playwright storageState (passkey-auth D17, R13).
 //
-// This works across origins because the API sets its session cookies on `COOKIE_DOMAIN`
-// (`.turistearya.com`, api-turistear/wrangler.jsonc), so a session minted at api-dev is sent to
-// app-dev too. That is what lets the whole suite authenticate without driving the login form —
-// the form itself is still exercised, once, by the login journey spec.
+// The llave lives in Chrome's virtual authenticator, loaded from the E2E_*_PASSKEY secret that
+// `e2e/enroll-passkey.ts` produced. The ceremony is the real one: "Entrar con llave de acceso" on
+// the deployed app, verified by the deployed API.
 //
-// Passwords come from the environment and are never written anywhere: only cookies are persisted.
+// This works across origins because Better Auth sets its session cookie on `COOKIE_DOMAIN`
+// (`.turistearya.com`, api-turistear/wrangler.jsonc), so the session the app's sign-in got from
+// api-dev is sent to api-dev by the seed's API calls and by the journeys' pages alike.
+//
+// Private keys come from the environment and are never written anywhere: only cookies are persisted.
 
-async function signIn(email: string, password: string, statePath: string) {
-  const ctx = await pwRequest.newContext({ baseURL: API_BASE })
-  const res = await ctx.post('/api/auth/login', { data: { email, password } })
+const PASSKEY_BUTTON = 'Entrar con llave de acceso'
 
-  expect(res.ok(), `login failed for ${email}: ${res.status()} ${await res.text()}`).toBeTruthy()
+async function signIn(browser: Browser, secretName: string, statePath: string) {
+  const secret = parsePasskeySecret(secretName, env(secretName))
+  const context = await browser.newContext({ baseURL: BASE_URL })
+  try {
+    const page = await context.newPage()
+    const { cdp, authenticatorId } = await addVirtualAuthenticator(context, page)
+    await loadPasskey(cdp, authenticatorId, secret)
 
-  const state = await ctx.storageState()
-  expect(
-    state.cookies.some((c) => c.name === 'gm_refresh'),
-    `no gm_refresh cookie after login for ${email} — the session did not stick`,
-  ).toBeTruthy()
+    await page.goto('/login')
+    // Conditional UI may already answer from the email field's autofill and navigate away; then
+    // the button is gone, and the URL check below is what decides.
+    await page
+      .getByRole('button', { name: PASSKEY_BUTTON })
+      .click({ timeout: 15_000 })
+      .catch(() => {})
 
-  await ctx.storageState({ path: statePath })
-  await ctx.dispose()
+    await expect(page, `${secretName}: the llave de acceso did not sign in`).not.toHaveURL(
+      /\/login/,
+      { timeout: 30_000 },
+    )
+
+    const state = await context.storageState({ path: statePath })
+    expect(
+      state.cookies.some((c) => c.name.endsWith('.session_token')),
+      `no session cookie after signing in with ${secretName} — the session did not stick`,
+    ).toBeTruthy()
+  } finally {
+    await context.close()
+  }
 }
 
-setup('authenticate the agent and the admin', async () => {
+setup('sign the agent and the admin in with their llaves de acceso', async ({ browser }) => {
   mkdirSync(AUTH_DIR, { recursive: true })
 
-  await signIn(env('E2E_AGENT_EMAIL'), env('E2E_AGENT_PASSWORD'), AGENT_STATE)
-  await signIn(env('E2E_ADMIN_EMAIL'), env('E2E_ADMIN_PASSWORD'), ADMIN_STATE)
+  await signIn(browser, 'E2E_AGENT_PASSKEY', AGENT_STATE)
+  await signIn(browser, 'E2E_ADMIN_PASSKEY', ADMIN_STATE)
 })
