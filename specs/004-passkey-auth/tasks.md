@@ -108,10 +108,10 @@ invitation lookup also disappear until US3 (T026) and US4 (T029) restore them un
   - drop the Agnostic Auth `/auth/refresh` stub from `api-turistear/test/staff/staff-management.test.ts`.
 
   Edit nothing else, and verify with `git diff --stat` (spec § Scope Boundary).
-- [ ] T014 [P] Create `api-turistear/test/helpers/authenticator.ts`, a WebCrypto ECDSA P-256 software authenticator (R13):
+- [X] T014 [P] Create `api-turistear/test/helpers/authenticator.ts`, a WebCrypto ECDSA P-256 software authenticator (R13):
   - `createCredential(options, { userVerified, counter })` returns a `RegistrationResponseJSON` with a `none` attestation, rpIdHash, flags `UP|UV|AT` and a COSE EC2 key, plus `clientDataJSON` for the given origin.
   - `getAssertion(options, credential, { userVerified, counter, origin })` returns an ES256 `AuthenticationResponseJSON`.
-- [ ] T015 Write `api-turistear/test/auth/sessions.test.ts`, citing `passkey-auth US1 (scenario 8), US5 (scenario 4), FR-020–FR-025, SC-005`. It covers:
+- [X] T015 Write `api-turistear/test/auth/sessions.test.ts`, citing `passkey-auth US1 (scenario 8), US5 (scenario 4), FR-020–FR-025, SC-005`. It covers:
   - a `sessionCookie` reaches `/api/folios`;
   - an altered signature, another secret, an unknown token and an expired row each answer `401`;
   - suspended → `403 ACCOUNT_SUSPENDED`;

@@ -56,9 +56,43 @@ const createAuth = (env: CloudflareBindings) => {
     // explicitly instead of trusting how Better Auth detects production inside a Worker.
     rateLimit: { enabled: true, storage: 'database', modelName: 'rateLimits' },
 
-    // D2, BFF (constitution IV v1.2.1) — the session is never readable over HTTP. Server-side
-    // `auth.api.getSession` keeps working: only the HTTP router checks this list.
-    disabledPaths: ['/get-session', '/list-sessions'],
+    // D2 — only the routes the app uses stay reachable over HTTP; the rest answer Better Auth's
+    // 404. Server-side `auth.api.*` keeps working: only the HTTP router checks this list.
+    disabledPaths: [
+      // BFF (constitution IV v1.2.1): the session is never readable over HTTP.
+      '/get-session',
+      '/list-sessions',
+      // FR-060: no password, anywhere. Core registers these even with email-and-password off,
+      // and the emailOTP plugin brings a code-based reset that would write a `credential` account.
+      '/sign-in/email',
+      '/sign-up/email',
+      '/change-password',
+      '/verify-password',
+      '/request-password-reset',
+      '/reset-password',
+      '/email-otp/request-password-reset',
+      '/forget-password/email-otp',
+      '/email-otp/reset-password',
+      '/email-otp/check-verification-otp',
+      // Out of scope (spec): changing an email; verifying one outside the sign-in code.
+      '/change-email',
+      '/email-otp/request-email-change',
+      '/email-otp/change-email',
+      '/email-otp/verify-email',
+      '/send-verification-email',
+      '/verify-email',
+      // No social sign-in or linked accounts; no self-deletion (an admin deactivates agents).
+      '/sign-in/social',
+      '/link-social',
+      '/unlink-account',
+      '/list-accounts',
+      '/account-info',
+      '/refresh-token',
+      '/get-access-token',
+      '/delete-user',
+      '/delete-user/callback',
+      '/update-session',
+    ],
 
     advanced: {
       database: { generateId: 'uuid' },
@@ -136,9 +170,12 @@ const createAuth = (env: CloudflareBindings) => {
         // reverses over 10⁶ codes.
         storeOTP: 'encrypted',
         // Runs in the background (advanced.backgroundTasks), so a known and an unknown email answer
-        // in the same time.
-        sendVerificationOTP: ({ email, otp }) =>
-          sendSignInCodeEmail(env, { to: email, code: otp }),
+        // in the same time. Only sign-in codes are sent: the routes that would redeem any other
+        // type are disabled above, so such a code is never mailed.
+        sendVerificationOTP: async ({ email, otp, type }) => {
+          if (type !== 'sign-in') return
+          await sendSignInCodeEmail(env, { to: email, code: otp })
+        },
       }),
       // D8 — a per-environment relying party: a phone never offers a dev llave de acceso on prod
       // (FR-003). `origin` is explicit because, unset, the plugin trusts the request's Origin.
