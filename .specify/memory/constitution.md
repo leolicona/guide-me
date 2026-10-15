@@ -1,47 +1,29 @@
 <!--
-Sync Impact Report (v1.2.1, 2026-10-07)
-- Version change: 1.2.0 → 1.2.1 — PATCH.
-  - Principle IV restores the backend-for-frontend invariant that v1.2.0
-    relaxed: no response body carries the session token.
-  - v1.2.0 has not merged into `develop`. Measured against `develop`'s v1.1.1,
-    this keeps that version's own rule ("never returned in a body"), so no
-    governance is added, removed or redefined net.
-  - Source: specs/004-passkey-auth, the developer's decision of 2026-10-07 to
-    keep the BFF.
+Sync Impact Report (v1.2.2, 2026-10-15)
+- Version change: 1.2.1 → 1.2.2 — PATCH.
+  - A correction of fact in Technology Stack & Constraints; no principle is
+    added, removed or redefined.
+  - Source: specs/004-passkey-auth, research.md R15, measured while
+    implementing. `@better-auth/utils` exports its password module for the
+    `workerd` condition as `password.node.mjs`, which statically imports
+    `node:crypto`. With only `nodejs_als`, the Vite dev server fails to start
+    and the production bundle carries an import a Worker cannot load; the
+    Vitest pool hid it. `nodejs_compat` is what Better Auth documents for
+    Cloudflare Workers.
 - Modified sections (titles unchanged):
-  · IV. The Server Decides. The session bullet's "Better Auth's sign-in
-    answers may echo the session token in their body; the app never reads,
-    stores or sends it" becomes:
-    - the API strips the token from Better Auth's sign-in answers;
-    - `/get-session` and `/list-sessions` are not exposed over HTTP;
-    - the app reads its user from `/api/me`.
-- Carried from v1.2.0 (same pull request, still on this branch):
-  · Authentication moves to Better Auth (specs/004-passkey-auth, plan D18).
-  · III: Better Auth's tenant fields are `input: false`, and its lookups by
-    globally unique key join the exempt reads.
-  · IV: `/api/auth/*` is Better Auth's handler, with its own validation,
-    `{ code, message }` and success shapes. Its codes the app branches on
-    are declared in the spec. MSW mirrors its client under the fixture rule.
-  · VI: the `AGNOSTIC_AUTH_API` stand-in leaves, `BETTER_AUTH_SECRET` is
-    pinned, and ceremonies come from a software authenticator.
-  · VIII: Agnostic Auth leaves the list, Resend's place on the sign-in path is
-    recorded, and the signing secrets are named.
-  · Technology Stack & Constraints: the Runtime row gains `nodejs_als`; the
-    Auth row becomes Better Auth 1.7.7.
+  · Technology Stack & Constraints: the Runtime row's compatibility flag
+    `nodejs_als` becomes `nodejs_compat` (Better Auth's request context and
+    its Node built-ins).
 - Added sections: none. Removed sections: none.
 - Templates: .specify/templates/plan-template.md ✅, spec-template.md ✅,
-  tasks-template.md ✅, checklist-template.md ✅. None names an auth
-  provider or a token rule; no template changed.
+  tasks-template.md ✅, checklist-template.md ✅. None names a compatibility
+  flag; no template changed.
 - Follow-up TODOs:
-  · The code catches up in the same pull request (specs/004-passkey-auth).
-    On this branch the text leads the code until the feature's tasks
-    complete; `develop` keeps v1.1.1 until that PR merges.
-  · TODO(PASSWORD-MATERIAL): `users.password_hash`, `users.password_salt` and
-    `password_reset_tokens` stay in D1, unread, until the deploy that follows
-    cutover (specs/004-passkey-auth D15). They are registered as debt at
-    implementation.
-  · CLAUDE.md still describes Agnostic Auth and the old local-login caveat;
-    specs/004-passkey-auth T044 rewrites it.
+  · `develop` carries v1.2.1 (PR #163, merged 2026-10-15) ahead of its code;
+    the implementation pull request of specs/004-passkey-auth lands the code
+    and this amendment together, and closes that gap.
+  · TODO(PASSWORD-MATERIAL) is now registered as debt
+    `.specify/debt/password-material` (specs/004-passkey-auth D15).
   · Carried from v1.0.0, still open: TODO(CONTRACT-MIRROR),
     TODO(TOKEN-FALLBACKS), TODO(EMAIL-PALETTE), TODO(TEST-CITATIONS),
     TODO(DESIGN-FOUNDATIONS), and the archived TECH_DEBT.md items to
@@ -322,7 +304,7 @@ Complexity Tracking.
 
 | Layer | Convention |
 | --- | --- |
-| Runtime | Cloudflare Workers, `compatibility_date` 2025-08-03, compatibility flag `nodejs_als` (Better Auth's request context). The API's one cron trigger (`*/15 * * * *`) runs the bookings auto-expiry sweep |
+| Runtime | Cloudflare Workers, `compatibility_date` 2025-08-03, compatibility flag `nodejs_compat` (Better Auth's request context and the Node built-ins it imports). The API's one cron trigger (`*/15 * * * *`) runs the bookings auto-expiry sweep |
 | API | `api-turistear`: Hono 4 + `@hono/zod-validator` (Zod 4), JSX through `hono/jsx`, built and served by Vite 6 with `@cloudflare/vite-plugin` and `vite-ssr-components`. Middleware in `src/middleware/`, helpers in `src/utils/`, providers in `src/services/` |
 | Data | Cloudflare D1 through Drizzle ORM (`sqlite`); migrations `NNNN_snake_case.sql` in `api-turistear/migrations/`, applied with `wrangler d1 migrations` |
 | Auth | Better Auth 1.7.7 inside the API Worker; its handler owns `/api/auth/*`. Passkeys (WebAuthn/FIDO2, `@better-auth/passkey`) are the primary sign-in and a 6-digit email code (`emailOTP`) is the backup. Database sessions in D1 (7 days, renewed by use); one HttpOnly session cookie on `.turistearya.com` |
@@ -394,4 +376,4 @@ Additional constraints:
 - The developer decides. When a principle blocks a feature, the plan says so
   and proposes the amendment; it does not route around it.
 
-**Version**: 1.2.1 | **Ratified**: 2026-10-04 | **Last Amended**: 2026-10-07
+**Version**: 1.2.2 | **Ratified**: 2026-10-04 | **Last Amended**: 2026-10-15

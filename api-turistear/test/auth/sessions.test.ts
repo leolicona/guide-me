@@ -46,6 +46,14 @@ beforeEach(async () => {
 })
 afterEach(() => vi.restoreAllMocks())
 
+describe('passkey-auth FR-021, constitution VIII — the signing secret is never a default', () => {
+  it('without BETTER_AUTH_SECRET, or with a short one, Better Auth is never built', async () => {
+    const { getAuth } = await import('../../src/auth')
+    expect(() => getAuth({ ...env, BETTER_AUTH_SECRET: '' })).toThrow(/BETTER_AUTH_SECRET/)
+    expect(() => getAuth({ ...env, BETTER_AUTH_SECRET: 'too-short' })).toThrow(/BETTER_AUTH_SECRET/)
+  })
+})
+
 describe('passkey-auth FR-021 — only a session the API issued is honored', () => {
   it('a signed session cookie reaches a business route', async () => {
     await seedUser({ email: ADMIN_EMAIL, role: 'admin' })

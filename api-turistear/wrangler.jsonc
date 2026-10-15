@@ -19,9 +19,11 @@
   // ─────────────────────────────────────────────────────────────────────────────
   "name": "api-guideme-local",
   "compatibility_date": "2025-08-03",
-  // passkey-auth D3 — Better Auth keeps its request context in AsyncLocalStorage
-  // (`node:async_hooks`, its only runtime Node import). Inherited by the named envs.
-  "compatibility_flags": ["nodejs_als"],
+  // passkey-auth D3 (R15) — Better Auth needs Node built-ins at runtime: AsyncLocalStorage
+  // (`node:async_hooks`) for its request context, and `node:crypto`, which @better-auth/utils
+  // resolves for the `workerd` condition. `nodejs_compat` is what Better Auth documents for
+  // Workers. Inherited by the named envs.
+  "compatibility_flags": ["nodejs_compat"],
   "main": "./src/index.tsx",
 
   // Local (`vite dev`) bindings + vars. Secrets come from `.dev.vars`. Migrations run

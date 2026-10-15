@@ -43,6 +43,9 @@ Paths like `dist/…` refer to those tarballs.
 ## R3 — Runtime flag and instance lifetime (D3)
 
 - **Decision**: the `nodejs_als` compatibility flag, and one instance per `env` object.
+  *Corrected 2026-10-15 (R15)*: `nodejs_compat`. The table below lists static imports;
+  `@better-auth/utils` also maps its password module to `password.node.mjs` (`node:crypto`) for the
+  `workerd` condition, which a static scan of the dist files does not show.
 - **Rationale**: these are the `node:` imports across the runtime packages.
 
   | Import | Where |
@@ -54,7 +57,7 @@ Paths like `dist/…` refer to those tarballs.
 
   Without async hooks, core logs a warning pointing to the Workers compatibility flags, and
   rethrows.
-- **Alternatives**: full `nodejs_compat`, which nothing needs.
+- **Alternatives**: full `nodejs_compat`, which nothing seemed to need (until R15).
 
 ## R4 — Sessions (D5)
 
@@ -224,6 +227,12 @@ Each point was found running Better Auth 1.7.7 in workerd, and is proved by the 
   resolved `utils` 0.5.0 and the API's `zod` 4.4.3, giving two copies of `@better-auth/core` and
   `better-call`. The API pins `@better-auth/utils@0.4.2` and `zod ^4.5.4`, so every package resolves
   one copy (R1). The app needs no change: the passkey client never imports `better-call`.
+- **`nodejs_compat`, not `nodejs_als`** (corrects R3; constitution v1.2.2): `@better-auth/utils`
+  maps its password module to `password.node.mjs` for the `workerd` condition, which statically
+  imports `node:crypto`. With `nodejs_als` alone, `pnpm dev:api` fails ("Failed to load url
+  node:crypto") and the production bundle carries an import a Worker cannot load. The Vitest pool
+  provides Node built-ins on its own, so the suites never saw it; the local run (quickstart § 3)
+  did.
 - **`better-auth/minimal`**: Better Auth's entry for adapters that are not Kysely; it keeps Kysely
   out of the Worker (574 KB gzipped in all).
 - **The Drizzle adapter addresses the Drizzle schema, not SQL**: models by their export name in

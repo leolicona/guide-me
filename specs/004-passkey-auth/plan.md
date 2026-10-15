@@ -77,7 +77,9 @@ and we write only what Better Auth does not know (organizations, invitations).
 **D3 — One auth instance per isolate.** `src/auth/index.ts` exports `getAuth(env)`, memoized in a
 `WeakMap` keyed by the `env` object. It is built with
 `drizzleAdapter(getDb(env), { provider: 'sqlite', transaction: false })`. The Worker gains the
-compatibility flag `nodejs_als`, not the full `nodejs_compat`.
+compatibility flag `nodejs_als`, not the full `nodejs_compat`. *Corrected 2026-10-15 (R15,
+constitution v1.2.2)*: the Worker uses `nodejs_compat`, because `@better-auth/utils` resolves
+`node:crypto` for the `workerd` condition.
 
 *Why*:
 - Workers hand out bindings per request. The `WeakMap` rebuilds nothing on a warm isolate and still
@@ -326,7 +328,7 @@ CLAUDE.md's local-login caveat is rewritten to match.
 - App: jsdom with Testing Library, MSW and axe.
 - End to end: Playwright with the CDP virtual authenticator.
 
-**Target Platform**: Cloudflare Workers (`compatibility_date` 2025-08-03, plus `nodejs_als`);
+**Target Platform**: Cloudflare Workers (`compatibility_date` 2025-08-03, plus `nodejs_compat`, R15);
 evergreen mobile browsers.
 
 **Project Type**: web service and web app (pnpm workspace).
@@ -383,7 +385,7 @@ specs/004-passkey-auth/
 ```text
 api-turistear/
 ├── migrations/0071_better_auth.sql             # D4, D16
-├── wrangler.jsonc                              # −AGNOSTIC_AUTH_*, +nodejs_als, +AUTH_COOKIE_PREFIX, +OTP_LOG_TO_CONSOLE (local)
+├── wrangler.jsonc                              # −AGNOSTIC_AUTH_*, +nodejs_compat, +AUTH_COOKIE_PREFIX, +OTP_LOG_TO_CONSOLE (local)
 ├── vitest.config.ts                            # −AGNOSTIC_AUTH_API stand-in, +BETTER_AUTH_SECRET pinned
 ├── src/
 │   ├── auth/index.ts                           # getAuth(env): the whole Better Auth configuration (D3, D5–D9, D12)
@@ -421,5 +423,5 @@ app-turistear/
 |-----------|------------|-------------------------------------|
 | `/api/auth/*` follows Better Auth's contract instead of Principle IV's route and error rules (amended by D18) | The developer chose Better Auth's standards (spec Clarifications, 2026-10-07). Its client and endpoints work unchanged | Wrapping it in our own routes (the 2026-10-06 plan) keeps Principle IV untouched, but rewrites a contract Better Auth already provides. The developer rejected it |
 | A new dependency on the auth path, in place of the stack table's Agnostic Auth | The developer chose Better Auth | A hand-built WebAuthn stack means our own CBOR, COSE and attestation handling |
-| The Worker compatibility flag `nodejs_als` | Better Auth keeps its request context in `AsyncLocalStorage` (R3) | The full `nodejs_compat` adds polyfills that no runtime import needs |
+| The Worker compatibility flag `nodejs_compat` (R15) | Better Auth keeps its request context in `AsyncLocalStorage`, and `@better-auth/utils` imports `node:crypto` under the `workerd` condition | `nodejs_als` alone (the first plan) cannot load `node:crypto`: the dev server fails and the deployed Worker would not start |
 | A test-only database trigger in the setup file (D17) | It gives 61 suites a session with a two-line edit each | An asynchronous helper changes every call site; a test bypass would be a back door in production code |

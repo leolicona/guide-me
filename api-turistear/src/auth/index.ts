@@ -15,6 +15,12 @@ import * as schema from '../db/schema'
 import { sendPasskeyNoticeEmail, sendSignInCodeEmail } from '../services/resend'
 
 const createAuth = (env: CloudflareBindings) => {
+  // Constitution VIII, D19 — fail closed. Without a secret Better Auth falls back to a public
+  // default and refuses it only where it detects "production", which a Worker is not: a deploy
+  // that forgot `wrangler secret put BETTER_AUTH_SECRET` would sign and encrypt with a known value.
+  if (!env.BETTER_AUTH_SECRET || env.BETTER_AUTH_SECRET.length < 32) {
+    throw new Error('BETTER_AUTH_SECRET is missing or shorter than 32 characters')
+  }
   const db = getDb(env)
 
   return betterAuth({

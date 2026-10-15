@@ -35,7 +35,7 @@ description: "Task list for passkey sign-in with email code backup, on Better Au
   - `api-turistear/package.json`: `better-auth`, `@better-auth/passkey` and `@better-auth/drizzle-adapter`, each at exactly `1.7.7` (no caret), plus dev dependency `@noble/hashes` `^2.2.0`.
   - `app-turistear/package.json`: `better-auth` and `@better-auth/passkey`, each at exactly `1.7.7`.
 - [X] T002 In `api-turistear/wrangler.jsonc`:
-  - add `"compatibility_flags": ["nodejs_als"]` at the top level, which named environments inherit (D3, R3);
+  - add `"compatibility_flags": ["nodejs_als"]` at the top level, which named environments inherit (D3, R3); *implemented as `nodejs_compat` (R15, constitution v1.2.2)*;
   - add `AUTH_COOKIE_PREFIX` to each profile's `vars`: `gm-local` (top level), `gm-dev` (`env.dev`), `gm` (`env.production`) (D5);
   - add `OTP_LOG_TO_CONSOLE: "true"` to the top-level (local) profile only (D7, FR-064).
 
