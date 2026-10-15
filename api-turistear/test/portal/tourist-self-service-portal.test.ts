@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { env, SELF } from 'cloudflare:test'
 import { materializeSeededFolio, seedUser, seedTwoOrgs, clearTenancyDb } from '../helpers/tenancy'
-import { buildFakeJwt } from '../helpers/jwt'
+import { sessionCookie } from '../helpers/session'
 
 // Tourist Self-Service Portal — Magic Link, itinerary, QR, cancellation request +
 // Refund PIN. US-T01–T05 + US-A23 (cash refund tracking, bundled).
@@ -16,7 +16,7 @@ import { buildFakeJwt } from '../helpers/jwt'
 const ADMIN_EMAIL = 'admin@empresa.com'
 const AGENT_EMAIL = 'agent@empresa.com'
 
-const auth = (email: string) => ({ Cookie: `gm_access=${buildFakeJwt(email)}` })
+const auth = (email: string) => ({ Cookie: sessionCookie(email) })
 const jsonAuth = (email: string) => ({
   ...auth(email),
   'Content-Type': 'application/json',

@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { env, SELF } from 'cloudflare:test'
 import { seedUser, clearTenancyDb } from '../helpers/tenancy'
-import { buildFakeJwt } from '../helpers/jwt'
+import { sessionCookie } from '../helpers/session'
 
 // US-A47 — sales cutoff: a slot stops being sellable once its departure passes the org's signed
 // cutoff offset (+ before / − after, a grace window). Closes the past-slot hole on the WRITE side
@@ -10,7 +10,7 @@ import { buildFakeJwt } from '../helpers/jwt'
 const AGENT_EMAIL = 'agent@empresa.com'
 const TODAY = '2026-06-14' // = frozen utcToday()
 
-const auth = (email: string) => ({ Cookie: `gm_access=${buildFakeJwt(email)}` })
+const auth = (email: string) => ({ Cookie: sessionCookie(email) })
 const jsonAuth = (email: string) => ({ ...auth(email), 'Content-Type': 'application/json' })
 const base = 'http://api.local/api/pos'
 

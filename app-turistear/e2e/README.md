@@ -17,7 +17,7 @@ auth ──▶ seed ──▶ chromium ──▶ cleanup
 
 | Project | File | What it does |
 |---|---|---|
-| `auth` | `setup/auth.setup.ts` | Signs the agent and the admin in **through the API** and saves cookies to `.auth/*.json`. Works across origins because the API sets its session cookies on `.turistearya.com` (`COOKIE_DOMAIN`), so a session minted at `api-dev` is sent to `app-dev`. On a preview the cookie is host-only on the preview's API, which still works: `workers.dev` is a public suffix, so the preview's app and API are the same site (`specs/005-delivery-pipeline` D4). |
+| `auth` | `setup/auth.setup.ts` | Signs the agent and the admin in **through the browser with their llave de acceso** — Chrome's virtual authenticator, loaded from `E2E_*_PASSKEY` and offered for the host under test — and saves cookies to `.auth/*.json`. Works across origins because Better Auth sets its session cookie on `.turistearya.com` (`COOKIE_DOMAIN`), so the session the app's sign-in got from `api-dev` is sent to both. On a preview the cookie is host-only on the preview's API, which still works: `workers.dev` is a public suffix, so the preview's app and API are the same site (`specs/005-delivery-pipeline` D4). One enrolment serves dev and every preview, which run on dev's database. |
 | `seed` | `setup/seed.setup.ts` | Picks the cheapest bookable tour with a departure **at least 2 days out** and creates an **apartado with a cash deposit**, writing `.auth/fixture.json`. It then asserts the folio's `booking_expires_at` is still ahead — see *A fixture the journey can actually settle* below. |
 | `chromium` | `*.spec.ts` | The journeys, already signed in as the agent. |
 | `cleanup` | `teardown/cleanup.teardown.ts` | Cancels the seeded folio. Never fails the run — a stale folio in dev is untidy, not a regression. |
@@ -50,20 +50,48 @@ Credentials come from the environment and are never committed; only cookies are 
 
 | Var | Meaning |
 |---|---|
-| `E2E_AGENT_EMAIL` / `E2E_AGENT_PASSWORD` | the agent/operator who owns the seeded booking |
-| `E2E_ADMIN_EMAIL` / `E2E_ADMIN_PASSWORD` | an admin (verifies the transfer, runs teardown) |
+| `E2E_AGENT_PASSKEY` | the llave de acceso of the agent who owns the seeded booking (JSON, see below) |
+| `E2E_ADMIN_PASSKEY` | the llave de acceso of an admin (verifies the transfer, runs teardown) |
 | `E2E_BASE_URL` | optional; defaults to `https://app-dev.turistearya.com` |
 | `E2E_API_BASE` | optional; defaults to `https://api-dev.turistearya.com` |
 | `E2E_FOLIO_ID` | optional **escape hatch** — reproduce against a specific existing apartado instead of seeding. Teardown leaves a caller-supplied folio alone. |
 
 In CI these come from the `dev` GitHub environment's secrets.
 
+### The llaves de acceso (`E2E_*_PASSKEY`)
+
+Passwords are gone (specs/004-passkey-auth). Each test account signs in with a llave de acceso held
+by Chrome's **virtual authenticator** (CDP's `WebAuthn` domain): the ceremony is the real one, against
+the deployed API, with no phone and no human. No email code is involved, so no inbox is either.
+
+A secret is one line of JSON — the credential's base64 fields as CDP takes them:
+
+```json
+{"credentialId":"…","privateKey":"…PKCS#8…","userHandle":"…","rpId":"app-dev.turistearya.com"}
+```
+
+`privateKey` is a credential: it lives in the GitHub secret and nowhere else. A llave de acceso is
+bound to its environment's relying party (`rpId`), so a dev llave never signs into prod.
+
+**Enroll once per account** (and again only if its llave is removed on Seguridad):
+
+```bash
+# from app-turistear/ — opens Chromium on E2E_BASE_URL (HEADED=1 to watch)
+node --experimental-strip-types e2e/enroll-passkey.ts agente@ejemplo.mx
+```
+
+It requests a sign-in code for that address and asks you for the 6 digits from the inbox; once
+signed in it accepts the offer to create a llave de acceso and prints the JSON above. Store it as
+`E2E_AGENT_PASSKEY` (or `E2E_ADMIN_PASSKEY`) in the `dev` environment. Each run's signature counter
+starts from the clock, so replaying the same secret every night never trips the API's cloned-key
+check (FR-006).
+
 ## Run
 
 ```bash
 # from app-turistear/
-E2E_AGENT_EMAIL=... E2E_AGENT_PASSWORD=... \
-E2E_ADMIN_EMAIL=... E2E_ADMIN_PASSWORD=... \
+E2E_AGENT_PASSKEY='{"credentialId":…}' \
+E2E_ADMIN_PASSKEY='{"credentialId":…}' \
 pnpm test:e2e            # headless — seeds, runs, cleans up
 # pnpm test:e2e:headed   # watch it drive the browser
 # pnpm test:e2e:report   # open the HTML report (trace/video on failure)

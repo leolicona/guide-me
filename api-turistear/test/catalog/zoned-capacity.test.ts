@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { env, SELF } from 'cloudflare:test'
 import { seedUser, seedTwoOrgs, clearTenancyDb } from '../helpers/tenancy'
-import { buildFakeJwt } from '../helpers/jwt'
+import { sessionCookie } from '../helpers/session'
 
 // Zoned Capacity (US-A64 — docs/catalog/zoned-capacity.spec.md). Phase 1: admin zone definitions,
 // enable/disable, editing. Scenarios 1–7, 18–21, 24 + multitenancy 27, 28, 30.
@@ -15,7 +15,7 @@ const ADMIN_EMAIL = 'admin@empresa.com'
 const FUTURE = '2099-06-15'
 const PAST = '2020-06-15'
 
-const auth = (email: string) => ({ Cookie: `gm_access=${buildFakeJwt(email)}` })
+const auth = (email: string) => ({ Cookie: sessionCookie(email) })
 const jsonAuth = (email: string) => ({ ...auth(email), 'Content-Type': 'application/json' })
 const base = 'http://api.local/api/services'
 const ts = () => Math.floor(Date.now() / 1000)

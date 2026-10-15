@@ -35,10 +35,10 @@ jobs:
     env:
       E2E_BASE_URL: ${{ github.event.inputs.base_url || 'https://app-dev.turistearya.com' }}
       E2E_API_BASE: ${{ vars.E2E_API_BASE || 'https://api-dev.turistearya.com' }}
-      E2E_AGENT_EMAIL: ${{ secrets.E2E_AGENT_EMAIL }}
-      E2E_AGENT_PASSWORD: ${{ secrets.E2E_AGENT_PASSWORD }}
-      E2E_ADMIN_EMAIL: ${{ secrets.E2E_ADMIN_EMAIL }}
-      E2E_ADMIN_PASSWORD: ${{ secrets.E2E_ADMIN_PASSWORD }}
+      # passkey-auth T042 — each account signs in with its llave de acceso in Chrome's virtual
+      # authenticator (app-turistear/e2e/README.md § The llaves de acceso). No password exists.
+      E2E_AGENT_PASSKEY: ${{ secrets.E2E_AGENT_PASSKEY }}
+      E2E_ADMIN_PASSKEY: ${{ secrets.E2E_ADMIN_PASSKEY }}
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup

@@ -159,7 +159,7 @@ export interface SeededOrg {
 
 /**
  * Seeds two fully isolated organizations, each with an active admin.
- * Use the returned `adminEmail` with `buildFakeJwt(email)` to authenticate as
+ * Use the returned `adminEmail` with `sessionCookie(email)` (test/helpers/session.ts) to authenticate as
  * either org's admin in a cross-org isolation test.
  */
 export const seedTwoOrgs = async (): Promise<{

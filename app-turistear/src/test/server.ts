@@ -2,6 +2,7 @@ import { setupServer } from 'msw/node'
 import { cashHandlers } from './handlers/cash'
 import { folioHandlers } from './handlers/folios'
 import { catalogHandlers, bookingHandlers } from './handlers/catalog'
+import { authHandlers } from './handlers/auth'
 
 // One mock layer for every hook test. `onUnhandledRequest: 'error'` (wired in setup.ts) is
 // deliberate: an unhandled request means the test is asserting against nothing, and a warning
@@ -11,4 +12,5 @@ export const server = setupServer(
   ...folioHandlers,
   ...catalogHandlers,
   ...bookingHandlers,
+  ...authHandlers,
 )

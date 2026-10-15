@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { env, SELF } from 'cloudflare:test'
 import { seedUser, seedTwoOrgs, clearTenancyDb , materializeSeededFolio} from '../helpers/tenancy'
-import { buildFakeJwt } from '../helpers/jwt'
+import { sessionCookie } from '../helpers/session'
 
 // Total Folio Cancellation — US-A21 / US-A26.
 // Spec: docs/cancellation/total-folio-cancellation.spec.md (Scenarios 1–11, incl. 6b).
@@ -17,7 +17,7 @@ const ADMIN_EMAIL = 'admin@empresa.com'
 const AGENT_EMAIL = 'agent@empresa.com'
 const DATE = '2026-06-04'
 
-const auth = (email: string) => ({ Cookie: `gm_access=${buildFakeJwt(email)}` })
+const auth = (email: string) => ({ Cookie: sessionCookie(email) })
 const jsonAuth = (email: string) => ({ ...auth(email), 'Content-Type': 'application/json' })
 
 // --- Local seeders (raw D1) ------------------------------------------------

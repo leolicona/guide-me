@@ -15,7 +15,10 @@ type AgentsContext = Context<{
 const INVITATION_TTL_SECONDS = 60 * 60 * 24 * 7 // 7 days
 
 export const inviteAgent = async (c: AgentsContext) => {
-  const input = (await c.req.json()) as InviteAgentInput
+  const raw = (await c.req.json()) as InviteAgentInput
+  // passkey-auth R11 — the body is re-read raw here, so apply the schema's normalization: Better
+  // Auth looks every email up lowercased.
+  const input = { ...raw, identity: raw.identity.trim().toLowerCase() }
   const admin = c.get('user')
   const db = getDb(c.env)
 

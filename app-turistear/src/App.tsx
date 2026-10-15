@@ -10,9 +10,7 @@ import { AppLayout } from './layout/AppLayout'
 
 const LoginPage = lazy(() => import('./pages/LoginPage'))
 const RegisterPage = lazy(() => import('./pages/RegisterPage'))
-const VerifyPage = lazy(() => import('./pages/VerifyPage'))
-const ForgotPasswordPage = lazy(() => import('./pages/ForgotPasswordPage'))
-const ResetPasswordPage = lazy(() => import('./pages/ResetPasswordPage'))
+const LegacyLinkPage = lazy(() => import('./pages/LegacyLinkPage'))
 const InviteAcceptPage = lazy(() => import('./pages/InviteAcceptPage'))
 const DashboardPage = lazy(() => import('./pages/DashboardPage'))
 const AgentsListPage = lazy(() => import('./pages/AgentsListPage'))
@@ -36,6 +34,7 @@ const CashBalancesPage = lazy(() => import('./pages/CashBalancesPage'))
 const CashDropDetailPage = lazy(() => import('./pages/CashDropDetailPage'))
 const CashDropsHistoryPage = lazy(() => import('./pages/CashDropsHistoryPage'))
 const ReportsPage = lazy(() => import('./pages/ReportsPage'))
+const SecurityPage = lazy(() => import('./pages/SecurityPage'))
 
 function PageLoader() {
   return (
@@ -62,9 +61,10 @@ function App() {
         <Routes>
           <Route path={ROUTES.LOGIN} element={<LoginPage />} />
           <Route path={ROUTES.REGISTER} element={<RegisterPage />} />
-          <Route path={ROUTES.VERIFY} element={<VerifyPage />} />
-          <Route path={ROUTES.FORGOT_PASSWORD} element={<ForgotPasswordPage />} />
-          <Route path={ROUTES.RESET_PASSWORD} element={<ResetPasswordPage />} />
+          {/* passkey-auth FR-063 — links mailed before cutover explain that passwords are gone. */}
+          <Route path={ROUTES.VERIFY} element={<LegacyLinkPage />} />
+          <Route path={ROUTES.FORGOT_PASSWORD} element={<LegacyLinkPage />} />
+          <Route path={ROUTES.RESET_PASSWORD} element={<LegacyLinkPage />} />
           <Route path={ROUTES.INVITE_ACCEPT} element={<InviteAcceptPage />} />
 
           {/* Authenticated app — shares the AppLayout navigation shell */}
@@ -228,6 +228,16 @@ function App() {
               element={
                 <RoleGuard role="admin">
                   <ReportsPage />
+                </RoleGuard>
+              }
+            />
+
+            {/* Seguridad — every role's own llaves de acceso and sessions (passkey-auth US5). */}
+            <Route
+              path={ROUTES.SECURITY}
+              element={
+                <RoleGuard role={['agent', 'admin']}>
+                  <SecurityPage />
                 </RoleGuard>
               }
             />

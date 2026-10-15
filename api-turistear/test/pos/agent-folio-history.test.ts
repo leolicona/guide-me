@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { env, SELF } from 'cloudflare:test'
 import { materializeSeededFolio, seedUser, seedTwoOrgs, clearTenancyDb } from '../helpers/tenancy'
-import { buildFakeJwt } from '../helpers/jwt'
+import { sessionCookie } from '../helpers/session'
 
 // Agent Folio History (read-only list and details) — US-AG20, US-AG21.
 // Spec: docs/folio-history/agent-folio-history.spec.md (Scenarios 1–11).
@@ -16,7 +16,7 @@ import { buildFakeJwt } from '../helpers/jwt'
 const AGENT_EMAIL = 'agent@empresa.com'
 const ADMIN_EMAIL = 'admin@empresa.com'
 
-const auth = (email: string) => ({ Cookie: `gm_access=${buildFakeJwt(email)}` })
+const auth = (email: string) => ({ Cookie: sessionCookie(email) })
 const jsonAuth = (email: string) => ({
   ...auth(email),
   'Content-Type': 'application/json',

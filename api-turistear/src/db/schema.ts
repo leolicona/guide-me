@@ -96,8 +96,22 @@ export const users = sqliteTable('users', {
     .references(() => organizations.id),
   name: text('name').notNull(),
   email: text('email').notNull().unique(),
-  passwordHash: text('password_hash').notNull(),
-  passwordSalt: text('password_salt').notNull(),
+  // passkey-auth D15 — no longer read; dropped by the deploy after cutover (debt
+  // `password-material`). Until then the columns are NOT NULL, so an insert that omits them
+  // writes ''. Better Auth's schema check also requires every column it never writes to have a
+  // default.
+  passwordHash: text('password_hash')
+    .notNull()
+    .$defaultFn(() => ''),
+  passwordSalt: text('password_salt')
+    .notNull()
+    .$defaultFn(() => ''),
+  // passkey-auth D4 — Better Auth's `emailVerified` (set by an email-code sign-in) and `image`
+  // (required by its model, never written).
+  emailVerified: integer('email_verified', { mode: 'boolean' })
+    .notNull()
+    .default(false),
+  image: text('image'),
   phone: text('phone'),
   role: text('role', { enum: ['admin', 'agent'] }).notNull(),
   status: text('status', { enum: ['unverified', 'active', 'suspended'] })
@@ -141,16 +155,92 @@ export const invitations = sqliteTable('invitations', {
     .default(sql`(unixepoch())`),
 })
 
-export const passwordResetTokens = sqliteTable('password_reset_tokens', {
+// passkey-auth D15 — `password_reset_tokens` (and `users.password_hash`/`password_salt`) are no
+// longer mapped or read: the email code replaced every password flow (FR-060, FR-061). The table
+// stays in D1 until the follow-up migration drops it (debt `password-material`).
+
+// ─── passkey-auth D4 — Better Auth 1.7.7's standard schema (migration 0071) ────────────────────
+// Better Auth addresses these through the Drizzle adapter: each table by its export name here
+// (`modelName` in src/auth/index.ts), each column by its property name. The SQL columns are
+// snake_case. Child tables are scoped through `user_id → users.organization_id` (constitution III).
+
+export const sessions = sqliteTable('sessions', {
   id: text('id').primaryKey(),
   userId: text('user_id')
     .notNull()
-    .references(() => users.id),
+    .references(() => users.id, { onDelete: 'cascade' }),
   token: text('token').notNull().unique(),
+  expiresAt: integer('expires_at', { mode: 'timestamp' }).notNull(),
+  ipAddress: text('ip_address'),
+  userAgent: text('user_agent'),
+  createdAt: integer('created_at', { mode: 'timestamp' })
+    .notNull()
+    .default(sql`(unixepoch())`),
+  updatedAt: integer('updated_at', { mode: 'timestamp' })
+    .notNull()
+    .default(sql`(unixepoch())`),
+})
+
+// Required by Better Auth's schema; neither email codes nor passkeys write it.
+export const accounts = sqliteTable('accounts', {
+  id: text('id').primaryKey(),
+  userId: text('user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  accountId: text('account_id').notNull(),
+  providerId: text('provider_id').notNull(),
+  accessToken: text('access_token'),
+  refreshToken: text('refresh_token'),
+  idToken: text('id_token'),
+  accessTokenExpiresAt: integer('access_token_expires_at', { mode: 'timestamp' }),
+  refreshTokenExpiresAt: integer('refresh_token_expires_at', { mode: 'timestamp' }),
+  scope: text('scope'),
+  password: text('password'),
+  createdAt: integer('created_at', { mode: 'timestamp' })
+    .notNull()
+    .default(sql`(unixepoch())`),
+  updatedAt: integer('updated_at', { mode: 'timestamp' })
+    .notNull()
+    .default(sql`(unixepoch())`),
+})
+
+// Sign-in codes (`sign-in-otp-<email>`, value stored encrypted — FR-016) and passkey challenges.
+export const verifications = sqliteTable('verifications', {
+  id: text('id').primaryKey(),
+  identifier: text('identifier').notNull(),
+  value: text('value').notNull(),
   expiresAt: integer('expires_at', { mode: 'timestamp' }).notNull(),
   createdAt: integer('created_at', { mode: 'timestamp' })
     .notNull()
     .default(sql`(unixepoch())`),
+  updatedAt: integer('updated_at', { mode: 'timestamp' })
+    .notNull()
+    .default(sql`(unixepoch())`),
+})
+
+// `@better-auth/passkey`'s model. `counter` is the authenticator's use count (FR-006).
+export const passkeys = sqliteTable('passkeys', {
+  id: text('id').primaryKey(),
+  userId: text('user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  name: text('name'),
+  credentialID: text('credential_id').notNull().unique(),
+  publicKey: text('public_key').notNull(),
+  counter: integer('counter').notNull(),
+  deviceType: text('device_type').notNull(),
+  backedUp: integer('backed_up', { mode: 'boolean' }).notNull(),
+  transports: text('transports'),
+  aaguid: text('aaguid'),
+  createdAt: integer('created_at', { mode: 'timestamp' }),
+})
+
+// Better Auth's rate limiter on database storage (D9). `lastRequest` is epoch MILLISECONDS.
+export const rateLimits = sqliteTable('rate_limits', {
+  id: text('id').primaryKey(),
+  key: text('key').notNull().unique(),
+  count: integer('count').notNull(),
+  lastRequest: integer('last_request').notNull(),
 })
 
 export const services = sqliteTable('services', {
@@ -993,8 +1083,13 @@ export type User = typeof users.$inferSelect
 export type NewUser = typeof users.$inferInsert
 export type Invitation = typeof invitations.$inferSelect
 export type NewInvitation = typeof invitations.$inferInsert
-export type PasswordResetToken = typeof passwordResetTokens.$inferSelect
-export type NewPasswordResetToken = typeof passwordResetTokens.$inferInsert
+export type Session = typeof sessions.$inferSelect
+export type NewSession = typeof sessions.$inferInsert
+export type Account = typeof accounts.$inferSelect
+export type Verification = typeof verifications.$inferSelect
+export type Passkey = typeof passkeys.$inferSelect
+export type NewPasskey = typeof passkeys.$inferInsert
+export type RateLimit = typeof rateLimits.$inferSelect
 export type Service = typeof services.$inferSelect
 export type NewService = typeof services.$inferInsert
 export type ServiceExtra = typeof serviceExtras.$inferSelect

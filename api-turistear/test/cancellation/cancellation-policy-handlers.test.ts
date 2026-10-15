@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { env, SELF } from 'cloudflare:test'
 import { materializeSeededFolio, seedUser, seedTwoOrgs, clearTenancyDb } from '../helpers/tenancy'
-import { buildFakeJwt } from '../helpers/jwt'
+import { sessionCookie } from '../helpers/session'
 
 // Cancellation Policy Engine — the WIRING.
 // Spec: docs/cancellation/cancellation-policy-engine.spec.md (Scenarios 1–19, 31–32)
@@ -13,7 +13,7 @@ import { buildFakeJwt } from '../helpers/jwt'
 
 const ADMIN = 'admin@empresa.com'
 const AGENT = 'agent@empresa.com'
-const auth = (email: string) => ({ Cookie: `gm_access=${buildFakeJwt(email)}` })
+const auth = (email: string) => ({ Cookie: sessionCookie(email) })
 const jsonAuth = (email: string) => ({ ...auth(email), 'Content-Type': 'application/json' })
 const FOLIOS = 'http://api.local/api/folios'
 const ORGS = 'http://api.local/api/organizations'

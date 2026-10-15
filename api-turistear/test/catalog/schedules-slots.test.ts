@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { env, SELF } from 'cloudflare:test'
 import { seedUser, seedTwoOrgs, clearTenancyDb } from '../helpers/tenancy'
-import { buildFakeJwt } from '../helpers/jwt'
+import { sessionCookie } from '../helpers/session'
 
 // Schedules & Slots (US-A10) — specific-date slots + recurring weekly schedules
 // that materialize concrete slot rows, nested under a service.
@@ -15,7 +15,7 @@ import { buildFakeJwt } from '../helpers/jwt'
 const ADMIN_EMAIL = 'admin@empresa.com'
 const AGENT_EMAIL = 'agent@empresa.com'
 
-const auth = (email: string) => ({ Cookie: `gm_access=${buildFakeJwt(email)}` })
+const auth = (email: string) => ({ Cookie: sessionCookie(email) })
 const jsonAuth = (email: string) => ({
   ...auth(email),
   'Content-Type': 'application/json',

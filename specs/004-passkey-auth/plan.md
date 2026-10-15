@@ -67,12 +67,19 @@ and we write only what Better Auth does not know (organizations, invitations).
   answers echo the session token, which would let a script in the page carry the session elsewhere;
   the cookie alone must authenticate (constitution IV, v1.2.1; R14). `auth.api.getSession` still
   works server-side, because `disabledPaths` only closes the HTTP routes.
+  *Implemented 2026-10-15 (R15)*: the filter applies to every JSON object answer under
+  `/api/auth/*`, so an echo added by an upgrade (or `verify-registration` with `createSession`) is
+  stripped too; and `disabledPaths` also closes every route the app does not use that touches
+  passwords, email changes, social accounts or self-deletion — including the emailOTP plugin's
+  code-based password reset, which would write a `credential` account (FR-060).
 - Principle IV is amended for `/api/auth/*` (D18). (R2)
 
 **D3 — One auth instance per isolate.** `src/auth/index.ts` exports `getAuth(env)`, memoized in a
 `WeakMap` keyed by the `env` object. It is built with
 `drizzleAdapter(getDb(env), { provider: 'sqlite', transaction: false })`. The Worker gains the
-compatibility flag `nodejs_als`, not the full `nodejs_compat`.
+compatibility flag `nodejs_als`, not the full `nodejs_compat`. *Corrected 2026-10-15 (R15,
+constitution v1.3.1)*: the Worker uses `nodejs_compat`, because `@better-auth/utils` resolves
+`node:crypto` for the `workerd` condition.
 
 *Why*:
 - Workers hand out bindings per request. The `WeakMap` rebuilds nothing on a warm isolate and still
@@ -168,7 +175,8 @@ behaviour. (R9)
 **D9 — Better Auth's rate limiter, stored in D1.**
 - Settings: `rateLimit: { enabled: true, storage: 'database', modelName: 'rate_limits' }`.
 - Built-in rules apply per client IP (`cf-connecting-ip`): `/sign-in*` allows 3 per 10 s, the
-  email-code send allows 3 per 60 s, and everything else 100 per 60 s.
+  email-code send allows 3 per 60 s, and everything else 100 per 60 s. *Measured 2026-10-15 (R15)*:
+  `/sign-in/email-otp` takes the emailOTP plugin's own rule instead, 3 per 60 s.
 - A refusal is `429` with `X-Retry-After`, which `src/index.tsx`'s CORS exposes to the app.
 
 *Why*:
@@ -296,8 +304,12 @@ CLAUDE.md's local-login caveat is rewritten to match.
 **Done 2026-10-07**, before implementation, so no task runs against the old text
 (`/speckit-analyze` C1): v1.2.0 (`f8ff722`), then v1.2.1 (`ca7b582`), which keeps the BFF.
 
-**D19 — A pre-merge gate.** Before merging into `develop`, which deploys dev at once:
-1. Set `BETTER_AUTH_SECRET` as a Worker secret in dev and in prod, with different values.
+**D19 — A pre-merge gate.** Before merging into `develop`, which deploys dev at once *(since
+`specs/005-delivery-pipeline`: before opening the pull request into `main`, whose preview applies
+the migration to dev's database)*:
+1. Set `BETTER_AUTH_SECRET` in dev and in prod, with different values: in the GitHub environments
+   `dev` and `production`, from which every deploy plants it on the Worker (constitution v1.4.0,
+   the developer's decision of 2026-10-15).
 2. Run the email-case collision query against both databases.
 3. Record both results in the PR.
 
@@ -320,7 +332,7 @@ CLAUDE.md's local-login caveat is rewritten to match.
 - App: jsdom with Testing Library, MSW and axe.
 - End to end: Playwright with the CDP virtual authenticator.
 
-**Target Platform**: Cloudflare Workers (`compatibility_date` 2025-08-03, plus `nodejs_als`);
+**Target Platform**: Cloudflare Workers (`compatibility_date` 2025-08-03, plus `nodejs_compat`, R15);
 evergreen mobile browsers.
 
 **Project Type**: web service and web app (pnpm workspace).
@@ -377,7 +389,7 @@ specs/004-passkey-auth/
 ```text
 api-turistear/
 ├── migrations/0071_better_auth.sql             # D4, D16
-├── wrangler.jsonc                              # −AGNOSTIC_AUTH_*, +nodejs_als, +AUTH_COOKIE_PREFIX, +OTP_LOG_TO_CONSOLE (local)
+├── wrangler.jsonc                              # −AGNOSTIC_AUTH_*, +nodejs_compat, +AUTH_COOKIE_PREFIX, +OTP_LOG_TO_CONSOLE (local)
 ├── vitest.config.ts                            # −AGNOSTIC_AUTH_API stand-in, +BETTER_AUTH_SECRET pinned
 ├── src/
 │   ├── auth/index.ts                           # getAuth(env): the whole Better Auth configuration (D3, D5–D9, D12)
@@ -415,5 +427,5 @@ app-turistear/
 |-----------|------------|-------------------------------------|
 | `/api/auth/*` follows Better Auth's contract instead of Principle IV's route and error rules (amended by D18) | The developer chose Better Auth's standards (spec Clarifications, 2026-10-07). Its client and endpoints work unchanged | Wrapping it in our own routes (the 2026-10-06 plan) keeps Principle IV untouched, but rewrites a contract Better Auth already provides. The developer rejected it |
 | A new dependency on the auth path, in place of the stack table's Agnostic Auth | The developer chose Better Auth | A hand-built WebAuthn stack means our own CBOR, COSE and attestation handling |
-| The Worker compatibility flag `nodejs_als` | Better Auth keeps its request context in `AsyncLocalStorage` (R3) | The full `nodejs_compat` adds polyfills that no runtime import needs |
+| The Worker compatibility flag `nodejs_compat` (R15) | Better Auth keeps its request context in `AsyncLocalStorage`, and `@better-auth/utils` imports `node:crypto` under the `workerd` condition | `nodejs_als` alone (the first plan) cannot load `node:crypto`: the dev server fails and the deployed Worker would not start |
 | A test-only database trigger in the setup file (D17) | It gives 61 suites a session with a two-line edit each | An asynchronous helper changes every call site; a test bypass would be a back door in production code |

@@ -1,63 +1,42 @@
 <!--
-Sync Impact Report (v1.3.0, 2026-10-15)
-- Version change: 1.2.1 → 1.3.0 — MINOR. The delivery workflow is rewritten
-  (specs/005-delivery-pipeline, plan D18), and IV and VIII gain one sentence
-  each about previews. No principle is removed, renumbered or redefined: what
-  changes is how code reaches dev and prod, which is materially expanded
-  guidance, not a new law. Source: the developer's decisions of 2026-10-15 —
-  one branch as in devolada, the tag alone is the approval, and previews
-  apply a pull request's migrations to dev.
+Sync Impact Report (v1.4.0, 2026-10-15)
+- Version change: 1.3.1 → 1.4.0 — MINOR. Guidance in VIII materially
+  changes; no principle is added, removed or redefined.
+  - Source: the developer's decision of 2026-10-15, "Los secrets se manejan a
+    través de GitHub environments."
+  - It reverses v1.3.0's "Dev's and prod's secrets stay on their Workers; no
+    workflow re-plants them" (specs/005-delivery-pipeline D17), now
+    superseded. The risk that rule guarded against stays named: a secret
+    enters an environment once, copied exactly from the Worker it already
+    runs on, and planting is additive, so a secret an environment does not
+    hold is never overwritten.
 - Modified sections (titles unchanged):
-  · IV. The Server Decides:
-    - a preview's session cookie is host-only on its API (workers.dev is a
-      public suffix);
-    - a preview is a target of dev, not an environment, so it signs with
-      dev's `QR_SECRET`.
-  · VI. A Rule Is Proven Where It Is Enforced: labelled pull-request journeys
-    run against that pull request's preview; the nightly run stays on dev.
-  · VIII. A Service We Do Not Own Never Undoes a Sale:
-    - dev's and prod's secrets stay on their Workers, never re-planted by a
-      workflow;
-    - a preview takes dev's values, or a throwaway its note names.
-  · Technology Stack & Constraints:
-    - the Environments row: dev from `main`, prod from `v*` tags, a preview
-      per pull request;
-    - the migration constraint: a pull request's migrations reach dev with
-      its preview, and a migration that reached dev keeps its file name.
-  · Development Workflow & Quality Gates:
-    - one long-lived branch, `main`, and worktrees from `origin/main`;
-    - pull requests into `main`, squash-merged, and no release pull requests;
-    - `verify` gains the pipeline scripts' tests and is one composite action
-      that every deploy runs whole;
-    - a preview per pull request;
-    - a push to `main` deploys dev;
-    - a `v*` tag releases prod and is the approval: the release refuses an
-      unproven commit, records a Time Travel restore point, never exports the
-      database, states what landed and smokes both hostnames;
-    - Rollback Prod.
+  · VIII. A Service We Do Not Own Never Undoes a Sale: secrets are managed in
+    the GitHub environments `dev` and `production`; every deploy plants the
+    API's secrets on its Worker with the version it ships
+    (`wrangler deploy --secrets-file`, additive); a deploy without
+    `BETTER_AUTH_SECRET` stops before migrating. Previews unchanged.
+  · Development Workflow & Quality Gates: the dev deploy and the prod release
+    ship the API with their environment's secrets.
 - Added sections: none. Removed sections: none.
 - Templates: .specify/templates/plan-template.md ✅, spec-template.md ✅,
-  tasks-template.md ✅, checklist-template.md ✅. None names a branch, a
-  deploy or an environment; no template changed.
+  tasks-template.md ✅, checklist-template.md ✅. None names where a secret
+  lives; no template changed.
 - Follow-up TODOs:
-  · The text leads the code, as it did for specs/004-passkey-auth: this
-    amendment lands with the feature's documentation in `develop`, and the
-    pipeline follows in its implementation pull request into `main`, which
-    is `develop`'s last trip there. Until that merges, `develop` and `main`
-    still deploy the old way.
-  · The settings that live outside the repository (environment policies,
-    branch protection, deleting `develop`) are the developer's acts, listed
-    in specs/005-delivery-pipeline/contracts/environment.md.
-  · Carried from v1.2.1, still open:
-    - specs/004-passkey-auth's code catches up with IV, VI and VIII; when it
-      lands, its preview profile gains `AUTH_COOKIE_PREFIX` and
-      `BETTER_AUTH_SECRET` (specs/005-delivery-pipeline research R2);
-    - TODO(PASSWORD-MATERIAL) (specs/004-passkey-auth D15);
-    - CLAUDE.md still describes Agnostic Auth (specs/004-passkey-auth T044);
-    - TODO(CONTRACT-MIRROR), TODO(TOKEN-FALLBACKS), TODO(EMAIL-PALETTE),
-      TODO(TEST-CITATIONS), TODO(DESIGN-FOUNDATIONS), and the archived
-      TECH_DEBT.md items to re-register when a feature touches them (see the
-      v1.0.0 report in git history, develop@33b3609).
+  · specs/005-delivery-pipeline: plan D17 and contracts/environment.md are
+    annotated as superseded by this amendment.
+  · `.github/workflows/deploy-dev.yml` and `deploy-prod.yml` implement it in
+    specs/004-passkey-auth's pull request #170.
+  · The developer copies `QR_SECRET` and `RESEND_API_KEY` into the
+    `production` environment only with prod's exact current values; until
+    then prod's Worker keeps its own (planting is additive).
+  · Carried from v1.3.1: debts `.specify/debt/password-material` and
+    `.specify/debt/better-auth-rejection-reports`; the settings outside the
+    repository (specs/005-delivery-pipeline/contracts/environment.md); and
+    from v1.0.0 TODO(CONTRACT-MIRROR), TODO(TOKEN-FALLBACKS),
+    TODO(EMAIL-PALETTE), TODO(TEST-CITATIONS), TODO(DESIGN-FOUNDATIONS), and
+    the archived TECH_DEBT.md items to re-register when a feature touches
+    them (see the v1.0.0 report in git history, develop@33b3609).
 -->
 
 # Turistear Ya! Constitution
@@ -322,13 +301,18 @@ once. Every rule here prevents one way that glance goes wrong.
 - A notification never sits inside a money write. It is sent after the write
   succeeds, under `waitUntil`, with its failure caught, so a provider outage
   never rolls back a sale, a payment or a cancellation.
-- Secrets live in each environment's Worker secrets and in GitHub
-  environments, never in the repo (`.dev.vars` is ignored), and no two
-  environments share a signing secret (`QR_SECRET`, `BETTER_AUTH_SECRET`).
-  Dev's and prod's secrets stay on their Workers; no workflow re-plants them,
-  because a value pasted wrong would invalidate every live ticket. A preview
-  takes dev's values from the GitHub `dev` environment, or a throwaway value
-  that its pull-request note names.
+- Secrets are managed in the GitHub environments `dev` and `production`,
+  never in the repo (`.dev.vars` is ignored), and no two environments share a
+  signing secret (`QR_SECRET`, `BETTER_AUTH_SECRET`). Every deploy plants the
+  API's secrets on its Worker with the version it ships
+  (`wrangler deploy --secrets-file`); planting is additive, so a secret the
+  environment does not hold keeps the Worker's current value. A value pasted
+  wrong invalidates every live ticket (`QR_SECRET`) or signs everyone out
+  (`BETTER_AUTH_SECRET`), so a secret enters an environment once, copied
+  exactly from the Worker it already runs on (or generated, for a new one),
+  and a deploy without `BETTER_AUTH_SECRET` stops before it migrates. A
+  preview takes dev's values from the GitHub `dev` environment, or a throwaway
+  value that its pull-request note names.
 
 Rationale: the sale is the fact and the receipt is a courtesy. A ticket can be
 sent again; a sale that vanished because an email bounced cannot be sold
@@ -341,7 +325,7 @@ Complexity Tracking.
 
 | Layer | Convention |
 | --- | --- |
-| Runtime | Cloudflare Workers, `compatibility_date` 2025-08-03, compatibility flag `nodejs_als` (Better Auth's request context). The API's one cron trigger (`*/15 * * * *`) runs the bookings auto-expiry sweep |
+| Runtime | Cloudflare Workers, `compatibility_date` 2025-08-03, compatibility flag `nodejs_compat` (Better Auth's request context and the Node built-ins it imports). The API's one cron trigger (`*/15 * * * *`) runs the bookings auto-expiry sweep |
 | API | `api-turistear`: Hono 4 + `@hono/zod-validator` (Zod 4), JSX through `hono/jsx`, built and served by Vite 6 with `@cloudflare/vite-plugin` and `vite-ssr-components`. Middleware in `src/middleware/`, helpers in `src/utils/`, providers in `src/services/` |
 | Data | Cloudflare D1 through Drizzle ORM (`sqlite`); migrations `NNNN_snake_case.sql` in `api-turistear/migrations/`, applied with `wrangler d1 migrations` |
 | Auth | Better Auth 1.7.7 inside the API Worker; its handler owns `/api/auth/*`. Passkeys (WebAuthn/FIDO2, `@better-auth/passkey`) are the primary sign-in and a 6-digit email code (`emailOTP`) is the backup. Database sessions in D1 (7 days, renewed by use); one HttpOnly session cookie on `.turistearya.com` |
@@ -393,13 +377,15 @@ Additional constraints:
   with its addresses, and is deleted when the PR closes. A preview never
   gates a merge.
 - A push to `main` deploys dev: `verify`, then the dev D1 migrations, then the
-  API, then the app, then a smoke of both hostnames.
+  API with the `dev` environment's secrets, then the app, then a smoke of both
+  hostnames.
 - A `v*` tag releases prod, and the tag is the approval. The release refuses
   a commit that is not on `main` or whose dev deploy did not finish green,
   before touching anything. It records a D1 Time Travel restore point before
   migrating and never exports the database — this repository is public, so
-  an artifact would publish every tourist's data. It states the version of
-  each Worker that went live and smokes both hostnames.
+  an artifact would publish every tourist's data. The API ships with the
+  `production` environment's secrets. It states the version of each Worker
+  that went live and smokes both hostnames.
 - *Rollback Prod* returns one prod Worker to one named version from CI and
   passes only when the live version is the one asked for. It never touches
   data; restoring data from a restore point is a separate, deliberate act.
@@ -433,4 +419,4 @@ Additional constraints:
 - The developer decides. When a principle blocks a feature, the plan says so
   and proposes the amendment; it does not route around it.
 
-**Version**: 1.3.0 | **Ratified**: 2026-10-04 | **Last Amended**: 2026-10-15
+**Version**: 1.4.0 | **Ratified**: 2026-10-04 | **Last Amended**: 2026-10-15

@@ -70,6 +70,11 @@ test('a ready preview names the migrations it applied and the ones it put on dev
   assert.ok(body.includes('**On dev from this pull request**: `0071_a.sql`, `0072_b.sql`'))
 })
 
+test('a throwaway BETTER_AUTH_SECRET is named with what it costs (passkey-auth D5)', () => {
+  const body = ready({ throwaway: ['BETTER_AUTH_SECRET'] })
+  assert.ok(body.includes('| `BETTER_AUTH_SECRET` | every push signs everyone out of this preview'))
+})
+
 test('a throwaway secret is named with what it costs', () => {
   const body = ready({ throwaway: ['QR_SECRET'] })
   assert.ok(body.includes('| `QR_SECRET` | tickets signed here do not validate on dev'))

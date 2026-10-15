@@ -26,6 +26,7 @@ import GroupsRounded from '@mui/icons-material/GroupsRounded'
 import LogoutRounded from '@mui/icons-material/LogoutRounded'
 import MapRounded from '@mui/icons-material/MapRounded'
 import SettingsRounded from '@mui/icons-material/SettingsRounded'
+import SecurityRounded from '@mui/icons-material/SecurityRounded'
 import { useCurrentUser } from '../features/auth/CurrentUserContext'
 import { useLogout } from '../features/auth/hooks/useLogout'
 import { ROUTES } from '../config/routes'
@@ -135,6 +136,17 @@ export function AccountMenu({ variant, open, onClose, anchorEl }: AccountMenuPro
           <Divider />
         </>
       )}
+
+      {/* Seguridad — every role's llaves de acceso and sessions (passkey-auth US5) */}
+      <List dense disablePadding>
+        <ListItemButton onClick={() => go(ROUTES.SECURITY)} sx={{ px: 2 }}>
+          <ListItemIcon sx={{ minWidth: 36, color: 'text.secondary' }}>
+            <SecurityRounded fontSize="small" />
+          </ListItemIcon>
+          <ListItemText primary="Seguridad" />
+        </ListItemButton>
+      </List>
+      <Divider />
 
       {/* Cerrar sesión — behind a confirm step */}
       <List dense disablePadding sx={{ pb: variant === 'sheet' ? 1 : 0 }}>

@@ -1,12 +1,12 @@
 import { describe, it, expect } from 'vitest'
 import { env, SELF } from 'cloudflare:test'
 import { seedUser } from '../helpers/tenancy'
-import { buildFakeJwt } from '../helpers/jwt'
+import { sessionCookie } from '../helpers/session'
 
 // WhatsApp ticket delivery — Phases 2/3 backend (docs/whatsapp-qr-delivery/whatsapp-qr-delivery.spec.md). The seller/
 // admin mark-sent endpoints (D4/D13) + the bot-proof "Visto" beacon (D6), plus cross-org isolation.
 
-const auth = (email: string) => ({ Cookie: `gm_access=${buildFakeJwt(email)}` })
+const auth = (email: string) => ({ Cookie: sessionCookie(email) })
 const jsonAuth = (email: string) => ({ ...auth(email), 'Content-Type': 'application/json' })
 const nowSec = () => Math.floor(Date.now() / 1000)
 

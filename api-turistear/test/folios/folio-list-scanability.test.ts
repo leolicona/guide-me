@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { env, SELF } from 'cloudflare:test'
 import { materializeSeededFolio, seedUser, seedTwoOrgs, clearTenancyDb } from '../helpers/tenancy'
-import { buildFakeJwt } from '../helpers/jwt'
+import { sessionCookie } from '../helpers/session'
 
 // US-A82 / US-AG49 — the folio list identifies a sale without opening it.
 // Spec: docs/oversight/folio-list-scanability.spec.md — Scenarios S-1, S-7, S-8, S-9, the payload
@@ -16,7 +16,7 @@ import { buildFakeJwt } from '../helpers/jwt'
 // proven where it is enforced, and none of these is enforced here (docs/TESTING.md).
 
 const ADMIN_EMAIL = 'admin@empresa.com'
-const auth = (email: string) => ({ Cookie: `gm_access=${buildFakeJwt(email)}` })
+const auth = (email: string) => ({ Cookie: sessionCookie(email) })
 const FOLIOS = 'http://api.local/api/folios'
 
 const nowSec = () => Math.floor(Date.now() / 1000)

@@ -17,7 +17,9 @@ export const MARKER = '<!-- guide-me:preview'
 // What a throwaway secret costs on a preview (delivery-pipeline D5).
 const THROWAWAY_COST = {
   QR_SECRET: "tickets signed here do not validate on dev, and dev's tickets do not validate here",
-  RESEND_API_KEY: 'no email leaves this preview (sign-in links, tickets, notices)',
+  RESEND_API_KEY: 'no email leaves this preview (sign-in codes, tickets, notices)',
+  // passkey-auth D5 — a new throwaway each deploy re-signs every cookie and re-keys every code.
+  BETTER_AUTH_SECRET: 'every push signs everyone out of this preview and voids pending sign-in codes',
 }
 
 const words = (s) => (s ?? '').split(/[\s,]+/).filter(Boolean)

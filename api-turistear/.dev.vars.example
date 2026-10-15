@@ -1,39 +1,37 @@
-# Local-only overrides for `pnpm dev` (git-ignored — see .gitignore:15).
+# Local-only overrides for `pnpm dev` (git-ignored — see .gitignore:22).
 # These take precedence over the `vars` block in wrangler.jsonc.
 #
-# Two of them are the difference between a login that works and one that silently does nothing;
-# both are explained in docs/DEVELOPMENT.md.
+# Signing in locally needs no external service (passkey-auth FR-064): the sign-in code is printed in
+# the API console (`[otp] <email> <code>`, OTP_LOG_TO_CONSOLE in wrangler.jsonc's local profile).
 
-# 1. THE COOKIE DOMAIN MUST BE EMPTY.
+# THE COOKIE DOMAIN MUST BE EMPTY.
 #    wrangler.jsonc sets `.turistearya.com`, and a browser refuses a cookie whose Domain does not
-#    match the host it came from. On localhost the login call returns 200, the session cookie is
-#    dropped on the floor, and the next request is a 401 — which looks like "wrong password".
-#    Empty ⇒ `c.env.COOKIE_DOMAIN || undefined` ⇒ a host-only cookie on localhost.
+#    match the host it came from. On localhost the sign-in answers 200, the session cookie is
+#    dropped on the floor, and the next request is a 401.
+#    Empty ⇒ a host-only cookie on localhost.
 COOKIE_DOMAIN=
-
-# 2. THE AUTH SERVICE OVER HTTPS INSTEAD OF THE SERVICE BINDING.
-#    Password hashing, verification and JWT minting all live in the `agnostic-auth` Worker, reached
-#    in production through a service binding. That binding does not exist locally, so `src/services/
-#    agnosticAuth.ts` looks for this URL first (the escape hatch was already in the code).
-DEV_AUTH_SERVICE_URL=https://agnostic-auth.leolicona-dev.workers.dev
-
-AGNOSTIC_AUTH_APP_ID=guide-me
 
 # Local origins. `API_BASE_URL` is what portal links and QR codes are built from, so leaving it
 # pointing at production would make a locally-created ticket resolve to the live site.
+# `APP_BASE_URL` MUST stay http://localhost:5174: a llave de acceso belongs to the host of this URL
+# (passkey-auth D8), so any other value makes the browser refuse every passkey ceremony locally.
 API_BASE_URL=http://localhost:5173
 APP_BASE_URL=http://localhost:5174
 CORS_ORIGIN=http://localhost:5173,http://localhost:5174
+
+# Signs the session cookie and encrypts the stored sign-in codes (passkey-auth D5, D7). Any 32+
+# random characters work locally (`openssl rand -base64 48`). In dev and prod it is managed in the
+# GitHub environments `dev` and `production` — DIFFERENT in each, never committed — and every deploy
+# plants it on the Worker (constitution VIII, v1.4.0); a preview takes the `dev` environment's value.
+# Changing it signs everyone out and voids pending codes; passkeys survive it.
+BETTER_AUTH_SECRET=
 
 # HMAC secret for QR tokens and operator shift sessions. Any value works locally; it only has to be
 # stable, or previously-issued local QRs stop verifying.
 QR_SECRET=change-me-any-stable-local-value
 
 # Deliberately invalid: nothing local should be sending real email. Any endpoint that tries
-# (register, invites, cancellation notices) will fail with a 502 from Resend — that is the intended
-# signal, not a misconfiguration. `pnpm seed:local` exists precisely so account creation never
-# needs the email path.
+# (invites, tickets, cancellation notices) will fail with a 502 from Resend — that is the intended
+# signal, not a misconfiguration. Sign-in codes never reach Resend locally: they go to the console.
 RESEND_API_KEY=local-dev-no-email
 RESEND_FROM=no-reply@localhost
-
-SESSION_REFRESH_TTL_SECONDS=5184000

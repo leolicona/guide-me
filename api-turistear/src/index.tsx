@@ -4,8 +4,8 @@ import { renderer } from './renderer'
 import { errorHandler } from './middleware/errorHandler'
 import { authMiddleware } from './middleware/auth'
 import { requireRole } from './middleware/role'
+import { getAuth } from './auth'
 import agentsRouter from './routes/agents'
-import authRouter from './routes/auth'
 import cashRouter from './routes/cash'
 import dashboardRouter from './routes/dashboard'
 import organizationsRouter from './routes/organizations'
@@ -16,10 +16,41 @@ import { sweepExpiredBookings } from './routes/pos/sweep'
 import { sweepDepartureReminders } from './routes/pos/reminders'
 import reportsRouter from './routes/reports'
 import notificationsRouter from './routes/notifications'
+import onboardingRouter from './routes/onboarding'
 import servicesRouter from './routes/services'
 import ticketRouter from './routes/ticket'
 import ticketsRouter from './routes/tickets'
 import type { AppVariables } from './types/context'
+
+// passkey-auth D2, R14 — keep the BFF: the HttpOnly cookie alone authenticates, so no answer may
+// carry the session token, which a script in the page could carry elsewhere. Better Auth echoes it
+// in the sign-in answers (`{ token, user }` for an email code, `{ session: { token, … }, user }`
+// for a llave de acceso). Every JSON object answer under /api/auth/* is rebuilt without `token` and
+// `session.token`, keeping its status and every header — Set-Cookie included. Filtering them all,
+// not just today's two routes, means an upgrade that adds an echo cannot re-expose it silently.
+const withoutSessionToken = async (res: Response): Promise<Response> => {
+  if (!res.headers.get('content-type')?.includes('application/json')) return res
+  const body: unknown = await res.clone().json().catch(() => null)
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return res
+  const record = body as Record<string, unknown>
+  const session = record.session
+  const echoesToken =
+    'token' in record ||
+    (!!session && typeof session === 'object' && 'token' in (session as object))
+  if (!echoesToken) return res
+  const { token: _token, ...rest } = record
+  if (rest.session && typeof rest.session === 'object') {
+    const { token: _sessionToken, ...safeSession } = rest.session as Record<string, unknown>
+    rest.session = safeSession
+  }
+  const headers = new Headers(res.headers)
+  headers.delete('content-length')
+  return new Response(JSON.stringify(rest), {
+    status: res.status,
+    statusText: res.statusText,
+    headers,
+  })
+}
 
 const app = new Hono<{
   Bindings: CloudflareBindings
@@ -35,10 +66,19 @@ app.use('/api/*', async (c, next) => {
     credentials: true,
     allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     allowHeaders: ['Content-Type'],
+    // passkey-auth D9 — Better Auth's rate limiter answers 429 with the wait in this header; the
+    // app reads it to count down "Reenviar código".
+    exposeHeaders: ['X-Retry-After'],
   })(c, next)
 })
 
-app.route('/api/auth', authRouter)
+// passkey-auth D2 — Better Auth's handler owns /api/auth/*, with its own validation, errors and
+// codes (constitution IV, v1.2.1). Unknown paths under it, such as the retired /login, get its 404.
+app.on(['GET', 'POST'], '/api/auth/*', async (c) =>
+  withoutSessionToken(await getAuth(c.env).handler(c.req.raw)),
+)
+// passkey-auth D10, D11 — registering an organization and accepting an invitation.
+app.route('/api/onboarding', onboardingRouter)
 app.route('/api/agents', agentsRouter)
 app.route('/api/organizations', organizationsRouter)
 app.route('/api/services', servicesRouter)

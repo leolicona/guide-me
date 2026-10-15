@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { env, SELF } from 'cloudflare:test'
-import { buildFakeJwt } from '../helpers/jwt'
+import { sessionCookie } from '../helpers/session'
 import { clearTenancyDb, seedUser } from '../helpers/tenancy'
 
 const ORG_NAME = 'Empresa S.A.'
@@ -45,7 +45,7 @@ describe('Multitenancy — GET /api/organizations/me', () => {
     })
 
     const res = await SELF.fetch('http://api.local/api/organizations/me', {
-      headers: { Cookie: `gm_access=${buildFakeJwt(ADMIN_EMAIL)}` },
+      headers: { Cookie: sessionCookie(ADMIN_EMAIL) },
     })
 
     expect(res.status).toBe(200)
@@ -64,7 +64,7 @@ describe('Multitenancy — GET /api/organizations/me', () => {
     })
 
     const res = await SELF.fetch('http://api.local/api/organizations/me', {
-      headers: { Cookie: `gm_access=${buildFakeJwt(AGENT_EMAIL)}` },
+      headers: { Cookie: sessionCookie(AGENT_EMAIL) },
     })
 
     expect(res.status).toBe(200)
@@ -102,7 +102,7 @@ describe('Multitenancy — tenant isolation invariants', () => {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Cookie: `gm_access=${buildFakeJwt(ADMIN_EMAIL)}`,
+        Cookie: sessionCookie(ADMIN_EMAIL),
       },
       body: JSON.stringify({
         identity: 'nuevo@empresa.com',
@@ -130,7 +130,7 @@ describe('Multitenancy — tenant isolation invariants', () => {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Cookie: `gm_access=${buildFakeJwt(ADMIN_EMAIL)}`,
+        Cookie: sessionCookie(ADMIN_EMAIL),
       },
       body: JSON.stringify({ identity: 'nuevo@empresa.com' }),
     })

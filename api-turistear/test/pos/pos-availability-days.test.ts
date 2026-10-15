@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { env, SELF } from 'cloudflare:test'
 import { seedUser, seedTwoOrgs, clearTenancyDb } from '../helpers/tenancy'
-import { buildFakeJwt } from '../helpers/jwt'
+import { sessionCookie } from '../helpers/session'
 
 // POS Date Filter — month availability for the calendar Bottom Sheet (US-AG35).
 // Spec: docs/pos/date-filter-calendar-sheet.spec.md (Scenarios 5, 10).
@@ -14,7 +14,7 @@ import { buildFakeJwt } from '../helpers/jwt'
 
 const AGENT_EMAIL = 'agent@empresa.com'
 const POS = 'http://api.local/api/pos'
-const auth = (email: string) => ({ Cookie: `gm_access=${buildFakeJwt(email)}` })
+const auth = (email: string) => ({ Cookie: sessionCookie(email) })
 
 const TODAY = '2026-06-15'
 

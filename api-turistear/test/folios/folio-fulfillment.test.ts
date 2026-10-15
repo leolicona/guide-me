@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { env, SELF } from 'cloudflare:test'
 import { materializeSeededFolio, seedUser, seedTwoOrgs, clearFullDb } from '../helpers/tenancy'
-import { buildFakeJwt } from '../helpers/jwt'
+import { sessionCookie } from '../helpers/session'
 
 // US-A85 — the wasted seat, end to end.
 // Spec: docs/folios/folio-state-machine.spec.md — S-4 … S-10, S-18.
@@ -12,7 +12,7 @@ import { buildFakeJwt } from '../helpers/jwt'
 // a request body, and that one org's wasted seats never appear in another's report.
 
 const ADMIN = 'admin@empresa.com'
-const auth = (email: string) => ({ Cookie: `gm_access=${buildFakeJwt(email)}` })
+const auth = (email: string) => ({ Cookie: sessionCookie(email) })
 const FOLIOS = 'http://api.local/api/folios'
 const REPORT = 'http://api.local/api/reports/wasted-seats'
 

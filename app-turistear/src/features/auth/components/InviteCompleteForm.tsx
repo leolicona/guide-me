@@ -1,54 +1,64 @@
+import { useState } from 'react';
 import { useForm, Controller } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { TextField, Button, Box, CircularProgress, Typography } from '@mui/material';
-import { useNavigate } from 'react-router-dom';
-import { useQueryClient } from '@tanstack/react-query';
+import { Alert, TextField, Button, Box, CircularProgress } from '@mui/material';
 import { inviteCompleteSchema } from '../schemas';
 import type { InviteCompleteFormData } from '../schemas';
 import { useInviteComplete } from '../hooks/useInviteComplete';
-import { ROUTES } from '../../../config/routes';
 import { ServiceError } from '../../../services/authService';
-import { PasswordInput } from './PasswordInput';
+import { EmailCodeForm } from './EmailCodeForm';
 
+const SUBMIT = 'Aceptar invitación';
+
+/**
+ * An invited agent joins with their name (passkey-auth US4, FR-031) — no password. Accepting
+ * creates the agent and mails a sign-in code to the invited address (D11); the code step follows
+ * here, then the offer of a llave de acceso.
+ */
 export function InviteCompleteForm({ token }: { token: string }) {
-  const navigate = useNavigate();
+  const [codeSentTo, setCodeSentTo] = useState<string | null>(null);
   const inviteCompleteMutation = useInviteComplete();
-  const queryClient = useQueryClient();
 
   const { control, handleSubmit, setError, formState: { errors } } = useForm<InviteCompleteFormData>({
     resolver: zodResolver(inviteCompleteSchema),
-    defaultValues: { name: '', password: '', confirmPassword: '' }
+    defaultValues: { name: '' }
   });
 
   const onSubmit = (data: InviteCompleteFormData) => {
     inviteCompleteMutation.mutate(
+      { token, name: data.name },
       {
-        token,
-        name: data.name,
-        password: data.password,
-      },
-      {
-        onSuccess: () => {
-          queryClient.invalidateQueries({ queryKey: ['me'] });
-          // Only agents are invited; an agent's landing is Vender (US-UX01) — the dashboard they
-          // used to be sent to bounced them there anyway.
-          navigate(ROUTES.POS, { replace: true });
+        onSuccess: ({ email }) => {
+          setCodeSentTo(email);
         },
         onError: (error) => {
-          if (error instanceof ServiceError && error.status === 400) {
+          if (error instanceof ServiceError && error.status === 409) {
+            setError('root', {
+              type: 'manual',
+              message: 'Ya existe una cuenta con este correo. Entra con tu llave de acceso o con un código por correo.',
+            });
+          } else if (error instanceof ServiceError && error.status === 400) {
             setError('root', { type: 'manual', message: 'La invitación es inválida o ha expirado. Contacta a tu administrador.' });
+          } else {
+            setError('root', { type: 'manual', message: 'No pudimos aceptar la invitación. Inténtalo de nuevo.' });
           }
         }
       }
     );
   };
 
+  if (codeSentTo) {
+    return <EmailCodeForm codeSentTo={codeSentTo} />;
+  }
+
+  const isLoading = inviteCompleteMutation.isPending;
+
   return (
     <Box component="form" onSubmit={handleSubmit(onSubmit)} noValidate>
       {errors.root && (
-        <Typography color="error" variant="body2" sx={{ mb: 2 }}>
+        <Alert severity="error" sx={{ mb: 2 }}>
           {errors.root.message}
-        </Typography>
+        </Alert>
       )}
 
       <Controller
@@ -57,28 +67,16 @@ export function InviteCompleteForm({ token }: { token: string }) {
         render={({ field }) => (
           <TextField
             {...field}
+            inputRef={field.ref}
             fullWidth
             label="Nombre"
             margin="normal"
-            disabled={inviteCompleteMutation.isPending}
+            autoComplete="name"
+            disabled={isLoading}
             error={!!errors.name}
-            helperText={errors.name?.message}
+            helperText={errors.name?.message ?? 'Te enviaremos un código al correo de la invitación.'}
           />
         )}
-      />
-
-      <PasswordInput
-        name="password"
-        control={control}
-        label="Contraseña"
-        disabled={inviteCompleteMutation.isPending}
-      />
-
-      <PasswordInput
-        name="confirmPassword"
-        control={control}
-        label="Confirmar contraseña"
-        disabled={inviteCompleteMutation.isPending}
       />
 
       <Button
@@ -86,10 +84,13 @@ export function InviteCompleteForm({ token }: { token: string }) {
         fullWidth
         variant="contained"
         size="large"
-        disabled={inviteCompleteMutation.isPending}
+        disabled={isLoading}
+        // BUG-022 (as in FormSheet) — the spinner replaces the label, so the name is stated.
+        aria-label={isLoading ? SUBMIT : undefined}
+        aria-busy={isLoading}
         sx={{ mt: 3, mb: 1 }}
       >
-        {inviteCompleteMutation.isPending ? <CircularProgress size={24} color="inherit" /> : 'Completar registro'}
+        {isLoading ? <CircularProgress size={24} color="inherit" aria-hidden /> : SUBMIT}
       </Button>
     </Box>
   );

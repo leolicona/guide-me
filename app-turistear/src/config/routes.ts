@@ -1,10 +1,12 @@
 export const ROUTES = {
   LOGIN: '/login',
   REGISTER: '/register',
+  // passkey-auth FR-063 — links mailed before cutover; all three land on LegacyLinkPage.
   VERIFY: '/verify',
   FORGOT_PASSWORD: '/forgot-password',
   RESET_PASSWORD: '/reset-password',
   INVITE_ACCEPT: '/invite/accept',
+  SECURITY: '/seguridad', // both roles — llaves de acceso and sessions (passkey-auth US5)
   DASHBOARD: '/dashboard',
   AGENTS: '/agents',
   INVITE_AGENT: '/agents/invite',

@@ -39,6 +39,10 @@
 
 - **FR-061 and SC-006: when the passwords go.** Password material is removed by the deploy that follows cutover, not by cutover itself. The cutover's migration runs before its code, and the code it replaces still reads the columns (`passkey-auth D15`). This is the same path `specs/001-retire-affiliates` → `specs/002-drop-affiliate-tables` took.
 
+### Amended by the implementation (2026-10-15)
+
+- **Scope Boundary: which lines count as "obtaining a session".** Besides the import and the cookie line, two business suites asserted on the old session mechanism itself, and those assertions changed with it; no business assertion did. `test/retire-affiliates/delete-legacy-affiliates.test.ts` now expects the Better Auth cookie name where it expected `gm_access`/`gm_refresh` to be cleared, and the email-code refusal (`INVALID_OTP`) where it expected the retired password login's `INVALID_CREDENTIALS`. `test/staff/staff-management.test.ts` drops, with its Agnostic Auth stub, the two tests of the refresh branch the stub existed for (`research.md` § Withdrawn scenarios), and expects the new cookie name. On the app side, `app-turistear/src/services/authService.test.ts` (the interceptor's suite) imported the `login` helper T037 deletes; its call became the equivalent `request('/api/auth/login', …)`, with its assertions unchanged. Everything Better Auth registers beyond the contract is closed (FR-060; `research.md` R15).
+
 ## Context — what is broken today
 
 Staff (admins and agents) sign in with an email and a password. Everything that proves who they are goes through Agnostic Auth, a service we do not own (constitution VIII).

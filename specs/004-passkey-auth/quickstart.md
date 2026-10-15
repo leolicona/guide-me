@@ -8,23 +8,24 @@ implementation lives in `tasks.md`.
 
 ## 1. Prerequisites
 
-- Node 22, pnpm 10, and a worktree from `develop` (CLAUDE.md § Local workflow).
+- Node 22, pnpm 10, and a worktree from `origin/main` (CLAUDE.md § Local workflow).
 - `pnpm install`. The lockfile gains Better Auth 1.7.7 (server and client), `@better-auth/passkey`,
   `@better-auth/drizzle-adapter` and `@noble/hashes` (API dev dependency).
 - A Chromium-based browser. `localhost` is a secure context, so WebAuthn works over
   `http://localhost:5174`.
 
-## 2. Pre-merge gate (D19): before the PR merges into `develop`
+## 2. Pre-merge gate (D19): before the PR merges into `main`
 
-Merging deploys dev at once. Do both steps and record the results in the PR.
+Opening the pull request builds its preview, which applies migration 0071 to dev's database
+(`specs/005-delivery-pipeline` D3); merging deploys dev. Do both steps first and record the results
+in the PR.
 
-**Secrets.** `BETTER_AUTH_SECRET` is a Worker secret, **different in each environment**
-(constitution VIII), and never committed.
-
-```bash
-openssl rand -base64 48 | pnpm --filter api-turistear exec wrangler secret put BETTER_AUTH_SECRET --env dev
-openssl rand -base64 48 | pnpm --filter api-turistear exec wrangler secret put BETTER_AUTH_SECRET --env production
-```
+**Secrets.** `BETTER_AUTH_SECRET` is managed in the GitHub environments `dev` and `production`,
+**a different value in each** (`openssl rand -base64 48`), never committed (constitution VIII,
+v1.4.0). Every dev deploy and prod release plants it on its API Worker with the version it ships
+(`wrangler deploy --secrets-file`, additive), and stops before migrating when it is missing or
+shorter than 32 characters; the API itself refuses to start without one (`src/auth/index.ts`). A
+pull request's preview takes the `dev` environment's value, or a throwaway its note names.
 
 Rotating the secret signs everyone out and invalidates every pending code. It never touches the
 passkeys.
@@ -77,28 +78,32 @@ pnpm lint:app && pnpm build:api && pnpm build:app
 
 | Proof | Where | Spec |
 |---|---|---|
-| Code issue and sign-in; same answer for unknown email; 3 attempts; newest code wins; 5-minute expiry; `unverified → active`; a suspended user gets no session row (fixture rows excluded); the stored code is not the code; `429` with `X-Retry-After` after 3 sends a minute and after 3 sign-in attempts in 10 s | `test/auth/email-code.test.ts` | US1, FR-010–FR-016, SC-010 |
+| Code issue and sign-in; same answer for unknown email; 3 attempts; newest code wins; 5-minute expiry; `unverified → active`; a suspended user gets no session row (fixture rows excluded); the stored code is not the code; `429` with `X-Retry-After` after 3 sends a minute and after 3 sign-in attempts a minute | `test/auth/email-code.test.ts` | US1, FR-010–FR-016, SC-010 |
 | Passkey registration and discoverable sign-in; a removed key is refused; a backwards use count is refused; another `rpID` or origin is refused; adding without a fresh session → `SESSION_NOT_FRESH`; list, rename, delete; notices sent | `test/auth/passkeys.test.ts` | US2, US5, FR-001–FR-006, FR-040, FR-041 |
-| Altered, foreign-secret and unknown-token cookies refused; renewal keeps the token; parallel requests survive renewal; sign-out and revoke-sessions end sessions at the next request; suspended refused; no `/api/auth/*` answer carries a token, and `/get-session` and `/list-sessions` answer `404` (BFF) | `test/auth/sessions.test.ts` | FR-020–FR-025, SC-005 |
+| Altered, foreign-secret and unknown-token cookies refused; renewal keeps the token; parallel requests survive renewal; sign-out and revoke-sessions end sessions at the next request; suspended refused; no `/api/auth/*` answer carries a token, and `/get-session`, `/list-sessions` and every password route answer `404` (BFF, FR-060); a foreign-Origin POST is refused | `test/auth/sessions.test.ts` | FR-020–FR-025, FR-060, SC-005 |
 | Register without password, then code, then signed in as admin; D17 policy present; duplicate refused | `test/onboarding/register.test.ts` | US3 |
 | Invitation lookup; accept with name, then code, then signed in as agent; pre-cutover invitation; used or expired token refused | `test/onboarding/invitations.test.ts` | US4 |
 | `/api/auth/update-user` cannot change `organizationId`, `role` or `status` | `test/auth/sessions.test.ts` | constitution III, D2 |
-| Business suites pass with only their session lines changed | `git diff --stat develop -- api-turistear/test ':!api-turistear/test/auth' ':!api-turistear/test/onboarding' ':!api-turistear/test/helpers'` shows two lines in each of 61 files | Scope Boundary |
+| Business suites pass with only their session lines changed | `git diff origin/main... -- api-turistear/test ':!api-turistear/test/auth' ':!api-turistear/test/onboarding' ':!api-turistear/test/helpers'` touches 61 files, and only their import, cookie and session-mechanism lines (spec § Amended by the implementation) | Scope Boundary |
 | No Agnostic Auth left | `git grep -nIE "AGNOSTIC_AUTH\|agnosticAuth\|Agnostic Auth\|DEV_AUTH_SERVICE_URL" -- api-turistear app-turistear .github` is empty, apart from archive citations | FR-062, SC-003 |
 
 ## 5. Cutover (dev, then prod)
 
-1. The gate (§2) is done and recorded. Merge into `develop`. CI deploys dev: tests, then migration
-   0071, then the API, then the app.
-2. On `app-dev.turistearya.com`:
+1. The gate (§2) is done and recorded. The pull request's preview (`app-guideme-pr-<n>` on
+   `workers.dev`, dev's data, 0071 applied) is the first place to try it: sign in by code there.
+2. Merge into `main`. CI deploys dev: the gate, then dev's migrations (0071 already applied by the
+   preview), then the API, then the app.
+3. On `app-dev.turistearya.com`:
    - Sign in by code with a real mailbox, create a passkey on a phone, sign out, and sign in with
      it.
    - Check that the dev passkey is **not offered** on `app.turistearya.com` (FR-003).
-3. Enroll each end-to-end account once with Playwright's virtual authenticator. Store the
-   credential as `E2E_AGENT_PASSKEY` and `E2E_ADMIN_PASSKEY`, and delete `E2E_*_PASSWORD`. Run the
-   `e2e` label on a PR.
-4. Release `develop → main` (a merge commit) after the `production` approval.
-5. On prod, every active admin and agent can sign in by code (SC-007), and no screen asks for a
+4. Enroll each end-to-end account once against dev (`e2e/enroll-passkey.ts`). Store the
+   credentials as `E2E_AGENT_PASSKEY` and `E2E_ADMIN_PASSKEY` in the GitHub `dev` environment, and
+   delete the four `E2E_*_EMAIL` / `E2E_*_PASSWORD` secrets. The same credential serves every
+   preview, which runs on dev's database. Run the `e2e` label on a PR.
+5. Put `BETTER_AUTH_SECRET` in the GitHub `production` environment (§2), then release: a `v*` tag on the `main` commit
+   whose dev deploy is green (`specs/005-delivery-pipeline` D10).
+6. On prod, every active admin and agent can sign in by code (SC-007), and no screen asks for a
    password (SC-006).
 
 **Measuring SC-009 after 30 days**: Better Auth's standard schema does not record how a session

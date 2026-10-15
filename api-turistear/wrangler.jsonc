@@ -20,6 +20,11 @@
   // ─────────────────────────────────────────────────────────────────────────────
   "name": "api-guideme-local",
   "compatibility_date": "2025-08-03",
+  // passkey-auth D3 (R15) — Better Auth needs Node built-ins at runtime: AsyncLocalStorage
+  // (`node:async_hooks`) for its request context, and `node:crypto`, which @better-auth/utils
+  // resolves for the `workerd` condition. `nodejs_compat` is what Better Auth documents for
+  // Workers. Inherited by the named envs.
+  "compatibility_flags": ["nodejs_compat"],
   "main": "./src/index.tsx",
 
   // Local (`vite dev`) bindings + vars. Secrets come from `.dev.vars`. Migrations run
@@ -32,22 +37,19 @@
       "migrations_dir": "migrations"
     }
   ],
-  "services": [
-    {
-      "binding": "AGNOSTIC_AUTH_API",
-      "service": "agnostic-auth"
-    }
-  ],
   "vars": {
-    "AGNOSTIC_AUTH_APP_ID": "guide-me",
     "COOKIE_DOMAIN": ".turistearya.com",
     "CORS_ORIGIN": "http://localhost:5173,https://app.turistearya.com",
     "API_BASE_URL": "https://api.turistearya.com",
     "APP_BASE_URL": "https://app.turistearya.com",
     "RESEND_FROM": "no-reply@turistearya.com",
-    // Idle-session window (seconds). Keep in sync with `refreshTokenTtlSeconds`
-    // in the agnostic-auth APP_REGISTRY KV entry for app "guide-me".
-    "SESSION_REFRESH_TTL_SECONDS": "5184000"
+    // passkey-auth D5 — the session cookie is `__Secure-<prefix>.session_token`. Each
+    // environment has its own prefix: dev and prod both set cookies on `.turistearya.com`,
+    // so a shared name would let one overwrite the other's session.
+    "AUTH_COOKIE_PREFIX": "gm-local",
+    // passkey-auth D7, FR-064 — LOCAL ONLY: print sign-in codes in the API console instead
+    // of emailing them. Never set it in `env.dev` or `env.production`.
+    "OTP_LOG_TO_CONSOLE": "true"
   },
 
   "env": {
@@ -75,22 +77,13 @@
           "migrations_dir": "migrations"
         }
       ],
-      // Shared auth realm (decision: dev uses the production agnostic-auth service +
-      // the "guide-me" app id; the `.turistearya.com` cookie domain spans both subdomains).
-      "services": [
-        {
-          "binding": "AGNOSTIC_AUTH_API",
-          "service": "agnostic-auth"
-        }
-      ],
       "vars": {
-        "AGNOSTIC_AUTH_APP_ID": "guide-me",
         "COOKIE_DOMAIN": ".turistearya.com",
         "CORS_ORIGIN": "http://localhost:5173,https://app-dev.turistearya.com",
         "API_BASE_URL": "https://api-dev.turistearya.com",
         "APP_BASE_URL": "https://app-dev.turistearya.com",
         "RESEND_FROM": "no-reply@turistearya.com",
-        "SESSION_REFRESH_TTL_SECONDS": "5184000"
+        "AUTH_COOKIE_PREFIX": "gm-dev"
       }
     },
 
@@ -114,20 +107,16 @@
           "migrations_dir": "migrations"
         }
       ],
-      "services": [
-        {
-          "binding": "AGNOSTIC_AUTH_API",
-          "service": "agnostic-auth"
-        }
-      ],
       "vars": {
-        "AGNOSTIC_AUTH_APP_ID": "guide-me",
         "COOKIE_DOMAIN": "",
         "CORS_ORIGIN": "",
         "API_BASE_URL": "",
         "APP_BASE_URL": "",
         "RESEND_FROM": "no-reply@turistearya.com",
-        "SESSION_REFRESH_TTL_SECONDS": "5184000"
+        // passkey-auth D5 — its own cookie name. Host-only on the preview's API, so it never
+        // meets dev's or prod's session cookie; `BETTER_AUTH_SECRET` comes from the GitHub `dev`
+        // environment through preview.yml's secrets file (delivery-pipeline D5, research R2).
+        "AUTH_COOKIE_PREFIX": "gm-preview"
       }
     },
 
@@ -154,20 +143,13 @@
           "migrations_dir": "migrations"
         }
       ],
-      "services": [
-        {
-          "binding": "AGNOSTIC_AUTH_API",
-          "service": "agnostic-auth"
-        }
-      ],
       "vars": {
-        "AGNOSTIC_AUTH_APP_ID": "guide-me",
         "COOKIE_DOMAIN": ".turistearya.com",
         "CORS_ORIGIN": "http://localhost:5173,https://app.turistearya.com",
         "API_BASE_URL": "https://api.turistearya.com",
         "APP_BASE_URL": "https://app.turistearya.com",
         "RESEND_FROM": "no-reply@turistearya.com",
-        "SESSION_REFRESH_TTL_SECONDS": "5184000"
+        "AUTH_COOKIE_PREFIX": "gm"
       }
     }
   }

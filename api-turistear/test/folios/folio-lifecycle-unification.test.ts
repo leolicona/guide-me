@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { env, SELF } from 'cloudflare:test'
 import { materializeSeededFolio, seedUser, seedTwoOrgs, clearTenancyDb } from '../helpers/tenancy'
-import { buildFakeJwt } from '../helpers/jwt'
+import { sessionCookie } from '../helpers/session'
 
 // US-A84 — the folio is one object, not five screens.
 // Spec: docs/oversight/folio-lifecycle-unification.spec.md (Scenarios S-1…S-6, S-11, S-17…S-19;
@@ -12,7 +12,7 @@ import { buildFakeJwt } from '../helpers/jwt'
 // the moment somebody replaces the union with a plain window because it reads correct.
 
 const ADMIN_EMAIL = 'admin@empresa.com'
-const auth = (email: string) => ({ Cookie: `gm_access=${buildFakeJwt(email)}` })
+const auth = (email: string) => ({ Cookie: sessionCookie(email) })
 const FOLIOS = 'http://api.local/api/folios'
 
 const nowSec = () => Math.floor(Date.now() / 1000)

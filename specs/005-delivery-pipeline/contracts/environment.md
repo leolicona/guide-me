@@ -17,4 +17,16 @@ one, once, during the cutover (quickstart §0). The agent never handles a secret
 
 Unchanged and still required: `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` in both
 environments; `E2E_AGENT_EMAIL`, `E2E_AGENT_PASSWORD`, `E2E_ADMIN_EMAIL`, `E2E_ADMIN_PASSWORD` in
-`dev`; the secrets already on `api-guideme-dev` and `api-guideme` (D17).
+`dev`; the secrets already on `api-guideme-dev` and `api-guideme` (D17, superseded below).
+
+*2026-10-15, `specs/004-passkey-auth` T042*: the journeys sign in with a llave de acceso, so the
+`dev` environment holds `E2E_AGENT_PASSKEY` and `E2E_ADMIN_PASSKEY` instead of the four
+`E2E_*_EMAIL` / `E2E_*_PASSWORD` secrets (`app-turistear/e2e/README.md`). A preview also takes
+`BETTER_AUTH_SECRET` from the `dev` environment, like `QR_SECRET` and `RESEND_API_KEY` (D5).
+
+*2026-10-15, constitution v1.4.0 (supersedes D17)*: secrets are managed in the GitHub environments.
+`dev` and `production` each hold `BETTER_AUTH_SECRET` (required: a deploy without it stops before
+migrating), and may hold `QR_SECRET` and `RESEND_API_KEY`; every dev deploy and prod release plants
+the ones present on its API Worker with the version it ships (`--secrets-file`, additive). Copy
+`QR_SECRET` and `RESEND_API_KEY` from the Worker's exact current value, or leave them out: a wrong
+`QR_SECRET` invalidates every live ticket.

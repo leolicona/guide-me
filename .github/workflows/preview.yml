@@ -101,23 +101,25 @@ jobs:
       # dev's values when the dev environment holds them; otherwise a throwaway value for this
       # preview only, which the comment names with its cost (D5). JSON, so no character of a
       # value can be read as dotenv syntax. The file stays in the runner's temp and is never
-      # printed.
+      # printed. BETTER_AUTH_SECRET (passkey-auth D5) must be 32+ characters or the API refuses
+      # to start, so a shorter one is replaced like a missing one.
       - name: Secrets for the preview
         id: secrets
         env:
           QR_SECRET: ${{ secrets.QR_SECRET }}
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET }}
         run: |
           set -euo pipefail
           throwaway=""
-          for name in QR_SECRET RESEND_API_KEY; do
-            if [ -z "${!name}" ]; then
+          for name in QR_SECRET RESEND_API_KEY BETTER_AUTH_SECRET; do
+            if [ -z "${!name}" ] || { [ "$name" = BETTER_AUTH_SECRET ] && [ "${#BETTER_AUTH_SECRET}" -lt 32 ]; }; then
               export "$name=$(openssl rand -hex 32)"
               throwaway="${throwaway:+$throwaway,}$name"
               echo "::warning::$name is not in the dev environment; this preview gets a throwaway value (delivery-pipeline D5)."
             fi
           done
-          node -e 'const e = process.env; process.stdout.write(JSON.stringify({ QR_SECRET: e.QR_SECRET, RESEND_API_KEY: e.RESEND_API_KEY }))' \
+          node -e 'const e = process.env; process.stdout.write(JSON.stringify({ QR_SECRET: e.QR_SECRET, RESEND_API_KEY: e.RESEND_API_KEY, BETTER_AUTH_SECRET: e.BETTER_AUTH_SECRET }))' \
             > "$RUNNER_TEMP/preview-secrets.json"
           echo "throwaway=$throwaway" >> "$GITHUB_OUTPUT"
 
@@ -183,10 +185,10 @@ jobs:
     env:
       E2E_BASE_URL: ${{ needs.deploy.outputs.app-origin }}
       E2E_API_BASE: ${{ needs.deploy.outputs.api-origin }}
-      E2E_AGENT_EMAIL: ${{ secrets.E2E_AGENT_EMAIL }}
-      E2E_AGENT_PASSWORD: ${{ secrets.E2E_AGENT_PASSWORD }}
-      E2E_ADMIN_EMAIL: ${{ secrets.E2E_ADMIN_EMAIL }}
-      E2E_ADMIN_PASSWORD: ${{ secrets.E2E_ADMIN_PASSWORD }}
+      # passkey-auth T042 — each account signs in with its llave de acceso, offered for this
+      # preview's host (app-turistear/e2e/passkey.ts); no password exists.
+      E2E_AGENT_PASSKEY: ${{ secrets.E2E_AGENT_PASSKEY }}
+      E2E_ADMIN_PASSKEY: ${{ secrets.E2E_ADMIN_PASSKEY }}
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup

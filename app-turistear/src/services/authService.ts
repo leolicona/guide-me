@@ -77,34 +77,17 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
   throw new ServiceError(code, res.status, message)
 }
 
-// --- Auth API functions ---
+// --- Onboarding API functions ---
+//
+// passkey-auth D2 — what Better Auth cannot know (an organization, an invitation) is ours, under
+// /api/onboarding/* and the `{ error: { code, message } }` envelope. Signing in, signing out and
+// llaves de acceso go through Better Auth's client instead (services/authClient.ts).
 
 export interface RegisterInput {
   name: string
   email: string
-  password: string
   company_name: string
   phone: string
-}
-
-export interface LoginInput {
-  email: string
-  password: string
-}
-
-export interface ResetPasswordInput {
-  token: string
-  password: string
-}
-
-export interface CompleteInviteInput {
-  token: string
-  name: string
-  password: string
-}
-
-export interface AuthUserResponse {
-  user: { name: string; role: string }
 }
 
 export interface MessageResponse {
@@ -119,51 +102,30 @@ export interface InviteResponse {
   }
 }
 
+export interface AcceptInvitationResponse {
+  /** The invited address: the sign-in code went there (D11). */
+  email: string
+}
+
+// passkey-auth US3, D10 — creates the organization and its admin, and sends the sign-in code.
 export const register = (data: RegisterInput) =>
-  request<MessageResponse>('/api/auth/register', {
+  request<MessageResponse>('/api/onboarding/register', {
     method: 'POST',
     body: JSON.stringify(data),
   })
 
-// POST, not GET (BUG-010): the token is single-use, and a GET URL gets refetched on tab
-// focus and prefetched by mail-link scanners — burning the token after (or before) use.
-export const verifyEmail = (token: string) =>
-  request<AuthUserResponse>('/api/auth/verify', {
-    method: 'POST',
-    body: JSON.stringify({ token }),
-  })
+// passkey-auth US4 — the invitation lookup, moved from /api/auth/invite/accept.
+export const getInvitation = (token: string) =>
+  request<InviteResponse>(`/api/onboarding/invitations/${encodeURIComponent(token)}`)
 
-export const login = (data: LoginInput) =>
-  request<AuthUserResponse>('/api/auth/login', {
-    method: 'POST',
-    body: JSON.stringify(data),
-  })
-
-export const forgotPassword = (email: string) =>
-  request<MessageResponse>('/api/auth/forgot-password', {
-    method: 'POST',
-    body: JSON.stringify({ email }),
-  })
-
-export const resetPassword = (data: ResetPasswordInput) =>
-  request<MessageResponse>('/api/auth/reset-password', {
-    method: 'POST',
-    body: JSON.stringify(data),
-  })
-
-export const getInvite = (token: string) =>
-  request<InviteResponse>(`/api/auth/invite/accept?token=${encodeURIComponent(token)}`)
-
-export const completeInvite = (data: CompleteInviteInput) =>
-  request<AuthUserResponse>('/api/auth/invite/complete', {
-    method: 'POST',
-    body: JSON.stringify(data),
-  })
+// passkey-auth US4, D11 — creates the agent, consumes the invitation and sends the sign-in code.
+export const acceptInvitation = (token: string, name: string) =>
+  request<AcceptInvitationResponse>(
+    `/api/onboarding/invitations/${encodeURIComponent(token)}/accept`,
+    { method: 'POST', body: JSON.stringify({ name }) },
+  )
 
 export const getMe = async (): Promise<UserPayload> => {
   const res = await request<{ user: UserPayload }>('/api/me')
   return res.user
 }
-
-export const logout = () =>
-  request<MessageResponse>('/api/auth/logout', { method: 'POST' })

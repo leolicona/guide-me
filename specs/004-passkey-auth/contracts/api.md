@@ -17,8 +17,9 @@ There are two families of routes, with two conventions.
   sign-in answers, and `/get-session` and `/list-sessions` answer `404` (`disabledPaths`). The app
   reads its user from `/api/me`.
 
-**Rate limits**: a refused call answers `429 { "message": "Too many requests…" }` with an
-`X-Retry-After` header in seconds, which CORS exposes (D9).
+**Rate limits**: a refused call answers `429 { "message": "Too many requests. Please try again later." }`
+with an `X-Retry-After` header in seconds, which CORS exposes (D9). Per client IP: code sends and
+`sign-in/email-otp` 3 per 60 s each (the emailOTP plugin's rules), every other route 100 per 60 s.
 
 ---
 
@@ -50,8 +51,13 @@ Failures of `sign-in/email-otp`:
 | `authClient.passkey.updatePasskey({ id, name })` | `POST /api/auth/passkey/update-passkey` | `200 { passkey }` |
 | `authClient.passkey.deletePasskey({ id })` | `POST /api/auth/passkey/delete-passkey` | `200`, followed by a notice email (D12) |
 
-The options both ceremonies return carry `rpId` set to the host of `APP_BASE_URL` and
-`userVerification: "required"`. Registration also carries `residentKey: "required"`.
+The options both ceremonies return carry `rpId` set to the host of `APP_BASE_URL`. Registration
+carries `authenticatorSelection: { residentKey: "required", userVerification: "required" }`. The
+sign-in options carry Better Auth 1.7.7's fixed `userVerification: "preferred"`, which asks every
+device able to verify its user to do so (FR-002) and is not configurable (R15).
+
+A registration that does not verify (another origin or rpID) answers Better Auth's own
+`500 FAILED_TO_VERIFY_REGISTRATION`, and nothing is stored.
 
 ### Sessions: US1, US5
 
@@ -64,8 +70,22 @@ The options both ceremonies return carry `rpId` set to the host of `APP_BASE_URL
 
 - **Reachable**: `/revoke-session`, `/revoke-other-sessions` and `/update-user`. The last accepts
   `name` only, because the tenant fields are `input: false`.
-- **Disabled (`404`)**: `/get-session` and `/list-sessions` (`disabledPaths`, which keeps the BFF);
-  email-and-password; `changeEmail`; `deleteUser`.
+- **Disabled (`404`)** through `disabledPaths` (R15):
+  - `/get-session` and `/list-sessions`, which keeps the BFF;
+  - every password route Better Auth or its emailOTP plugin registers, even with
+    email-and-password off: `/sign-in/email`, `/sign-up/email`, `/change-password`,
+    `/verify-password`, `/request-password-reset`, `/reset-password`,
+    `/email-otp/request-password-reset`, `/forget-password/email-otp`, `/email-otp/reset-password`
+    and `/email-otp/check-verification-otp` (FR-060);
+  - email changes and out-of-band verification: `/change-email`, `/email-otp/request-email-change`,
+    `/email-otp/change-email`, `/email-otp/verify-email`, `/send-verification-email`,
+    `/verify-email`;
+  - social and account routes and self-deletion: `/sign-in/social`, `/link-social`,
+    `/unlink-account`, `/list-accounts`, `/account-info`, `/refresh-token`, `/get-access-token`,
+    `/delete-user`, `/delete-user/callback`, `/update-session`.
+
+**Cross-site requests**: Better Auth refuses (`403`) a cookie-bearing `POST` whose `Origin` is not
+`APP_BASE_URL`. The app's browser always sends its own.
 
 ---
 
