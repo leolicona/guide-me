@@ -276,7 +276,7 @@ invitation lookup also disappear until US3 (T026) and US4 (T029) restore them un
 
 ## Phase 8: Retirement, tooling and polish
 
-- [ ] T036 [P] Delete the password and Agnostic Auth code under `api-turistear/src/` (D13, FR-060, FR-071):
+- [X] T036 [P] Delete the password and Agnostic Auth code under `api-turistear/src/` (D13, FR-060, FR-071):
   - `services/agnosticAuth.ts`, `utils/jwt.ts`, `utils/cookies.ts` and the whole `routes/auth/` folder;
   - `sendMagicLinkEmail` and `sendPasswordResetEmail` from `services/resend.ts`;
   - `INVALID_CREDENTIALS` and `EMAIL_NOT_VERIFIED` from `types/errors.ts`;
@@ -289,12 +289,12 @@ invitation lookup also disappear until US3 (T026) and US4 (T029) restore them un
   - `login`, `verify`, `forgotPassword`, `resetPassword` and the old invite calls in `services/authService.ts`;
   - the matching exports from `features/auth/index.ts`.
 - [ ] T038 Create `app-turistear/src/features/auth/components/LegacyLinkNotice.tsx` ("Ya no usamos contraseñas. Entra con tu llave de acceso o con un código por correo.", with a button to `ROUTES.LOGIN`) and `app-turistear/src/pages/LegacyLinkPage.tsx`. Route `ROUTES.VERIFY`, `ROUTES.FORGOT_PASSWORD` and `ROUTES.RESET_PASSWORD` to it in `app-turistear/src/App.tsx` (FR-063). Add a component test citing `passkey-auth US1` (scenario 9), with axe.
-- [ ] T039 Remove Agnostic Auth from `api-turistear/wrangler.jsonc`, `api-turistear/vitest.config.ts`, `api-turistear/src/bindings.d.ts` and `api-turistear/.dev.vars.example` (FR-062, SC-003):
+- [X] T039 Remove Agnostic Auth from `api-turistear/wrangler.jsonc`, `api-turistear/vitest.config.ts`, `api-turistear/src/bindings.d.ts` and `api-turistear/.dev.vars.example` (FR-062, SC-003):
   - delete the `AGNOSTIC_AUTH_API` service binding, `AGNOSTIC_AUTH_APP_ID`, `DEV_AUTH_SERVICE_URL` and `SESSION_REFRESH_TTL_SECONDS` from all three profiles, plus the "Shared auth realm" comment;
   - delete the stand-in and the keys from the vitest config;
   - run `pnpm cf-typegen:api`.
-- [ ] T040 Delete `api-turistear/test/helpers/jwt.ts` and the replaced suites `api-turistear/test/auth/{admin-login-session,admin-registration,agent-invitation,password-recovery}.test.ts`. research.md § Withdrawn scenarios records where each went.
-- [ ] T041 [P] Rewrite `api-turistear/scripts/seed-local.mjs` (SC-011):
+- [X] T040 Delete `api-turistear/test/helpers/jwt.ts` and the replaced suites `api-turistear/test/auth/{admin-login-session,admin-registration,agent-invitation,password-recovery}.test.ts`. research.md § Withdrawn scenarios records where each went.
+- [X] T041 [P] Rewrite `api-turistear/scripts/seed-local.mjs` (SC-011):
   - drop the agnostic-auth hashing and the password argument;
   - insert users with password columns `''` and `email_verified = 1`;
   - print "Entra en http://localhost:5174/login con <email>; el código aparece en la consola del API".

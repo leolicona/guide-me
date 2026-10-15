@@ -155,17 +155,9 @@ export const invitations = sqliteTable('invitations', {
     .default(sql`(unixepoch())`),
 })
 
-export const passwordResetTokens = sqliteTable('password_reset_tokens', {
-  id: text('id').primaryKey(),
-  userId: text('user_id')
-    .notNull()
-    .references(() => users.id),
-  token: text('token').notNull().unique(),
-  expiresAt: integer('expires_at', { mode: 'timestamp' }).notNull(),
-  createdAt: integer('created_at', { mode: 'timestamp' })
-    .notNull()
-    .default(sql`(unixepoch())`),
-})
+// passkey-auth D15 — `password_reset_tokens` (and `users.password_hash`/`password_salt`) are no
+// longer mapped or read: the email code replaced every password flow (FR-060, FR-061). The table
+// stays in D1 until the follow-up migration drops it (debt `password-material`).
 
 // ─── passkey-auth D4 — Better Auth 1.7.7's standard schema (migration 0071) ────────────────────
 // Better Auth addresses these through the Drizzle adapter: each table by its export name here
@@ -1091,8 +1083,6 @@ export type User = typeof users.$inferSelect
 export type NewUser = typeof users.$inferInsert
 export type Invitation = typeof invitations.$inferSelect
 export type NewInvitation = typeof invitations.$inferInsert
-export type PasswordResetToken = typeof passwordResetTokens.$inferSelect
-export type NewPasswordResetToken = typeof passwordResetTokens.$inferInsert
 export type Session = typeof sessions.$inferSelect
 export type NewSession = typeof sessions.$inferInsert
 export type Account = typeof accounts.$inferSelect

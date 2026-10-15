@@ -34,22 +34,12 @@
       "migrations_dir": "migrations"
     }
   ],
-  "services": [
-    {
-      "binding": "AGNOSTIC_AUTH_API",
-      "service": "agnostic-auth"
-    }
-  ],
   "vars": {
-    "AGNOSTIC_AUTH_APP_ID": "guide-me",
     "COOKIE_DOMAIN": ".turistearya.com",
     "CORS_ORIGIN": "http://localhost:5173,https://app.turistearya.com",
     "API_BASE_URL": "https://api.turistearya.com",
     "APP_BASE_URL": "https://app.turistearya.com",
     "RESEND_FROM": "no-reply@turistearya.com",
-    // Idle-session window (seconds). Keep in sync with `refreshTokenTtlSeconds`
-    // in the agnostic-auth APP_REGISTRY KV entry for app "guide-me".
-    "SESSION_REFRESH_TTL_SECONDS": "5184000",
     // passkey-auth D5 — the session cookie is `__Secure-<prefix>.session_token`. Each
     // environment has its own prefix: dev and prod both set cookies on `.turistearya.com`,
     // so a shared name would let one overwrite the other's session.
@@ -84,22 +74,12 @@
           "migrations_dir": "migrations"
         }
       ],
-      // Shared auth realm (decision: dev uses the production agnostic-auth service +
-      // the "guide-me" app id; the `.turistearya.com` cookie domain spans both subdomains).
-      "services": [
-        {
-          "binding": "AGNOSTIC_AUTH_API",
-          "service": "agnostic-auth"
-        }
-      ],
       "vars": {
-        "AGNOSTIC_AUTH_APP_ID": "guide-me",
         "COOKIE_DOMAIN": ".turistearya.com",
         "CORS_ORIGIN": "http://localhost:5173,https://app-dev.turistearya.com",
         "API_BASE_URL": "https://api-dev.turistearya.com",
         "APP_BASE_URL": "https://app-dev.turistearya.com",
         "RESEND_FROM": "no-reply@turistearya.com",
-        "SESSION_REFRESH_TTL_SECONDS": "5184000",
         "AUTH_COOKIE_PREFIX": "gm-dev"
       }
     },
@@ -127,20 +107,12 @@
           "migrations_dir": "migrations"
         }
       ],
-      "services": [
-        {
-          "binding": "AGNOSTIC_AUTH_API",
-          "service": "agnostic-auth"
-        }
-      ],
       "vars": {
-        "AGNOSTIC_AUTH_APP_ID": "guide-me",
         "COOKIE_DOMAIN": ".turistearya.com",
         "CORS_ORIGIN": "http://localhost:5173,https://app.turistearya.com",
         "API_BASE_URL": "https://api.turistearya.com",
         "APP_BASE_URL": "https://app.turistearya.com",
         "RESEND_FROM": "no-reply@turistearya.com",
-        "SESSION_REFRESH_TTL_SECONDS": "5184000",
         "AUTH_COOKIE_PREFIX": "gm"
       }
     }

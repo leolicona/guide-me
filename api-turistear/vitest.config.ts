@@ -28,13 +28,6 @@ export default defineConfig({
           AUTH_COOKIE_PREFIX: 'gm-test',
           COOKIE_DOMAIN: '',
           OTP_LOG_TO_CONSOLE: '',
-          // Force tests to use the (mocked) AGNOSTIC_AUTH_API service binding,
-          // overriding any DEV_AUTH_SERVICE_URL inherited from .dev.vars.
-          DEV_AUTH_SERVICE_URL: '',
-        },
-        serviceBindings: {
-          AGNOSTIC_AUTH_API: () =>
-            new Response('{"success":false}', { status: 500 }),
         },
       },
     }),
