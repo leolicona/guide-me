@@ -93,7 +93,7 @@ export function ReceiptPaymentChip({ folio }: { folio: ReceiptStatusFolio }) {
  */
 export function ReceiptVerificationNote({ folio }: { folio: ReceiptStatusFolio }) {
   if (folio.payment_verification !== 'pending' || folio.verification_auto) return null
-  const titled = true
+  const titled = receiptState(folio) !== 'unverified'
   return (
     <SectionCard>
       <Stack direction="row" spacing={1.5} sx={{ alignItems: 'flex-start' }}>
