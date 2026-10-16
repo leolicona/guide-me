@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { env, SELF } from 'cloudflare:test'
-import { seedUser, seedTwoOrgs, clearFullDb } from '../helpers/tenancy'
+import { seedUser, seedTwoOrgs, clearFullDb, materializeSeededFolio } from '../helpers/tenancy'
+import { EVENTS, renderOutboxMessage } from '../../src/utils/notifications'
 import { sessionCookie } from '../helpers/session'
 
 // US-A86 / US-AG51 — the notification outbox.
@@ -233,5 +234,95 @@ describe('Multitenancy isolation', () => {
     // And it was NOT drained by the attempt.
     const [row] = await rowsFor(folioB)
     expect(row.status).toBe('pending')
+  })
+})
+
+// bug: payment-rejected-folio-copy (.specify/bugs/payment-rejected-folio-copy/assessment.md) — the
+// customer bought a «compra», never a «folio» (constitution VII), and the outbox row carries its
+// message already filled from the sale: the composer used to fill only the customer's name and cut
+// the rest, so the customer read «…la cancelación de tu folio en .». D11 (Devolada) sends
+// `payment_rejected` for every transfer that never arrives, with no human tap behind it.
+describe('bug: payment-rejected-folio-copy — the outbox sends a whole message', () => {
+  const pendingMessages = async (email: string) => {
+    const res = await SELF.fetch(`${OUTBOX}?status=pending&channel=whatsapp`, { headers: auth(email) })
+    expect(res.status).toBe(200)
+    return ((await res.json()) as any).notifications.map((n: any) => n.message as string)
+  }
+
+  it('a rejected payment names the organization and is signed by the seller', async () => {
+    const { organizationId, userId } = await seedUser({
+      email: ADMIN, role: 'admin', name: 'Lucía Vende', organizationName: 'Buceo Cancún',
+    })
+    const folioId = await seedFolio({ organizationId, agentId: userId })
+    await seedRow({ organizationId, folioId, event: 'payment_rejected' })
+
+    expect(await pendingMessages(ADMIN)).toEqual([
+      'Hola Ana Buceo, no pudimos confirmar el pago de tu compra en Buceo Cancún, así que tuvimos ' +
+        'que cancelarla. Si crees que es un error, escríbeme. — Lucía Vende',
+    ])
+  })
+
+  it('an approved cancellation names the organization', async () => {
+    const { organizationId, userId } = await seedUser({
+      email: ADMIN, role: 'admin', organizationName: 'Buceo Cancún',
+    })
+    const folioId = await seedFolio({ organizationId, agentId: userId })
+    await seedRow({ organizationId, folioId, event: 'cancellation_approved' })
+
+    expect(await pendingMessages(ADMIN)).toEqual([
+      'Hola Ana Buceo, aprobamos la cancelación de tu compra en Buceo Cancún. Te contamos ' +
+        'enseguida cómo queda.',
+    ])
+  })
+
+  it('a completed refund spells out what was paid, returned and kept', async () => {
+    const { organizationId, userId } = await seedUser({
+      email: ADMIN, role: 'admin', organizationName: 'Buceo Cancún',
+    })
+    const folioId = await seedFolio({ organizationId, agentId: userId })
+    await materializeSeededFolio(folioId)
+    await env.DB.prepare(
+      `UPDATE folio_lines SET refund_status = 'refunded', refund_amount = 150000 WHERE folio_id = ?`,
+    )
+      .bind(folioId)
+      .run()
+    await seedRow({ organizationId, folioId, event: 'refund_completed' })
+
+    expect(await pendingMessages(ADMIN)).toEqual([
+      'Hola Ana Buceo, confirmamos el reembolso de tu compra en Buceo Cancún. Pagaste $2,000.00, ' +
+        'te devolvimos $1,500.00 y se retuvo $500.00 según la política de cancelación.',
+    ])
+  })
+
+  it("each organization's message names its own organization", async () => {
+    const { orgA, orgB } = await seedTwoOrgs()
+    for (const o of [orgA, orgB]) {
+      const folioId = await seedFolio({ organizationId: o.organizationId, agentId: o.adminUserId })
+      await seedRow({ organizationId: o.organizationId, folioId, event: 'cancellation_approved' })
+    }
+    const [a] = await pendingMessages(orgA.adminEmail)
+    const [b] = await pendingMessages(orgB.adminEmail)
+    expect(a).toContain('tu compra en Org A.')
+    expect(b).toContain('tu compra en Org B.')
+  })
+
+  it('no shipped template says «folio», and a value is never read again as a placeholder', () => {
+    for (const [event, def] of Object.entries(EVENTS)) {
+      expect(def.template, event).not.toMatch(/folio/i)
+    }
+    const message = renderOutboxMessage(EVENTS.payment_rejected.template, {
+      customerName: 'Ana {org_name}',
+      orgName: 'Buceo',
+      agentName: null,
+      timezone: 'UTC',
+      total: 0,
+      amountPaid: 0,
+      refundAmount: null,
+      creditAmount: null,
+      creditExpiresAt: null,
+      bookingExpiresAt: null,
+    })
+    expect(message.startsWith('Hola Ana {org_name}, no pudimos')).toBe(true)
+    expect(message).not.toMatch(/\{(?!org_name\})[a-z_]+\}/)
   })
 })
