@@ -1,6 +1,7 @@
-import { describe, it, expect, beforeAll } from 'vitest'
+import { describe, it, expect, beforeAll, beforeEach } from 'vitest'
 import { http, HttpResponse } from 'msw'
 import { renderWithProviders, screen } from '../../../test/renderWithProviders'
+import { expectNoA11yViolations } from '../../../test/axe'
 import { server } from '../../../test/server'
 import { FolioTimeline } from './FolioTimeline'
 import type { FolioEvent } from '../types'
@@ -411,5 +412,157 @@ describe('the empty timeline', () => {
       <FolioTimeline events={[]} lines={[{ slot_date: past, slot_start_time: '08:00' }]} />,
     )
     expect(screen.getByText('Historial')).toBeInTheDocument()
+  })
+})
+
+// --- devolada-transfer-verification US1 — the enlace and Devolada's verdicts in the Historial -----
+// Copy from contracts/turistear-api.md § Labels and § Action copy (research D16); payloads from
+// data-model.md § Changes to existing types.
+
+describe('devolada-transfer-verification US1 — the enlace’s story', () => {
+  // Registered per test: MSW resets handlers after each one.
+  beforeEach(() => {
+    server.use(
+      http.get('/api/organizations/me', () =>
+        HttpResponse.json({
+          organization: { id: 'o1', name: 'Turistear Ya!', timezone: 'America/Cancun' },
+        }),
+      ),
+    )
+  })
+
+  /** The row's functional colour, which its icon carries — state is never colour alone. */
+  const iconOf = (text: string) => screen.getByText(text).parentElement!.previousElementSibling!
+
+  it('a link created and then closed reads as an enlace, never a "liga" or a "link"', async () => {
+    const { container } = renderWithProviders(
+      <FolioTimeline
+        events={[
+          anEvent({
+            type: 'payment_link_issued',
+            at: 1000,
+            payload: { link_id: 'link-1', kind: 'sale', amount: 150_000, expires_at: 87_400 },
+          }),
+          anEvent({
+            type: 'payment_link_closed',
+            at: 2000,
+            actor: null,
+            payload: { link_id: 'link-1', reason: 'verified_by_admin' },
+          }),
+        ]}
+      />,
+    )
+
+    expect(screen.getByText('Enlace de pago creado')).toBeInTheDocument()
+    expect(screen.getByText('Enlace de pago cerrado')).toBeInTheDocument()
+    expect(container.textContent).not.toMatch(/\bliga\b|\blink\b/i)
+    // Narrative, not state: neutral ink, each row with its icon.
+    for (const text of ['Enlace de pago creado', 'Enlace de pago cerrado']) {
+      expect(iconOf(text)).toHaveStyle({ color: 'var(--mui-palette-text-secondary)' })
+      expect(iconOf(text).querySelector('svg')).toBeInTheDocument()
+    }
+    await expectNoA11yViolations(container)
+  })
+
+  it('Devolada’s verification names its receipt, a «Comprobante», with the system as actor', async () => {
+    const { container } = renderWithProviders(
+      <FolioTimeline
+        events={[
+          anEvent({
+            type: 'payment_verified',
+            actor: null,
+            payload: { source: 'devolada', receipt_number: 'DV-0042', received: 150_000 },
+          }),
+        ]}
+      />,
+    )
+
+    expect(
+      screen.getByText('Transferencia verificada por Devolada · Comprobante DV-0042'),
+    ).toBeInTheDocument()
+    expect(screen.getByText(/^Sistema · /)).toBeInTheDocument()
+    expect(container.textContent).not.toMatch(/folio/i)
+    await expectNoA11yViolations(container)
+  })
+
+  it('without a receipt number the line stops at Devolada', () => {
+    renderWithProviders(
+      <FolioTimeline
+        events={[anEvent({ type: 'payment_verified', actor: null, payload: { source: 'devolada' } })]}
+      />,
+    )
+    expect(screen.getByText('Transferencia verificada por Devolada')).toBeInTheDocument()
+  })
+
+  it('an admin’s verification keeps its copy and its reference', () => {
+    renderWithProviders(
+      <FolioTimeline
+        events={[anEvent({ type: 'payment_verified', payload: { reference: 'SPEI-778' } })]}
+      />,
+    )
+    expect(screen.getByText('Transferencia verificada')).toBeInTheDocument()
+    expect(screen.getByText(/· ref\. SPEI-778$/)).toBeInTheDocument()
+  })
+
+  // Written for partial, invalid and unapplied, and for confirmed on a cancelled sale; the other
+  // statuses map as § Labels does, so a future writer cannot make the two surfaces disagree.
+  it.each<{ status: string; awaiting: string | null; copy: string; tone: string }>([
+    { status: 'partial', awaiting: null, copy: 'Pago incompleto', tone: 'warning' },
+    { status: 'invalid', awaiting: null, copy: 'Banxico no confirma la transferencia', tone: 'error' },
+    { status: 'unapplied', awaiting: null, copy: 'Dinero por devolver', tone: 'warning' },
+    { status: 'confirmed', awaiting: null, copy: 'Dinero por devolver', tone: 'warning' },
+    { status: 'expired', awaiting: null, copy: 'No se recibió la transferencia', tone: 'error' },
+    { status: 'queued_for_credit', awaiting: null, copy: 'Verificación en pausa', tone: 'warning' },
+    {
+      status: 'validating',
+      awaiting: 'payer_tracking_key',
+      copy: 'Pide al cliente su clave de rastreo',
+      tone: 'warning',
+    },
+    { status: 'validating', awaiting: null, copy: 'Verificando pago', tone: 'warning' },
+    { status: 'superseded', awaiting: null, copy: 'Veredicto de Devolada', tone: 'warning' },
+  ])('a $status verdict reads «$copy», in $tone', async ({ status, awaiting, copy, tone }) => {
+    const { container } = renderWithProviders(
+      <FolioTimeline
+        events={[
+          anEvent({
+            type: 'payment_verdict',
+            actor: null,
+            payload: {
+              link_id: 'link-1',
+              status,
+              asked: 150_000,
+              received: status === 'partial' ? 100_000 : null,
+              receipt_number: null,
+              awaiting,
+            },
+          }),
+        ]}
+      />,
+    )
+
+    expect(screen.getByText(copy)).toBeInTheDocument()
+    expect(screen.getByText(/^Sistema · /)).toBeInTheDocument()
+    expect(iconOf(copy)).toHaveStyle({ color: `var(--mui-palette-${tone}-main)` })
+    await expectNoA11yViolations(container)
+  })
+
+  it('money that never arrived reads as the sale ending, in red', async () => {
+    const { container } = renderWithProviders(
+      <FolioTimeline
+        events={[
+          anEvent({
+            type: 'transfer_not_received',
+            actor: null,
+            payload: { link_id: 'link-1', kind: 'sale' },
+          }),
+        ]}
+      />,
+    )
+
+    const copy = 'No se recibió la transferencia — venta cancelada'
+    expect(screen.getByText(copy)).toBeInTheDocument()
+    expect(iconOf(copy)).toHaveStyle({ color: 'var(--mui-palette-error-main)' })
+    await expectNoA11yViolations(container)
   })
 })

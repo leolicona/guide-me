@@ -29,7 +29,8 @@ import { FolioTimeline } from './FolioTimeline'
 import { refundReceiptUrl } from '../refundReceipt'
 import { FolioWorkActions } from './FolioWorkActions'
 import type { FolioDetail } from '../types'
-import { useOrgDateFormatter } from '../../organization'
+import { useMyOrganization, useOrgDateFormatter } from '../../organization'
+import { PaymentLinkCard, PaymentLinkStatusChip } from '../../devolada'
 import type { CancellationQuote } from '../../organization/types'
 // US-A93 (folio-surface-parity D1) — the seller's read of the SAME folio, through their own
 // caller-scoped endpoint. Since #126 both endpoints return the same payload, so everything below
@@ -89,6 +90,7 @@ export interface FolioDetailScreenProps {
 export function FolioDetailScreen({ surface }: FolioDetailScreenProps) {
   const isAdmin = surface === 'admin'
   const formatDate = useOrgDateFormatter(DATE_FMT) // US-A66 — org-local audit timestamps
+  const { data: org } = useMyOrganization()
   const { id } = useParams<{ id: string }>()
   // Both hooks run every render (rules of hooks); passing `undefined` disables the one this
   // surface is not using, since both queries are `enabled: !!id`.
@@ -132,6 +134,13 @@ export function FolioDetailScreen({ surface }: FolioDetailScreenProps) {
   // cancel path for unconfirmed money.
   const hasOpenPetition = !!folio?.folio_requests?.some((r) => r.status === 'pending')
   const awaitingVerification = folio?.payment_verification === 'pending' && !isCancelled
+  // devolada-transfer-verification D14, D16 — the sale's latest payment link (they arrive newest
+  // first), a failed one included. While the money is unverified its chip takes the clearance slot
+  // of the header; on a sale Devolada is resolving it replaces «Por verificar», which names the
+  // admin's work, and there is none.
+  const latestLink = folio?.payment_links?.[0] ?? null
+  const clearanceLink = awaitingVerification ? latestLink : null
+  const devoladaResolving = !!folio?.verification_auto && !!clearanceLink
   // Every dated line already departed → the folio is a countable fact (its fulfilment reading),
   // not something to cancel: no seats to release, terminal-tier money. Client-clock pre-filter,
   // date granularity — the same call BookingActions makes for its movable lines.
@@ -341,9 +350,10 @@ export function FolioDetailScreen({ surface }: FolioDetailScreenProps) {
                   from useNowSeconds (D19), never Date.now() in render. */}
               <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: 'wrap', mt: 1 }}>
                 <FolioStatusChip status={folio.status} />
-                {folio.payment_verification === 'pending' && (
+                {folio.payment_verification === 'pending' && !devoladaResolving && (
                   <StatusChip status="pending" label="Por verificar" />
                 )}
+                {clearanceLink && <PaymentLinkStatusChip label={clearanceLink.label} />}
                 {/* US-A23 — refund status at a glance, next to the folio status. */}
                 {folio.refund_status === 'pending' && (
                   <StatusChip status="pending" label="Reembolso pendiente" />
@@ -533,6 +543,22 @@ export function FolioDetailScreen({ surface }: FolioDetailScreenProps) {
                 </Stack>
               </Box>
             </SectionCard>
+
+            {/* devolada-transfer-verification D16 — the enlace that collects this sale, beside the
+                money it collects: its amount, its label and, while it is open, «Cobrar por
+                WhatsApp». On both surfaces, because the `url` goes to the seller and to admins, the
+                people who send it (contracts § PaymentLinkView). The message reads like every other
+                one this sale sends — its seller, the organization — with the expiry in the
+                organization's zone. Nothing renders for a sale without an enlace. */}
+            <PaymentLinkCard
+              link={latestLink}
+              message={{
+                folio,
+                agentName: folio.agent.name,
+                orgName: org?.name ?? 'Turistear Ya!',
+                timezone: org?.timezone,
+              }}
+            />
 
             {/* US-A93 (D8) — the access tickets, on BOTH surfaces. «Mi QR no funciona» is a call
                 that reaches the admin, and until now they could not see what the customer was

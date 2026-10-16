@@ -1,4 +1,4 @@
-import { useParams, Link as RouterLink } from 'react-router-dom'
+import { useParams, useLocation, Link as RouterLink } from 'react-router-dom'
 import {
   Box,
   Typography,
@@ -10,14 +10,14 @@ import {
   Fade,
   Stack,
   Divider,
-  Chip,
 } from '@mui/material'
-import CheckCircleRounded from '@mui/icons-material/CheckCircleRounded'
-import EventAvailableRounded from '@mui/icons-material/EventAvailableRounded'
-import EventBusyRounded from '@mui/icons-material/EventBusyRounded'
-import HourglassTopRounded from '@mui/icons-material/HourglassTopRounded'
 import { useFolio, useFolioCancellationQuote } from '../features/pos/hooks'
 import { PaymentBreakdown } from '../features/pos/components/PaymentBreakdown'
+import {
+  ReceiptPaymentChip,
+  ReceiptPaymentStatus,
+  ReceiptVerificationNote,
+} from '../features/pos/components/ReceiptPaymentStatus'
 import { TicketQr } from '../features/pos/components/TicketQr'
 import {
   BookingActions,
@@ -25,6 +25,9 @@ import {
   TicketWhatsAppButton,
   DeliveryBadge,
 } from '../features/bookings'
+import { PaymentLinkCard, type PaymentLinkError } from '../features/devolada'
+import { useMyOrganization } from '../features/organization'
+import { useMe } from '../features/auth/hooks/useMe'
 import { formatMoney } from '../features/catalog/types'
 import { folioLineMeta } from '../features/folios/folioLineLabel'
 import { FolioStatusChip } from '../features/folios'
@@ -45,6 +48,14 @@ export default function FolioReceiptPage() {
   const { data: folio, isLoading, isError } = useFolio(id)
   // Same request as above (shared query key) — US-A76: what cancelling now would cost.
   const { data: quote, isLoading: quoteLoading } = useFolioCancellationQuote(id)
+  // devolada-transfer-verification D16 — the enlace's message carries the names the ticket's does
+  // (TicketWhatsAppButton), and its expiry reads in the organization's zone.
+  const { data: org } = useMyOrganization()
+  const { data: me } = useMe()
+  // D6 — why the checkout got no enlace, when it answered one (PosCheckoutPage passes it).
+  const location = useLocation()
+  const paymentLinkError = (location.state as { paymentLinkError?: PaymentLinkError } | null)
+    ?.paymentLinkError
 
   const isBooking = folio?.status === 'booking'
   // A cancelled folio that carries a booking expiry was an apartado (US-AG07.5 late arrival).
@@ -67,23 +78,10 @@ export default function FolioReceiptPage() {
         {folio && (
           <Stack spacing={3}>
             <Box sx={{ textAlign: 'center' }}>
-              {isBooking ? (
-                <EventAvailableRounded color="warning" sx={{ fontSize: 48 }} />
-              ) : isExpiredBooking ? (
-                <EventBusyRounded color="disabled" sx={{ fontSize: 48 }} />
-              ) : (
-                <CheckCircleRounded color="success" sx={{ fontSize: 48 }} />
-              )}
-              <Typography variant="h5" component="h1" sx={{ mt: 1 }}>
-                {isBooking
-                  ? 'Apartado registrado'
-                  : isExpiredBooking
-                    ? 'Apartado vencido'
-                    : 'Venta confirmada'}
-              </Typography>
-              <Typography variant="caption" color="textSecondary" sx={{ display: 'block' }}>
-                Folio {folio.id}
-              </Typography>
+              {/* devolada-transfer-verification D16 — never «Venta confirmada» for a transfer
+                  nobody has verified; and the sale is a Venta, so no «Folio {id}» line
+                  (constitution VII). */}
+              <ReceiptPaymentStatus folio={folio} />
               {folio.customer_email && (
                 <Typography variant="body2" color="success" sx={{ mt: 1 }}>
                   📧 {isBooking ? 'Comprobante de apartado enviado a' : 'Recibo enviado a'}{' '}
@@ -92,24 +90,25 @@ export default function FolioReceiptPage() {
               )}
             </Box>
 
+            {/* devolada-transfer-verification D16 — the sale's latest enlace, a failed one
+                included, right under the status: sending it is how the seller collects (FR-008).
+                When the checkout could create none, the card says why (FR-010). It renders
+                nothing for a sale without Devolada. */}
+            <PaymentLinkCard
+              link={folio.payment_links?.[0] ?? null}
+              error={paymentLinkError ?? null}
+              message={{
+                folio,
+                agentName: me?.name ?? '',
+                orgName: org?.name ?? 'Turistear Ya!',
+                timezone: org?.timezone,
+              }}
+            />
+
             <ExpiredBookingBanner folio={folio} />
 
             {/* US-A67 — a transfer whose money an admin hasn't verified yet: no QR, no delivery. */}
-            {folio.payment_verification === 'pending' && (
-              <SectionCard>
-                <Stack direction="row" spacing={1.5} sx={{ alignItems: 'flex-start' }}>
-                  <HourglassTopRounded sx={{ color: 'warning.main', mt: 0.25 }} />
-                  <Box>
-                    <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
-                      Pago en verificación
-                    </Typography>
-                    <Typography variant="body2" color="textSecondary">
-                      Los boletos se enviarán en cuanto un administrador confirme la transferencia.
-                    </Typography>
-                  </Box>
-                </Stack>
-              </SectionCard>
-            )}
+            <ReceiptVerificationNote folio={folio} />
 
             {/* whatsapp-qr-delivery — the primary post-payment action: send the portal link (QR +
                 itinerary) over WhatsApp. Leads the receipt for a paid folio; the QR below is the
@@ -140,12 +139,7 @@ export default function FolioReceiptPage() {
                   sx={{ justifyContent: 'space-between', alignItems: 'center', mb: 2 }}
                 >
                   <Typography variant="h6">Recibo</Typography>
-                  <Chip
-                    size="small"
-                    color={isBooking ? 'warning' : folio.status === 'cancelled' ? 'default' : 'success'}
-                    variant="outlined"
-                    label={isBooking ? 'Apartado' : folio.status === 'cancelled' ? 'Cancelado' : 'Pagado'}
-                  />
+                  <ReceiptPaymentChip folio={folio} />
                 </Stack>
 
                 {(folio.customer_name || folio.customer_email) && (
@@ -233,7 +227,10 @@ export default function FolioReceiptPage() {
                 {folio.payments && folio.payments.length > 1 && (
                   <>
                     <Divider sx={{ my: 2 }} />
-                    <PaymentBreakdown payments={folio.payments} />
+                    <PaymentBreakdown
+                      payments={folio.payments}
+                      verificationAuto={folio.verification_auto}
+                    />
                   </>
                 )}
               </CardContent>

@@ -1,7 +1,20 @@
 import { useQuery } from '@tanstack/react-query'
 import { getFolio } from '../../../services/posService'
+import type { PaymentLinkLabel } from '../../devolada/types'
 
 export const FOLIO_QUERY_KEY = ['pos', 'folio'] as const
+
+// devolada-transfer-verification D16 — the labels of an enlace still in flight: waiting for the
+// customer's transfer, or for Banxico's answer to it. Its verdict reaches the server by webhook or
+// by the sweep, never through a mutation this screen could invalidate on, so the receipt re-reads
+// the sale until the label leaves this set.
+const LINK_IN_FLIGHT: ReadonlySet<PaymentLinkLabel> = new Set<PaymentLinkLabel>([
+  'awaiting_payment',
+  'validating',
+  'needs_tracking_key',
+  'credit_paused',
+])
+const LINK_POLL_MS = 15_000
 
 // One request serves both hooks below — same key, different `select`.
 //
@@ -28,10 +41,17 @@ export function useFolioDetailRead(id: string | undefined) {
   return useQuery(folioQuery(id))
 }
 
+// The receipt's read. Only this observer polls (D16): the hooks sharing its key keep their
+// behaviour, and its interval refetches the one request they all share. The callback sees the
+// un-selected read, whose latest enlace comes first (`payment_links` is newest first).
 export function useFolio(id: string | undefined) {
   return useQuery({
     ...folioQuery(id),
     select: (r: Awaited<ReturnType<typeof getFolio>>) => r.folio,
+    refetchInterval: (query) => {
+      const label = query.state.data?.folio.payment_links?.[0]?.label
+      return label && LINK_IN_FLIGHT.has(label) ? LINK_POLL_MS : false
+    },
   })
 }
 
