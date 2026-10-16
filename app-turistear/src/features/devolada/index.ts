@@ -8,3 +8,5 @@ export { PaymentLinkStatusChip } from './components/PaymentLinkStatusChip'
 export * from './copy'
 export * from './hooks'
 export type * from './types'
+// D15 — the admin's three decisions on a Devolada payment, as the resolve endpoint names them.
+export type { ResolveDevoladaAction } from '../../services/devoladaService'

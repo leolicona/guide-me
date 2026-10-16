@@ -1,6 +1,7 @@
-import { and, asc, eq, inArray, sql } from 'drizzle-orm'
+import { and, asc, eq, inArray, sql, type SQL } from 'drizzle-orm'
 import type { Db } from '../db/client'
 import { folioLines, folioPayments, folioPaymentAllocations } from '../db/schema'
+import { insertWhere } from './batchGate'
 import {
   type LineAllocation,
   orderForCascade,
@@ -55,21 +56,30 @@ interface PaymentRowInput {
   // same batch (the id must exist before the insert statement is built). Omit where nothing
   // references the row.
   id?: string
+  /** devolada-transfer-verification D8 — a payment proven when it is recorded: who verified it
+   *  (NULL = «Sistema») and when. */
+  verifiedBy?: string | null
+  verifiedAt?: Date | null
+  /** devolada-transfer-verification D8 — write the row only while this holds (`insertWhere`). */
+  gate?: SQL
 }
 
-export const paymentRow = (db: Db, input: PaymentRowInput) =>
-  db.insert(folioPayments).values({
+export const paymentRow = (db: Db, input: PaymentRowInput) => {
+  const row = {
     id: input.id ?? crypto.randomUUID(),
     organizationId: input.organizationId,
     folioId: input.folioId,
-    entryType: 'payment',
+    entryType: 'payment' as const,
     amount: input.amount,
     method: input.method,
     reference: input.reference ?? null,
     verification: input.verification,
     collectedBy: input.collectedBy,
+    ...(input.verifiedAt ? { verifiedAt: input.verifiedAt, verifiedBy: input.verifiedBy ?? null } : {}),
     ...(input.createdAt ? { createdAt: input.createdAt } : {}),
-  })
+  }
+  return input.gate ? insertWhere(db, folioPayments, row, input.gate) : db.insert(folioPayments).values(row)
+}
 
 interface CommissionRowInput {
   organizationId: string
@@ -78,20 +88,24 @@ interface CommissionRowInput {
   method: Method // the collection method this commission accrues on (for the cash/electronic bucket)
   collectedBy: string // the agent/manager whose caja earns it
   createdAt?: Date
+  /** devolada-transfer-verification D8 — write the row only while this holds (`insertWhere`). */
+  gate?: SQL
 }
 
-export const commissionRow = (db: Db, input: CommissionRowInput) =>
-  db.insert(folioPayments).values({
+export const commissionRow = (db: Db, input: CommissionRowInput) => {
+  const row = {
     id: crypto.randomUUID(),
     organizationId: input.organizationId,
     folioId: input.folioId,
-    entryType: 'commission',
+    entryType: 'commission' as const,
     amount: input.amount,
     method: input.method,
-    verification: 'not_required',
+    verification: 'not_required' as const,
     collectedBy: input.collectedBy,
     ...(input.createdAt ? { createdAt: input.createdAt } : {}),
-  })
+  }
+  return input.gate ? insertWhere(db, folioPayments, row, input.gate) : db.insert(folioPayments).values(row)
+}
 
 interface ReversalRowInput {
   organizationId: string
@@ -105,38 +119,44 @@ interface ReversalRowInput {
   // US-A22 (line-autonomy D9) — the line a SINGLE-line reversal belongs to; null when the
   // reversal spans lines (the split lives in the allocations instead).
   folioLineId?: string | null
+  /** devolada-transfer-verification D11 — write the row only while this holds (`insertWhere`). */
+  gate?: SQL
 }
 
 // A cancellation reverses the money collected on the folio (its sale leaves the sales/cash buckets).
-export const refundRow = (db: Db, input: ReversalRowInput) =>
-  db.insert(folioPayments).values({
+export const refundRow = (db: Db, input: ReversalRowInput) => {
+  const row = {
     id: input.id ?? crypto.randomUUID(),
     organizationId: input.organizationId,
     folioId: input.folioId,
-    entryType: 'refund',
+    entryType: 'refund' as const,
     amount: -Math.abs(input.amount),
     method: input.method,
-    verification: 'not_required',
+    verification: 'not_required' as const,
     collectedBy: input.collectedBy,
     folioLineId: input.folioLineId ?? null,
     createdAt: input.at,
-  })
+  }
+  return input.gate ? insertWhere(db, folioPayments, row, input.gate) : db.insert(folioPayments).values(row)
+}
 
 // A clawback reverses the commission the agent had accrued (US-A26). An ABSORBED cancellation
 // (clawback=false) writes none — the agent keeps the commission.
-export const commissionReversalRow = (db: Db, input: ReversalRowInput) =>
-  db.insert(folioPayments).values({
+export const commissionReversalRow = (db: Db, input: ReversalRowInput) => {
+  const row = {
     id: crypto.randomUUID(),
     organizationId: input.organizationId,
     folioId: input.folioId,
-    entryType: 'commission_reversal',
+    entryType: 'commission_reversal' as const,
     amount: -Math.abs(input.amount),
     method: input.method,
-    verification: 'not_required',
+    verification: 'not_required' as const,
     collectedBy: input.collectedBy,
     folioLineId: input.folioLineId ?? null,
     createdAt: input.at,
-  })
+  }
+  return input.gate ? insertWhere(db, folioPayments, row, input.gate) : db.insert(folioPayments).values(row)
+}
 
 // US-LG09 — build the allocation INSERTs that ride a payment/refund row's own batch (rule 1). The
 // caller pre-generates the parent row's id and signs the amounts here: +1 for a payment, −1 for a
@@ -149,18 +169,23 @@ export const allocationRows = (
     allocations: LineAllocation[] // positive magnitudes (folioAllocations.ts output)
     sign: 1 | -1
     createdAt?: Date
+    /** devolada-transfer-verification D11 — write the rows only while this holds (`insertWhere`). */
+    gate?: SQL
   },
 ) =>
-  input.allocations.map((a) =>
-    db.insert(folioPaymentAllocations).values({
+  input.allocations.map((a) => {
+    const row = {
       id: crypto.randomUUID(),
       organizationId: input.organizationId,
       paymentId: input.paymentId,
       folioLineId: a.folioLineId,
       amount: input.sign * a.amount,
       ...(input.createdAt ? { createdAt: input.createdAt } : {}),
-    }),
-  )
+    }
+    return input.gate
+      ? insertWhere(db, folioPaymentAllocations, row, input.gate)
+      : db.insert(folioPaymentAllocations).values(row)
+  })
 
 // Split `target` across `buckets` in proportion to what each holds, in whole minor units.
 //
@@ -228,6 +253,9 @@ export const buildCancellationReversal = async (
      * only its lines' money). Omit for a whole-folio reversal. The method buckets stay
      * folio-wide either way — money is fungible across methods; the lines are what is not. */
     lineIds?: string[]
+    /** devolada-transfer-verification D11 — every row is written only while this holds: the
+     *  reversal rides a batch whose first statement may not take effect (constitution V). */
+    gate?: SQL
   },
 ) => {
   const grouped = await db
@@ -334,6 +362,7 @@ export const buildCancellationReversal = async (
         collectedBy: input.collectedBy,
         folioLineId: stampLineId,
         at: input.at,
+        gate: input.gate,
       }),
       ...allocationRows(db, {
         organizationId: input.organizationId,
@@ -341,6 +370,7 @@ export const buildCancellationReversal = async (
         allocations: perRowAllocations[i],
         sign: -1,
         createdAt: input.at,
+        gate: input.gate,
       }),
     )
   }
@@ -354,6 +384,7 @@ export const buildCancellationReversal = async (
         collectedBy: input.collectedBy,
         folioLineId: stampLineId,
         at: input.at,
+        gate: input.gate,
       }),
     )
   }

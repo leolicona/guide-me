@@ -1,10 +1,14 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { http, HttpResponse } from 'msw'
 import { server } from '../../../test/server'
-import { renderWithProviders, screen } from '../../../test/renderWithProviders'
+import { renderWithProviders, screen, waitFor, within } from '../../../test/renderWithProviders'
 import userEvent from '@testing-library/user-event'
+import { expectNoA11yViolations } from '../../../test/axe'
+import { aFolio } from '../../../test/handlers/folios'
+import { aLinkPayment, aPaymentLink } from '../../../test/handlers/devolada'
 import { FolioWorkActions } from './FolioWorkActions'
 import type { FolioCancellationRequest, FolioDetail } from '../types'
+import type { PaymentLinkView } from '../../devolada'
 
 // US-A84 (D14) — the work a folio needs, on the folio itself.
 //
@@ -274,5 +278,327 @@ describe('Design review, Should Fix 3 — the seller mounts no admin overlay', (
   it('the admin still has them mounted, ready to open', () => {
     renderWork(folio({ payment_verification: 'pending' }))
     expect(drawers().length).toBeGreaterThan(0)
+  })
+})
+
+// --- devolada-transfer-verification — the Devolada payments the admin decides (D15) ---------------
+
+const link = (over: Record<string, unknown> = {}) => aPaymentLink(over) as PaymentLinkView
+
+/** Every resolve the screen sends, in order, as the API received it. */
+const captureResolves = (answer: () => Response = () => HttpResponse.json({ folio: aFolio() })) => {
+  const sent: { id: string; body: unknown }[] = []
+  server.use(
+    http.post('/api/devolada/payments/:id/resolve', async ({ params, request }) => {
+      sent.push({ id: String(params.id), body: await request.json() })
+      return answer()
+    }),
+  )
+  return sent
+}
+
+const refusal = (code: string) => () =>
+  HttpResponse.json({ error: { code, message: code } }, { status: 409 })
+
+/** Opens the rung's action, then confirms it inside its sheet. */
+const decide = async (rungButton: string, sheetTitle: string, confirm = rungButton) => {
+  await userEvent.click(screen.getByRole('button', { name: rungButton }))
+  const sheet = await screen.findByRole('dialog', { name: sheetTitle })
+  await userEvent.click(within(sheet).getByRole('button', { name: confirm }))
+  return sheet
+}
+
+const noSheetOpen = () =>
+  waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+
+beforeEach(() => {
+  server.use(
+    http.get('/api/organizations/me', () =>
+      HttpResponse.json({
+        organization: { id: 'o1', name: 'Turistear Ya!', timezone: 'America/Cancun' },
+      }),
+    ),
+  )
+})
+
+// devolada-transfer-verification US2 — anything short of a clean confirmation reaches the admin with
+// the reason and the amounts: a sale exception inside today's «Pago por verificar» (FR-018), money
+// to return in its own rung, with «Ya lo devolví».
+describe('devolada-transfer-verification US2 — Devolada exceptions on the sale', () => {
+  const unapplied = () =>
+    link({
+      id: 'link-late',
+      state: 'closed',
+      label: 'unapplied',
+      payment: aLinkPayment({
+        id: 'dpay-late',
+        status: 'unapplied',
+        received: 150_000,
+        match: 'exact',
+        receipt_number: 'DV-0042',
+      }),
+    })
+
+  it('a sale exception shows its label, its receipt and its amounts inside «Pago por verificar»', async () => {
+    const { container } = renderWork(
+      folio({
+        payment_verification: 'pending',
+        payment_links: [
+          link({
+            label: 'partial',
+            payment: aLinkPayment({
+              status: 'partial',
+              received: 100_000,
+              match: 'short',
+              receipt_number: 'DV-0001',
+            }),
+          }),
+        ],
+      }),
+    )
+
+    expect(screen.getByRole('heading', { name: 'Pago por verificar' })).toBeInTheDocument()
+    expect(screen.getByText('Pago incompleto')).toBeInTheDocument()
+    expect(screen.getByText('Comprobante Devolada DV-0001')).toBeInTheDocument()
+    expect(screen.getByLabelText('Solicitado: $1,500.00')).toBeInTheDocument()
+    expect(screen.getByLabelText('Declarado: $1,500.00')).toBeInTheDocument()
+    expect(screen.getByLabelText('Recibido: $1,000.00')).toBeInTheDocument()
+    // FR-018 — today's two verbs, unchanged; nothing of the resolve endpoint's.
+    expect(screen.getByRole('button', { name: 'Verificar' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Rechazar pago' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Descartar' })).toBeNull()
+    await expectNoA11yViolations(container)
+  })
+
+  it('«Ya lo devolví» resolves the payment as `returned`', async () => {
+    const sent = captureResolves()
+    const { container } = renderWork(
+      folio({ status: 'cancelled', devolada_attention: true, payment_links: [unapplied()] }),
+    )
+
+    expect(screen.getByRole('heading', { name: 'Pago por transferencia' })).toBeInTheDocument()
+    expect(screen.getByText('Dinero por devolver')).toBeInTheDocument()
+    expect(screen.getByText('Comprobante Devolada DV-0042')).toBeInTheDocument()
+    expect(screen.getByLabelText('Recibido: $1,500.00')).toBeInTheDocument()
+    await expectNoA11yViolations(container)
+
+    const sheet = await decide('Ya lo devolví', '¿Ya devolviste el dinero?')
+    expect(sheet).toHaveTextContent('No cambia ningún monto de la venta.')
+    await waitFor(() => expect(sent).toEqual([{ id: 'dpay-late', body: { action: 'returned' } }]))
+    await noSheetOpen()
+  })
+
+  it('the Devolada rung waits behind «Pago por verificar», one rung at a time', () => {
+    renderWork(
+      folio({ payment_verification: 'pending', devolada_attention: true, payment_links: [unapplied()] }),
+    )
+
+    expect(screen.getByText('Pago por verificar')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Ya lo devolví' })).toBeNull()
+  })
+
+  it('and goes before the refund: money that arrived is answered for before cash leaves the drawer', () => {
+    renderWork(
+      folio({
+        status: 'cancelled',
+        refund_status: 'pending',
+        refund_amount: 150_000,
+        payment_links: [unapplied()],
+      }),
+    )
+
+    expect(screen.getByRole('button', { name: 'Ya lo devolví' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Confirmar reembolso' })).toBeNull()
+  })
+
+  it('a decision taken already is refused inside the sheet, which then only closes', async () => {
+    const sent = captureResolves(refusal('DEVOLADA_PAYMENT_NOT_RESOLVABLE'))
+    renderWork(folio({ status: 'cancelled', payment_links: [unapplied()] }))
+
+    const sheet = await decide('Ya lo devolví', '¿Ya devolviste el dinero?')
+
+    expect(await within(sheet).findByRole('alert')).toHaveTextContent(
+      'Este pago ya no admite esa acción: ya se resolvió o la venta cambió.',
+    )
+    expect(sent).toHaveLength(1)
+    expect(within(sheet).queryByRole('button', { name: 'Ya lo devolví' })).toBeNull()
+    await expectNoA11yViolations(sheet)
+    // The footer's «Cerrar» (the sheet's own close glyph is named the same, and does the same).
+    const [, footerClose] = within(sheet).getAllByRole('button', { name: 'Cerrar' })
+    await userEvent.click(footerClose)
+    await noSheetOpen()
+  })
+
+  it('the seller is offered no decision', () => {
+    const { container } = renderWork(
+      folio({ status: 'cancelled', payment_links: [unapplied()] }),
+      () => {},
+      'seller',
+    )
+
+    expect(container).toBeEmptyDOMElement()
+    expect(document.querySelectorAll('.MuiDrawer-root')).toHaveLength(0)
+  })
+})
+
+// devolada-transfer-verification US3 — a settlement records nothing until it is proven (D8), so its
+// exceptions have no pending row for «Verificar» to flip: the admin accepts or dismisses the payment
+// itself. One verb per action: «Verificar» (accept), «Descartar» (dismiss) — research D15.
+describe('devolada-transfer-verification US3 — an apartado’s settlement decided by the admin', () => {
+  const apartado = (settlement: PaymentLinkView, over: Partial<FolioDetail> = {}) =>
+    folio({
+      status: 'booking',
+      payment_verification: 'verified',
+      total: 300_000,
+      amount_paid: 150_000,
+      pending_balance: 150_000,
+      payment_links: [settlement],
+      ...over,
+    })
+
+  const exception = () =>
+    link({
+      id: 'link-settle',
+      kind: 'settlement',
+      state: 'closed',
+      label: 'partial',
+      payment: aLinkPayment({
+        id: 'dpay-settle',
+        status: 'partial',
+        received: 100_000,
+        match: 'short',
+        receipt_number: 'DV-0077',
+      }),
+    })
+
+  // D21 — an enlace no key can read any more, its payment last seen in flight.
+  const unreadable = () =>
+    link({
+      id: 'link-lost',
+      kind: 'settlement',
+      state: 'failed',
+      url: null,
+      label: 'link_failed',
+      payment: aLinkPayment({ id: 'dpay-lost' }),
+    })
+
+  it('an exception: its label and amounts, «Verificar» and «Descartar»', async () => {
+    const { container } = renderWork(apartado(exception(), { devolada_attention: true }))
+
+    expect(screen.getByRole('heading', { name: 'Liquidación por transferencia' })).toBeInTheDocument()
+    expect(screen.getByText('Pago incompleto')).toBeInTheDocument()
+    expect(screen.getByText('Comprobante Devolada DV-0077')).toBeInTheDocument()
+    expect(screen.getByLabelText('Recibido: $1,000.00')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Verificar' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Descartar' })).toBeInTheDocument()
+    // Not today's sale-level verbs: there is no pending row, and Rechazar would cancel the sale.
+    expect(screen.queryByRole('button', { name: 'Rechazar pago' })).toBeNull()
+    await expectNoA11yViolations(container)
+  })
+
+  it('«Verificar» resolves the exception as `accept`', async () => {
+    const sent = captureResolves()
+    renderWork(apartado(exception(), { devolada_attention: true }))
+
+    const sheet = await decide('Verificar', '¿Verificar la liquidación?')
+    expect(sheet).toHaveTextContent('Se registra la liquidación como verificada por ti')
+    await waitFor(() => expect(sent).toEqual([{ id: 'dpay-settle', body: { action: 'accept' } }]))
+    await noSheetOpen()
+  })
+
+  it('«Descartar» resolves it as `dismiss`, and says the apartado stays and nothing is cancelled', async () => {
+    const sent = captureResolves()
+    renderWork(apartado(exception(), { devolada_attention: true }))
+
+    const sheet = await decide('Descartar', '¿Descartar el pago?')
+    expect(sheet).toHaveTextContent('El apartado sigue vigente y no se cancela nada.')
+    await expectNoA11yViolations(sheet)
+    await waitFor(() => expect(sent).toEqual([{ id: 'dpay-settle', body: { action: 'dismiss' } }]))
+    await noSheetOpen()
+  })
+
+  it('an enlace no key can read: «Verificar» accepts and «Descartar» dismisses its payment (D21)', async () => {
+    const sent = captureResolves()
+    const { container, unmount } = renderWork(apartado(unreadable(), { devolada_attention: true }))
+
+    expect(screen.getByText('Sin enlace de pago — verificar a mano')).toBeInTheDocument()
+    await expectNoA11yViolations(container)
+    await decide('Verificar', '¿Verificar la liquidación?')
+    await waitFor(() => expect(sent).toEqual([{ id: 'dpay-lost', body: { action: 'accept' } }]))
+    unmount()
+
+    renderWork(apartado(unreadable(), { devolada_attention: true }))
+    await decide('Descartar', '¿Descartar el pago?')
+    await waitFor(() => expect(sent[1]).toEqual({ id: 'dpay-lost', body: { action: 'dismiss' } }))
+  })
+
+  it('a settlement Devolada is still verifying gets «Verificar» alone, in Por verificar or not (D15)', async () => {
+    const sent = captureResolves()
+    const verifying = link({
+      id: 'link-wait',
+      kind: 'settlement',
+      label: 'validating',
+      payment: aLinkPayment({ id: 'dpay-wait' }),
+    })
+    // Nothing for the admin to do — the sale is not in Por verificar — and still their option.
+    const { container } = renderWork(apartado(verifying, { devolada_attention: false }))
+
+    expect(screen.getByText('Verificando pago')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Verificar' })).toBeInTheDocument()
+    // Closing its enlace would turn the money unapplied (D13): no «Descartar».
+    expect(screen.queryByRole('button', { name: 'Descartar' })).toBeNull()
+    await expectNoA11yViolations(container)
+
+    await decide('Verificar', '¿Verificar la liquidación?')
+    await waitFor(() => expect(sent).toEqual([{ id: 'dpay-wait', body: { action: 'accept' } }]))
+  })
+
+  it('a tracking key to ask for on the settlement: «Verificar» alone too', () => {
+    renderWork(
+      apartado(
+        link({
+          kind: 'settlement',
+          label: 'needs_tracking_key',
+          payment: aLinkPayment({ awaiting: 'payer_tracking_key' }),
+        }),
+        { devolada_attention: true },
+      ),
+    )
+
+    expect(screen.getByText('Pide al cliente su clave de rastreo')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Verificar' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Descartar' })).toBeNull()
+  })
+
+  it('on a sale that no longer owes it, the exception is only discarded', () => {
+    renderWork(apartado(exception(), { status: 'cancelled', devolada_attention: true }))
+
+    expect(screen.getByRole('button', { name: 'Descartar' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Verificar' })).toBeNull()
+  })
+
+  it('a sale cancelled meanwhile is refused inside the sheet', async () => {
+    captureResolves(refusal('FOLIO_CANCELLED'))
+    renderWork(apartado(exception(), { devolada_attention: true }))
+
+    const sheet = await decide('Verificar', '¿Verificar la liquidación?')
+
+    expect(await within(sheet).findByRole('alert')).toHaveTextContent(
+      'La venta está cancelada: la liquidación ya no se puede verificar.',
+    )
+    expect(within(sheet).queryByRole('button', { name: 'Verificar' })).toBeNull()
+    expect(within(sheet).getAllByRole('button', { name: 'Cerrar' })).toHaveLength(2)
+  })
+
+  it('any other failure can be tried again', async () => {
+    captureResolves(() => HttpResponse.json({ error: { code: 'INTERNAL_ERROR', message: 'x' } }, { status: 500 }))
+    renderWork(apartado(exception(), { devolada_attention: true }))
+
+    const sheet = await decide('Descartar', '¿Descartar el pago?')
+
+    expect(await within(sheet).findByRole('alert')).toHaveTextContent(
+      'No se pudo registrar. Inténtalo de nuevo.',
+    )
+    expect(within(sheet).getByRole('button', { name: 'Descartar' })).toBeEnabled()
   })
 })

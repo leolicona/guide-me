@@ -4,9 +4,12 @@ import AccountBalanceRounded from '@mui/icons-material/AccountBalanceRounded'
 import CreditCardRounded from '@mui/icons-material/CreditCardRounded'
 import LinkRounded from '@mui/icons-material/LinkRounded'
 import UndoRounded from '@mui/icons-material/UndoRounded'
+import MoneyOffRounded from '@mui/icons-material/MoneyOffRounded'
 import type { ReactElement } from 'react'
 import { MoneyText } from '../../../components/MoneyText'
 import { StatusChip } from '../../../components/StatusChip'
+import { PAYMENT_NOT_RECEIVED_ROW_COPY } from '../../devolada'
+import type { CancellationSource } from '../../folios/types'
 import type { FolioPaymentEntry, PaymentMethod } from '../types'
 
 const METHOD: Record<PaymentMethod, { label: string; icon: ReactElement }> = {
@@ -30,13 +33,20 @@ const formatDate = (unixSecs: number) =>
 export function PaymentBreakdown({
   payments,
   verificationAuto = false,
+  cancellationSource = null,
 }: {
   payments: FolioPaymentEntry[]
   /** devolada-transfer-verification D14 — the sale's `verification_auto`: Devolada is verifying
    *  its pending money, with nothing for an admin to do. */
   verificationAuto?: boolean
+  /** devolada-transfer-verification D11 — who cancelled the sale (`saleCancellationSource`), null
+   *  while it lives. `payment_not_received`: Devolada showed the transfer never arrived. */
+  cancellationSource?: CancellationSource | null
 }) {
   if (!payments || payments.length < 2) return null
+  // D11 — the system withdrew the sale because its transfer never arrived: the row that waited for
+  // it is not work for anyone any more, and «Por verificar» would say it still might come.
+  const notReceived = cancellationSource === 'payment_not_received'
 
   return (
     <Stack spacing={1.25}>
@@ -68,13 +78,21 @@ export function PaymentBreakdown({
 
             <Stack direction="row" spacing={1} sx={{ alignItems: 'center', flexShrink: 0 }}>
               {/* D14 — «Por verificar» names the admin's work; while Devolada verifies the
-                  money there is none, so the row says what is happening to it. */}
-              {p.verification === 'pending' && (
-                <StatusChip
-                  status="pending"
-                  label={verificationAuto ? 'En verificación' : 'Por verificar'}
-                />
-              )}
+                  money there is none, so the row says what is happening to it. D11 — on a sale
+                  cancelled because the transfer never arrived, the row says that instead. */}
+              {p.verification === 'pending' &&
+                (notReceived ? (
+                  <StatusChip
+                    tone="error"
+                    icon={<MoneyOffRounded />}
+                    label={PAYMENT_NOT_RECEIVED_ROW_COPY}
+                  />
+                ) : (
+                  <StatusChip
+                    status="pending"
+                    label={verificationAuto ? 'En verificación' : 'Por verificar'}
+                  />
+                ))}
               <MoneyText
                 cents={p.amount}
                 variant="body1"

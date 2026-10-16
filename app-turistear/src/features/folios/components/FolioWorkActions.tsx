@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import { Alert, Button, Stack, TextField, Typography } from '@mui/material'
 import CheckCircleRounded from '@mui/icons-material/CheckCircleRounded'
-import { ConfirmSheet, FormSheet, SectionCard } from '../../../components'
+import CurrencyExchangeRounded from '@mui/icons-material/CurrencyExchangeRounded'
+import { ConfirmSheet, FormSheet, MoneyText, SectionCard } from '../../../components'
 import {
   useVerifyPayment,
   useRejectPayment,
@@ -14,12 +15,29 @@ import {
 } from '../hooks'
 import { useOrgDateFormatter } from '../../organization'
 import { formatMoney } from '../../catalog/types'
+import {
+  DEVOLADA_DECISION_COPY,
+  DEVOLADA_RUNG_TITLE,
+  PaymentLinkStatusChip,
+  RESOLVE_ACTION_COPY,
+  paymentAmountsCopy,
+  receiptNumberCopy,
+  resolveConfirmCopy,
+  resolveErrorCopy,
+  useResolveDevoladaPayment,
+  type PaymentLinkView,
+  type ResolveDevoladaAction,
+} from '../../devolada'
+import { ServiceError } from '../../../services/authService'
+import { devoladaWork, verificationLink } from '../folioCardState'
 import type { FolioDetail } from '../types'
 
 // US-A84 (D14/D21) — the work a folio needs, on the folio itself: THE pending-action card.
 //
-// This component owns the detail's whole D12 ladder — solicitud → verificación → reembolso →
-// entrega — and renders exactly ONE rung (or nothing). The exclusion used to be three booleans
+// This component owns the detail's whole D12 ladder — solicitud → verificación → Devolada →
+// reembolso → entrega — and renders exactly ONE rung (or nothing). The Devolada rung
+// (devolada-transfer-verification D15) holds what «Pago por verificar» cannot: an apartado's
+// settlement to verify or discard, and money to return. The exclusion used to be three booleans
 // threaded through three blocks of the page; a future slip could render two rungs at once. Here
 // the ladder is structural: one component, one branch, one card in one fixed position, so the eye
 // learns "the card under the chips is what this folio needs from me".
@@ -39,6 +57,41 @@ const DATE_FMT: Intl.DateTimeFormatOptions = {
   day: 'numeric',
   hour: '2-digit',
   minute: '2-digit',
+}
+
+/**
+ * devolada-transfer-verification FR-015, FR-022 — what Devolada knows about one transfer, as the
+ * admin weighs it: the label the server decided, the receipt it rests on («Comprobante Devolada»,
+ * never a "folio") and every amount it reported — asked, claimed, received — through MoneyText.
+ */
+function DevoladaEvidence({ link }: { link: PaymentLinkView }) {
+  const payment = link.payment
+  return (
+    <Stack spacing={1} sx={{ mt: 1.5, alignItems: 'flex-start' }}>
+      <PaymentLinkStatusChip label={link.label} />
+      {payment?.receipt_number && (
+        <Typography variant="body2" color="textSecondary">
+          {receiptNumberCopy(payment.receipt_number)}
+        </Typography>
+      )}
+      {payment && (
+        <Stack spacing={0.5} sx={{ alignSelf: 'stretch' }}>
+          {paymentAmountsCopy(payment).map(({ key, label, cents }) => (
+            <Stack
+              key={key}
+              direction="row"
+              sx={{ justifyContent: 'space-between', alignItems: 'baseline' }}
+            >
+              <Typography variant="body2" color="textSecondary">
+                {label}
+              </Typography>
+              <MoneyText cents={cents} variant="body1" srLabel={label} />
+            </Stack>
+          ))}
+        </Stack>
+      )}
+    </Stack>
+  )
 }
 
 // Each rung's title is the heading of the card it owns — `h2`, the level `SectionCard` gives its
@@ -64,12 +117,20 @@ export function FolioWorkActions({
   const rejectPayment = useRejectPayment()
   const approveRequest = useApproveCancellationRequest()
   const rejectRequest = useRejectCancellationRequest()
+  const resolve = useResolveDevoladaPayment()
 
   const [confirming, setConfirming] = useState<'verify' | 'approve' | null>(null)
   const [rejectingPayment, setRejectingPayment] = useState(false)
   const [rejectingRequest, setRejectingRequest] = useState(false)
   const [paymentReason, setPaymentReason] = useState('')
   const [requestNote, setRequestNote] = useState('')
+  // D15 — the decision being confirmed, and the payment it was taken on. Kept after the sheet
+  // closes so its words do not change while it slides away.
+  const [resolving, setResolving] = useState<{
+    action: ResolveDevoladaAction
+    paymentId: string
+    open: boolean
+  } | null>(null)
 
   const requests = folio.folio_requests ?? []
   const pending = requests.find((r) => r.status === 'pending')
@@ -83,6 +144,14 @@ export function FolioWorkActions({
     : undefined
   const awaitingVerification =
     folio.payment_verification === 'pending' && folio.status !== 'cancelled'
+  // devolada-transfer-verification FR-018 — the sale or deposit enlace behind that verification:
+  // its label, its receipt and its amounts ride the rung, whose Verificar and Rechazar stay as they
+  // are. Null without Devolada.
+  const verifiedLink = awaitingVerification ? verificationLink(folio) : null
+  const isAdmin = surface === 'admin'
+  // Rung 2b — devolada-transfer-verification D15: a Devolada payment the admin decides on the sale
+  // (an apartado's settlement, money to return). Admin verbs only: the resolve endpoint is theirs.
+  const devolada = isAdmin ? devoladaWork(folio) : null
   // Rung 3 — the open refund obligation (US-A23/US-T05). A warning that carries a BUTTON is work,
   // not a notice, so it ranks as a rung: an orphaned petition on a cancelled folio gets resolved
   // before cash leaves the drawer.
@@ -95,17 +164,35 @@ export function FolioWorkActions({
   // The ladder, structural: the first true rung is the ONLY one that renders. Resolved petitions
   // no longer render here — the timeline carries them (approved ones as their events, rejected
   // ones as derived rows) — so a folio with only history renders nothing.
-  const isAdmin = surface === 'admin'
+  // The Devolada rung ranks right after the verification and before the refund, as the list card
+  // ranks its `resolve` verb: money that arrived is answered for before cash leaves the drawer.
   const rung = pending && isAdmin
     ? 'petition'
     : awaitingVerification && isAdmin
       ? 'verification'
-      : refundPending && isAdmin
-        ? 'refund'
-        : deliverable
-          ? 'delivery'
-          : null
+      : devolada
+        ? 'devolada'
+        : refundPending && isAdmin
+          ? 'refund'
+          : deliverable
+            ? 'delivery'
+            : null
   if (!rung) return null
+
+  // D15 — the decision's sheet. Its words follow the decision opened; a 409 is final (the payment
+  // was decided already, or the sale changed under it), so the sheet then offers only «Cerrar».
+  const sheetAction = resolving?.action ?? devolada?.actions[0] ?? 'accept'
+  const sheetCopy = resolveConfirmCopy(sheetAction, { apartado: folio.status === 'booking' })
+  const resolveRefused = resolve.error instanceof ServiceError && resolve.error.status === 409
+  const openResolve = (action: ResolveDevoladaAction) => {
+    if (!devolada) return
+    resolve.reset()
+    setResolving({ action, paymentId: devolada.payment.id, open: true })
+  }
+  const closeResolve = () => {
+    setResolving((current) => (current ? { ...current, open: false } : current))
+    resolve.reset()
+  }
 
   return (
     <>
@@ -166,6 +253,10 @@ export function FolioWorkActions({
             Transferencia
             {folio.payment_reference ? ` · Ref. ${folio.payment_reference}` : ''}
           </Typography>
+          {/* devolada-transfer-verification FR-015/FR-018 — a sale or deposit exception (an
+              incomplete payment, one Banxico contradicts, a tracking key, an enlace no key can
+              read) is decided here, as today: the rung only adds what Devolada knows. */}
+          {verifiedLink && <DevoladaEvidence link={verifiedLink} />}
           <Stack direction="row" spacing={1} sx={{ mt: 2, flexWrap: 'wrap', gap: 1 }}>
             <Button
               variant="contained"
@@ -184,6 +275,56 @@ export function FolioWorkActions({
             >
               Rechazar pago
             </Button>
+          </Stack>
+        </SectionCard>
+      )}
+
+      {/* Rung 2b — devolada-transfer-verification D15: a Devolada payment the sale's verification
+          cannot carry. A settlement records no pending row (D8), so its exception is decided here:
+          «Verificar» records it as the admin, «Descartar» keeps the apartado and cancels nothing;
+          one still in flight takes «Verificar» alone, since closing its enlace would turn the money
+          unapplied (D13). Money that arrived for an enlace already closed is given back outside the
+          system, and «Ya lo devolví» says so. One verb per action (constitution VII). */}
+      {rung === 'devolada' && devolada && (
+        <SectionCard>
+          <Typography variant="subtitle1" component="h2" sx={{ fontWeight: 600, mb: 0.5 }}>
+            {DEVOLADA_RUNG_TITLE[devolada.link.kind]}
+          </Typography>
+          <Typography variant="body2" color="textSecondary">
+            {DEVOLADA_DECISION_COPY[devolada.decision]}
+          </Typography>
+          <DevoladaEvidence link={devolada.link} />
+          <Stack direction="row" spacing={1} sx={{ mt: 2, flexWrap: 'wrap', gap: 1 }}>
+            {devolada.actions.map((action) =>
+              // «Descartar» sits beside «Verificar» as the quiet way out; alone, it is the next
+              // action, and the one accent marks it.
+              action === 'dismiss' && devolada.actions.length > 1 ? (
+                <Button key={action} color="inherit" onClick={() => openResolve(action)}>
+                  {RESOLVE_ACTION_COPY.dismiss}
+                </Button>
+              ) : action === 'dismiss' ? (
+                <Button
+                  key={action}
+                  variant="contained"
+                  disableElevation
+                  onClick={() => openResolve(action)}
+                >
+                  {RESOLVE_ACTION_COPY.dismiss}
+                </Button>
+              ) : (
+                <Button
+                  key={action}
+                  variant="contained"
+                  disableElevation
+                  startIcon={
+                    action === 'returned' ? <CurrencyExchangeRounded /> : <CheckCircleRounded />
+                  }
+                  onClick={() => openResolve(action)}
+                >
+                  {RESOLVE_ACTION_COPY[action]}
+                </Button>
+              ),
+            )}
           </Stack>
         </SectionCard>
       )}
@@ -367,6 +508,38 @@ export function FolioWorkActions({
           />
         </Stack>
       </FormSheet>
+
+      {/* D15 — one sheet for the three decisions, mounted only while there is a Devolada payment
+          to decide. It acts on the payment the admin opened it for. A refusal is said inside it:
+          `DEVOLADA_PAYMENT_NOT_RESOLVABLE` (decided already, or the sale changed) and
+          `FOLIO_CANCELLED` are final, anything else can be tried again. */}
+      {devolada && (
+        <ConfirmSheet
+          open={resolving?.open ?? false}
+          onClose={closeResolve}
+          title={sheetCopy.title}
+          description={sheetCopy.description}
+          confirmLabel={RESOLVE_ACTION_COPY[sheetAction]}
+          confirmColor={sheetAction === 'dismiss' ? 'error' : 'primary'}
+          busy={resolve.isPending}
+          hideConfirm={resolveRefused}
+          cancelLabel={resolveRefused ? 'Cerrar' : 'Cancelar'}
+          error={
+            resolve.isError ? (
+              <Alert severity="error">
+                {resolveErrorCopy(resolve.error instanceof ServiceError ? resolve.error.code : null)}
+              </Alert>
+            ) : null
+          }
+          onConfirm={() =>
+            resolving &&
+            resolve.mutate(
+              { paymentId: resolving.paymentId, action: resolving.action },
+              { onSuccess: closeResolve },
+            )
+          }
+        />
+      )}
         </>
       )}
     </>

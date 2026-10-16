@@ -66,3 +66,32 @@ describe('devolada-transfer-verification US1 — «Por verificar» counts the ad
     await expectNoA11yViolations(container)
   })
 })
+
+// devolada-transfer-verification US2 — the Devolada payments that need the admin join «Por
+// verificar», each sale once: a cancelled sale with money to return, an apartado's settlement to
+// decide (research D14; contracts/turistear-api.md § Reads).
+describe('devolada-transfer-verification US2 — «Por verificar» adds the Devolada attention', () => {
+  it('shows verification − verification_auto + devolada_attention', async () => {
+    const c = counts({ verification: 5, verification_auto: 2, devolada_attention: 2 })
+    const { container } = renderWithProviders(
+      <PendingWorkBar counts={c} active={[]} onToggle={() => {}} />,
+    )
+
+    expect(porVerificarCount(c)).toBe(5)
+    expect(screen.getByRole('button', { name: '5 Por verificar' })).toBeInTheDocument()
+    await expectNoA11yViolations(container)
+  })
+
+  it('a day whose only work is money to return still shows the pill', async () => {
+    const { container } = renderWithProviders(
+      <PendingWorkBar
+        counts={counts({ verification: 1, verification_auto: 1, devolada_attention: 1 })}
+        active={[]}
+        onToggle={() => {}}
+      />,
+    )
+
+    expect(screen.getByRole('button', { name: '1 Por verificar' })).toBeInTheDocument()
+    await expectNoA11yViolations(container)
+  })
+})

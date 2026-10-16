@@ -61,8 +61,13 @@ export const listFolios = async (filters: FolioFilters = {}): Promise<FolioListP
 export interface FolioCounts {
   verification: number
   /** devolada-transfer-verification D14 — the sales Devolada is resolving with nothing for the
-   *  admin to do. «Por verificar» = verification − verification_auto (`porVerificarCount`). */
+   *  admin to do. */
   verification_auto: number
+  /** D14 — the sales with a Devolada payment that needs the admin which `verification` does not
+   *  already count, because they are cancelled or their verification is not pending. Each sale
+   *  counts once: «Por verificar» = verification − verification_auto + devolada_attention
+   *  (`porVerificarCount`). */
+  devolada_attention: number
   folio_requests: number
   refunds: number
   overdue: number

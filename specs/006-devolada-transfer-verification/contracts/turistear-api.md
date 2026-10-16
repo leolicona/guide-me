@@ -105,6 +105,18 @@ never appear (research D16).
 | Settlement exception, a settlement Devolada is still verifying, or one no key can read any more: accept | Verificar |
 | Settlement exception, or a settlement no key can read any more: dismiss | Descartar (the sale stays an apartado; unlike «Rechazar pago», it cancels nothing) |
 | Unapplied money, returned | Ya lo devolví |
+| A payment's amounts, beside its label (FR-015, FR-020); an amount Devolada has not reported is left out, never shown as zero | Solicitado · Declarado · Recibido |
+| Devolada's receipt number, on the rungs (FR-022) | Comprobante Devolada {receipt_number} |
+| List card of a sale whose Devolada payment needs the admin: opens the sale | Revisar pago |
+| Sale detail, the Devolada rung's title, by what the enlace collects | Pago por transferencia · Anticipo por transferencia · Liquidación por transferencia |
+| Devolada rung, the line above the evidence: accept or dismiss | Si confirmas que el cliente pagó la liquidación completa, verifícala; si no, descártala. El apartado no vence mientras decides. |
+| Devolada rung, a settlement the sale no longer expects: dismiss alone | Esta venta ya no espera esta liquidación. Si llegó dinero, devuélvelo al cliente y descarta el pago. |
+| Devolada rung, a settlement still in flight: accept alone | Devolada todavía no da el veredicto de esta liquidación. Si ya confirmaste el pago, puedes verificarla tú. |
+| Devolada rung, money to return | Llegó dinero que esta venta ya no esperaba. Devuélvelo al cliente y regístralo aquí. |
+| Confirm accept | ¿Verificar la liquidación? — Se registra la liquidación como verificada por ti y, si la venta queda pagada, se liberan los boletos. |
+| Confirm dismiss | ¿Descartar el pago? — El apartado sigue vigente y no se cancela nada. (on a sale no longer an apartado: No se cancela nada en la venta.) Si llegó dinero, devuélvelo al cliente fuera del sistema. |
+| Confirm returned | ¿Ya devolviste el dinero? — Registra que le devolviste al cliente el dinero que llegó por este enlace. No cambia ningún monto de la venta. |
+| Resolve refused | `DEVOLADA_PAYMENT_NOT_RESOLVABLE`: Este pago ya no admite esa acción: ya se resolvió o la venta cambió. · `FOLIO_CANCELLED`: La venta está cancelada: la liquidación ya no se puede verificar. · anything else: No se pudo registrar. Inténtalo de nuevo. |
 | Receipt header while the money is unverified | Pago en verificación (instead of «Venta confirmada» and the «Pagado» chip) |
 | Sale detail header while Devolada handles the sale (`verification_auto`) | the link's chip, instead of «Por verificar», which names the admin's work |
 | Payment breakdown, a pending row while Devolada handles the sale (`verification_auto`) | En verificación (instead of «Por verificar») |
@@ -279,9 +291,9 @@ For a connected organization with `"method": "transfer"`, no settlement is recor
 |---|---|---|
 | `accept` | settlement link, payment `partial` or `invalid`, or still in flight (*validating*, awaiting a tracking key, `queued_for_credit`), unresolved | records the settlement as the admin (`verified_by` = admin), past the apartado's clock too when the payment was submitted before its link expired (D8), and releases tickets if the sale is now paid and cleared. For a payment in flight the link stays open until the verdict, which records nothing more and ends the link (`paid` when confirmed; D13, D15) |
 | `dismiss` | settlement link, payment `partial` or `invalid`, or in flight on a link no credential can read (`failed`, D21), unresolved | closes the link when a credential can still reach it; the apartado continues |
-| `returned` | payment `unapplied` (or `confirmed` on a cancelled sale), unresolved | records that the money was returned outside the system |
+| `returned` | payment `unapplied`, or `confirmed` that reached a cancelled sale without being applied to it (its link never ended `paid`), unresolved | records that the money was returned outside the system |
 
-`note` is optional, up to 500 characters. While a settlement payment awaits `accept` or `dismiss`, the apartado does not expire: the sweep holds it past its release time, or only its line for a settlement of one line (research D8).
+`note` is optional, up to 500 characters. It is validated and not stored yet: the data model has no place for it (amended 2026-10-16, in build). While a settlement payment awaits `accept` or `dismiss`, the apartado does not expire: the sweep holds it past its release time, or only its line for a settlement of one line (research D8).
 
 | Status | Body / code |
 |---|---|

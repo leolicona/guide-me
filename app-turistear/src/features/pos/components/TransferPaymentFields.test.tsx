@@ -1,8 +1,9 @@
-// devolada-transfer-verification US1 — what picking Transferencia asks of the seller, by the
-// organization's Devolada connection (research D6, D16; contracts/turistear-api.md § Action copy):
-// connected, a full sale is collected by enlace and offers no reference (FR-009); a broken
-// connection keeps the manual path and says why (FR-010); without Devolada, US-A88's reference
-// rules, unchanged. The copy is asserted verbatim: it is the contract's.
+// devolada-transfer-verification US1, US3 — what picking Transferencia asks of the seller, by the
+// organization's Devolada connection (research D6, D8, D16; contracts/turistear-api.md § Action
+// copy): connected, the transfer is collected by enlace and offers no reference (FR-009), whether it
+// pays a full sale or, since T058, an apartado's deposit; a broken connection keeps the manual path
+// and says why (FR-010); without Devolada, US-A88's reference rules, unchanged. The copy is asserted
+// verbatim: it is the contract's.
 import { useState } from 'react'
 import { describe, expect, it } from 'vitest'
 import { renderWithProviders, screen, userEvent } from '../../../test/renderWithProviders'
@@ -35,19 +36,15 @@ function Fields(props: Partial<TransferPaymentFieldsProps>) {
 const referenceField = () => screen.queryByRole('textbox', { name: /Referencia de la transferencia/ })
 
 describe('TransferPaymentFields', () => {
-  it('connected, a full sale is collected by enlace: no reference field', async () => {
+  // T058 — PR 1 kept an apartado deposit on the manual path, so this component took a `deposit`
+  // flag that brought the field back. Deposits now get their own enlace, so the flag is gone: the
+  // connection alone decides, for a full sale, a deposit and a balance (SettleSheet) alike.
+  it('connected, a transfer is collected by enlace — a full sale or an apartado deposit: no reference field', async () => {
     const { container } = renderWithProviders(<Fields devolada={connection('connected')} />)
     expect(referenceField()).not.toBeInTheDocument()
     expect(screen.getByText(BY_LINK)).toBeInTheDocument()
     expect(screen.queryByText(MANUAL)).not.toBeInTheDocument()
     await expectNoA11yViolations(container)
-  })
-
-  it('connected, an apartado deposit keeps its reference until deposits get their enlace', () => {
-    renderWithProviders(<Fields devolada={connection('connected')} deposit />)
-    expect(referenceField()).toBeInTheDocument()
-    expect(screen.getByText(MANUAL)).toBeInTheDocument()
-    expect(screen.queryByText(BY_LINK)).not.toBeInTheDocument()
   })
 
   it('a broken connection keeps the reference and its rules, and says why', async () => {
