@@ -8,6 +8,9 @@ import {
   DEPOSIT_VERIFIED_TEMPLATE,
   DEFAULT_REMINDER_TEMPLATE,
   TEMPLATE_PLACEHOLDERS,
+  PAYMENT_LINK_TEMPLATES,
+  linkExpiryPhrase,
+  paymentLinkWhatsAppUrl,
   type TemplateContext,
 } from './delivery'
 
@@ -221,5 +224,69 @@ describe('depositVerifiedWhatsAppUrl', () => {
 
   it('returns null when there is no phone', () => {
     expect(depositVerifiedWhatsAppUrl(ctx({ customer_phone: null }))).toBeNull()
+  })
+})
+
+// devolada-transfer-verification US1 — the payment link's WhatsApp message (contracts/turistear-api.md
+// § The WhatsApp message for a link; research D16).
+describe('paymentLinkWhatsAppUrl', () => {
+  // 2026-08-01 12:00 in Mexico City (UTC−6).
+  const NOW = Date.parse('2026-08-01T18:00:00Z')
+  const link = (kind: 'sale' | 'deposit' | 'settlement', over = {}) => ({
+    kind,
+    amount: 125_000,
+    url: 'https://link.devoladapago.com/p/kq7m2x9d4tbn3wpa',
+    // 20:30 the same day, org-local.
+    expires_at: Date.parse('2026-08-02T02:30:00Z') / 1000,
+    ...over,
+  })
+  const linkCtx = () => {
+    const { folio, agentName, orgName } = ctx()
+    return { folio, agentName, orgName, timezone: 'America/Mexico_City', nowMs: NOW }
+  }
+  const textOf = (url: string | null) => decodeURIComponent(url!.split('?text=')[1]!)
+
+  it('a sale link asks for the amount, carries the enlace and its expiry, and promises the tickets', () => {
+    const text = textOf(paymentLinkWhatsAppUrl(link('sale'), linkCtx()))
+    expect(text).toBe(
+      'Hola Ana, te escribe Luis de Turistear Ya. Para confirmar tu compra, transfiere $1,250.00 desde tu banco con este enlace: https://link.devoladapago.com/p/kq7m2x9d4tbn3wpa (vence hoy a las 20:30). En cuanto se confirme el pago te enviamos tus boletos.',
+    )
+  })
+
+  it("a deposit link names the balance and never promises the tickets now", () => {
+    const text = textOf(paymentLinkWhatsAppUrl(link('deposit'), linkCtx()))
+    expect(text).toContain('transfiere el anticipo de $1,250.00')
+    expect(text).toContain('Tus boletos se envían al liquidar el saldo de $1,000.00')
+    expect(text).not.toContain('te enviamos tus boletos')
+  })
+
+  it('a settlement link asks for the balance', () => {
+    const text = textOf(
+      paymentLinkWhatsAppUrl(link('settlement', { expires_at: Date.parse('2026-08-02T16:00:00Z') / 1000 }), linkCtx()),
+    )
+    expect(text).toContain('Para liquidar tu reserva, transfiere $1,250.00')
+    expect(text).toContain('(vence mañana a las 10:00)')
+  })
+
+  it('every kind has its shipped text, and none says «liga» or «link»', () => {
+    for (const template of Object.values(PAYMENT_LINK_TEMPLATES)) {
+      expect(template).toContain('{payment_link}')
+      expect(template).not.toMatch(/\bliga\b|\blink\b/i)
+    }
+  })
+
+  it('null for an unusable phone, or a link with no URL', () => {
+    const noPhone = { ...linkCtx(), folio: { ...linkCtx().folio, customer_phone: 'no digits here' } }
+    expect(paymentLinkWhatsAppUrl(link('sale'), noPhone)).toBeNull()
+    expect(paymentLinkWhatsAppUrl(link('sale', { url: null }), linkCtx())).toBeNull()
+  })
+
+  it('linkExpiryPhrase reads hoy / mañana in the org zone', () => {
+    expect(linkExpiryPhrase(Date.parse('2026-08-02T05:00:00Z') / 1000, 'America/Mexico_City', NOW)).toBe(
+      'hoy a las 23:00',
+    )
+    expect(linkExpiryPhrase(Date.parse('2026-08-02T07:00:00Z') / 1000, 'America/Mexico_City', NOW)).toBe(
+      'mañana a las 01:00',
+    )
   })
 })

@@ -1,10 +1,13 @@
-import { describe, it, expect, beforeAll } from 'vitest'
+import { describe, it, expect, beforeAll, beforeEach } from 'vitest'
 import { http, HttpResponse } from 'msw'
 import { renderWithProviders, screen } from '../../../test/renderWithProviders'
+import { expectNoA11yViolations } from '../../../test/axe'
 import { server } from '../../../test/server'
+import { aPaymentLink } from '../../../test/handlers/devolada'
 import { FolioCard, type FolioCardFolio } from './FolioCard'
 import { FolioStatusChip } from './FolioStatusChip'
 import type { Fulfillment } from '../types'
+import type { PaymentLinkView } from '../../devolada'
 
 // US-A82 / US-AG49 — the card as RENDERED.
 // Spec: docs/oversight/folio-list-scanability.spec.md — S-10, plus the render-level facts the pure
@@ -258,5 +261,89 @@ describe('BUG-035 — the request is named in words on the surface whose button 
     )
     expect(screen.getByRole('link', { name: /Revisar solicitud/ })).toBeInTheDocument()
     expect(screen.queryByText('El cliente pidió un cambio')).toBeNull()
+  })
+})
+
+// --- devolada-transfer-verification US1 — the sales Devolada is resolving (D14) ------------------
+
+describe('devolada-transfer-verification US1 — a sale Devolada is resolving', () => {
+  // «Verificar y enviar» reads the session and the org to build its message. Registered per test:
+  // MSW resets handlers after each one, so a `beforeAll` registration would serve only the first.
+  beforeEach(() => {
+    server.use(
+      http.get('/api/me', () =>
+        HttpResponse.json({
+          user: { id: 'u1', name: 'Ana Ramírez', email: 'ana@x.com', role: 'admin' },
+        }),
+      ),
+      http.get('/api/organizations/me', () =>
+        HttpResponse.json({
+          organization: { id: 'o1', name: 'Turistear Ya!', timezone: 'America/Cancun' },
+        }),
+      ),
+    )
+  })
+
+  // A transfer awaiting its verification — off the delivery axis until the money clears — whose
+  // enlace is open and waiting for the customer's first payment.
+  const transfer = (over: Partial<FolioCardFolio> = {}) =>
+    aFolio({
+      payment_verification: 'pending',
+      deliverable: false,
+      tickets_sent_at: null,
+      payment_link: aPaymentLink() as PaymentLinkView,
+      ...over,
+    })
+
+  const renderCard = (folio: FolioCardFolio) =>
+    renderWithProviders(
+      <FolioCard
+        folio={folio}
+        to="/folios/f1"
+        byline="Ana Ramírez"
+        soldAt="hoy 14:32"
+        surface="admin"
+      />,
+    )
+
+  it('offers no «Verificar y enviar», and the link’s chip stands where «por verificar» would', async () => {
+    const { container } = renderCard(transfer({ verification_auto: true }))
+
+    // The chip is the money's reading: it sits on the money line, beside the figure it explains.
+    const figure = screen.getByLabelText('Total en verificación: $2,400.00')
+    expect(figure.parentElement).toContainElement(screen.getByText('Esperando pago'))
+    // «Por verificar» names the admin's work, and there is none — not on the line, not to a reader.
+    expect(screen.queryByText('por verificar')).toBeNull()
+    expect(screen.queryByLabelText(/por verificar/)).toBeNull()
+    expect(screen.queryByRole('button', { name: /Verificar y enviar/ })).toBeNull()
+    expect(screen.getByRole('button', { name: /Enviar mensaje/ })).toBeInTheDocument()
+    await expectNoA11yViolations(container)
+  })
+
+  it('the same row without the flag is back: «Verificar y enviar» and «por verificar»', async () => {
+    const { container } = renderCard(transfer({ verification_auto: false }))
+
+    expect(screen.getByRole('button', { name: /Verificar y enviar/ })).toBeInTheDocument()
+    expect(screen.getByText('por verificar')).toBeInTheDocument()
+    // The enlace still says what it is doing: one more fact, with the card's other chips.
+    expect(screen.getByText('Esperando pago')).toBeInTheDocument()
+    await expectNoA11yViolations(container)
+  })
+
+  it('a sale with no enlace says so on the row the admin verifies by hand', async () => {
+    const failed = aPaymentLink({ state: 'failed', url: null, label: 'link_failed' })
+    const { container } = renderCard(transfer({ payment_link: failed as PaymentLinkView }))
+
+    expect(screen.getByText('Sin enlace de pago — verificar a mano')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Verificar y enviar/ })).toBeInTheDocument()
+    await expectNoA11yViolations(container)
+  })
+
+  it('a sale of an organization without Devolada carries no link chip', async () => {
+    const { container } = renderCard(transfer({ payment_link: null }))
+
+    expect(await screen.findByText('por verificar')).toBeInTheDocument()
+    expect(screen.queryByText(/Esperando pago|Verificando pago|enlace/i)).toBeNull()
+    await expectNoA11yViolations(container)
   })
 })

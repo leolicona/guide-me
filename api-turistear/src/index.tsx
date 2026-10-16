@@ -14,12 +14,14 @@ import portalRouter from './routes/portal'
 import posRouter from './routes/pos'
 import { sweepExpiredBookings } from './routes/pos/sweep'
 import { sweepDepartureReminders } from './routes/pos/reminders'
+import { sweepDevoladaPayments } from './routes/devolada/sweep'
 import reportsRouter from './routes/reports'
 import notificationsRouter from './routes/notifications'
 import onboardingRouter from './routes/onboarding'
 import servicesRouter from './routes/services'
 import ticketRouter from './routes/ticket'
 import ticketsRouter from './routes/tickets'
+import webhooksRouter from './routes/webhooks'
 import type { AppVariables } from './types/context'
 
 // passkey-auth D2, R14 — keep the BFF: the HttpOnly cookie alone authenticates, so no answer may
@@ -89,6 +91,8 @@ app.route('/api/cash', cashRouter)
 app.route('/api/reports', reportsRouter)
 app.route('/api/dashboard', dashboardRouter)
 app.route('/api/notifications', notificationsRouter)
+// devolada-transfer-verification D4 — public: Devolada proves itself with its signature.
+app.route('/api/webhooks', webhooksRouter)
 
 app.get('/api/me', authMiddleware, (c) => c.json({ user: c.get('user') }))
 
@@ -116,7 +120,7 @@ app.get('/', (c) => {
 export default {
   fetch: app.fetch,
   scheduled: (
-    _event: ScheduledController,
+    controller: ScheduledController,
     env: CloudflareBindings,
     ctx: ExecutionContext,
   ) => {
@@ -144,6 +148,16 @@ export default {
           ),
         )
         .catch((err) => console.error('[reminders] departure-reminder sweep failed', err)),
+    )
+    // devolada-transfer-verification D12 — the Devolada recovery sweep, a THIRD independent
+    // waitUntil: a lost notification is applied at the next run. `now` is the trigger's own time,
+    // so local validation can advance the clock with `/cdn-cgi/local/scheduled?time=`.
+    ctx.waitUntil(
+      sweepDevoladaPayments(env, new Date(controller.scheduledTime))
+        .then((r) =>
+          console.log(`[devolada] checked=${r.checked} applied=${r.applied} failed=${r.failed}`),
+        )
+        .catch((err) => console.error('[devolada] recovery sweep failed', err)),
     )
   },
 }

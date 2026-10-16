@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm'
-import { index, sqliteTable, text, integer } from 'drizzle-orm/sqlite-core'
+import { index, sqliteTable, text, integer, uniqueIndex } from 'drizzle-orm/sqlite-core'
 
 export const organizations = sqliteTable('organizations', {
   id: text('id').primaryKey(),
@@ -488,8 +488,11 @@ export const folios = sqliteTable('folios', {
   cancellationPolicySnapshot: text('cancellation_policy_snapshot'),
   // WHO cancelled, as a type rather than prose — so a report never has to parse
   // `cancellation_reason`. NULL = cancelled before the policy engine shipped.
+  // devolada-transfer-verification D11 — 'payment_not_received': the system cancelled because
+  // Devolada showed the transfer never arrived. Apart from 'system_expiry', so it never counts as
+  // an expired apartado.
   cancellationSource: text('cancellation_source', {
-    enum: ['admin', 'agent', 'tourist_request', 'company', 'system_expiry'],
+    enum: ['admin', 'agent', 'tourist_request', 'company', 'system_expiry', 'payment_not_received'],
   }),
   // Cash refund tracking (US-A23 / US-T05). `pending` is set when a PAID folio is cancelled
   // via an approved tourist cancellation request; `refunded` once the admin confirms the
@@ -562,8 +565,11 @@ export const folioLines = sqliteTable('folio_lines', {
   // line's positive allocations.
   cancelledAt: integer('cancelled_at', { mode: 'timestamp' }),
   cancelledBy: text('cancelled_by').references(() => users.id),
+  // devolada-transfer-verification D11 — 'payment_not_received': the system cancelled because
+  // Devolada showed the transfer never arrived. Apart from 'system_expiry', so it never counts as
+  // an expired apartado.
   cancellationSource: text('cancellation_source', {
-    enum: ['admin', 'agent', 'tourist_request', 'company', 'system_expiry'],
+    enum: ['admin', 'agent', 'tourist_request', 'company', 'system_expiry', 'payment_not_received'],
   }),
   refundStatus: text('refund_status', { enum: ['none', 'pending', 'refunded'] })
     .notNull()
@@ -1007,6 +1013,11 @@ export const folioEvents = sqliteTable('folio_events', {
       'rescheduled',
       'cancelled',
       'refund_confirmed',
+      // devolada-transfer-verification (utils/folioEvents.ts documents each payload).
+      'payment_link_issued',
+      'payment_link_closed',
+      'payment_verdict',
+      'transfer_not_received',
     ],
   }).notNull(),
   actorId: text('actor_id').references(() => users.id),
@@ -1065,6 +1076,220 @@ export const notifications = sqliteTable('notifications', {
     .default(sql`(unixepoch())`),
 })
 
+// ─── devolada-transfer-verification (specs/006-devolada-transfer-verification/data-model.md) ──────
+// Migration 0073. An organization connects its own Devolada account, and its transfers are cleared
+// by Banxico's verdict instead of by an admin. Instants are epoch seconds (Devolada's milliseconds
+// are converted in services/devolada.ts, D5); money is integer minor units (constitution II).
+
+export const DEVOLADA_MODES = ['real', 'test'] as const
+export const DEVOLADA_BROKEN_REASONS = [
+  'DEVOLADA_CREDENTIAL_REJECTED',
+  'DEVOLADA_BUSINESS_SUSPENDED',
+  'DEVOLADA_CHANNEL_UNAVAILABLE',
+] as const
+export const DEVOLADA_LINK_KINDS = ['sale', 'deposit', 'settlement'] as const
+export const DEVOLADA_LINK_STATES = [
+  'creating',
+  'open',
+  'paid',
+  'expired',
+  'closing',
+  'closed',
+  'failed',
+  'abandoned',
+] as const
+export const DEVOLADA_LINK_CLOSED_REASONS = [
+  'cancelled',
+  'rejected',
+  'amount_changed',
+  'settled_otherwise',
+  'verified_by_admin',
+  'abandoned',
+] as const
+export const DEVOLADA_PAYMENT_STATUSES = [
+  'validating',
+  'queued_for_credit',
+  'confirmed',
+  'partial',
+  'unapplied',
+  'invalid',
+  'expired',
+  'superseded',
+] as const
+
+// devolada-transfer-verification D1, D21 — every key the organization ever connected, AES-256-GCM
+// encrypted under a per-organization key derived from DEVOLADA_CREDENTIAL_KEY. A retired key is
+// kept while a link that uses it is unresolved; the sweep erases its ciphertext after (D12). The
+// row stays for audit. Only the hint ever leaves the API.
+export const devoladaCredentials = sqliteTable(
+  'devolada_credentials',
+  {
+    id: text('id').primaryKey(),
+    organizationId: text('organization_id')
+      .notNull()
+      .references(() => organizations.id),
+    mode: text('mode', { enum: DEVOLADA_MODES }).notNull(),
+    ciphertext: text('ciphertext'),
+    iv: text('iv'),
+    keyHint: text('key_hint').notNull(),
+    createdBy: text('created_by')
+      .notNull()
+      .references(() => users.id),
+    createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+    retiredAt: integer('retired_at', { mode: 'timestamp' }),
+    erasedAt: integer('erased_at', { mode: 'timestamp' }),
+  },
+  (table) => [index('devolada_credentials_org_idx').on(table.organizationId, table.retiredAt)],
+)
+
+// devolada-transfer-verification D1-D3 — one per organization. `currentCredentialId` is the key new
+// links use (NULL while disconnected, D21); its mode and hint are the connection's.
+export const devoladaConnections = sqliteTable(
+  'devolada_connections',
+  {
+    id: text('id').primaryKey(),
+    organizationId: text('organization_id')
+      .notNull()
+      .references(() => organizations.id),
+    status: text('status', { enum: ['connected', 'broken', 'disconnected'] }).notNull(),
+    currentCredentialId: text('current_credential_id').references(() => devoladaCredentials.id),
+    webhookUrl: text('webhook_url'),
+    replacedWebhookUrl: text('replaced_webhook_url'),
+    brokenReason: text('broken_reason', { enum: DEVOLADA_BROKEN_REASONS }),
+    brokenAt: integer('broken_at', { mode: 'timestamp' }),
+    // Set while a payment of a link on the current credential is queued_for_credit (D9).
+    creditPausedAt: integer('credit_paused_at', { mode: 'timestamp' }),
+    lastVerdictAt: integer('last_verdict_at', { mode: 'timestamp' }),
+    // D2 — a broken connection is probed again when an admin opens it, at most every 15 minutes.
+    probedAt: integer('probed_at', { mode: 'timestamp' }),
+    connectedBy: text('connected_by')
+      .notNull()
+      .references(() => users.id),
+    connectedAt: integer('connected_at', { mode: 'timestamp' }).notNull(),
+    disconnectedBy: text('disconnected_by').references(() => users.id),
+    disconnectedAt: integer('disconnected_at', { mode: 'timestamp' }),
+    createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+    updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
+  },
+  (table) => [uniqueIndex('devolada_connections_org_uq').on(table.organizationId)],
+)
+
+// devolada-transfer-verification D6-D8, D13 — one per transfer we asked Devolada to collect. `id`
+// is also the create's Idempotency-Key (D6); `devoladaLinkId` is Devolada's globally unique id, by
+// which webhooks are routed (D4). Every call about a link uses `credentialId` (D21).
+export const devoladaLinks = sqliteTable(
+  'devolada_links',
+  {
+    id: text('id').primaryKey(),
+    organizationId: text('organization_id')
+      .notNull()
+      .references(() => organizations.id),
+    folioId: text('folio_id')
+      .notNull()
+      .references(() => folios.id),
+    folioLineId: text('folio_line_id').references(() => folioLines.id),
+    // sale/deposit: the pending ledger row at issue; settlement: the row recorded on confirmation (D8).
+    folioPaymentId: text('folio_payment_id').references(() => folioPayments.id),
+    kind: text('kind', { enum: DEVOLADA_LINK_KINDS }).notNull(),
+    credentialId: text('credential_id')
+      .notNull()
+      .references(() => devoladaCredentials.id),
+    mode: text('mode', { enum: DEVOLADA_MODES }).notNull(),
+    amount: integer('amount').notNull(),
+    devoladaLinkId: text('devolada_link_id'),
+    url: text('url'),
+    expiresAt: integer('expires_at', { mode: 'timestamp' }).notNull(),
+    state: text('state', { enum: DEVOLADA_LINK_STATES }).notNull(),
+    closedReason: text('closed_reason', { enum: DEVOLADA_LINK_CLOSED_REASONS }),
+    requestedBy: text('requested_by')
+      .notNull()
+      .references(() => users.id),
+    createAttempts: integer('create_attempts').notNull().default(1),
+    lastCheckedAt: integer('last_checked_at', { mode: 'timestamp' }),
+    createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+    updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
+  },
+  (table) => [
+    index('devolada_links_folio_idx').on(table.organizationId, table.folioId),
+    uniqueIndex('devolada_links_devolada_id_uq').on(table.devoladaLinkId),
+    index('devolada_links_state_expiry_idx').on(table.state, table.expiresAt),
+    uniqueIndex('devolada_links_open_settlement_uq')
+      .on(table.folioId)
+      .where(sql`kind = 'settlement' AND state IN ('creating', 'open')`),
+    uniqueIndex('devolada_links_open_payment_uq')
+      .on(table.folioPaymentId)
+      .where(sql`state IN ('creating', 'open')`),
+    index('devolada_links_credential_idx').on(table.credentialId, table.state),
+  ],
+)
+
+// devolada-transfer-verification D9 — what Devolada reported for a link: one row per Devolada
+// payment, holding its latest snapshot. A final status is never overwritten by an earlier one.
+export const devoladaPayments = sqliteTable(
+  'devolada_payments',
+  {
+    id: text('id').primaryKey(),
+    organizationId: text('organization_id')
+      .notNull()
+      .references(() => organizations.id),
+    linkId: text('link_id')
+      .notNull()
+      .references(() => devoladaLinks.id),
+    folioId: text('folio_id')
+      .notNull()
+      .references(() => folios.id),
+    devoladaPaymentId: text('devolada_payment_id').notNull(),
+    status: text('status', { enum: DEVOLADA_PAYMENT_STATUSES }).notNull(),
+    proofDoor: text('proof_door', { enum: ['transfer', 'receipt'] }).notNull(),
+    askedAmount: integer('asked_amount').notNull(),
+    claimedAmount: integer('claimed_amount'),
+    receivedAmount: integer('received_amount'),
+    match: text('match', { enum: ['exact', 'short', 'over'] }),
+    // Devolada's `folio` (DV-…): shown as «Comprobante Devolada», never as "folio" (FR-022).
+    receiptNumber: text('receipt_number'),
+    verdictAt: integer('verdict_at', { mode: 'timestamp' }),
+    awaiting: text('awaiting', { enum: ['payer_tracking_key'] }),
+    awaitingReason: text('awaiting_reason', {
+      enum: ['all_used', 'ambiguous', 'no_match', 'unreadable'],
+    }),
+    devoladaCreatedAt: integer('devolada_created_at', { mode: 'timestamp' }).notNull(),
+    // The last status D9 acted on; equal to `status` ⇒ nothing to do.
+    appliedStatus: text('applied_status', { enum: DEVOLADA_PAYMENT_STATUSES }),
+    appliedAt: integer('applied_at', { mode: 'timestamp' }),
+    resolution: text('resolution', { enum: ['accepted', 'dismissed', 'returned'] }),
+    resolvedBy: text('resolved_by').references(() => users.id),
+    resolvedAt: integer('resolved_at', { mode: 'timestamp' }),
+    createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+    updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
+  },
+  (table) => [
+    index('devolada_payments_folio_idx').on(table.organizationId, table.folioId),
+    index('devolada_payments_link_idx').on(table.linkId),
+    uniqueIndex('devolada_payments_devolada_id_uq').on(table.devoladaPaymentId),
+    index('devolada_payments_status_idx').on(table.organizationId, table.status),
+    index('devolada_payments_status_link_idx').on(table.status, table.linkId),
+  ],
+)
+
+// devolada-transfer-verification D4 — the notification inbox: de-duplicates Devolada's webhook by
+// `eventId`. Only events resolved to an organization are stored.
+export const devoladaEvents = sqliteTable(
+  'devolada_events',
+  {
+    eventId: text('event_id').primaryKey(),
+    organizationId: text('organization_id')
+      .notNull()
+      .references(() => organizations.id),
+    devoladaPaymentId: text('devolada_payment_id').notNull(),
+    type: text('type').notNull(),
+    eventCreatedAt: integer('event_created_at', { mode: 'timestamp' }).notNull(),
+    receivedAt: integer('received_at', { mode: 'timestamp' }).notNull(),
+    attempts: integer('attempts').notNull().default(1),
+    outcome: text('outcome', { enum: ['applied', 'no_change', 'mode_mismatch', 'failed'] }).notNull(),
+  },
+  (table) => [index('devolada_events_org_idx').on(table.organizationId, table.receivedAt)],
+)
+
 export type Notification = typeof notifications.$inferSelect
 export type NewNotification = typeof notifications.$inferInsert
 
@@ -1120,3 +1345,19 @@ export type AccommodationBlockout = typeof accommodationBlockouts.$inferSelect
 export type NewAccommodationBlockout = typeof accommodationBlockouts.$inferInsert
 export type AccommodationReservation = typeof accommodationReservations.$inferSelect
 export type NewAccommodationReservation = typeof accommodationReservations.$inferInsert
+export type DevoladaCredential = typeof devoladaCredentials.$inferSelect
+export type NewDevoladaCredential = typeof devoladaCredentials.$inferInsert
+export type DevoladaConnection = typeof devoladaConnections.$inferSelect
+export type NewDevoladaConnection = typeof devoladaConnections.$inferInsert
+export type DevoladaLink = typeof devoladaLinks.$inferSelect
+export type NewDevoladaLink = typeof devoladaLinks.$inferInsert
+export type DevoladaPayment = typeof devoladaPayments.$inferSelect
+export type NewDevoladaPayment = typeof devoladaPayments.$inferInsert
+export type DevoladaEvent = typeof devoladaEvents.$inferSelect
+export type NewDevoladaEvent = typeof devoladaEvents.$inferInsert
+export type DevoladaMode = (typeof DEVOLADA_MODES)[number]
+export type DevoladaBrokenReason = (typeof DEVOLADA_BROKEN_REASONS)[number]
+export type DevoladaLinkKind = (typeof DEVOLADA_LINK_KINDS)[number]
+export type DevoladaLinkState = (typeof DEVOLADA_LINK_STATES)[number]
+export type DevoladaLinkClosedReason = (typeof DEVOLADA_LINK_CLOSED_REASONS)[number]
+export type DevoladaPaymentStatus = (typeof DEVOLADA_PAYMENT_STATUSES)[number]

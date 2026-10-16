@@ -1,7 +1,7 @@
 import { ButtonBase, Stack } from '@mui/material'
 import { FilterStrip, filterChipSx } from '../../filters'
 import type { FolioCounts } from '../../../services/foliosService'
-import type { FacetKey } from '../folioFacets'
+import { porVerificarCount, type FacetKey } from '../folioFacets'
 
 // US-A84 (D5/D6) — the pending-work bar: one pill per kind of work that actually exists.
 //
@@ -34,7 +34,10 @@ export function PendingWorkBar({ counts, active, onToggle }: PendingWorkBarProps
 
   const items: PendingWorkItem[] = ([
     // Order matters and matches the button ladder (D12): the work that blocks other work first.
-    { facet: 'por_verificar', count: counts.verification, label: () => 'Por verificar' },
+    // devolada-transfer-verification D14 — the same number the admin's Ventas badge shows (and Hoy,
+    // which renders this bar): the sales Devolada is resolving are nobody's work yet, and the facet
+    // this pill applies leaves them out.
+    { facet: 'por_verificar', count: porVerificarCount(counts), label: () => 'Por verificar' },
     {
       facet: 'solicitud',
       count: counts.folio_requests,

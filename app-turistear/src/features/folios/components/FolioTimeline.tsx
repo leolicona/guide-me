@@ -11,8 +11,17 @@ import EventRepeatRounded from '@mui/icons-material/EventRepeatRounded'
 import CurrencyExchangeRounded from '@mui/icons-material/CurrencyExchangeRounded'
 import EventRounded from '@mui/icons-material/EventRounded'
 import RuleRounded from '@mui/icons-material/RuleRounded'
+import LinkRounded from '@mui/icons-material/LinkRounded'
+import LinkOffRounded from '@mui/icons-material/LinkOffRounded'
+import AccountBalanceRounded from '@mui/icons-material/AccountBalanceRounded'
+import MoneyOffRounded from '@mui/icons-material/MoneyOffRounded'
 import { MoneyText, SectionCard } from '../../../components'
 import { useOrgDateFormatter } from '../../organization'
+import {
+  PAYMENT_LINK_LABEL_COPY,
+  type PaymentLinkLabel,
+  type PaymentLinkTone,
+} from '../../devolada'
 import type { FolioCancellationRequest, FolioEvent, FolioEventType, Fulfillment } from '../types'
 
 const DATE_FMT: Intl.DateTimeFormatOptions = {
@@ -36,6 +45,13 @@ const EVENT_TONE: Record<FolioEventType, string> = {
   rescheduled: 'text.secondary',
   cancelled: 'error.main',
   refund_confirmed: 'success.main',
+  // devolada-transfer-verification — the enlace's own story. Opening and closing it is narrative;
+  // a verdict takes its label's tone (`VERDICT_COLOR`), amber when the status is unknown; money
+  // that never arrived is a sale dying.
+  payment_link_issued: 'text.secondary',
+  payment_link_closed: 'text.secondary',
+  payment_verdict: 'warning.main',
+  transfer_not_received: 'error.main',
 }
 
 const EVENT_ICON: Record<FolioEventType, ReactNode> = {
@@ -49,6 +65,11 @@ const EVENT_ICON: Record<FolioEventType, ReactNode> = {
   rescheduled: <EventRepeatRounded fontSize="small" />,
   cancelled: <CancelRounded fontSize="small" />,
   refund_confirmed: <CurrencyExchangeRounded fontSize="small" />,
+  payment_link_issued: <LinkRounded fontSize="small" />,
+  payment_link_closed: <LinkOffRounded fontSize="small" />,
+  // What the bank said about the transfer: Banxico's verdict, relayed by Devolada.
+  payment_verdict: <AccountBalanceRounded fontSize="small" />,
+  transfer_not_received: <MoneyOffRounded fontSize="small" />,
 }
 
 const METHOD_WORDS: Record<string, string> = {
@@ -66,6 +87,41 @@ const num = (p: Record<string, unknown> | null, key: string): number | undefined
   typeof p?.[key] === 'number' ? (p[key] as number) : undefined
 const bool = (p: Record<string, unknown> | null, key: string): boolean | undefined =>
   typeof p?.[key] === 'boolean' ? (p[key] as boolean) : undefined
+
+// devolada-transfer-verification D16 — a verdict reads as its label reads on every other surface
+// (contracts/turistear-api.md § Labels), so the timeline and the chip never name one verdict two
+// ways. The event is written for partial, invalid and unapplied, and for confirmed on a cancelled
+// sale, which § Labels calls unapplied: money to return. `null` ⇒ a status this client does not
+// know, shown generically rather than guessed.
+const verdictLabel = (p: Record<string, unknown> | null): PaymentLinkLabel | null => {
+  switch (str(p, 'status')) {
+    case 'partial':
+      return 'partial'
+    case 'invalid':
+      return 'invalid'
+    case 'unapplied':
+    case 'confirmed':
+      return 'unapplied'
+    case 'expired':
+      return 'not_received'
+    case 'queued_for_credit':
+      return 'credit_paused'
+    case 'validating':
+      return str(p, 'awaiting') ? 'needs_tracking_key' : 'validating'
+    default:
+      return null
+  }
+}
+
+// The chip tones onto this list's functional colours: meaning only, never teal. A wait is amber,
+// as the chip draws it.
+const VERDICT_COLOR: Record<PaymentLinkTone, string> = {
+  paid: 'success.main',
+  pending: 'warning.main',
+  warning: 'warning.main',
+  error: 'error.main',
+  neutral: 'text.secondary',
+}
 
 // The one-line copy per event (spec D8 vocabulary — never "Reserva"). Money renders through
 // MoneyText (D11): small, neutral semantic.
@@ -103,8 +159,13 @@ function eventPrimary(ev: FolioEvent): ReactNode {
         </>
       )
     }
-    case 'payment_verified':
-      return 'Transferencia verificada'
+    case 'payment_verified': {
+      // devolada-transfer-verification — the automatic verification names who verified and the
+      // receipt it rests on: Devolada's number, a «Comprobante», never a "folio" (FR-022).
+      if (str(p, 'source') !== 'devolada') return 'Transferencia verificada'
+      const receipt = str(p, 'receipt_number')
+      return `Transferencia verificada por Devolada${receipt ? ` · Comprobante ${receipt}` : ''}`
+    }
     case 'transfer_rejected':
       return 'Transferencia rechazada — venta cancelada'
     case 'tickets_sent':
@@ -152,6 +213,18 @@ function eventPrimary(ev: FolioEvent): ReactNode {
         </>
       )
     }
+    // devolada-transfer-verification — copy from contracts/turistear-api.md § Action copy. The
+    // customer opens an «enlace», never a "liga" or a "link" (research D16).
+    case 'payment_link_issued':
+      return 'Enlace de pago creado'
+    case 'payment_link_closed':
+      return 'Enlace de pago cerrado'
+    case 'payment_verdict': {
+      const label = verdictLabel(p)
+      return label ? PAYMENT_LINK_LABEL_COPY[label].text : 'Veredicto de Devolada'
+    }
+    case 'transfer_not_received':
+      return 'No se recibió la transferencia — venta cancelada'
   }
 }
 
@@ -265,10 +338,13 @@ export function FolioTimeline({
     if (ev.type === 'refund_confirmed' && via === 'override' && refundNote) {
       details.push(`Nota: ${refundNote}`)
     }
+    // A verdict is coloured by its label (an invalid transfer red, a partial one amber); every
+    // other event by its type.
+    const verdict = ev.type === 'payment_verdict' ? verdictLabel(ev.payload) : null
     return {
       key: ev.id,
       icon: EVENT_ICON[ev.type],
-      color: EVENT_TONE[ev.type],
+      color: verdict ? VERDICT_COLOR[PAYMENT_LINK_LABEL_COPY[verdict].tone] : EVENT_TONE[ev.type],
       primary: eventPrimary(ev),
       details: details.length > 0 ? details : undefined,
       caption,

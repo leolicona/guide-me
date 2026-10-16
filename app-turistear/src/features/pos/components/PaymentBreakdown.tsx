@@ -27,7 +27,15 @@ const formatDate = (unixSecs: number) =>
 // cancellation reversal) with its OWN method, so "cash deposit + transfer balance" is legible at a
 // glance. Rendered only when a folio was collected in more than one movement — a single-payment
 // folio is already summarised by the "Método de pago" line above.
-export function PaymentBreakdown({ payments }: { payments: FolioPaymentEntry[] }) {
+export function PaymentBreakdown({
+  payments,
+  verificationAuto = false,
+}: {
+  payments: FolioPaymentEntry[]
+  /** devolada-transfer-verification D14 — the sale's `verification_auto`: Devolada is verifying
+   *  its pending money, with nothing for an admin to do. */
+  verificationAuto?: boolean
+}) {
   if (!payments || payments.length < 2) return null
 
   return (
@@ -59,8 +67,13 @@ export function PaymentBreakdown({ payments }: { payments: FolioPaymentEntry[] }
             </Stack>
 
             <Stack direction="row" spacing={1} sx={{ alignItems: 'center', flexShrink: 0 }}>
+              {/* D14 — «Por verificar» names the admin's work; while Devolada verifies the
+                  money there is none, so the row says what is happening to it. */}
               {p.verification === 'pending' && (
-                <StatusChip status="pending" label="Por verificar" />
+                <StatusChip
+                  status="pending"
+                  label={verificationAuto ? 'En verificación' : 'Por verificar'}
+                />
               )}
               <MoneyText
                 cents={p.amount}

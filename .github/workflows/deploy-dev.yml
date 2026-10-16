@@ -44,21 +44,32 @@ jobs:
       # the Worker's current value). BETTER_AUTH_SECRET is required — the API refuses to start
       # without 32+ characters — so a missing one stops the run here, before anything changes. The
       # file stays in the runner's temp and is never printed.
+      #
+      # devolada-transfer-verification D17 — DEVOLADA_CREDENTIAL_KEY encrypts every stored Devolada
+      # credential: 32 random bytes, base64 (`openssl rand -base64 32`), generated once for this
+      # environment and never pasted again (a different value makes every stored credential
+      # unreadable). A value that is present but does not decode to 32 bytes stops the run before it
+      # migrates; an absent one keeps the Worker's current value.
       - name: Secrets for the API (dev)
         env:
           BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET }}
           QR_SECRET: ${{ secrets.QR_SECRET }}
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          DEVOLADA_CREDENTIAL_KEY: ${{ secrets.DEVOLADA_CREDENTIAL_KEY }}
         run: |
           set -euo pipefail
           if [ "${#BETTER_AUTH_SECRET}" -lt 32 ]; then
             echo "::error::BETTER_AUTH_SECRET is missing or shorter than 32 characters in the 'dev' environment. Nothing was migrated or deployed."
             exit 1
           fi
-          for name in QR_SECRET RESEND_API_KEY; do
+          if [ -n "$DEVOLADA_CREDENTIAL_KEY" ] && ! node -e 'const k = process.env.DEVOLADA_CREDENTIAL_KEY; process.exit(/^[A-Za-z0-9+\/]{43}=$/.test(k) && Buffer.from(k, "base64").length === 32 ? 0 : 1)'; then
+            echo "::error::DEVOLADA_CREDENTIAL_KEY in the 'dev' environment does not decode to 32 bytes (openssl rand -base64 32). Nothing was migrated or deployed."
+            exit 1
+          fi
+          for name in QR_SECRET RESEND_API_KEY DEVOLADA_CREDENTIAL_KEY; do
             [ -n "${!name}" ] || echo "::notice::$name is not in the 'dev' environment; the Worker keeps its current value."
           done
-          node -e 'const e = process.env; const s = {}; for (const k of ["BETTER_AUTH_SECRET", "QR_SECRET", "RESEND_API_KEY"]) if (e[k]) s[k] = e[k]; process.stdout.write(JSON.stringify(s))' \
+          node -e 'const e = process.env; const s = {}; for (const k of ["BETTER_AUTH_SECRET", "QR_SECRET", "RESEND_API_KEY", "DEVOLADA_CREDENTIAL_KEY"]) if (e[k]) s[k] = e[k]; process.stdout.write(JSON.stringify(s))' \
             > "$RUNNER_TEMP/api-secrets.json"
 
       - name: Apply D1 migrations (dev)

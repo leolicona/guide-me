@@ -4,6 +4,9 @@
 
 import { normalizePhone } from './phone'
 import { formatMoney } from '../catalog/types'
+import { formatCents } from '../../components/money'
+import { addDays } from './dates'
+import type { PaymentLinkKind, PaymentLinkView } from '../devolada/types'
 
 // US-T07 (express-sale D9) — every rendered QR encodes the public ticket-page URL instead of the
 // bare signed token, so a tourist's plain camera resolves to their ticket while the agent's
@@ -140,4 +143,76 @@ export function depositVerifiedWhatsAppUrl(ctx: Omit<TemplateContext, 'portalLin
     ctx.folio.customer_phone,
     fillTemplate(DEPOSIT_VERIFIED_TEMPLATE, { ...ctx, portalLink: '' }),
   )
+}
+
+// --- devolada-transfer-verification — the payment link's message (contracts/turistear-api.md
+// § The WhatsApp message for a link, FR-008). Shipped defaults, one per link kind, that the
+// organization does not edit, like DEPOSIT_VERIFIED_TEMPLATE. Sending the enlace IS collecting the
+// payment, so its action reads «Cobrar por WhatsApp». A deposit's text never promises tickets: an
+// apartado's tickets wait for its settlement (bug verify-send-empty-link). ----------------------------
+
+export const PAYMENT_LINK_TEMPLATES: Record<PaymentLinkKind, string> = {
+  sale: 'Hola {customer_name}, te escribe {agent_name} de {org_name}. Para confirmar tu compra, transfiere {link_amount} desde tu banco con este enlace: {payment_link} (vence {link_expires}). En cuanto se confirme el pago te enviamos tus boletos.',
+  deposit:
+    'Hola {customer_name}, te escribe {agent_name} de {org_name}. Para apartar tu reserva, transfiere el anticipo de {link_amount} desde tu banco con este enlace: {payment_link} (vence {link_expires}). Tus boletos se envían al liquidar el saldo de {pending_balance}.',
+  settlement:
+    'Hola {customer_name}, te escribe {agent_name} de {org_name}. Para liquidar tu reserva, transfiere {link_amount} desde tu banco con este enlace: {payment_link} (vence {link_expires}). En cuanto se confirme el pago te enviamos tus boletos.',
+}
+
+const dayIn = (ms: number, tz?: string): string =>
+  new Intl.DateTimeFormat('en-CA', {
+    ...(tz ? { timeZone: tz } : {}),
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date(ms))
+
+const timeIn = (ms: number, tz?: string): string =>
+  new Intl.DateTimeFormat('en-GB', {
+    ...(tz ? { timeZone: tz } : {}),
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).format(new Date(ms))
+
+/**
+ * When a payment link expires, as a person says it: «hoy a las HH:MM» or «mañana a las HH:MM» in the
+ * organization's time zone. A link lives at most 24 h (research D7), so it is always one of the two;
+ * a stray other day reads «el DD/MM a las HH:MM» rather than lying.
+ */
+export function linkExpiryPhrase(expiresAt: number, tz?: string, nowMs: number = Date.now()): string {
+  const ms = expiresAt * 1000
+  const day = dayIn(ms, tz)
+  const today = dayIn(nowMs, tz)
+  const time = timeIn(ms, tz)
+  if (day === today) return `hoy a las ${time}`
+  if (day === addDays(today, 1)) return `mañana a las ${time}`
+  return `el ${day.slice(8, 10)}/${day.slice(5, 7)} a las ${time}`
+}
+
+export interface PaymentLinkMessageContext extends Omit<TemplateContext, 'portalLink'> {
+  /** The organization's IANA zone, for {link_expires}. */
+  timezone?: string
+  /** For tests: the instant «hoy» is measured from. */
+  nowMs?: number
+}
+
+/**
+ * The wa.me link that sends a payment link to the customer. The link's own tokens are filled first
+ * ({link_amount}, {payment_link}, {link_expires}), then the shared ones by `fillTemplate`. Null when
+ * the phone is unusable, or the link has no URL to send.
+ */
+export function paymentLinkWhatsAppUrl(
+  link: Pick<PaymentLinkView, 'kind' | 'amount' | 'url' | 'expires_at'>,
+  ctx: PaymentLinkMessageContext,
+): string | null {
+  if (!link.url) return null
+  const own = PAYMENT_LINK_TEMPLATES[link.kind]
+    .split('{link_amount}')
+    .join(formatCents(link.amount))
+    .split('{payment_link}')
+    .join(link.url)
+    .split('{link_expires}')
+    .join(linkExpiryPhrase(link.expires_at, ctx.timezone, ctx.nowMs))
+  return whatsAppUrl(ctx.folio.customer_phone, fillTemplate(own, { ...ctx, portalLink: '' }))
 }

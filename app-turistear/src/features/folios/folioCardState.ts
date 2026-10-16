@@ -170,14 +170,26 @@ export function folioAction(
     payment_verification?: 'not_required' | 'pending' | 'verified'
     refund_status?: 'none' | 'pending' | 'refunded'
     cancellation_request?: 'pending' | 'resolved' | null
+    /** devolada-transfer-verification D14 — Devolada is resolving the transfer with nothing for
+     *  the admin to do. Decided by the server. */
+    verification_auto?: boolean
   },
   opts: { urgent: boolean; surface?: 'admin' | 'seller' },
 ): FolioAction {
   if (opts.surface !== 'seller') {
     // 1 — a customer is waiting on an answer, and the answer changes the rest.
     if (folio.cancellation_request === 'pending') return 'request'
-    // 2 — money the company does not hold yet, blocking delivery downstream.
-    if (folio.status !== 'cancelled' && folio.payment_verification === 'pending') return 'verify'
+    // 2 — money the company does not hold yet, blocking delivery downstream. Not while Devolada is
+    // resolving it (devolada-transfer-verification D14): the sale is out of Por verificar, and
+    // «Verificar y enviar» there would invite releasing tickets before the money is proven. The
+    // admin can still verify it from the sale (FR-018).
+    if (
+      folio.status !== 'cancelled' &&
+      folio.payment_verification === 'pending' &&
+      folio.verification_auto !== true
+    ) {
+      return 'verify'
+    }
     // 3 — money the company owes and has not handed back.
     if (folio.refund_status === 'pending') return 'refund'
   }
@@ -212,6 +224,10 @@ export type AttentionLevel = 'ok' | 'work' | 'urgent'
  * hold across two. A seller now legitimately sees an amber rail above a neutral verb — with the
  * card's own line naming the work, because a colour is never allowed to carry state alone
  * (DESIGN_TOKENS §3).
+ *
+ * devolada-transfer-verification D14 — a sale Devolada is resolving rests `ok`: the ladder has no
+ * verify for it, because nobody has to act until the server hands it back. Its link chip, not the
+ * rail, says what the money is doing.
  */
 export function folioAttention(
   folio: Parameters<typeof folioAction>[0] & { overdue?: boolean },

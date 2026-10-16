@@ -157,7 +157,7 @@ export function ExpressSalePanel({ service, today }: ExpressSalePanelProps) {
         lines: [{ slot_id: slot.id, quantity: seats, unit_price: priceCents, extras: [] }],
       },
       {
-        onSuccess: (folio) => {
+        onSuccess: ({ folio }) => {
           setLastSale({ folio, at: Date.now() })
           setVoidWindowOpen(true)
           // D26/D27 — WhatsApp-first: Cobrar LAUNCHES the send; the QR overlay stays closed

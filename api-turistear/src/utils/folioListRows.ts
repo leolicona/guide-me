@@ -12,6 +12,7 @@ import { and, asc, eq, sql, type SQL } from 'drizzle-orm'
 import type { Db } from '../db/client'
 import { folioRequests, folioAccessTokens, folioLines, folios } from '../db/schema'
 import { folioFulfillment, lineFulfillment, type Fulfillment } from './folioFulfillment'
+import { listRowPaymentLink, type PaymentLinkView } from './devoladaLinkView'
 
 /** The lean line shape the card and `renderItinerary()` share (spec D14). */
 export interface FolioListLine {
@@ -209,12 +210,16 @@ export interface FolioListRow {
   creditAmount: number | null
   creditExpiresAt: Date | null
   saleMode: string | null
+  /** devolada-transfer-verification D14 — `verificationAutoFilter` as a 0/1 column. */
+  verificationAuto: number
 }
 
 export interface FolioListDecorations {
   linesByFolio: Map<string, FolioListLine[]>
   portalLinkByFolio: Map<string, string>
   requestByFolio: Map<string, CancellationRequestMark>
+  /** devolada-transfer-verification D14 — `loadPaymentLinkViews` over the same filters. */
+  paymentLinksByFolio: Map<string, PaymentLinkView[]>
   nowMs: number
 }
 
@@ -261,6 +266,10 @@ export const serializeFolioListRow = (r: FolioListRow, deco: FolioListDecoration
     // US-A84 rule 6 — 'pending' ⇒ a customer is waiting on an answer; 'resolved' ⇒ requests exist
     // but none live; null ⇒ none.
     cancellation_request: deco.requestByFolio.get(r.id) ?? null,
+    // devolada-transfer-verification D14 — the latest unresolved payment link, otherwise the latest;
+    // and whether Devolada is resolving the sale with nothing for the admin to do.
+    payment_link: listRowPaymentLink(deco.paymentLinksByFolio.get(r.id)),
+    verification_auto: Number(r.verificationAuto) === 1,
     // US-A84 — surfaced per row so the card's time chip need not re-derive the deadline.
     overdue:
       r.status === 'booking' &&

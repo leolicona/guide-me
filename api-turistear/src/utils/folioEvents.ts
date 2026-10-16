@@ -1,4 +1,4 @@
-import { and, asc, eq, sql } from 'drizzle-orm'
+import { and, asc, eq, getTableColumns, sql, type SQL } from 'drizzle-orm'
 import type { Db } from '../db/client'
 import { folioEvents, users } from '../db/schema'
 
@@ -22,6 +22,18 @@ export type FolioEventType =
   | 'rescheduled'
   | 'cancelled'
   | 'refund_confirmed'
+  // devolada-transfer-verification (data-model.md § Changes to existing types). Payloads:
+  // - payment_link_issued — actor = the seller; `{link_id, kind, amount, expires_at}` (D6).
+  // - payment_link_closed — actor = whoever stopped the sale, or NULL; `{link_id, reason}` (D13).
+  // - payment_verdict — actor NULL; `{link_id, status, asked, received, receipt_number, awaiting}`,
+  //   for partial, invalid and unapplied, and for confirmed on a cancelled sale (D9).
+  // - transfer_not_received — actor NULL; `{link_id, kind}` (D11).
+  // An automatic `payment_verified` has actor NULL and `{source: 'devolada', receipt_number,
+  // received}` (D10).
+  | 'payment_link_issued'
+  | 'payment_link_closed'
+  | 'payment_verdict'
+  | 'transfer_not_received'
 
 interface FolioEventInput {
   organizationId: string
@@ -54,6 +66,29 @@ export const folioEventRow = (db: Db, input: FolioEventInput) =>
     payload: input.payload ? JSON.stringify(prune(input.payload)) : null,
     createdAt: input.at,
   })
+
+// devolada-transfer-verification D10 — the same row, written only when `gate` holds when the
+// statement runs. Inside a `db.batch`, a gate over the batch's own guarded transition keeps the
+// narrative from claiming an action another processor already took (constitution V). Drizzle's
+// insert-select names every column in the table's own order, so the values follow that order.
+export const folioEventRowWhere = (db: Db, input: FolioEventInput, gate: SQL) => {
+  const values: Record<string, unknown> = {
+    id: crypto.randomUUID(),
+    organizationId: input.organizationId,
+    folioId: input.folioId,
+    eventType: input.type,
+    actorId: input.actorId ?? null,
+    folioLineId: input.folioLineId ?? null,
+    payload: input.payload ? JSON.stringify(prune(input.payload)) : null,
+    backfilled: 0,
+    createdAt: Math.floor(input.at.getTime() / 1000),
+  }
+  const columns = Object.keys(getTableColumns(folioEvents)).map((key) => {
+    if (!(key in values)) throw new Error(`folioEventRowWhere: no value for folio_events.${key}`)
+    return sql`${values[key]}`
+  })
+  return db.insert(folioEvents).select(sql`SELECT ${sql.join(columns, sql`, `)} WHERE ${gate}`)
+}
 
 // Drop nullish keys so a payload never carries `"reason": null` noise.
 const prune = (payload: Record<string, unknown>) =>

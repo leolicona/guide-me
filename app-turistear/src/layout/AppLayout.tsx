@@ -25,6 +25,7 @@ import { usePasskeyOffer } from '../store/passkeyOffer'
 import { usePendingAckCount, usePendingDropCount } from '../features/cash/hooks'
 import { usePendingDeliveryCount } from '../features/pos/hooks'
 import { useFolioCounts } from '../features/folios/hooks'
+import { porVerificarCount } from '../features/folios/folioFacets'
 import { ROUTES } from '../config/routes'
 import { AccountMenu } from './AccountMenu'
 import { TopBar } from './TopBar'
@@ -89,7 +90,9 @@ export function AppLayout() {
   // where these were two more full-list fetches whose only use was `.length`.
   const { data: folioCounts } = useFolioCounts(user.role === 'admin')
   const pendingCancellationCount = folioCounts?.folio_requests ?? 0
-  const pendingVerificationCount = folioCounts?.verification ?? 0
+  // devolada-transfer-verification D14 — «Por verificar» is the admin's work only: the number the
+  // Ventas pending-work bar and Hoy show, without the sales Devolada is resolving.
+  const pendingVerificationCount = folioCounts ? porVerificarCount(folioCounts) : 0
   // US-UX06 — agent cash drops awaiting confirmation, surfaced on the admin's Caja destination.
   // Admins only; the admin's own (self-authorized) drops never count.
   const { data: pendingDropCount = 0 } = usePendingDropCount(user.role === 'admin')

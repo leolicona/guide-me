@@ -1,5 +1,6 @@
 import { request } from './authService'
 import type { CancellationPolicy } from '../features/organization/types'
+import type { OrganizationDevoladaSummary } from '../features/devolada/types'
 
 // The caller's organization, including the booking policy (US-A46). The deposit chip in the
 // adaptive checkout (US-AG07.2) reads `booking_min_down_payment_pct` from here.
@@ -45,6 +46,9 @@ export interface MyOrganization {
   // US-A88 (payment-verification D10) — must a transfer carry its bank reference at checkout and
   // settle? When false the field turns optional; the admin still verifies the money (US-A67).
   payment_reference_required: boolean
+  /** devolada-transfer-verification D1 — the connection's status and mode, never a credential.
+   *  Every role reads it: the checkout decides from it whether a transfer is collected by enlace. */
+  devolada?: OrganizationDevoladaSummary
 }
 
 export const getMyOrganization = async (): Promise<MyOrganization> => {

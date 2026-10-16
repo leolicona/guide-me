@@ -495,12 +495,12 @@ says otherwise.
 
     | Profile | `DEVOLADA_API_BASE_URL` | `DEVOLADA_KEY_MODE` | `DEVOLADA_WEBHOOK_URL` |
     |---|---|---|---|
-    | local | `https://api.devoladapago.com` | `test` | empty |
-    | dev | `https://api.devoladapago.com` | `test` | `https://api-dev.turistearya.com/api/webhooks/devolada` |
-    | preview (one per pull request) | `https://api.devoladapago.com` | `test` | empty |
+    | local | `https://api.dev.devoladapago.com` | `test` | empty |
+    | dev | `https://api.dev.devoladapago.com` | `test` | `https://api-dev.turistearya.com/api/webhooks/devolada` |
+    | preview (one per pull request) | `https://api.dev.devoladapago.com` | `test` | empty |
     | production | `https://api.devoladapago.com` | `real` | `https://api.turistearya.com/api/webhooks/devolada` |
 
-    - Dev and previews use Devolada's production API with test credentials, which is the contract's test mode.
+    - Local, dev and previews use Devolada's shared dev environment (`https://api.dev.devoladapago.com`), with test credentials; only production talks to Devolada's production API. *(Changed in build, 2026-10-16: the developer's test businesses live in Devolada's dev environment, and Devolada keeps each environment's credentials apart, so production answered `AUTHENTICATION_ERROR` to a dev key.)*
     - The address is empty where Devolada cannot or must not deliver:
       - a laptop, whose `API_BASE_URL` points at production (D3);
       - a preview, which shares dev's database; its own address would take the business's one address away from dev (D3).
