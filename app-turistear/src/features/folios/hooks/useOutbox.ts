@@ -26,6 +26,8 @@ export interface OutboxRow {
   customer_name: string | null
   customer_phone: string | null
   template: string | null
+  /** bug: payment-rejected-folio-copy — the template filled from the sale by the server. */
+  message?: string | null
 }
 
 export const useOutbox = (filter: { status?: NotificationStatus; channel?: NotificationChannel }) => {

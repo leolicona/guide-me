@@ -1,10 +1,14 @@
 import { describe, it, expect } from 'vitest'
-import { refundReceiptText, refundReceiptUrl, retainedCents } from './refundReceipt'
+import { refundReceiptText as textOf, refundReceiptUrl as urlOf, retainedCents } from './refundReceipt'
 
 // US-AG51 — S-11. The receipt is what the customer keeps after the cash is in their pocket.
 // Spec: docs/folios/folio-state-machine.spec.md (D12, D20, business rule 13).
 
-const aRefund = (over: Partial<Parameters<typeof refundReceiptText>[0]> = {}) => ({
+const ORG = 'Buceo Cancún'
+const refundReceiptText = (f: Parameters<typeof textOf>[0]) => textOf(f, ORG)
+const refundReceiptUrl = (f: Parameters<typeof urlOf>[0]) => urlOf(f, ORG)
+
+const aRefund = (over: Partial<Parameters<typeof textOf>[0]> = {}) => ({
   id: '9f3c1b7e-0000-4000-8000-000000000001',
   customer_name: 'María González',
   customer_phone: '+52 998 123 4567',
@@ -44,8 +48,12 @@ describe('US-AG51 — the refund receipt says where the money went', () => {
     expect(retainedCents(aRefund({ amount_paid: 100, refund_amount: 999999 }))).toBe(0)
   })
 
-  it('names the folio by the same short reference the rest of the app uses', () => {
-    expect(refundReceiptText(aRefund())).toContain('9F3C1B7E')
+  // bug: payment-rejected-folio-copy — the customer's own word, and the organization's name, the
+  // sentence the outbox's `refund_completed` sends; never «folio» (constitution VII).
+  it('names the purchase and the organization, never «folio»', () => {
+    const text = refundReceiptText(aRefund())
+    expect(text).toContain('confirmamos el reembolso de tu compra en Buceo Cancún.')
+    expect(text).not.toMatch(/folio/i)
   })
 
   it('builds a composer link from the phone, digits only', () => {

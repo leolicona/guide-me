@@ -30,8 +30,14 @@ const EVENT_LABEL: Record<string, string> = {
   refund_completed: 'Recibo de reembolso',
 }
 
-/** Fills the template with what this row knows. Anything unresolved is dropped, never shown raw. */
+/**
+ * The message to send. bug: payment-rejected-folio-copy — the server fills it from the sale (the
+ * organization, the seller, the money); filling the template here knew only the customer's name and
+ * cut the rest, «…tu compra en .». The fallback covers a row from an API that predates `message`:
+ * anything unresolved is dropped, never shown raw.
+ */
 const composerText = (row: OutboxRow): string =>
+  row.message ??
   (row.template ?? '')
     .replace(/\{customer_name\}/g, row.customer_name ?? '')
     .replace(/\{[a-z_]+\}/g, '')

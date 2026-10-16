@@ -24,8 +24,10 @@ export interface RefundReceiptFolio {
 export const retainedCents = (f: RefundReceiptFolio): number =>
   Math.max(0, f.amount_paid - (f.refund_amount ?? 0))
 
-export const refundReceiptText = (f: RefundReceiptFolio): string =>
-  `Hola ${f.customer_name ?? ''}, confirmamos tu reembolso del folio ${f.id.slice(0, 8).toUpperCase()}. ` +
+// bug: payment-rejected-folio-copy — the customer bought a «compra», never a «folio» (constitution
+// VII); the same sentence the outbox's `refund_completed` sends.
+export const refundReceiptText = (f: RefundReceiptFolio, orgName: string): string =>
+  `Hola ${f.customer_name ?? ''}, confirmamos el reembolso de tu compra en ${orgName}. ` +
   `Pagaste ${formatMoney(f.amount_paid)}, te devolvimos ${formatMoney(f.refund_amount ?? 0)} ` +
   `y se retuvo ${formatMoney(retainedCents(f))} según la política de cancelación.`
 
@@ -36,8 +38,8 @@ export const refundReceiptText = (f: RefundReceiptFolio): string =>
  * (`apartado-stages.spec.md` S4) — which is precisely why this belongs chained to the action rather
  * than in a queue: the human is already holding the phone.
  */
-export const refundReceiptUrl = (f: RefundReceiptFolio): string | null => {
+export const refundReceiptUrl = (f: RefundReceiptFolio, orgName: string): string | null => {
   const digits = (f.customer_phone ?? '').replace(/\D/g, '')
   if (!digits) return null
-  return `https://wa.me/${digits}?text=${encodeURIComponent(refundReceiptText(f))}`
+  return `https://wa.me/${digits}?text=${encodeURIComponent(refundReceiptText(f, orgName))}`
 }

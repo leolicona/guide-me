@@ -1,6 +1,7 @@
 import { and, asc, eq, inArray, sql } from 'drizzle-orm'
 import type { Db } from '../db/client'
-import { folios, notifications } from '../db/schema'
+import { folios, notifications, organizations, users } from '../db/schema'
+import { deriveBookingExpiresAtSql, deriveRefundAmountSql } from './folioStatus'
 
 // The notification outbox — one producer, two drains.
 // Spec: docs/folios/folio-state-machine.spec.md (US-A86 / US-AG51; D8, D12, D14, D16, D19–D21, D26).
@@ -68,17 +69,19 @@ export const EVENTS: Record<NotificationEvent, EventDef> = {
       'Hola {customer_name}, confirmamos tu transferencia de {total}. ' +
       'Tu compra en {org_name} está lista. — {agent_name}',
   },
+  // bug: payment-rejected-folio-copy — the customer bought a «compra», never a «folio»
+  // (constitution VII), the word `payment_verified` already uses.
   cancellation_approved: {
     origin: 'action-tail',
     template:
-      'Hola {customer_name}, aprobamos la cancelación de tu folio {folio_ref} en {org_name}. ' +
+      'Hola {customer_name}, aprobamos la cancelación de tu compra en {org_name}. ' +
       'Te contamos enseguida cómo queda.',
   },
   payment_rejected: {
     origin: 'action-tail',
     template:
-      'Hola {customer_name}, no pudimos confirmar el pago de tu folio {folio_ref}, ' +
-      'así que tuvimos que cancelarlo. Si crees que es un error, escríbeme. — {agent_name}',
+      'Hola {customer_name}, no pudimos confirmar el pago de tu compra en {org_name}, ' +
+      'así que tuvimos que cancelarla. Si crees que es un error, escríbeme. — {agent_name}',
   },
   booking_grace_entered: {
     origin: 'clock',
@@ -119,7 +122,7 @@ export const EVENTS: Record<NotificationEvent, EventDef> = {
   refund_completed: {
     origin: 'action-tail',
     template:
-      'Hola {customer_name}, confirmamos tu reembolso del folio {folio_ref} en {org_name}. ' +
+      'Hola {customer_name}, confirmamos el reembolso de tu compra en {org_name}. ' +
       'Pagaste {amount_paid}, te devolvimos {refund_amount} y se retuvo {retained_amount} ' +
       'según la política de cancelación.',
   },
@@ -259,23 +262,71 @@ const day = (epoch: number, tz: string) =>
  * number, because a zero credit must produce SILENCE — promising a credit that does not exist is
  * worse than not mentioning one (rule 13).
  */
+const creditClause = (credit: number, expiresAt: number | null | undefined, tz: string): string =>
+  credit > 0
+    ? ` Te queda ${money(credit)} a favor${expiresAt ? ` hasta el ${day(expiresAt, tz)}` : ''}.`
+    : ''
+
 export const renderFigures = (
   template: string,
   figures: NotificationFigures,
   tz: string,
 ): string => {
   const credit = figures.creditAmount ?? 0
-  const clause =
-    credit > 0
-      ? ` Te queda ${money(credit)} a favor${
-          figures.creditExpiresAt ? ` hasta el ${day(figures.creditExpiresAt, tz)}` : ''
-        }.`
-      : ''
   return template
     .replace(/\{amount_paid\}/g, money(figures.amountPaid ?? 0))
     .replace(/\{retained_amount\}/g, money(figures.retainedAmount ?? 0))
     .replace(/\{credit_amount\}/g, money(credit))
-    .replace(/\{credit_clause\}/g, clause)
+    .replace(/\{credit_clause\}/g, creditClause(credit, figures.creditExpiresAt, tz))
+}
+
+/** What an outbox row's sale knows, for its message (`readOutbox`). Money in cents, instants in epoch seconds. */
+export interface OutboxMessageValues {
+  customerName: string | null
+  orgName: string | null
+  agentName: string | null
+  timezone: string
+  total: number
+  amountPaid: number
+  /** The refund owed or handed back; null when there is no obligation. */
+  refundAmount: number | null
+  creditAmount: number | null
+  creditExpiresAt: number | null
+  bookingExpiresAt: number | null
+}
+
+const dateTime = (epoch: number, tz: string) =>
+  new Intl.DateTimeFormat('es-MX', {
+    day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit', timeZone: tz,
+  }).format(new Date(epoch * 1000))
+
+/**
+ * The message an outbox row sends: its template filled from its own sale, in one pass, so a value
+ * is never read again as a placeholder (bug: payment-rejected-folio-copy). The WhatsApp composer
+ * used to fill only `{customer_name}` and cut everything else, so the customer read «…la
+ * cancelación de tu folio en .» and an unsigned «—». What a sale alone cannot give — the itinerary
+ * and the ticket page, which only the delivery screens compose — is still dropped, never sent raw.
+ */
+export const renderOutboxMessage = (template: string, v: OutboxMessageValues): string => {
+  const refund = v.refundAmount ?? 0
+  const credit = v.creditAmount ?? 0
+  const values: Record<string, string> = {
+    customer_name: v.customerName ?? '',
+    org_name: v.orgName ?? '',
+    agent_name: v.agentName ?? '',
+    total: money(v.total),
+    pending_balance: money(Math.max(0, v.total - v.amountPaid)),
+    amount_paid: money(v.amountPaid),
+    refund_amount: money(refund),
+    retained_amount: money(Math.max(0, v.amountPaid - refund)),
+    credit_amount: money(credit),
+    credit_clause: creditClause(credit, v.creditExpiresAt, v.timezone),
+    booking_expires_at: v.bookingExpiresAt ? dateTime(v.bookingExpiresAt, v.timezone) : '',
+  }
+  return template
+    .replace(/\{([a-z_]+)\}/g, (_, key: string) => values[key] ?? '')
+    .replace(/\s+/g, ' ')
+    .trim()
 }
 
 /** Pending rows for one org, oldest first — the admin's outbox view and the drains share it. */
@@ -302,9 +353,21 @@ export const readOutbox = async (
       createdAt: notifications.createdAt,
       customerName: folios.customerName,
       customerPhone: folios.customerPhone,
+      // bug: payment-rejected-folio-copy — what the row's message is filled with (renderOutboxMessage).
+      orgName: organizations.name,
+      timezone: organizations.timezone,
+      agentName: users.name,
+      total: folios.total,
+      amountPaid: folios.amountPaid,
+      refundAmount: deriveRefundAmountSql,
+      creditAmount: folios.creditAmount,
+      creditExpiresAt: folios.creditExpiresAt,
+      bookingExpiresAt: deriveBookingExpiresAtSql,
     })
     .from(notifications)
     .innerJoin(folios, eq(notifications.folioId, folios.id))
+    .innerJoin(organizations, eq(organizations.id, notifications.organizationId))
+    .leftJoin(users, and(eq(users.id, folios.agentId), eq(users.organizationId, notifications.organizationId)))
     .where(and(...where))
     .orderBy(asc(notifications.createdAt))
     .limit(200)
