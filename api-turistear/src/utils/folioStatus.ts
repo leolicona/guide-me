@@ -47,11 +47,22 @@ export const anyLineStatusSql = (status: 'paid' | 'booking' | 'cancelled') => {
   )`
 }
 
-// The folio's hold clock: MIN over its LIVE lines' clocks — the exact roll-up the column held —
-// falling back to MIN over ALL lines so a LAPSED apartado (every line expired and cancelled)
-// still reads as one, which is how the UI tells a lapse from an admin cancellation.
+// The folio's hold clock: MIN over the clocks of its lines that still HOLD — live and still owing,
+// the predicate `overdueFilter` and the sweep's `due` read — then MIN over its LIVE lines (the
+// exact roll-up the column held, which a PAID folio still reads), then MIN over ALL lines so a
+// LAPSED apartado (every line expired and cancelled) still reads as one, which is how the UI tells
+// a lapse from an admin cancellation.
+//
+// bug: settled-line-clock-expiry — the first step is new. A line paid in full keeps the clock it
+// was born with, so without it a mixed apartado read its PAID line's stale clock: settleBooking
+// answered BOOKING_EXPIRED while the owing line's hold had days left, and the list flagged the row
+// overdue where the Vencidos facet did not. Only a `booking` folio with a settled sibling reads
+// differently; every other folio falls through to the steps it always had.
 export const deriveBookingExpiresAtSql = sql<number | null>`(
   select coalesce(
+    (select min(fl.booking_expires_at) from folio_lines fl
+      where fl.folio_id = folios.id and fl.cancelled_at is null and fl.booking_expires_at is not null
+        and coalesce((select sum(a.amount) from folio_payment_allocations a where a.folio_line_id = fl.id), 0) < fl.line_total),
     (select min(fl.booking_expires_at) from folio_lines fl
       where fl.folio_id = folios.id and fl.cancelled_at is null and fl.booking_expires_at is not null),
     (select min(fl.booking_expires_at) from folio_lines fl
