@@ -126,9 +126,10 @@ no tickets exist.
 2. **Given** that returned apartado with its hold deadline still ahead, **When** the seller settles
    it again (in cash, or by a new transfer that starts its own deadline), **Then** the settlement
    works as any other.
-3. **Given** a returned apartado whose own hold deadline has already passed, **When** the apartado
-   rules next run, **Then** it is released by those rules — the cancellation policy, credit never
-   cash — and the customer is told once.
+3. **Given** a returned apartado whose own hold deadline has already passed, **Then** it can no
+   longer be settled and it follows the apartado's own stages. If its release instant is still
+   ahead, the customer is warned once and the seats stay held until then. Once the release instant
+   passes, it is released under the cancellation policy, as credit and never cash.
 4. **Given** a two-service apartado where service A was settled in cash (tickets issued) and
    service B by transfer, **When** B's settlement passes its deadline, **Then** service A is
    untouched (paid, tickets valid) and only service B owes again.
@@ -225,8 +226,9 @@ still pending and see that its deadline did not move.
   - every peso of cash the seller collected stays in their balance.
   *(Requires `reject-settle-voids-deposit`.)*
 - **FR-008**: A sale returned to an apartado by FR-007 MUST follow the apartado rules from then on.
-  It can be settled again before its hold deadline. Past it, it is released on the next run under
-  the cancellation policy, as credit and never cash.
+  It can be settled again only before its hold deadline. Past it, the apartado goes through its
+  grace stage and is released at its release instant under the cancellation policy, as credit and
+  never cash.
 - **FR-009**: Verificar, Rechazar and the deadline MUST each resolve a payment at most once, and
   exactly one of them applies. A payment resolved by one MUST be refused by the others, with the
   existing "not awaiting verification" answer.
