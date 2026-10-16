@@ -505,47 +505,57 @@ describe('devolada-transfer-verification US1 — the enlace’s story', () => {
   })
 
   // Written for partial, invalid and unapplied, and for confirmed on a cancelled sale; the other
-  // statuses map as § Labels does, so a future writer cannot make the two surfaces disagree.
-  it.each<{ status: string; awaiting: string | null; copy: string; tone: string }>([
-    { status: 'partial', awaiting: null, copy: 'Pago incompleto', tone: 'warning' },
-    { status: 'invalid', awaiting: null, copy: 'Banxico no confirma la transferencia', tone: 'error' },
-    { status: 'unapplied', awaiting: null, copy: 'Dinero por devolver', tone: 'warning' },
-    { status: 'confirmed', awaiting: null, copy: 'Dinero por devolver', tone: 'warning' },
-    { status: 'expired', awaiting: null, copy: 'No se recibió la transferencia', tone: 'error' },
-    { status: 'queued_for_credit', awaiting: null, copy: 'Verificación en pausa', tone: 'warning' },
-    {
-      status: 'validating',
-      awaiting: 'payer_tracking_key',
-      copy: 'Pide al cliente su clave de rastreo',
-      tone: 'warning',
-    },
-    { status: 'validating', awaiting: null, copy: 'Verificando pago', tone: 'warning' },
-    { status: 'superseded', awaiting: null, copy: 'Veredicto de Devolada', tone: 'warning' },
-  ])('a $status verdict reads «$copy», in $tone', async ({ status, awaiting, copy, tone }) => {
-    const { container } = renderWithProviders(
-      <FolioTimeline
-        events={[
-          anEvent({
-            type: 'payment_verdict',
-            actor: null,
-            payload: {
-              link_id: 'link-1',
-              status,
-              asked: 150_000,
-              received: status === 'partial' ? 100_000 : null,
-              receipt_number: null,
-              awaiting,
-            },
-          }),
-        ]}
-      />,
-    )
+  // statuses map as § Labels does, so a future writer cannot make the two surfaces disagree. The
+  // row takes its label's tone, so an invalid transfer is red where a partial one is amber.
+  const verdicts: Array<[string, Record<string, unknown>, string, 'warning' | 'error']> = [
+    ['partial', { status: 'partial', received: 100_000 }, 'Pago incompleto', 'warning'],
+    ['invalid', { status: 'invalid' }, 'Banxico no confirma la transferencia', 'error'],
+    ['unapplied', { status: 'unapplied', received: 150_000 }, 'Dinero por devolver', 'warning'],
+    [
+      'confirmed on a cancelled sale',
+      { status: 'confirmed', received: 150_000, receipt_number: 'DV-0042' },
+      'Dinero por devolver',
+      'warning',
+    ],
+    ['expired', { status: 'expired' }, 'No se recibió la transferencia', 'error'],
+    ['queued for credit', { status: 'queued_for_credit' }, 'Verificación en pausa', 'warning'],
+    [
+      'validating, awaiting the tracking key',
+      { status: 'validating', awaiting: 'payer_tracking_key' },
+      'Pide al cliente su clave de rastreo',
+      'warning',
+    ],
+    ['validating', { status: 'validating' }, 'Verificando pago', 'warning'],
+    ['of a status this client does not know', { status: 'superseded' }, 'Veredicto de Devolada', 'warning'],
+  ]
 
-    expect(screen.getByText(copy)).toBeInTheDocument()
-    expect(screen.getByText(/^Sistema · /)).toBeInTheDocument()
-    expect(iconOf(copy)).toHaveStyle({ color: `var(--mui-palette-${tone}-main)` })
-    await expectNoA11yViolations(container)
-  })
+  for (const [name, verdict, copy, tone] of verdicts) {
+    it(`a verdict ${name} → «${copy}», in ${tone}`, async () => {
+      const { container } = renderWithProviders(
+        <FolioTimeline
+          events={[
+            anEvent({
+              type: 'payment_verdict',
+              actor: null,
+              payload: {
+                link_id: 'link-1',
+                asked: 150_000,
+                received: null,
+                receipt_number: null,
+                awaiting: null,
+                ...verdict,
+              },
+            }),
+          ]}
+        />,
+      )
+
+      expect(screen.getByText(copy)).toBeInTheDocument()
+      expect(screen.getByText(/^Sistema · /)).toBeInTheDocument()
+      expect(iconOf(copy)).toHaveStyle({ color: `var(--mui-palette-${tone}-main)` })
+      await expectNoA11yViolations(container)
+    })
+  }
 
   it('money that never arrived reads as the sale ending, in red', async () => {
     const { container } = renderWithProviders(

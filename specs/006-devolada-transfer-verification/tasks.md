@@ -417,7 +417,7 @@ Write each story's tests first and watch them fail.
   - **Cleanup**: erase the `ciphertext` and `iv` of every retired credential with no unresolved link (`creating`, `open`, `closing` or `abandoned`, or `closed` with a payment still in flight; data-model), found through the `(credential_id, state)` index, setting `erased_at`.
   - **Returns** `{checked, applied, failed}`.
   - **Wiring**: a third independent `ctx.waitUntil` in `scheduled()` in `api-turistear/src/index.tsx` (116-149), with `now = new Date(controller.scheduledTime)`, logging `[devolada] …`.
-- [ ] T033 [P] [US1] Mirror the contract types in the app, starting with the new `app-turistear/src/features/devolada/types.ts`:
+- [X] T033 [P] [US1] Mirror the contract types in the app, starting with the new `app-turistear/src/features/devolada/types.ts`:
   - `PaymentLinkView`, `PaymentLinkLabel`, `DevoladaConnectionView` (with `previous_keys`) and `OrganizationDevoladaSummary` in `app-turistear/src/features/devolada/types.ts`;
   - `payment_links` and `verification_auto` on `FolioDetail` (`app-turistear/src/features/folios/types.ts:127-183`);
   - `payment_link` and `verification_auto` on `FolioListItem` (`folios/types.ts:29-71`), and `payment_link` on `FolioHistoryItem` (`app-turistear/src/features/pos/types.ts:247-278`);
@@ -425,12 +425,12 @@ Write each story's tests first and watch them fail.
   - `verification_auto` on `FolioCounts` (`app-turistear/src/services/foliosService.ts:61-70`);
   - the confirm response `{folio, payment_link?, payment_link_error?}` (`app-turistear/src/services/posService.ts:134-140`);
   - the same fields in the MSW fixtures `aFolio` and `aFolioCounts` (`app-turistear/src/test/handlers/folios.ts:6-35`), with an unconnected organization's values (constitution IV).
-- [ ] T034 [P] [US1] Implement `app-turistear/src/services/devoladaService.ts` (`getDevoladaConnection`, `connectDevolada`, `disconnectDevolada`, using the shared `request`) and the hooks `useDevoladaConnection`, `useConnectDevolada` and `useDisconnectDevolada` in `app-turistear/src/features/devolada/hooks/`. Mutations invalidate `['organization','me']` and the connection key.
-- [ ] T035 [P] [US1] Add MSW handlers and fixtures to `app-turistear/src/test/handlers/devolada.ts`:
+- [X] T034 [P] [US1] Implement `app-turistear/src/services/devoladaService.ts` (`getDevoladaConnection`, `connectDevolada`, `disconnectDevolada`, using the shared `request`) and the hooks `useDevoladaConnection`, `useConnectDevolada` and `useDisconnectDevolada` in `app-turistear/src/features/devolada/hooks/`. Mutations invalidate `['organization','me']` and the connection key.
+- [X] T035 [P] [US1] Add MSW handlers and fixtures to `app-turistear/src/test/handlers/devolada.ts`:
   - handlers for `GET/PUT/DELETE /api/organizations/me/devolada`;
   - fixtures `aConnection()`, with `previous_keys: []`, and `aPaymentLink(overrides)`, copying shapes asserted by T017-T019 (constitution IV);
   - register them in `app-turistear/src/test/server.ts`.
-- [ ] T036 [US1] Build the Ajustes surface in `app-turistear/src/features/devolada/components/`:
+- [X] T036 [US1] Build the Ajustes surface in `app-turistear/src/features/devolada/components/`:
   - **`DevoladaConnectionCard`**: `SectionCard` with a `StatusChip` + text for the status («Conectada» / «Con fallas» / «Sin conectar»), the mode («Real» / «Prueba»), «Clave …abcd», health («Avisos funcionando» / «Avisos con fallas» / «Verificación en pausa», and «Avisos: solo revisión periódica» when `webhook.is_ours` is `null`), and «Último veredicto: …» from `last_verdict_at` (FR-005). For each entry of `previous_keys`, one line «La clave anterior …abcd todavía tiene N enlaces pendientes. No la revoques en Devolada hasta que terminen.», singular for one (FR-005; D21). Copy from contracts/turistear-api.md § Action copy; «llave» already names the passkeys.
   - **`ConnectDevoladaSheet`**: `FormSheet` with a «Clave de API de Devolada» field and the submit «Conectar».
     - `DEVOLADA_WEBHOOK_CONFLICT` opens a `ConfirmSheet` «¿Reemplazar la dirección de avisos?» showing the current URL, then resends with `replace_webhook: true`.
@@ -438,35 +438,35 @@ Write each story's tests first and watch them fail.
   - **Disconnect**: a `ConfirmSheet`.
 
   Mount the card in `app-turistear/src/pages/SettingsPage.tsx` right after «Punto de venta» (after line 728). While connected, the «Referencia obligatoria en transferencias» switch (700-726) gets the helper «Con Devolada conectado, las transferencias se cobran con enlace de pago».
-- [ ] T037 [US1] Extract `app-turistear/src/features/pos/components/TransferPaymentFields.tsx` from `app-turistear/src/pages/PosCheckoutPage.tsx` (the reference field 400-419 and the consequence line 421-440):
+- [X] T037 [US1] Extract `app-turistear/src/features/pos/components/TransferPaymentFields.tsx` from `app-turistear/src/pages/PosCheckoutPage.tsx` (the reference field 400-419 and the consequence line 421-440):
   - **Connected** (`org.devolada.status === 'connected'`) **on a full sale**: no reference field, and the line «Se generará un enlace de pago para cobrar por WhatsApp». An apartado deposit keeps today's field until T058.
   - **Connection `broken`**: today's field and US-A88 rules, plus the line «El cobro con Devolada tiene fallas; un administrador verificará la transferencia» (FR-010; contracts § Action copy).
   - **Otherwise**: today's field and US-A88 rules, unchanged.
 
   `PosCheckoutPage` renders the component and omits `payment_reference` for a connected full sale.
-- [ ] T038 [US1] Add `paymentLinkWhatsAppUrl(link, ctx)` and the three shipped default texts (`PAYMENT_LINK_TEMPLATES`, keyed by link kind) to `app-turistear/src/features/pos/delivery.ts`, as `depositVerifiedWhatsAppUrl` does (bug `verify-send-empty-link`):
+- [X] T038 [US1] Add `paymentLinkWhatsAppUrl(link, ctx)` and the three shipped default texts (`PAYMENT_LINK_TEMPLATES`, keyed by link kind) to `app-turistear/src/features/pos/delivery.ts`, as `depositVerifiedWhatsAppUrl` does (bug `verify-send-empty-link`):
   - fill the link's own tokens (`{link_amount}`, `{payment_link}`, `{link_expires}`), then `fillTemplate` (101-115) for the shared ones;
   - return through the private `whatsAppUrl` (117-121), so an unusable phone gives `null`;
   - take the texts and tokens from contracts/turistear-api.md § WhatsApp message, and format the amount with `app-turistear/src/components/money.ts`;
   - extend `app-turistear/src/features/pos/delivery.test.ts`: one case per kind, a deposit's text that never promises tickets, and `null` for an unusable phone.
-- [ ] T039 [US1] Build `PaymentLinkStatusChip` and `PaymentLinkCard` in `app-turistear/src/features/devolada/components/` and export them from `app-turistear/src/features/devolada/index.ts`:
+- [X] T039 [US1] Build `PaymentLinkStatusChip` and `PaymentLinkCard` in `app-turistear/src/features/devolada/components/` and export them from `app-turistear/src/features/devolada/index.ts`:
   - **`PaymentLinkStatusChip`**: one chip per label code, each with icon + text per § Labels.
   - **`PaymentLinkCard`**, titled «Enlace de pago»:
     - `MoneyText` amount and, while the link is open, «Vence hoy a las HH:MM» or «Vence mañana a las HH:MM» in the organization's time zone (the same rule as `{link_expires}`);
     - the chip and, while the link is open, a primary «Cobrar por WhatsApp» that opens `paymentLinkWhatsAppUrl` (the canonical verb, constitution VII);
     - for `link_failed`, and for a `payment_link_error`, an `AlertCard` with that case's copy from contracts § Action copy: «No se pudo crear el enlace de pago…», or «Ya no hay tiempo para cobrar con enlace…» for `PAYMENT_LINK_TOO_SHORT`.
-- [ ] T040 [US1] Update the receipt in `app-turistear/src/pages/FolioReceiptPage.tsx`, a new `app-turistear/src/features/pos/components/ReceiptPaymentStatus.tsx` and `app-turistear/src/features/pos/components/PaymentBreakdown.tsx`:
+- [X] T040 [US1] Update the receipt in `app-turistear/src/pages/FolioReceiptPage.tsx`, a new `app-turistear/src/features/pos/components/ReceiptPaymentStatus.tsx` and `app-turistear/src/features/pos/components/PaymentBreakdown.tsx`:
   - render the `payment_link_error` alert when the checkout answered one, so «Ya no hay tiempo para cobrar con enlace…» shows for `PAYMENT_LINK_TOO_SHORT`; otherwise `PaymentLinkCard` for the sale's latest link, a `failed` one included;
   - give `useFolio` (`app-turistear/src/features/pos/hooks/useFolio.ts`) `refetchInterval: 15000` while the label is `awaiting_payment`, `validating`, `needs_tracking_key` or `credit_paused`;
   - move the receipt's status line and chip into `ReceiptPaymentStatus`, which shows «Pago en verificación» while `payment_verification` is `pending`, instead of «Venta confirmada» (74-82) and the «Pagado» chip (143-148). The rule then lives outside `pages/`, where it can be tested (constitution VI; research D16);
   - pass the sale's `verification_auto` to `PaymentBreakdown`, whose pending rows then read «En verificación» instead of «Por verificar» (62-64), because «Por verificar» names the admin's work (D14);
   - drop «Folio {id}» (85) (constitution VII).
-- [ ] T041 [US1] Keep the sales Devolada is resolving out of Por verificar, and show their status, in `app-turistear/src/features/folios/folioFacets.ts`, `folioCardState.ts`, `components/PendingWorkBar.tsx`, `components/FolioCard.tsx`, `components/FolioDetailScreen.tsx` and `app-turistear/src/layout/AppLayout.tsx` (D14; spec clarification of 2026-10-15):
+- [X] T041 [US1] Keep the sales Devolada is resolving out of Por verificar, and show their status, in `app-turistear/src/features/folios/folioFacets.ts`, `folioCardState.ts`, `components/PendingWorkBar.tsx`, `components/FolioCard.tsx`, `components/FolioDetailScreen.tsx` and `app-turistear/src/layout/AppLayout.tsx` (D14; spec clarification of 2026-10-15):
   - the `por_verificar` facet (`folioFacets.ts:69-76`) leaves out rows with `verification_auto`, and `folioAction` (`folioCardState.ts:166-229`) gives them no `verify`;
   - one helper beside the facet in `folioFacets.ts`, `porVerificarCount(counts)` = `verification − verification_auto`, feeds `PendingWorkBar` (37) and the admin badge in `AppLayout.tsx` (90-127), so the badge, the Ventas bar and Hoy show the same number; the badge adds `folio_requests`;
   - `PaymentLinkStatusChip` on sale rows in `FolioCard.tsx`;
   - in `FolioDetailScreen.tsx`, the chip in the header chips (342-363), where on a `verification_auto` sale it replaces the «Por verificar» chip (345), and the `PaymentLinkCard`, so an admin can send the link too (contracts: `url` goes to the seller and to admins).
-- [ ] T042 [US1] Add the four new event types and the automatic `payment_verified` to `app-turistear/src/features/folios/components/FolioTimeline.tsx`, in `eventPrimary` (72-156), `EVENT_TONE` (28-39) and `EVENT_ICON` (41-52). Add them to the event union (`app-turistear/src/features/folios/types.ts:207-217`).
+- [X] T042 [US1] Add the four new event types and the automatic `payment_verified` to `app-turistear/src/features/folios/components/FolioTimeline.tsx`, in `eventPrimary` (72-156), `EVENT_TONE` (28-39) and `EVENT_ICON` (41-52). Add them to the event union (`app-turistear/src/features/folios/types.ts:207-217`).
 
   | Event | Copy |
   |---|---|
@@ -475,7 +475,7 @@ Write each story's tests first and watch them fail.
   | `payment_verdict` | per status, from § Labels |
   | `transfer_not_received` | «No se recibió la transferencia — venta cancelada» |
   | `payment_verified` with `payload.source === 'devolada'` | «Transferencia verificada por Devolada · Comprobante {receipt_number}» |
-- [ ] T043 [P] [US1] Write the app tests under `app-turistear/src/features/devolada/components/`, `app-turistear/src/features/pos/components/` and `app-turistear/src/features/folios/`, each citing `devolada-transfer-verification US1`, and each component test running `expectNoA11yViolations`:
+- [X] T043 [P] [US1] Write the app tests under `app-turistear/src/features/devolada/components/`, `app-turistear/src/features/pos/components/` and `app-turistear/src/features/folios/`, each citing `devolada-transfer-verification US1`, and each component test running `expectNoA11yViolations`:
   - `app-turistear/src/features/devolada/components/DevoladaConnectionCard.test.tsx`: connect; conflict → replace confirm; disconnect; error copy; one line per previous key still in use, singular for one enlace, and none when `previous_keys` is empty.
   - `app-turistear/src/features/devolada/components/PaymentLinkCard.test.tsx`: every label renders copy + icon; the WhatsApp URL contains the link and the formatted amount; no expiry line and no WhatsApp action once the link is not open; the failed and too-short alerts.
   - `app-turistear/src/features/pos/components/TransferPaymentFields.test.tsx`: connected hides the reference; broken keeps it and shows the failure line; unconnected keeps the US-A88 rules.

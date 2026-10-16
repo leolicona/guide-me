@@ -386,7 +386,8 @@ export default function PosCheckoutPage() {
                     </Box>
                     <Box>
                       <b>Transferencia</b> la cobra la empresa: no suma a tu caja (generas comisión
-                      igual), y los boletos se envían cuando un administrador verifica el pago.
+                      igual), y los boletos se envían cuando se verifica el pago: lo verifica un
+                      administrador, o Devolada si la transferencia se cobra con enlace.
                     </Box>
                   </Stack>
                 </InfoPopover>
