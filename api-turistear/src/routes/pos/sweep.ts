@@ -104,6 +104,8 @@ export async function sweepExpiredBookings(env: CloudflareBindings): Promise<Swe
           checkIn: folioLines.checkIn,
           cancelledAt: folioLines.cancelledAt,
           bookingExpiresAt: folioLines.bookingExpiresAt,
+          lineTotal: folioLines.lineTotal,
+          allocated: sql<number>`coalesce((select sum(a.amount) from folio_payment_allocations a where a.folio_line_id = folio_lines.id), 0)`,
         })
         .from(folioLines)
         .where(
@@ -118,8 +120,16 @@ export async function sweepExpiredBookings(env: CloudflareBindings): Promise<Swe
       // the backfill copy) and its own grace instant (ITS departure − the org's grace offset). A
       // line with no readable departure gets `nowSec` — it is already past its deadline and there
       // is nothing to wait for.
-      const liveLines = lineRows.filter((l) => !l.cancelledAt)
-      const lineFacts = liveLines.map((l) => {
+      //
+      // bug: settled-line-clock-expiry — only a line that still OWES holds anything, the same
+      // predicate as the `due` query above. A line paid in full keeps the clock it was born with (no
+      // settle path clears it); read as a hold, it was cancelled here as "Apartado vencido" once its
+      // stale clock and its departure had passed — a paid tour — and its grace moved the release
+      // instant the stage-② warning quotes.
+      const holdingLines = lineRows.filter(
+        (l) => !l.cancelledAt && Number(l.allocated ?? 0) < l.lineTotal,
+      )
+      const lineFacts = holdingLines.map((l) => {
         const departure = l.slotDate
           ? naiveEpoch(l.slotDate, l.slotStartTime ?? '00:00', org.timezone)
           : l.checkIn

@@ -120,10 +120,20 @@ export const rescheduleFolio = async (ctx: Ctx) => {
   // stage-is-derived principle as apartado-stages S7).
   if (folio.status === 'booking') {
     const currentLines = await db
-      .select({ slotDate: folioLines.slotDate, slotStartTime: folioLines.slotStartTime })
+      .select({
+        slotDate: folioLines.slotDate,
+        slotStartTime: folioLines.slotStartTime,
+        cancelledAt: folioLines.cancelledAt,
+        lineTotal: folioLines.lineTotal,
+        allocated: sql<number>`coalesce((select sum(a.amount) from folio_payment_allocations a where a.folio_line_id = folio_lines.id), 0)`,
+      })
       .from(folioLines)
       .where(and(eq(folioLines.folioId, folioId), eq(folioLines.organizationId, org)))
+    // bug: settled-line-clock-expiry — the release instant belongs to the lines still HELD: live
+    // and still owing. A line paid in full (or cancelled) releases nothing, so its departure — a
+    // settled tour that left this morning — must not close the reschedule of a sibling that holds.
     const currentDepartures = currentLines
+      .filter((l) => !l.cancelledAt && Number(l.allocated ?? 0) < l.lineTotal)
       .map((l) => (l.slotDate ? naiveEpoch(l.slotDate, l.slotStartTime ?? '00:00', tz) : null))
       .filter((e): e is number => e !== null)
     if (
@@ -403,12 +413,17 @@ export const rescheduleFolio = async (ctx: Ctx) => {
         slotDate: folioLines.slotDate,
         slotStartTime: folioLines.slotStartTime,
         cancelledAt: folioLines.cancelledAt,
+        lineTotal: folioLines.lineTotal,
+        allocated: sql<number>`coalesce((select sum(a.amount) from folio_payment_allocations a where a.folio_line_id = folio_lines.id), 0)`,
       })
       .from(folioLines)
       .where(and(eq(folioLines.folioId, folioId), eq(folioLines.organizationId, org)))
 
     for (const l of lineRows) {
       if (l.cancelledAt || !l.slotDate) continue
+      // bug: settled-line-clock-expiry — "still-owing", as the rule above says: a line paid in
+      // full holds nothing, so it gets no fresh clock to go stale.
+      if (Number(l.allocated ?? 0) >= l.lineTotal) continue
       const departure = naiveEpoch(l.slotDate, l.slotStartTime ?? '00:00', tz)
       const nearDeparture = departure - nowSec < buffer * 3_600
       const expiresAt = departure - (nearDeparture ? grace * 60 : buffer * 3_600)
