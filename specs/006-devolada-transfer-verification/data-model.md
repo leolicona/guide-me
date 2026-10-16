@@ -136,7 +136,7 @@ creating ── no outcome after 5 minutes (D12) ────────▶ aba
 creating ── the sale stops taking it (D13) ──────────▶ closing  (the create still records Devolada's id)
 abandoned ── sweep: create replay finds it ──────────▶ closing
 abandoned ── sweep: replay is refused ───────────────▶ failed
-open ── confirmed applied (D9) ──────────────────────▶ paid     (final)
+open ── confirmed applied (D9) ──────────────────────▶ paid     (final; its money reached the sale)
 open ── expired verdict, or past expires_at with
         no payment, after a successful re-read ──────▶ expired  (final; D11 or D8)
 open ── past expires_at after a partial, invalid
@@ -203,7 +203,7 @@ open ── no credential can read it (D21) ────────────
 **Attention** is derived, never stored (constitution II). A payment needs the admin when any of these holds:
 - `status ∈ {partial, invalid}` ∧ link `kind = 'settlement'` ∧ `resolution IS NULL`;
 - `status = 'unapplied'` ∧ `resolution IS NULL`;
-- `status = 'confirmed'` on a cancelled sale ∧ `resolution IS NULL` (treated as `unapplied`, D9);
+- `status = 'confirmed'` on a cancelled sale ∧ `resolution IS NULL` ∧ its link never ended `paid` (treated as `unapplied`, D9). A `paid` link's money reached the sale before an ordinary cancellation, which priced it *(amended 2026-10-16 in build)*;
 - `status = 'validating'` ∧ `awaiting IS NOT NULL`, while nobody has decided the payment by hand;
 - `status = 'queued_for_credit'`, while nobody has decided the payment by hand: validation credit is paused, and the admin tops it up at Devolada;
 - the payment of a link no credential can read (`failed` by D21), last seen in flight, while nobody has decided it by hand. Its label is the link's, «Sin enlace de pago — verificar a mano».

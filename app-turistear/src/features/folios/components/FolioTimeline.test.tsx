@@ -576,3 +576,37 @@ describe('devolada-transfer-verification US1 — the enlace’s story', () => {
     await expectNoA11yViolations(container)
   })
 })
+
+// devolada-transfer-verification US2 — wherever a cancellation source is labelled, the system's
+// withdrawal of a sale whose transfer never arrived reads «No se recibió la transferencia» (D11;
+// contracts/turistear-api.md § Action copy).
+describe('devolada-transfer-verification US2 — the `payment_not_received` cancellation source', () => {
+  beforeEach(() => {
+    server.use(
+      http.get('/api/organizations/me', () =>
+        HttpResponse.json({
+          organization: { id: 'o1', name: 'Turistear Ya!', timezone: 'America/Cancun' },
+        }),
+      ),
+    )
+  })
+
+  it('a cancellation by `payment_not_received` names it, by the system, in red', async () => {
+    const { container } = renderWithProviders(
+      <FolioTimeline
+        events={[
+          anEvent({
+            type: 'cancelled',
+            actor: null,
+            payload: { source: 'payment_not_received', clawback: true },
+          }),
+        ]}
+      />,
+    )
+
+    expect(screen.getByText('No se recibió la transferencia')).toBeInTheDocument()
+    expect(screen.getByText(/^Sistema · /)).toBeInTheDocument()
+    expect(screen.queryByText('Cancelado')).toBeNull()
+    await expectNoA11yViolations(container)
+  })
+})

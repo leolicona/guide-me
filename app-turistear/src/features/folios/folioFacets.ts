@@ -76,8 +76,16 @@ export const FACETS: FacetDef[] = [
     // admin to do: «Por verificar» holds only the admin's work. The server decides the flag and
     // clears it the moment the admin is needed (an exception, an expired link, a broken key), and
     // the row is back here without the client deriving anything.
+    // And every sale with a Devolada payment that needs the admin (`devolada_attention`, also
+    // decided by the server) is the admin's work whatever its verification says: a settlement
+    // exception on an apartado, a tracking key to ask for, paused credit, money to return. A
+    // CANCELLED sale holding such a payment is listed too — the only cancelled rows this facet
+    // lists, because the money that arrived after the sale ended still needs someone.
     match: (f) =>
-      f.payment_verification === 'pending' && f.status !== 'cancelled' && f.verification_auto !== true,
+      f.devolada_attention === true ||
+      (f.payment_verification === 'pending' &&
+        f.status !== 'cancelled' &&
+        f.verification_auto !== true),
   },
   {
     key: 'solicitud',
@@ -116,18 +124,27 @@ export const FACETS: FacetDef[] = [
 /**
  * devolada-transfer-verification D14 — the «Por verificar» number: ONE derivation for the admin's
  * Ventas badge, the Ventas pending-work bar and Hoy, so the three can never disagree. The server
- * counts every pending verification and, among them, the sales Devolada is resolving, each sale
- * once; the difference is exactly what the `por_verificar` facet lists (US-A84 S-4: a pill
- * promises a number its list delivers).
+ * counts every pending verification and, among them, the sales Devolada is resolving; and, apart,
+ * the sales with a Devolada payment that needs the admin which `verification` does not already
+ * count (cancelled, or not pending). Each sale counts once, so
  *
- * Floored at 0: the two counts are separate statements, and a sale that leaves Devolada's hands
- * between them must not render a negative pill. An API that predates the field sends no
- * `verification_auto`, and every pending verification is the admin's, as before.
+ *   «Por verificar» = verification − verification_auto + devolada_attention
+ *
+ * is exactly what the `por_verificar` facet lists (US-A84 S-4: a pill promises a number its list
+ * delivers).
+ *
+ * The difference is floored at 0 before the attention is added: the counts are separate
+ * statements, and a sale that leaves Devolada's hands between them must not render a negative
+ * pill, nor eat into sales the attention count holds on their own. An API that predates either
+ * field sends nothing for it, and every pending verification is the admin's, as before.
  */
 export const porVerificarCount = (counts: {
   verification: number
   verification_auto?: number
-}): number => Math.max(0, counts.verification - (counts.verification_auto ?? 0))
+  devolada_attention?: number
+}): number =>
+  Math.max(0, counts.verification - (counts.verification_auto ?? 0)) +
+  (counts.devolada_attention ?? 0)
 
 const BY_KEY = new Map(FACETS.map((f) => [f.key, f]))
 

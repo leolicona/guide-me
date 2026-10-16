@@ -1,12 +1,22 @@
-import { useState } from 'react'
+import { Fragment, useState } from 'react'
+import type { SxProps, Theme } from '@mui/material'
 import { Alert, Box, Button, Skeleton, Stack, Typography } from '@mui/material'
 import EventBusyRounded from '@mui/icons-material/EventBusyRounded'
+import HourglassTopRounded from '@mui/icons-material/HourglassTopRounded'
 import PaidRounded from '@mui/icons-material/PaidRounded'
 import { useCancelBooking } from '../hooks/useBookingActions'
 import { SettleSheet } from './SettleSheet'
 import { RescheduleSheet } from './RescheduleSheet'
 import EventRepeatRounded from '@mui/icons-material/EventRepeatRounded'
-import { ConfirmSheet, MoneyText } from '../../../components'
+import { ConfirmSheet, MoneyText, StatusChip } from '../../../components'
+import { ServiceError } from '../../../services/authService'
+import {
+  PaymentLinkCard,
+  SETTLEMENT_IN_PROGRESS_COPY,
+  SETTLEMENT_VERIFYING_COPY,
+  type PaymentLinkView,
+} from '../../devolada'
+import { useMyOrganization } from '../../organization'
 import type { DisplayMethod, PaymentMethod } from '../../pos/types'
 import type { PosCancellationQuote } from '../../../services/posService'
 
@@ -41,6 +51,14 @@ export interface BookingFolio {
     booking_expires_at?: number | null
     cancelled_at?: number | null
   }[]
+  /** devolada-transfer-verification D14 — the sale's payment links, newest first. An open
+   *  settlement link stands in for the settle buttons it would refuse (D8, D19). */
+  payment_links?: PaymentLinkView[]
+  /** Who that enlace's WhatsApp message goes to, and whose name it carries (contracts § The
+   *  WhatsApp message for a link). */
+  customer_name?: string | null
+  customer_phone?: string | null
+  agent?: { name: string }
 }
 
 // US-AG54 — a line's own deadline, in the words a seller uses at the counter. Coarse on purpose:
@@ -147,9 +165,48 @@ export function ExpiredBookingBanner({ folio }: { folio: BookingFolio }) {
   )
 }
 
+// devolada-transfer-verification D16, D19 — in place of a settle button while a settlement enlace
+// collects that balance. A state, not an action: functional amber with its icon, never teal.
+function SettlingChip({ sx }: { sx?: SxProps<Theme> }) {
+  return (
+    <StatusChip
+      tone="warning"
+      icon={<HourglassTopRounded />}
+      label={SETTLEMENT_VERIFYING_COPY}
+      sx={sx}
+    />
+  )
+}
+
+// devolada-transfer-verification D16 — the enlace collecting the apartado's balance. Its message
+// reads like every other one the sale sends: its seller, the organization, and the expiry in the
+// organization's zone.
+function SettlementLinkCard({ folio, link }: { folio: BookingFolio; link: PaymentLinkView }) {
+  const { data: org } = useMyOrganization()
+  return (
+    <PaymentLinkCard
+      link={link}
+      message={{
+        folio: {
+          id: folio.id,
+          customer_name: folio.customer_name ?? null,
+          customer_phone: folio.customer_phone ?? null,
+          total: folio.total ?? 0,
+          amount_paid: folio.amount_paid ?? 0,
+          pending_balance: folio.pending_balance,
+          lines: (folio.lines ?? []).map((l) => ({ ...l, quantity: l.quantity ?? 1 })),
+        },
+        agentName: folio.agent?.name ?? '',
+        orgName: org?.name ?? 'Turistear Ya!',
+        timezone: org?.timezone,
+      }}
+    />
+  )
+}
+
 // US-AG07 / US-AG07.4 / US-AG07.5 — the booking action buttons, dynamically incorporated into
 // the existing folio detail: Liquidar/Cancelar for a live apartado, Reactivar for an expired
-// one. Returns null for ordinary paid/cancelled folios so the detail reads normally.
+// one. Renders nothing visible for ordinary paid/cancelled folios so the detail reads normally.
 export function BookingActions({
   folio,
   quote,
@@ -187,94 +244,168 @@ export function BookingActions({
     }))
   const busy = cancel.isPending
 
+  // US-AG54 — the lines still holding a balance, each with its own clock. When more than one
+  // lives, the per-line gesture appears and the main button becomes "Liquidar todo"; a folio
+  // read by an older shape (no money_state) simply keeps the single button.
+  const apartadaLines = (folio.lines ?? []).filter(
+    (l) => l.id && l.money_state === 'booking' && (l.pending_balance ?? 0) > 0,
+  )
+  // The amount the whole-folio settle collects: Σ of the live lines' own balances when the
+  // server sent them (a cancelled line's remainder must never be charged — F3), else the
+  // scalar arithmetic it always was.
+  const balance =
+    apartadaLines.length > 0
+      ? apartadaLines.reduce((s, l) => s + (l.pending_balance ?? 0), 0)
+      : (folio.pending_balance ?? (folio.total ?? 0) - (folio.amount_paid ?? 0))
+  const defaultMethod: PaymentMethod =
+    folio.payment_method && folio.payment_method !== 'Mixto' ? folio.payment_method : 'cash'
+  const multiLine = apartadaLines.length > 1
+
+  // devolada-transfer-verification D8, D16, D19 — the settlement enlaces still collecting (one per
+  // sale). Until PR 3 closes and replaces them, every settle waits for an open one: the server
+  // answers any other SETTLEMENT_IN_PROGRESS, so no settle button is offered. «Liquidación en
+  // verificación» stands in the main button's place, and on the line a line's enlace collects.
+  const settlementLinks = (folio.payment_links ?? []).filter(
+    (l) => l.kind === 'settlement' && l.state === 'open',
+  )
+  const settlingLineIds = new Set(settlementLinks.flatMap((l) => l.folio_line_id ?? []))
+  const mainSettling = settlementLinks.length > 0
+
+  // D8, D19 — a line cancellation refused because an enlace is collecting the balance. Retrying
+  // cannot succeed until that enlace resolves, so the sheet keeps only its way out.
+  const cancelRefusedBySettlement =
+    cancel.error instanceof ServiceError && cancel.error.code === 'SETTLEMENT_IN_PROGRESS'
+  // The shared mutation's refusal belongs to the sheet that met it, not to the next one opened.
+  const closeCancelLine = () => {
+    cancel.reset()
+    setCancelLine(null)
+  }
+
+  // devolada-transfer-verification FR-010 — the settle sheets stay mounted whatever the sale's
+  // state. A transfer settled on the manual path because no enlace could be created closes its
+  // sheet as settled, the sale turns paid, and the alert saying why must outlive that change: keyed
+  // and first in every branch below, they are the same two sheets to React throughout.
+  const settleSheets = (
+    <Fragment key="settle-sheets">
+      <SettleSheet
+        open={settleOpen}
+        onClose={() => setSettleOpen(false)}
+        folioId={folio.id}
+        balance={balance}
+        defaultMethod={defaultMethod}
+      />
+
+      {/* US-AG54 — settle ONE line: its balance, its QR, its commission. */}
+      <SettleSheet
+        open={!!settleLine}
+        onClose={() => setSettleLine(null)}
+        folioId={folio.id}
+        balance={settleLine?.balance ?? 0}
+        defaultMethod={defaultMethod}
+        lineId={settleLine?.id}
+        lineName={settleLine?.name}
+      />
+    </Fragment>
+  )
+
   if (isLiveBooking(folio)) {
-    // US-AG54 — the lines still holding a balance, each with its own clock. When more than one
-    // lives, the per-line gesture appears and the main button becomes "Liquidar todo"; a folio
-    // read by an older shape (no money_state) simply keeps the single button.
-    const apartadaLines = (folio.lines ?? []).filter(
-      (l) => l.id && l.money_state === 'booking' && (l.pending_balance ?? 0) > 0,
-    )
-    // The amount the whole-folio settle collects: Σ of the live lines' own balances when the
-    // server sent them (a cancelled line's remainder must never be charged — F3), else the
-    // scalar arithmetic it always was.
-    const balance =
-      apartadaLines.length > 0
-        ? apartadaLines.reduce((s, l) => s + (l.pending_balance ?? 0), 0)
-        : (folio.pending_balance ?? (folio.total ?? 0) - (folio.amount_paid ?? 0))
-    const defaultMethod: PaymentMethod =
-      folio.payment_method && folio.payment_method !== 'Mixto' ? folio.payment_method : 'cash'
-    const multiLine = apartadaLines.length > 1
     return (
       <>
+        {settleSheets}
         <Stack spacing={1.5}>
+          {/* devolada-transfer-verification D16 — the enlace collecting the balance leads: sending
+              it is how the seller collects now. */}
+          {settlementLinks.map((link) => (
+            <SettlementLinkCard key={link.id} folio={folio} link={link} />
+          ))}
           {/* US-AG54 — one row per line still owing: its balance, its deadline, its verbs. The
               whole-folio buttons keep the common case at one tap below. */}
           {multiLine &&
-            apartadaLines.map((line) => (
-              <Box
-                key={line.id}
-                sx={{ border: 1, borderColor: 'grey.200', borderRadius: 2, p: 1.5 }}
-              >
-                <Stack
-                  direction="row"
-                  sx={{ justifyContent: 'space-between', alignItems: 'baseline', gap: 1 }}
+            apartadaLines.map((line) => {
+              // D19 — this line's settle: the chip while its own enlace collects it, nothing while
+              // any other enlace collects (the chip below says so once).
+              const settle = settlingLineIds.has(line.id!) ? (
+                <SettlingChip />
+              ) : mainSettling ? null : (
+                <Button
+                  size="small"
+                  variant="outlined"
+                  disabled={busy}
+                  onClick={() =>
+                    setSettleLine({
+                      id: line.id!,
+                      name: line.service_name,
+                      balance: line.pending_balance ?? 0,
+                    })
+                  }
                 >
-                  <Box sx={{ minWidth: 0 }}>
-                    <Typography variant="subtitle2" noWrap>
-                      {line.service_name}
-                    </Typography>
-                    <Typography variant="caption" color="textSecondary">
-                      {line.slot_date ?? ''}
-                      {lineDeadline(line.booking_expires_at)
-                        ? ` · ${lineDeadline(line.booking_expires_at)}`
-                        : ''}
-                    </Typography>
-                  </Box>
-                  <MoneyText
-                    cents={line.pending_balance ?? 0}
-                    variant="subtitle1"
-                    semantic="neutral"
-                    srLabel={`Saldo de ${line.service_name}`}
-                  />
-                </Stack>
-                <Stack direction="row" spacing={1} sx={{ mt: 1 }}>
-                  <Button
-                    size="small"
-                    variant="outlined"
-                    disabled={busy}
-                    onClick={() =>
-                      setSettleLine({
-                        id: line.id!,
-                        name: line.service_name,
-                        balance: line.pending_balance ?? 0,
-                      })
-                    }
+                  Liquidar
+                </Button>
+              )
+              const cancellable = folio.payment_verification !== 'pending'
+              return (
+                // Named by its service, so a «Liquidar» or «Cancelar» read out of context still
+                // says which line it acts on.
+                <Box
+                  key={line.id}
+                  role="group"
+                  aria-label={line.service_name}
+                  sx={{ border: 1, borderColor: 'grey.200', borderRadius: 2, p: 1.5 }}
+                >
+                  <Stack
+                    direction="row"
+                    sx={{ justifyContent: 'space-between', alignItems: 'baseline', gap: 1 }}
                   >
-                    Liquidar
-                  </Button>
-                  {folio.payment_verification !== 'pending' && (
-                    <Button
-                      size="small"
-                      color="error"
-                      disabled={busy}
-                      onClick={() => setCancelLine({ id: line.id!, name: line.service_name })}
-                    >
-                      Cancelar
-                    </Button>
+                    <Box sx={{ minWidth: 0 }}>
+                      <Typography variant="subtitle2" noWrap>
+                        {line.service_name}
+                      </Typography>
+                      <Typography variant="caption" color="textSecondary">
+                        {line.slot_date ?? ''}
+                        {lineDeadline(line.booking_expires_at)
+                          ? ` · ${lineDeadline(line.booking_expires_at)}`
+                          : ''}
+                      </Typography>
+                    </Box>
+                    <MoneyText
+                      cents={line.pending_balance ?? 0}
+                      variant="subtitle1"
+                      semantic="neutral"
+                      srLabel={`Saldo de ${line.service_name}`}
+                    />
+                  </Stack>
+                  {(settle || cancellable) && (
+                    <Stack direction="row" spacing={1} sx={{ mt: 1, alignItems: 'center' }}>
+                      {settle}
+                      {cancellable && (
+                        <Button
+                          size="small"
+                          color="error"
+                          disabled={busy}
+                          onClick={() => setCancelLine({ id: line.id!, name: line.service_name })}
+                        >
+                          Cancelar
+                        </Button>
+                      )}
+                    </Stack>
                   )}
-                </Stack>
-              </Box>
-            ))}
-          <Button
-            variant="contained"
-            size="large"
-            disableElevation
-            startIcon={<PaidRounded />}
-            disabled={busy}
-            onClick={() => setSettleOpen(true)}
-          >
-            {multiLine ? 'Liquidar todo' : 'Liquidar saldo'}
-          </Button>
+                </Box>
+              )
+            })}
+          {mainSettling ? (
+            <SettlingChip sx={{ alignSelf: 'flex-start' }} />
+          ) : (
+            <Button
+              variant="contained"
+              size="large"
+              disableElevation
+              startIcon={<PaidRounded />}
+              disabled={busy}
+              onClick={() => setSettleOpen(true)}
+            >
+              {multiLine ? 'Liquidar todo' : 'Liquidar saldo'}
+            </Button>
+          )}
           {/* US-AG52 — the cheap operation, and the one the product never had. Here the seats are
               still the customer's: moving a hold you own takes nothing from anybody, and no money
               is re-decided. It sits ABOVE Cancelar because cancelling prices the customer and this
@@ -313,30 +444,11 @@ export function BookingActions({
           isPaid={false}
         />
 
-        <SettleSheet
-          open={settleOpen}
-          onClose={() => setSettleOpen(false)}
-          folioId={folio.id}
-          balance={balance}
-          defaultMethod={defaultMethod}
-        />
-
-        {/* US-AG54 — settle ONE line: its balance, its QR, its commission. */}
-        <SettleSheet
-          open={!!settleLine}
-          onClose={() => setSettleLine(null)}
-          folioId={folio.id}
-          balance={settleLine?.balance ?? 0}
-          defaultMethod={defaultMethod}
-          lineId={settleLine?.id}
-          lineName={settleLine?.name}
-        />
-
         {/* US-AG54 — cancel ONE apartada line. The figure shown is the SUBSET quote the server
             computed (line_refund); the sibling lines are untouched by construction. */}
         <ConfirmSheet
           open={!!cancelLine}
-          onClose={() => setCancelLine(null)}
+          onClose={closeCancelLine}
           title={`¿Cancelar ${cancelLine?.name ?? 'esta actividad'}?`}
           description="Se liberan solo los lugares de esta actividad; el resto del apartado sigue vivo, con su propio plazo."
           detail={(() => {
@@ -386,8 +498,11 @@ export function BookingActions({
             cancelLine &&
             cancel.mutate({ id: folio.id, lineId: cancelLine.id }, { onSuccess: () => setCancelLine(null) })
           }
+          hideConfirm={cancelRefusedBySettlement}
           error={
-            cancel.isError ? (
+            cancelRefusedBySettlement ? (
+              <Alert severity="warning">{SETTLEMENT_IN_PROGRESS_COPY}</Alert>
+            ) : cancel.isError ? (
               <Alert severity="error">No se pudo cancelar la actividad. Inténtalo de nuevo.</Alert>
             ) : null
           }
@@ -435,6 +550,7 @@ export function BookingActions({
   if (folio.status === 'paid' && movablePaidLines.length > 0) {
     return (
       <>
+        {settleSheets}
         <Stack spacing={1.5}>
           <Button
             variant="outlined"
@@ -466,5 +582,6 @@ export function BookingActions({
   // A customer arriving after the hold ended makes an ordinary sale; the banner says so, and the
   // credit is on the folio for the seller to apply.
 
-  return null
+  // Nothing to act on: only the closed settle sheets, and the alert of one that just closed.
+  return settleSheets
 }

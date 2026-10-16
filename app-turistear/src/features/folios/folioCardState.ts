@@ -7,6 +7,14 @@
 import { normalizePhone } from '../pos/phone'
 import { deliveryState } from '../pos/delivery'
 import type { FolioListLine } from '../pos/types'
+import type {
+  DevoladaPaymentStatus,
+  PaymentLinkLabel,
+  PaymentLinkPayment,
+  PaymentLinkView,
+} from '../devolada/types'
+import type { ResolveDevoladaAction } from '../../services/devoladaService'
+import type { CancellationSource } from './types'
 
 // --- Identity (D3) -------------------------------------------------------------------------------
 
@@ -145,10 +153,19 @@ export function folioDeliveryMark(folio: Parameters<typeof deliveryState>[0]): D
  * The verbs the single button can carry. `message` is the neutral resting verb; everything else is
  * a pending job and renders filled.
  *
- * `request`/`verify`/`refund` are ADMIN verbs — US-A84 D15 draws the audience line at capability,
- * so `folioAction` is told which surface is asking rather than guessing from the data.
+ * `request`/`verify`/`resolve`/`refund` are ADMIN verbs — US-A84 D15 draws the audience line at
+ * capability, so `folioAction` is told which surface is asking rather than guessing from the data.
+ * `resolve` (devolada-transfer-verification D15) is a Devolada payment the admin decides on the
+ * sale: a settlement to verify or discard, or money to return.
  */
-export type FolioAction = 'request' | 'verify' | 'refund' | 'tickets' | 'reminder' | 'message'
+export type FolioAction =
+  | 'request'
+  | 'verify'
+  | 'resolve'
+  | 'refund'
+  | 'tickets'
+  | 'reminder'
+  | 'message'
 
 /**
  * Exactly one action per card, and its verb is the folio's first pending job.
@@ -173,6 +190,8 @@ export function folioAction(
     /** devolada-transfer-verification D14 — Devolada is resolving the transfer with nothing for
      *  the admin to do. Decided by the server. */
     verification_auto?: boolean
+    /** D14 — a Devolada payment of the sale needs the admin. Decided by the server. */
+    devolada_attention?: boolean
   },
   opts: { urgent: boolean; surface?: 'admin' | 'seller' },
 ): FolioAction {
@@ -182,7 +201,8 @@ export function folioAction(
     // 2 — money the company does not hold yet, blocking delivery downstream. Not while Devolada is
     // resolving it (devolada-transfer-verification D14): the sale is out of Por verificar, and
     // «Verificar y enviar» there would invite releasing tickets before the money is proven. The
-    // admin can still verify it from the sale (FR-018).
+    // admin can still verify it from the sale (FR-018). A sale or deposit exception (an incomplete
+    // payment, one Banxico contradicts, a tracking key) is verified here, as today.
     if (
       folio.status !== 'cancelled' &&
       folio.payment_verification === 'pending' &&
@@ -190,6 +210,12 @@ export function folioAction(
     ) {
       return 'verify'
     }
+    // 2b — any other Devolada payment that needs the admin (devolada-transfer-verification D15):
+    // an apartado's settlement to verify or discard, or money that arrived for an enlace already
+    // closed, a cancelled sale's included. Decided on the sale, never from the list: the evidence
+    // (the amounts, the receipt) is there. Ranked where the detail ranks its rung, right after the
+    // verification and before the refund.
+    if (folio.devolada_attention === true) return 'resolve'
     // 3 — money the company owes and has not handed back.
     if (folio.refund_status === 'pending') return 'refund'
   }
@@ -227,7 +253,8 @@ export type AttentionLevel = 'ok' | 'work' | 'urgent'
  *
  * devolada-transfer-verification D14 — a sale Devolada is resolving rests `ok`: the ladder has no
  * verify for it, because nobody has to act until the server hands it back. Its link chip, not the
- * rail, says what the money is doing.
+ * rail, says what the money is doing. A Devolada payment that needs the admin is `work` (the
+ * `resolve` rung), for both audiences: the seller reads its label on the card.
  */
 export function folioAttention(
   folio: Parameters<typeof folioAction>[0] & { overdue?: boolean },
@@ -242,6 +269,158 @@ export function folioAttention(
     return { level: 'work', rail: 'warning' }
   }
   return { level: 'ok', rail: 'success' }
+}
+
+// --- devolada-transfer-verification: the payment in front of a person (FR-015, D15) --------------
+//
+// The server decides every label and both flags (D14); nothing below re-derives one. What is
+// decided here is presentation only: which of the sale's enlaces a surface puts in front of the
+// admin, with which evidence and which of the resolve endpoint's actions — the server still checks
+// each action against the payment (constitution IV), and refuses with a 409 what no longer fits.
+
+/**
+ * devolada-transfer-verification D11 — who cancelled the sale, null while it lives. The read model
+ * carries the source on each line (`folio_lines.cancellation_source`): a whole-sale cancellation
+ * stamps it on every line it cancels at once, and a line cancelled before keeps its own. So the
+ * sale's source is the one on its last-cancelled line. The receipt's payment breakdown reads it to
+ * say «No recibido» where the transfer never arrived.
+ */
+export function saleCancellationSource(folio: {
+  status: 'paid' | 'booking' | 'cancelled'
+  lines?: { cancelled_at?: number | null; cancellation_source?: CancellationSource | null }[]
+}): CancellationSource | null {
+  if (folio.status !== 'cancelled') return null
+  let last: { cancelled_at: number; source: CancellationSource | null } | null = null
+  for (const line of folio.lines ?? []) {
+    if (line.cancelled_at == null) continue
+    if (!last || line.cancelled_at > last.cancelled_at) {
+      last = { cancelled_at: line.cancelled_at, source: line.cancellation_source ?? null }
+    }
+  }
+  return last?.source ?? null
+}
+
+/** The labels that put a payment in front of a person (FR-015): the verdicts short of a clean
+ *  confirmation, the waits the customer or the admin must unblock, the money that never arrived,
+ *  and an enlace no key can read any more whose payment Devolada last reported (D21). */
+const EVIDENCE_LABELS: ReadonlySet<PaymentLinkLabel> = new Set<PaymentLinkLabel>([
+  'partial',
+  'invalid',
+  'unapplied',
+  'needs_tracking_key',
+  'credit_paused',
+  'not_received',
+  'link_failed',
+])
+
+/**
+ * The payment whose amounts (asked, claimed, received) a surface shows beside its label (FR-015),
+ * or null when there is nothing to weigh: no payment yet, or one Devolada is clearing on its own.
+ */
+export function linkEvidence(
+  link: Pick<PaymentLinkView, 'label' | 'payment'> | null | undefined,
+): PaymentLinkPayment | null {
+  if (!link?.payment) return null
+  return EVIDENCE_LABELS.has(link.label) ? link.payment : null
+}
+
+/**
+ * The sale or deposit enlace behind today's «Pago por verificar» rung: its label, its receipt and
+ * its amounts ride that rung, whose Verificar and Rechazar stay as they are (FR-018). The newest
+ * one not paid yet. Money to return is the Devolada rung's, and a settlement records no pending row
+ * for Verificar to flip (D8), so neither is shown here.
+ */
+export function verificationLink(folio: { payment_links?: PaymentLinkView[] }): PaymentLinkView | null {
+  return (
+    (folio.payment_links ?? []).find(
+      (l) => l.kind !== 'settlement' && l.label !== 'confirmed' && l.label !== 'unapplied',
+    ) ?? null
+  )
+}
+
+/** What the Devolada rung asks the admin to decide (copy: `DEVOLADA_DECISION_COPY`). */
+export type DevoladaDecision = 'decide' | 'dismiss' | 'in_flight' | 'returned'
+
+export interface DevoladaWork {
+  link: PaymentLinkView
+  payment: PaymentLinkPayment
+  decision: DevoladaDecision
+  /** The resolve actions the rung offers, in the order it offers them: one verb each (D15). */
+  actions: ResolveDevoladaAction[]
+}
+
+// data-model § devolada_links — a payment is in flight while `validating` (awaiting included) or
+// `queued_for_credit`.
+const IN_FLIGHT: ReadonlySet<DevoladaPaymentStatus> = new Set<DevoladaPaymentStatus>([
+  'validating',
+  'queued_for_credit',
+])
+
+const work = (
+  link: PaymentLinkView,
+  payment: PaymentLinkPayment,
+  decision: DevoladaDecision,
+  actions: ResolveDevoladaAction[],
+): DevoladaWork => ({ link, payment, decision, actions })
+
+/**
+ * devolada-transfer-verification D15 — the Devolada payment the sale's detail puts in front of the
+ * admin in its own rung, outside «Pago por verificar» (which keeps the sale and deposit exceptions,
+ * FR-018). It mirrors data-model § Attention, read from the payment Devolada reported rather than
+ * from the enlace's label, because an enlace no key can read any more is labelled `link_failed`
+ * whatever its payment said last (D21):
+ *
+ *   - money that arrived for an enlace already closed (`unapplied`, or a confirmed payment the
+ *     sale, cancelled meanwhile, never took — D9), not yet returned → «Ya lo devolví». A `paid`
+ *     enlace's payment is not that: the sale took it before it was cancelled, and its money follows
+ *     the cancellation's own refund;
+ *   - a settlement that ended `partial` or `invalid`, undecided → «Verificar» and «Descartar»,
+ *     «Descartar» alone once the sale no longer owes it (cancelled, or settled another way);
+ *   - a settlement whose enlace no key can read (`link_failed`, D21), its payment last seen in
+ *     flight, on a sale still alive → the same two;
+ *   - a settlement still in flight on an apartado → «Verificar» alone (D15: closing its enlace
+ *     would turn the payment unapplied, D13), whether or not the sale is in «Por verificar»: a
+ *     tracking key or paused credit is the admin's work, a plain verification is the admin's
+ *     option, offered only when nothing needs them first.
+ *
+ * A payment someone decided (`resolution`) is never offered again. Among several, the newest of
+ * those that need the admin comes first; the detail shows one rung at a time.
+ */
+export function devoladaWork(folio: {
+  status: 'paid' | 'booking' | 'cancelled'
+  payment_links?: PaymentLinkView[]
+}): DevoladaWork | null {
+  // A settlement is recorded only on an apartado that still owes it (D8): «Verificar» elsewhere
+  // could only be refused.
+  const owes = folio.status === 'booking'
+  const accept: ResolveDevoladaAction[] = owes ? ['accept'] : []
+  let option: DevoladaWork | null = null
+  for (const link of folio.payment_links ?? []) {
+    const payment = link.payment
+    if (!payment || payment.resolution !== null) continue
+    const toReturn =
+      payment.status === 'unapplied' ||
+      (payment.status === 'confirmed' && folio.status === 'cancelled' && link.state !== 'paid')
+    if (toReturn) return work(link, payment, 'returned', ['returned'])
+    // A sale or deposit exception is verified or rejected in «Pago por verificar» (FR-018).
+    if (link.kind !== 'settlement') continue
+    if (payment.status === 'partial' || payment.status === 'invalid') {
+      return work(link, payment, owes ? 'decide' : 'dismiss', [...accept, 'dismiss'])
+    }
+    // An undecided payment in flight on a cancelled sale is decided by the cancellation itself;
+    // its verdict, money to return, is what reaches the admin (data-model § Attention).
+    if (folio.status === 'cancelled' || !IN_FLIGHT.has(payment.status)) continue
+    if (link.label === 'link_failed') {
+      return work(link, payment, owes ? 'decide' : 'dismiss', [...accept, 'dismiss'])
+    }
+    if (!owes) continue
+    const inFlight = work(link, payment, 'in_flight', ['accept'])
+    // A tracking key to ask for, or paused credit, needs the admin now; a plain verification waits
+    // behind anything that does.
+    if (payment.awaiting !== null || payment.status === 'queued_for_credit') return inFlight
+    option ??= inFlight
+  }
+  return option
 }
 
 // --- The time axis: the chip (D1 · US-A84 D10 · D19) ---------------------------------------------

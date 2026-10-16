@@ -30,7 +30,11 @@ import { refundReceiptUrl } from '../refundReceipt'
 import { FolioWorkActions } from './FolioWorkActions'
 import type { FolioDetail } from '../types'
 import { useMyOrganization, useOrgDateFormatter } from '../../organization'
-import { PaymentLinkCard, PaymentLinkStatusChip } from '../../devolada'
+import {
+  PaymentLinkCard,
+  PaymentLinkStatusChip,
+  SETTLEMENT_IN_PROGRESS_COPY,
+} from '../../devolada'
 import type { CancellationQuote } from '../../organization/types'
 // US-A93 (folio-surface-parity D1) — the seller's read of the SAME folio, through their own
 // caller-scoped endpoint. Since #126 both endpoints return the same payload, so everything below
@@ -134,11 +138,12 @@ export function FolioDetailScreen({ surface }: FolioDetailScreenProps) {
   // cancel path for unconfirmed money.
   const hasOpenPetition = !!folio?.folio_requests?.some((r) => r.status === 'pending')
   const awaitingVerification = folio?.payment_verification === 'pending' && !isCancelled
-  // devolada-transfer-verification D14, D16 — the sale's latest payment link (they arrive newest
-  // first), a failed one included. While the money is unverified its chip takes the clearance slot
-  // of the header; on a sale Devolada is resolving it replaces «Por verificar», which names the
-  // admin's work, and there is none.
-  const latestLink = folio?.payment_links?.[0] ?? null
+  // devolada-transfer-verification D14, D16 — the latest link of the sale or its deposit (they
+  // arrive newest first), a failed one included: the money a pending verification waits for. While
+  // the money is unverified its chip takes the clearance slot of the header; on a sale Devolada is
+  // resolving it replaces «Por verificar», which names the admin's work, and there is none. A
+  // settlement's link is BookingActions' to show, beside the settle it replaces (D8).
+  const latestLink = folio?.payment_links?.find((l) => l.kind !== 'settlement') ?? null
   const clearanceLink = awaitingVerification ? latestLink : null
   const devoladaResolving = !!folio?.verification_auto && !!clearanceLink
   // Every dated line already departed → the folio is a countable fact (its fulfilment reading),
@@ -180,7 +185,15 @@ export function FolioDetailScreen({ surface }: FolioDetailScreenProps) {
     liveLines.length > 1 &&
     (line.slot_date ?? line.check_in ?? '') >= todayIso
 
+  // devolada-transfer-verification D8, D19 — refused while a settlement enlace is open: until PR 3
+  // closes and replaces enlaces, the cancellation would leave it asking for a stale balance (a sale
+  // the admin verified by hand keeps its enlace open until the verdict, D15). Retrying cannot
+  // succeed until that enlace resolves, so the sheet keeps only its way out.
+  const lineCancelRefusedBySettlement =
+    cancelLine.error instanceof ServiceError && cancelLine.error.code === 'SETTLEMENT_IN_PROGRESS'
   const closeLineDialog = () => {
+    // The refusal belongs to this line's sheet, not to the next one opened.
+    cancelLine.reset()
     setLineTarget(null)
     setLineReason('')
   }
@@ -723,6 +736,12 @@ export function FolioDetailScreen({ surface }: FolioDetailScreenProps) {
           onConfirm={handleCancelLine}
           busy={cancelLine.isPending}
           cancelLabel="Conservar actividad"
+          hideConfirm={lineCancelRefusedBySettlement}
+          error={
+            lineCancelRefusedBySettlement ? (
+              <Alert severity="warning">{SETTLEMENT_IN_PROGRESS_COPY}</Alert>
+            ) : null
+          }
         />
 
         {/* US-A23 / US-T05 — confirm the physical cash refund, on the canonical form host

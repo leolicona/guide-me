@@ -17,6 +17,19 @@ export type { Fulfillment }
 
 export type FolioStatus = 'paid' | 'booking' | 'cancelled'
 
+/** Who or what cancelled a sale, or one of its lines (`folios.cancellation_source`,
+ *  `folio_lines.cancellation_source`). Written by the server; the client only labels it. */
+export type CancellationSource =
+  | 'admin'
+  | 'agent'
+  | 'tourist_request'
+  | 'company'
+  | 'system_expiry'
+  // devolada-transfer-verification D11 — Devolada showed the transfer never arrived, and the
+  // system withdrew the sale. Kept apart from `system_expiry`, so it never counts as an apartado
+  // that ran out its clock.
+  | 'payment_not_received'
+
 // US-AG07.3 — last-reminder tracking for the WhatsApp recovery flow.
 export type ReminderStatus = 'none' | 'sent'
 
@@ -75,6 +88,10 @@ export interface FolioListItem {
   /** D14 — Devolada is resolving the sale with nothing for the admin to do: it stays out of
    *  «Por verificar». Decided by the server. */
   verification_auto?: boolean
+  /** D14 — the sale has a Devolada payment that needs the admin (data-model § Attention), so it is
+   *  listed in «Por verificar» whatever its age, a cancelled sale with money to return included.
+   *  Decided by the server. */
+  devolada_attention?: boolean
 }
 
 // US-A84 rule 6 — what a folio's cancellation requests amount to, for the row.
@@ -117,7 +134,7 @@ export interface FolioDetailLine {
   allocated?: number
   pending_balance?: number
   cancelled_at?: number | null
-  cancellation_source?: string | null
+  cancellation_source?: CancellationSource | null
   refund_status?: RefundStatus
   refund_amount?: number | null
   /** US-AG54 (D5) — the line's own hold clock, for its countdown. */
@@ -191,6 +208,8 @@ export interface FolioDetail {
   payment_links?: PaymentLinkView[]
   /** D14 — Devolada is resolving the sale with nothing for the admin to do. */
   verification_auto?: boolean
+  /** D14 — the sale has a Devolada payment that needs the admin (data-model § Attention). */
+  devolada_attention?: boolean
 }
 
 // One row of a folio's own request history (US-A84 D2). Leaner than `CancellationRequest`, which

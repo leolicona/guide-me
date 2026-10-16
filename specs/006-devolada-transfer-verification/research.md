@@ -235,12 +235,13 @@ says otherwise.
     | `collected_by` | the seller who issued the link |
     | date | the verdict |
 
-    It then runs the release core (D10) if the sale is now paid and cleared.
+    It then releases the tickets the way the seller's own settlement does — in the same batch, the QR of every live slot line for the whole sale's balance, or of its line for one line's — and, once the sale is paid and cleared, the portal token and, for the whole sale, the ticket email. A proven settlement that completes a cleared sale also emits `payment_verified` and `tickets_delivered`, as D10's release does. *(Amended 2026-10-16 in build: the seller's settlement already released its tickets this way, and `releaseClearedFolio` would re-sign the QR of a line settled earlier.)*
   - **One batch, gated by a claim** (constitution V: a read is never the only guard). A settlement link records at most one settlement, so the link itself is the claim:
     1. Generate the new payment row's id (`:newId`) first.
-    2. The batch's first statement is `UPDATE devolada_links SET folio_payment_id = :newId [, state = 'paid'] WHERE id = ? AND organization_id = ? AND kind = 'settlement' AND folio_payment_id IS NULL`.
-    3. Every later statement carries `WHERE EXISTS (SELECT 1 FROM devolada_links WHERE id = ? AND folio_payment_id = :newId)`: the payment row (as `INSERT … SELECT`), its allocations, the commission top-up, `settled_at`/`settled_by` and the event.
-    4. The release runs only if, after the batch, the link holds `:newId`.
+    2. The batch's first statement writes the payment row (as `INSERT … SELECT`), only while the link is still unclaimed (`folio_payment_id IS NULL`) and its sale alive. D1 checks a foreign key at each statement, so the claim cannot name a row the batch has not written yet. *(Amended 2026-10-16 in build.)*
+    3. The claim follows: `UPDATE devolada_links SET folio_payment_id = :newId [, state = 'paid'] WHERE id = ? AND organization_id = ? AND kind = 'settlement' AND folio_payment_id IS NULL AND EXISTS (<the row :newId>)`.
+    4. Every later statement carries `WHERE EXISTS (SELECT 1 FROM devolada_links WHERE id = ? AND folio_payment_id = :newId)`: its allocations, the commission top-up, `settled_at`/`settled_by`, the event, the tickets and, for the admin's accept, the payment's resolution.
+    5. The release runs only if the claim matched.
 
     A second processor — the webhook and the sweep at once, a Devolada retry, an admin's double tap on *accept* (D15) — matches nothing and writes nothing.
   - **An unpaid settlement link** simply closes.
@@ -283,7 +284,7 @@ says otherwise.
   | the link expired after a `partial`, `invalid` or `unapplied` verdict | link `expired`; nothing else: the admin decides (FR-016) | the link is already closed |
   | `unapplied` | attention item «Dinero por devolver»; the admin marks it *returned* (D15) | same |
   | `superseded` | recorded and ignored; the correction arrives as a new payment | same |
-  | `confirmed`, but the sale is already cancelled (a close that never reached Devolada) | treated as `unapplied`: a cancelled sale is never verified | same |
+  | `confirmed`, but the sale is already cancelled (a close that never reached Devolada) | treated as `unapplied`: a cancelled sale is never verified. Money the sale took before an ordinary cancellation — its row verified by hand, its settlement accepted — was priced by that cancellation: the link only ends `paid`, which always means its money reached the sale *(amended 2026-10-16 in build)* | same |
 
 - **Rationale**:
   - FR-014 to FR-017 and Story 2.
@@ -327,12 +328,12 @@ says otherwise.
        - the sale's other open links marked `closing`, with `closed_reason` `cancelled` (D13);
        - the event `transfer_not_received`, with a NULL actor.
 
-     If anything cancelled the sale between step 2 and the batch, the first statement matches nothing and so does every other: nothing is reversed or released twice.
+     If anything cancelled the sale between step 2 and the batch, the first statement matches nothing and so does every other: nothing is reversed or released twice. The first statement also repeats every other check of step 2 (the row still pending, no other money, no payment in flight), and a line's seats are released only once that line was cancelled by the same batch. *(Amended 2026-10-16 in build.)*
   4. **After the batch**: the `payment_rejected` notification, then the claimed link and the sale's other closing links are closed at Devolada (D13).
 
   It returns `'cancelled'`, `'kept'`, or `'noop'` when step 1's claim matched nothing. *(Amended 2026-10-15 by /speckit-analyze: step 2's conditions, the other links, and `'kept'` in place of an undefined attention item.)*
 
-  The seat and reservation release statements are extracted from `rejectPayment` into a builder both use. The admin's Rechazar is otherwise untouched.
+  The seat and reservation release statements are extracted from `rejectPayment` into a builder both use, each counter clamped at zero like every other release (`applyCancellation`). The admin's Rechazar is otherwise untouched. A `'kept'` sale's link is left as Devolada has it: money that still arrives on it is verified. *(Amended 2026-10-16 in build.)*
 - **Rationale**:
   - FR-016 says "the way Rechazar cancels", but without Rechazar's defects: it releases seats for lines already cancelled, has no not-cancelled guard, and would erase a cleared deposit (`routes/pos/handler.ts:2993-3118`).
   - A separate `cancellation_source` keeps these out of the expired-apartado counts (`system_expiry`).

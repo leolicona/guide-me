@@ -102,3 +102,113 @@ export const previousKeyCopy = ({
 /** The «Referencia obligatoria en transferencias» switch while connected. */
 export const REFERENCE_SWITCH_CONNECTED_COPY =
   'Con Devolada conectado, las transferencias se cobran con enlace de pago'
+
+// PR 2 (US2, US3) — contracts § Action copy.
+
+/** Cancellation source `payment_not_received`, wherever cancellation sources are labelled (D11). */
+export const PAYMENT_NOT_RECEIVED_SOURCE_COPY = 'No se recibió la transferencia'
+/** Payment breakdown: a pending row of a sale cancelled with `payment_not_received`. */
+export const PAYMENT_NOT_RECEIVED_ROW_COPY = 'No recibido'
+/** The admin's resolve actions, one verb per action (research D15). */
+export const RESOLVE_ACTION_COPY = {
+  accept: 'Verificar',
+  dismiss: 'Descartar',
+  returned: 'Ya lo devolví',
+} as const
+/** BookingActions chip in place of the settle buttons while a settlement link is open (PR 2). */
+export const SETTLEMENT_VERIFYING_COPY = 'Liquidación en verificación'
+/** A line cancellation or a settlement refused with `SETTLEMENT_IN_PROGRESS` (D8, D19). */
+export const SETTLEMENT_IN_PROGRESS_COPY =
+  'La venta ya tiene un enlace de pago para liquidar; espera su resultado'
+
+// PR 2 — the payment a person must weigh, and the admin's decisions on it (FR-015, research D15).
+
+/** FR-022 — Devolada's receipt number (`DV-…`) is a «Comprobante Devolada», never a "folio". */
+export const receiptNumberCopy = (receiptNumber: string): string =>
+  `Comprobante Devolada ${receiptNumber}`
+
+/** FR-015 — the words for a payment's three amounts. The claim is what the customer's receipt
+ *  says, never money; the received amount is what Banxico says arrived (FR-020). */
+export const PAYMENT_AMOUNT_COPY = {
+  asked: 'Solicitado',
+  claimed: 'Declarado',
+  received: 'Recibido',
+} as const
+
+/** FR-015 — a payment's amounts, each with its word, in the order the admin weighs them: what the
+ *  enlace asked, what the receipt claims, what arrived. An amount Devolada has not reported is left
+ *  out rather than shown as zero: «Recibido $0.00» would say the money did not arrive. */
+export const paymentAmountsCopy = (payment: {
+  asked: number
+  claimed: number | null
+  received: number | null
+}): { key: keyof typeof PAYMENT_AMOUNT_COPY; label: string; cents: number }[] =>
+  (['asked', 'claimed', 'received'] as const)
+    .filter((key) => payment[key] != null)
+    .map((key) => ({ key, label: PAYMENT_AMOUNT_COPY[key], cents: payment[key] as number }))
+
+/** The list card's single button on a sale whose Devolada payment needs the admin's decision: it
+ *  opens the sale, where the decision is taken with the evidence in front of them. */
+export const REVIEW_PAYMENT_COPY = 'Revisar pago'
+
+/** The heading of the sale detail's Devolada rung: what the enlace collects. */
+export const DEVOLADA_RUNG_TITLE: Record<'sale' | 'deposit' | 'settlement', string> = {
+  sale: 'Pago por transferencia',
+  deposit: 'Anticipo por transferencia',
+  settlement: 'Liquidación por transferencia',
+}
+
+/** D15 — the line above the evidence, by the decisions the rung offers. */
+export const DEVOLADA_DECISION_COPY = {
+  /** A settlement exception, or one no key can read any more: «Verificar» or «Descartar» (D8). */
+  decide:
+    'Si confirmas que el cliente pagó la liquidación completa, verifícala; si no, descártala. El apartado no vence mientras decides.',
+  /** A settlement exception on a sale that no longer expects it: «Descartar» alone. */
+  dismiss:
+    'Esta venta ya no espera esta liquidación. Si llegó dinero, devuélvelo al cliente y descarta el pago.',
+  /** A settlement with no verdict yet: «Verificar» alone, never «Descartar» (D13). */
+  in_flight:
+    'Devolada todavía no da el veredicto de esta liquidación. Si ya confirmaste el pago, puedes verificarla tú.',
+  /** Money that arrived for an enlace already closed, or for a sale cancelled meanwhile:
+   *  «Ya lo devolví». */
+  returned: 'Llegó dinero que esta venta ya no esperaba. Devuélvelo al cliente y regístralo aquí.',
+} as const
+
+/** D15 — the question each decision asks, and its one-line consequence. «Descartar» cancels
+ *  nothing, unlike «Rechazar pago»; on an apartado that still owes, it says the apartado stays. */
+export const resolveConfirmCopy = (
+  action: keyof typeof RESOLVE_ACTION_COPY,
+  { apartado }: { apartado: boolean },
+): { title: string; description: string } => {
+  switch (action) {
+    case 'accept':
+      return {
+        title: '¿Verificar la liquidación?',
+        description:
+          'Se registra la liquidación como verificada por ti y, si la venta queda pagada, se liberan los boletos.',
+      }
+    case 'dismiss':
+      return {
+        title: '¿Descartar el pago?',
+        description: `${
+          apartado ? 'El apartado sigue vigente y no se cancela nada.' : 'No se cancela nada en la venta.'
+        } Si llegó dinero, devuélvelo al cliente fuera del sistema.`,
+      }
+    case 'returned':
+      return {
+        title: '¿Ya devolviste el dinero?',
+        description:
+          'Registra que le devolviste al cliente el dinero que llegó por este enlace. No cambia ningún monto de la venta.',
+      }
+  }
+}
+
+/** D15 — why a decision was refused, inside its sheet. Both 409s are final: the payment was
+ *  decided already, or the sale changed under it. Anything else can be tried again. */
+export const RESOLVE_ERROR_COPY: Record<string, string> = {
+  DEVOLADA_PAYMENT_NOT_RESOLVABLE: 'Este pago ya no admite esa acción: ya se resolvió o la venta cambió.',
+  FOLIO_CANCELLED: 'La venta está cancelada: la liquidación ya no se puede verificar.',
+}
+
+export const resolveErrorCopy = (code: string | null | undefined): string =>
+  (code && RESOLVE_ERROR_COPY[code]) || 'No se pudo registrar. Inténtalo de nuevo.'

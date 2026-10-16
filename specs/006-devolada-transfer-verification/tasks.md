@@ -502,7 +502,7 @@ Write each story's tests first and watch them fail.
 
 ### Tests for User Story 2 ⚠️
 
-- [ ] T044 [P] [US2] Write `api-turistear/test/devolada/verdicts.test.ts`:
+- [X] T044 [P] [US2] Write `api-turistear/test/devolada/verdicts.test.ts`:
   - **partial**: the sale stays pending; its row's `payment_link.label` is `partial`, with asked and received amounts; the existing admin `POST /api/pos/folios/:id/verify` still verifies with the admin as actor, and `/reject` still cancels (FR-018).
   - **invalid**: label `invalid`.
   - **expired** on a full sale:
@@ -525,7 +525,7 @@ Write each story's tests first and watch them fail.
   - **over** (received above the ask, e.g. Devolada's fee): confirmed; the ledger and the sale total keep the sale's amount, and `received_amount` holds what arrived (FR-020).
   - **tracking key**: `GET /api/pos/folios/:id` shows label `needs_tracking_key` to the seller.
   - **counts**: each sale counts once in `verification − verification_auto + devolada_attention`. A tracking-key wait on a sale link is counted by `verification` only. Unapplied money on a cancelled sale, and a settlement exception, are counted by `devolada_attention` only. A sale with *partial* or *invalid* is never `verification_auto`. A payment `queued_for_credit` on a settlement link is counted by `devolada_attention` only. A pending sale whose deposit link is *validating* while its settlement link has an exception counts once, and is not `verification_auto`.
-- [ ] T045 [P] [US2] Extend `api-turistear/test/devolada/sweep.test.ts` with expiry, passing a `now` past `expires_at`:
+- [X] T045 [P] [US2] Extend `api-turistear/test/devolada/sweep.test.ts` with expiry, passing a `now` past `expires_at`:
   - an unpaid link is cancelled through D11 only after a successful `listPaymentsByCustomer` re-read, replacing T021's PR 1 case, which only moved it to `expired`;
   - a failing re-read cancels nothing;
   - a payment *validating* at the expiry prevents cancellation;
@@ -536,8 +536,8 @@ Write each story's tests first and watch them fail.
 
 ### Implementation for User Story 2
 
-- [ ] T046 [US2] Extract the seat and reservation release statements of `rejectPayment` (`api-turistear/src/routes/pos/handler.ts:3015-3089`) into `buildInventoryReleaseStatements(db, organizationId, lines)`, exported from the new `api-turistear/src/routes/pos/unreceivedTransfer.ts`. `rejectPayment` keeps passing all its lines, so its behaviour is unchanged (`payment-verification.test.ts` unedited).
-- [ ] T047 [US2] Implement `cancelForUnreceivedTransfer(deps, {organizationId, folioId, linkId, at})` in `api-turistear/src/routes/pos/unreceivedTransfer.ts` (D11):
+- [X] T046 [US2] Extract the seat and reservation release statements of `rejectPayment` (`api-turistear/src/routes/pos/handler.ts:3015-3089`) into `buildInventoryReleaseStatements(db, organizationId, lines)`, exported from the new `api-turistear/src/routes/pos/unreceivedTransfer.ts`. `rejectPayment` keeps passing all its lines, so its behaviour is unchanged (`payment-verification.test.ts` unedited). *(Built: each counter clamped at zero, like every other release; research D11.)*
+- [X] T047 [US2] Implement `cancelForUnreceivedTransfer(deps, {organizationId, folioId, linkId, at})` in `api-turistear/src/routes/pos/unreceivedTransfer.ts` (D11):
   1. **Claim the link**: `UPDATE devolada_links SET state='expired' … WHERE id = ? AND organization_id = ? AND state = 'open' RETURNING id`; nothing returned → `'noop'`.
   2. **Check the sale**: return `'kept'`, writing nothing more, if the sale is cancelled, if the row of `link.folio_payment_id` is no longer pending (an admin verified it by hand), if another link of the sale has an undecided payment in flight (*validating*, awaiting or `queued_for_credit`; one the admin accepted or dismissed does not count, whatever its last snapshot says, D21), or if the sale holds any positive payment row besides that one.
   3. **One `db.batch`, every statement gated on its own transition** (constitution V — the read in step 2 is never the only guard):
@@ -553,45 +553,45 @@ Write each story's tests first and watch them fail.
   4. **After the batch**: `emitNotification(…, 'payment_rejected')`, whose «tu folio» copy is fixed by defect 11's lite path before PR 2 (T077), then the new helper `closePaymentLinkRemote(deps, link)` in `api-turistear/src/routes/devolada/links.ts`, for the claimed link and for each link the batch marked `closing`. The helper uses the link's own credential (D21), is fail-soft, sends `PATCH close` with `Idempotency-Key 'close:' + id`, and treats `LINK_CLOSED` as closed. A refusal or an outage leaves the link `closing` for the sweep (T049); a rejected current credential also calls `markConnectionBroken`.
 
   It returns `'cancelled'`, `'kept'` or `'noop'`.
-- [ ] T048 [US2] Complete `applyDevoladaPayment` in `api-turistear/src/routes/devolada/apply.ts` (D9 table, sale and deposit columns):
+- [X] T048 [US2] Complete `applyDevoladaPayment` in `api-turistear/src/routes/devolada/apply.ts` (D9 table, sale and deposit columns):
   - *partial* / *invalid*: snapshot plus a `payment_verdict` event (NULL actor).
   - *expired*: `cancelForUnreceivedTransfer`; a `'kept'` result keeps the snapshot.
   - *unapplied*, or *confirmed* on a cancelled sale: snapshot plus a `payment_verdict` event.
   - *superseded*: snapshot only.
   - Set the connection's `last_verdict_at` on every final status.
-- [ ] T049 [US2] Add the unpaid-expiry branch to `api-turistear/src/routes/devolada/sweep.ts` (D12 step 2). Select `open` links past `expires_at` through the `(state, expires_at)` index. Only after a successful `listPaymentsByCustomer` re-read, act by the link's current payment:
+- [X] T049 [US2] Add the unpaid-expiry branch to `api-turistear/src/routes/devolada/sweep.ts` (D12 step 2). Select `open` links past `expires_at` through the `(state, expires_at)` index. Only after a successful `listPaymentsByCustomer` re-read, act by the link's current payment:
   - none, or *expired*: `cancelForUnreceivedTransfer` for `sale` and `deposit` links;
   - in flight (*validating*, awaiting or `queued_for_credit`): nothing, and the link stays open;
   - *confirmed*: `applyDevoladaPayment` applies it, and nothing is cancelled;
   - *partial*, *invalid* or *unapplied*: the link moves to `expired` through a guarded update, and nothing else happens; the admin decides (FR-016).
 
   This replaces T032's PR 1 unpaid-expiry step. Settlement links come in T060. Add D12 step 3's `closing` retry here too, since PR 2 already closes links (T047, T060, T062): `closePaymentLinkRemote` until Devolada acknowledges, with D21's fallback when the link's retired credential is rejected; while its current credential is rejected the link stays `closing` (research D19, D21). A `closing` link whose create never recorded Devolada's id is first replayed with the same key, as T071 does for an abandoned one (D12 step 3).
-- [ ] T050 [US2] Add Devolada attention to the pending work and the counts in `api-turistear/src/utils/folioPendingWork.ts` and `api-turistear/src/routes/folios/handler.ts`:
+- [X] T050 [US2] Add Devolada attention to the pending work and the counts in `api-turistear/src/utils/folioPendingWork.ts` and `api-turistear/src/routes/folios/handler.ts`:
   - add `devoladaAttentionFilter` (derived per data-model.md § Attention, the clause for a link no credential can read included) to `api-turistear/src/utils/folioPendingWork.ts`;
   - include it in the pending-work set (103-110), so `GET /api/folios` lists attention sales whatever their age, cancelled ones with unapplied money included;
   - add the `devolada_attention` flag to list rows and the detail, and its count to `GET /api/folios/counts` (`api-turistear/src/routes/folios/handler.ts:286-317`). The count includes only sales that `verification` does not already count (data-model § Flags and counts);
   - add `devoladaAttentionFilter` to the shared `verification_auto` predicate (T030, T031), so a pending sale with an attention item on another link is counted as well as listed.
-- [ ] T051 [US2] Create the admin router `api-turistear/src/routes/devolada/index.ts`, with `handler.ts` and `schema.ts`:
+- [X] T051 [US2] Create the admin router `api-turistear/src/routes/devolada/index.ts`, with `handler.ts` and `schema.ts`:
   - **Route**: `POST /payments/:id/resolve` behind `authMiddleware` and `requireRole('admin')`, validated with `zValidator`: `{action: 'accept' | 'dismiss' | 'returned', note?: string ≤ 500}`.
   - **Mount**: `app.route('/api/devolada', devolada)` in `api-turistear/src/index.tsx`.
   - **`returned`**: for an unresolved *unapplied* payment, or a *confirmed* one on a cancelled sale; sets `resolution`, `resolved_by` and `resolved_at` with `… WHERE id = ? AND organization_id = ? AND resolution IS NULL RETURNING` — no row returned (a double tap) → 409 `DEVOLADA_PAYMENT_NOT_RESOLVABLE` (D15).
   - **Errors**: 404 for another organization's payment; 409 `DEVOLADA_PAYMENT_NOT_RESOLVABLE` for a wrong status or kind, or one already resolved.
   - **`accept` / `dismiss`**: answer 409 until T062.
   - **Response**: `{folio}`, the `readFolioDetail` shape.
-- [ ] T052 [P] [US2] Mirror the Story 2 additions in the app (`app-turistear/src/features/folios/types.ts`, `app-turistear/src/services/devoladaService.ts`):
+- [X] T052 [P] [US2] Mirror the Story 2 additions in the app (`app-turistear/src/features/folios/types.ts`, `app-turistear/src/services/devoladaService.ts`):
   - `payment_not_received` in the cancellation-source unions (`app-turistear/src/features/folios/types.ts`);
   - `devolada_attention` on `FolioListItem` and `FolioDetail` (`app-turistear/src/features/folios/types.ts`) and on `FolioCounts` (`app-turistear/src/services/foliosService.ts`), and in the fixtures `aFolio` and `aFolioCounts` (`app-turistear/src/test/handlers/folios.ts`);
   - `resolveDevoladaPayment` in `app-turistear/src/services/devoladaService.ts`, plus `useResolveDevoladaPayment` in `app-turistear/src/features/devolada/hooks/`, invalidating `['folios']` and `['pos']`;
   - an MSW handler for resolve in `app-turistear/src/test/handlers/devolada.ts`.
-- [ ] T053 [US2] Bring Devolada attention into Por verificar (`app-turistear/src/features/folios/`):
+- [X] T053 [US2] Bring Devolada attention into Por verificar (`app-turistear/src/features/folios/`):
   - **Facet**: the `por_verificar` facet (`app-turistear/src/features/folios/folioFacets.ts:69-76`) also lists rows with `devolada_attention`, cancelled sales with unapplied money among them, and `folioAction` / `folioAttention` (`app-turistear/src/features/folios/folioCardState.ts:166-229`) give them their action.
   - **`FolioCard.tsx`**: shows the label and the asked, claimed and received amounts with `MoneyText` (FR-015).
   - **`FolioWorkActions.tsx`**: a sale or deposit exception shows its label, «Comprobante Devolada {receipt}» and the amounts inside today's «Pago por verificar» rung. Every other attention item gets a Devolada rung, ranked right after «Pago por verificar» and before the refund (`FolioWorkActions.tsx:99-107`), so one rung shows at a time: its label and amounts, plus «Ya lo devolví» (resolve `returned`) for unapplied money.
   - **Count**: `porVerificarCount` (T041) adds `devolada_attention`, for the badge, the Ventas bar and Hoy alike.
-- [ ] T054 [US2] Label money that never arrived in `app-turistear/src/features/pos/components/PaymentBreakdown.tsx`:
+- [X] T054 [US2] Label money that never arrived in `app-turistear/src/features/pos/components/PaymentBreakdown.tsx`:
   - `app-turistear/src/features/pos/components/PaymentBreakdown.tsx` (62-64) shows «No recibido» instead of «Por verificar» for a pending row of a sale cancelled with `cancellation_source: 'payment_not_received'`;
   - wherever cancellation sources are labelled, `payment_not_received` reads «No se recibió la transferencia».
-- [ ] T055 [P] [US2] Extend the app tests in `app-turistear/src/features/folios/components/`, each citing `devolada-transfer-verification US2` and running axe:
+- [X] T055 [P] [US2] Extend the app tests in `app-turistear/src/features/folios/components/`, each citing `devolada-transfer-verification US2` and running axe:
   - `app-turistear/src/features/folios/components/FolioCard.test.tsx`: the `partial`, `invalid`, `unapplied`, `needs_tracking_key`, `credit_paused` and `not_received` labels;
   - `FolioWorkActions.test.tsx`: «Ya lo devolví» calls resolve `returned`.
 
@@ -607,7 +607,7 @@ Write each story's tests first and watch them fail.
 
 ### Tests for User Story 3 ⚠️
 
-- [ ] T056 [P] [US3] Write `api-turistear/test/devolada/apartados.test.ts`:
+- [X] T056 [P] [US3] Write `api-turistear/test/devolada/apartados.test.ts`:
   - **Deposit link at confirm**: `kind: 'deposit'`, `amount` = `down_payment`, `expires_at` ≤ the earliest live line clock.
   - **Deposit confirmed**: only the deposit row is verified; the sale is still a booking, with no QR.
   - **Settle by transfer** (`POST /api/pos/folios/:id/settle`, connected org):
@@ -642,7 +642,7 @@ Write each story's tests first and watch them fail.
 
 ### Implementation for User Story 3
 
-- [ ] T057 [US3] Extract `applySettlement(deps, {organizationId, folioId, folioLineId, method, reference, verification, verifiedBy, verifiedAt, collectedBy, settledBy, at, bypassExpiry?})` into `api-turistear/src/routes/pos/settleCore.ts`, from `settleBooking` (`api-turistear/src/routes/pos/handler.ts:2122-2468`) and `settleFolioLine` (2476-2697). It covers:
+- [X] T057 [US3] Extract `applySettlement(deps, {organizationId, folioId, folioLineId, method, reference, verification, verifiedBy, verifiedAt, collectedBy, settledBy, at, bypassExpiry?})` into `api-turistear/src/routes/pos/settleCore.ts`, from `settleBooking` (`api-turistear/src/routes/pos/handler.ts:2122-2468`) and `settleFolioLine` (2476-2697). It covers:
   - balance computation;
   - the payment row and allocations;
   - the commission top-up;
@@ -652,13 +652,13 @@ Write each story's tests first and watch them fail.
 
   It takes an optional `claim` for Devolada callers (D8): a fresh payment-row id plus the settlement link to claim. The batch then opens with `UPDATE devolada_links SET folio_payment_id = :newId[, state = 'paid'] WHERE id = ? AND organization_id = ? AND kind = 'settlement' AND folio_payment_id IS NULL`, every later statement carries `WHERE EXISTS (SELECT 1 FROM devolada_links WHERE id = ? AND folio_payment_id = :newId)`, and it returns whether the claim matched. Release runs only if it did.
 
-  Both handlers then call it without a claim, with behaviour unchanged: `settle-method.test.ts` and `payment-verification.test.ts` pass unedited.
-- [ ] T058 [US3] Issue and apply deposit links in `api-turistear/src/routes/pos/handler.ts`, `api-turistear/src/routes/devolada/links.ts` and `api-turistear/src/routes/devolada/apply.ts`:
+  Both handlers then call it without a claim, with behaviour unchanged: `settle-method.test.ts` and `payment-verification.test.ts` pass unedited. *(Built: the cleared branch keeps the seller's own release — the QR in the batch — rather than `releaseClearedFolio`, which would re-sign a line settled earlier; a proven settlement adds D10's notifications. The claimed batch writes the payment row before the claim, since D1 checks a foreign key at each statement. Research D8.)*
+- [X] T058 [US3] Issue and apply deposit links in `api-turistear/src/routes/pos/handler.ts`, `api-turistear/src/routes/devolada/links.ts` and `api-turistear/src/routes/devolada/apply.ts`:
   - in `confirmSale` (`api-turistear/src/routes/pos/handler.ts`), call `issuePaymentLink` with `kind: 'deposit'`, `folioPaymentId` = the deposit row and `amount` = `down_payment` when the organization's connection is `connected` or `broken` and the deposit is a transfer. A `broken` connection only records the `failed` link, which still holds the apartado (T061);
   - extend T027's skip of the reference requirement to transfer deposits, and T037's `TransferPaymentFields` to hide the field for an apartado deposit when connected;
   - make sure `computeLinkExpiry` in `api-turistear/src/routes/devolada/links.ts` bounds a `deposit` link by every live line, and a `settlement` link by the lines it collects, the whole sale's or one line's own, with their earliest `booking_expires_at` (D7);
   - in `applyDevoladaPayment` (`api-turistear/src/routes/devolada/apply.ts`), apply *confirmed* on a `deposit` link as on a `sale` link (T028), which PR 1 only snapshots: verify the deposit row, set the reference, link `paid`. `releaseClearedFolio` runs only once the sale is paid and cleared, so a confirmed deposit releases nothing (US3 scenario 2).
-- [ ] T059 [US3] Settle by link in `settleBooking` and `settleFolioLine` (`api-turistear/src/routes/pos/handler.ts`), citing D8, when the organization's connection is `connected` or `broken` and the method is `transfer`:
+- [X] T059 [US3] Settle by link in `settleBooking` and `settleFolioLine` (`api-turistear/src/routes/pos/handler.ts`), citing D8, when the organization's connection is `connected` or `broken` and the method is `transfer`:
   1. run today's guards;
   2. compute the balance (or the line balance);
   3. if a settlement link is already open: for the same scope (the same line, or the whole sale), return it; for any other scope, answer 409 `SETTLEMENT_IN_PROGRESS`. Otherwise `issuePaymentLink` with `kind: 'settlement'`, `folioLineId`, `amount` = balance and `requestedBy` = the user. Its expiry counts the whole sale's live lines for `settleBooking`, and that line alone for `settleFolioLine` (D7);
@@ -666,13 +666,13 @@ Write each story's tests first and watch them fail.
   5. if no link is created, `PAYMENT_LINK_TOO_SHORT` and a `broken` connection included, fall back to today's manual transfer settlement and add `payment_link_error`. No reference is required while connected; a `broken` connection keeps today's reference rule. The `failed` or `abandoned` link stays as the record (T026).
 
   Until PR 3 closes and replaces settlement links, guard the writes that would leave one stale (research D19). While the sale has an open settlement link, a cash settlement in these two handlers, and a line cancellation in `cancelBookingLine` (`api-turistear/src/routes/pos/handler.ts:2702`) and `cancelFolioLine` (`api-turistear/src/routes/folios/handler.ts:1193`), answer 409 `SETTLEMENT_IN_PROGRESS`, next to today's `PAYMENT_UNVERIFIED` guard. T068 and T069 narrow it to a link whose payment is in flight.
-- [ ] T060 [US3] Add the settlement branches to `api-turistear/src/routes/devolada/apply.ts` and `sweep.ts` (D8, D9):
+- [X] T060 [US3] Add the settlement branches to `api-turistear/src/routes/devolada/apply.ts` and `sweep.ts` (D8, D9):
   - ***confirmed* on a `settlement` link**:
     1. `applySettlement` with the link `claim` (state → `paid`), method `transfer`, reference = receipt number, `verification 'verified'`, `verifiedBy` null, `collectedBy` and `settledBy` = `link.requested_by`, and `bypassExpiry` when the payment's `devolada_created_at` < `link.expires_at`;
     2. the claim itself records the new row id in `link.folio_payment_id` and moves the link to `paid`. A claim that does not match means the settlement is already recorded, by another processor or by the admin's *accept* (D15): record nothing more, and move the link to `paid` if it is still `open` (`UPDATE … SET state = 'paid' WHERE id = ? AND organization_id = ? AND state = 'open'`). Either way the branch acted, so `applied_status` is set.
   - ***partial* / *invalid***: `closePaymentLinkRemote`, link `closing` → `closed`, plus a `payment_verdict` event. This makes an attention item, and the apartado waits for the admin's decision (T061).
   - ***expired*, or an unpaid expiry in the sweep**: link `expired`, nothing else.
-- [ ] T061 [US3] Guard the apartado expiry sweep in `api-turistear/src/routes/pos/sweep.ts`, citing D8. A held line is neither released nor counted for the grace notice (`booking_grace_entered`).
+- [X] T061 [US3] Guard the apartado expiry sweep in `api-turistear/src/routes/pos/sweep.ts`, citing D8. A held line is neither released nor counted for the grace notice (`booking_grace_entered`).
   - **Every line is held**, so skip the folio in the due-folio query (49-67), while it has:
     - a `sale` or `deposit` link, or a whole-sale settlement link (no `folio_line_id`), in `creating` or `open`;
     - a whole-sale settlement payment awaiting the admin's decision (data-model § Attention): *partial* or *invalid* and unresolved, or in flight on a link no credential can read (`failed`), while nobody has decided it by hand;
@@ -680,19 +680,19 @@ Write each story's tests first and watch them fail.
   - **Only its line is held** while a settlement link of one line is in `creating` or `open`, or its payment awaits the admin's decision: leave that line out of the due-folio query's line clause and out of `lineFacts` and `dueLines` (122-134), so the other lines follow their own clocks (US3 scenario 8; US-AG54 D5).
 
   For the settlement clauses, never skip on a payment's stored status alone: a link no credential can read keeps its last snapshot for good. Correlate each subquery on `organization_id` and `folio_id`, and on `folio_line_id` for the per-line one, so the `(organization_id, folio_id)` indexes serve it (T074). `test/pos/pos-bookings-sweep.test.ts` must still pass.
-- [ ] T062 [US3] Implement resolve `accept` and `dismiss` in `api-turistear/src/routes/devolada/handler.ts`:
+- [X] T062 [US3] Implement resolve `accept` and `dismiss` in `api-turistear/src/routes/devolada/handler.ts`:
   - **`accept`**: allowed for a `settlement` link whose payment is *partial*, *invalid*, or still in flight (*validating*, awaiting a tracking key, `queued_for_credit`), and unresolved (D15). On a sale that is not cancelled, call `applySettlement` with the link `claim`, `verifiedBy` = the admin, `collectedBy` = `link.requested_by`, and `bypassExpiry` when the payment's `devolada_created_at` < `link.expires_at`, as T060 does (D8); the same claimed batch sets the payment's `resolution 'accepted'`. A claim that does not match (a double tap) → 409 `DEVOLADA_PAYMENT_NOT_RESOLVABLE`. On a cancelled sale → 409 `FOLIO_CANCELLED`. On an apartado that no longer owes, because it was settled another way while the payment waited → 409 `DEVOLADA_PAYMENT_NOT_RESOLVABLE`; `dismiss` is the way out. For a payment in flight the link is not closed: its verdict later finds the claim taken, records nothing more and ends the link (T060).
   - **`dismiss`**: for *partial* or *invalid*, and for a payment in flight on a link no credential can read (`failed`, D21). Any other payment in flight answers 409, since closing its link would make it *unapplied* (D13). Set `resolution 'dismissed'` with `… WHERE resolution IS NULL RETURNING` (no row → 409), then `closePaymentLinkRemote` (fail-soft), except for a `failed` link, which no credential can reach.
   - **Both**: set `resolved_by` / `resolved_at` and answer `{folio}`.
-- [ ] T063 [US3] Settle by link in the app (`app-turistear/src/features/bookings/components/SettleSheet.tsx`):
+- [X] T063 [US3] Settle by link in the app (`app-turistear/src/features/bookings/components/SettleSheet.tsx`):
   - `app-turistear/src/features/bookings/components/SettleSheet.tsx` renders `TransferPaymentFields`;
   - for a connected transfer, submitting shows the returned `PaymentLinkCard` instead of closing as settled. On `payment_link_error` the settlement was recorded on the manual path, so the sheet closes as settled and shows the alert;
   - type the settle responses `{folio, payment_link?, payment_link_error?}` in `app-turistear/src/services/bookingsService.ts:24-44`.
-- [ ] T064 [US3] Show the settlement link and its exceptions (`app-turistear/src/features/bookings/components/BookingActions.tsx`, `app-turistear/src/features/folios/components/FolioWorkActions.tsx`, `app-turistear/src/features/folios/components/FolioDetailScreen.tsx`):
+- [X] T064 [US3] Show the settlement link and its exceptions (`app-turistear/src/features/bookings/components/BookingActions.tsx`, `app-turistear/src/features/folios/components/FolioWorkActions.tsx`, `app-turistear/src/features/folios/components/FolioDetailScreen.tsx`):
   - **`BookingActions.tsx`**: while a settlement link is open, show its `PaymentLinkCard` and replace «Liquidar saldo» / «Liquidar todo» with the chip «Liquidación en verificación».
   - **Refusals**: `SETTLEMENT_IN_PROGRESS`, which T059 raises from this PR, shows its copy from contracts § Action copy wherever a line cancellation or a settlement is refused: `BookingActions.tsx` and `SettleSheet.tsx` for the seller, `FolioDetailScreen.tsx` for the admin's line cancellation.
   - **`FolioWorkActions.tsx`**: in T053's Devolada rung, settlement exceptions, and a settlement payment of a link no credential can read (D21), get «Verificar» (resolve `accept`) and «Descartar» (resolve `dismiss`) `ConfirmSheet`s, using `useResolveDevoladaPayment`. A settlement payment still in flight gets that rung on the sale's detail with «Verificar» only, whether or not the sale is in Por verificar (D15). Copy from contracts/turistear-api.md § Action copy: one verb per action (constitution VII, research D15).
-- [ ] T065 [P] [US3] Extend the app tests in `app-turistear/src/features/bookings/components/SettleSheet.test.tsx` and `FolioWorkActions.test.tsx`, citing `devolada-transfer-verification US3` and running axe:
+- [X] T065 [P] [US3] Extend the app tests in `app-turistear/src/features/bookings/components/SettleSheet.test.tsx` and `FolioWorkActions.test.tsx`, citing `devolada-transfer-verification US3` and running axe:
   - `app-turistear/src/features/bookings/components/SettleSheet.test.tsx`, connected mode: no reference field; the link card after submit; on the fallback, the sheet closes as settled and shows its alert; the `SETTLEMENT_IN_PROGRESS` copy.
   - `FolioWorkActions.test.tsx`: accept and dismiss for an exception and for a settlement whose link no credential can read, and «Verificar» alone for a settlement still in flight.
 

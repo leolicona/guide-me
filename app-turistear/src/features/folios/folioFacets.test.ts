@@ -250,3 +250,71 @@ describe('devolada-transfer-verification US1 — a sale Devolada is resolving is
     expect(porVerificarCount(counts)).toBe(listed.length)
   })
 })
+
+// --- devolada-transfer-verification US2 — a Devolada payment that needs the admin is their work ---
+
+describe('devolada-transfer-verification US2 — Devolada attention joins «Por verificar» (D14)', () => {
+  it('a row with `devolada_attention` is listed, whatever its verification says', () => {
+    // A transfer sale waiting on a tracking key: pending, and the server's flag.
+    expect(
+      matchesFacets(folio({ payment_verification: 'pending', devolada_attention: true }), ['por_verificar']),
+    ).toBe(true)
+    // An apartado whose settlement ended short: no pending row to verify (D8), and still work.
+    expect(
+      matchesFacets(
+        folio({ status: 'booking', payment_verification: 'verified', devolada_attention: true }),
+        ['por_verificar'],
+      ),
+    ).toBe(true)
+    // The same apartado once the admin decided it: the server clears the flag, the row leaves.
+    expect(
+      matchesFacets(
+        folio({ status: 'booking', payment_verification: 'verified', devolada_attention: false }),
+        ['por_verificar'],
+      ),
+    ).toBe(false)
+  })
+
+  it('a cancelled sale with money to return is listed — the only cancelled rows the facet lists', () => {
+    const late = folio({ status: 'cancelled', payment_verification: 'pending', devolada_attention: true })
+    expect(matchesFacets(late, ['por_verificar'])).toBe(true)
+    // A rejected payment's stale flag is still not work (US-A67).
+    expect(matchesFacets({ ...late, devolada_attention: false }, ['por_verificar'])).toBe(false)
+    // And it is still a cancelled sale for the Pago section.
+    expect(matchesFacets(late, ['cancelado', 'por_verificar'])).toBe(true)
+  })
+
+  it('porVerificarCount adds `devolada_attention` to what the admin verifies', () => {
+    expect(porVerificarCount({ verification: 5, verification_auto: 2, devolada_attention: 3 })).toBe(6)
+    // The sales only the attention count holds are never eaten by a momentary negative difference.
+    expect(porVerificarCount({ verification: 1, verification_auto: 2, devolada_attention: 3 })).toBe(3)
+    // An API that predates the field counts as before.
+    expect(porVerificarCount({ verification: 3, verification_auto: 1 })).toBe(2)
+  })
+
+  it('each sale counts once, and the count promises exactly the rows the facet lists', () => {
+    const rows = [
+      folio({ id: 'manual', payment_verification: 'pending' }),
+      folio({ id: 'auto', payment_verification: 'pending', verification_auto: true }),
+      // A sale exception: `verification` already counts it, and so does the flag (once, not twice).
+      folio({ id: 'partial', payment_verification: 'pending', devolada_attention: true }),
+      // Money to return on a cancelled sale, and a settlement exception on an apartado: only the
+      // attention count holds them.
+      folio({ id: 'late', status: 'cancelled', payment_verification: 'pending', devolada_attention: true }),
+      folio({ id: 'settlement', status: 'booking', payment_verification: 'verified', devolada_attention: true }),
+      folio({ id: 'rejected', status: 'cancelled', payment_verification: 'pending' }),
+      folio({ id: 'cleared', payment_verification: 'verified' }),
+    ]
+    // What `GET /api/folios/counts` counts over the same rows (data-model § Flags and counts).
+    const counted = (f: FolioListItem) => f.payment_verification === 'pending' && f.status !== 'cancelled'
+    const counts = {
+      verification: rows.filter(counted).length,
+      verification_auto: rows.filter((f) => counted(f) && f.verification_auto).length,
+      devolada_attention: rows.filter((f) => f.devolada_attention && !counted(f)).length,
+    }
+
+    const listed = rows.filter((f) => matchesFacets(f, ['por_verificar']))
+    expect(listed.map((f) => f.id)).toEqual(['manual', 'partial', 'late', 'settlement'])
+    expect(porVerificarCount(counts)).toBe(listed.length)
+  })
+})

@@ -2340,7 +2340,7 @@ export const cancelBookingLine = async (c: PosContext) => {
   // devolada-transfer-verification D19 — the apartado's balance is being collected by a settlement
   // link. Until PR 3 closes and replaces it, a line cancellation would leave it asking a stale
   // amount, so it waits for the link's result.
-  if (await openSettlementLink(db, org, id)) {
+  if (await openSettlementLink(db, org, id ?? '')) {
     throw new ApiError('SETTLEMENT_IN_PROGRESS', 409, SETTLEMENT_IN_PROGRESS_MESSAGE)
   }
   const [line] = await db
