@@ -62,6 +62,9 @@ export function PaymentBreakdown({ payments }: { payments: FolioPaymentEntry[] }
               {p.verification === 'pending' && (
                 <StatusChip status="pending" label="Por verificar" />
               )}
+              {p.verification === 'rejected' && (
+                <StatusChip status="cancelled" label="Rechazado" />
+              )}
               <MoneyText
                 cents={p.amount}
                 variant="body1"

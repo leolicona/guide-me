@@ -60,6 +60,7 @@ import {
   refundRow,
   allocationRows,
   buildCancellationReversal,
+  buildPendingPaymentVoid,
   displayMethodSql,
   depositMethodSql,
 } from '../../utils/folioPayments'
@@ -2987,9 +2988,12 @@ export const verifyPayment = async (c: PosContext) => {
   return c.json({ folio: out })
 }
 
-// US-A67 (D6) — ADMIN rejects an electronic payment (bad reference / money never arrived): the sale
-// is void, so release the held spots, claw back the seller's commission, and cancel the folio (no
-// refund — nothing was collected). Admin-only; org-scoped; only a `pending` folio can be rejected.
+// US-A67 (D6) — ADMIN rejects an electronic payment (bad reference / money never arrived). When that
+// money was all the sale had, the sale is void: release the held spots, claw back the seller's
+// commission, and cancel the folio (no refund — nothing was collected). When the sale holds other,
+// cleared money — a cash deposit under a transfer settlement — only the pending payment is withdrawn
+// and the sale stays alive as an apartado (bug: reject-settle-voids-deposit). Admin-only;
+// org-scoped; only a `pending` folio can be rejected.
 export const rejectPayment = async (c: PosContext) => {
   const admin = c.get('user')
   const id = c.req.param('id')
@@ -3002,6 +3006,8 @@ export const rejectPayment = async (c: PosContext) => {
       agentId: folios.agentId,
       paymentVerification: folios.paymentVerification,
       paymentReference: folios.paymentReference,
+      amountPaid: folios.amountPaid,
+      commissionAmount: folios.commissionAmount,
     })
     .from(folios)
     .where(and(eq(folios.id, id), eq(folios.organizationId, org)))
@@ -3014,14 +3020,66 @@ export const rejectPayment = async (c: PosContext) => {
 
   const lineRows = await db
     .select({
+      id: folioLines.id,
       slotId: folioLines.slotId,
       quantity: folioLines.quantity,
       zoneId: folioLines.zoneId,
+      cancelledAt: folioLines.cancelledAt,
     })
     .from(folioLines)
     .where(and(eq(folioLines.folioId, id), eq(folioLines.organizationId, org)))
 
   const now = new Date()
+  const reason = body.reason ?? 'Pago electrónico rechazado'
+
+  // bug: reject-settle-voids-deposit — a sale that keeps cleared money is never cancelled by a
+  // rejected transfer. Withdraw the pending payment(s) only: the lines they paid owe again, the
+  // seats stay held, the cleared money stays in the books and in the seller's corte, and the
+  // apartado's own clock (never cleared by a settle) takes it from here.
+  const voidPlan = await buildPendingPaymentVoid(db, { organizationId: org, folioId: id, at: now })
+  if (voidPlan.pendingCount > 0 && voidPlan.cleared > 0) {
+    const reopensLiveLine = lineRows.some(
+      (l) => !l.cancelledAt && voidPlan.touchedLineIds.includes(l.id),
+    )
+    await db.batch([
+      db
+        .update(folios)
+        .set({
+          amountPaid: Math.max(0, folio.amountPaid - voidPlan.voidedAmount),
+          commissionAmount: Math.max(0, folio.commissionAmount - voidPlan.commissionReversed),
+          // A line owes again → the folio is an apartado again, so it is no longer settled.
+          ...(reopensLiveLine ? { settledAt: null, settledBy: null } : {}),
+          paymentVerification: voidPlan.remainingVerification,
+          paymentReference: voidPlan.remainingReference,
+          updatedAt: now,
+        })
+        .where(and(eq(folios.id, id), eq(folios.organizationId, org))),
+      ...(voidPlan.statements as BatchItem<'sqlite'>[]),
+      // One action, one row (D9). `outcome` tells the timeline the sale survived.
+      folioEventRow(db, {
+        organizationId: org,
+        folioId: id,
+        type: 'transfer_rejected',
+        actorId: admin.userId,
+        payload: {
+          reference: folio.paymentReference,
+          reason,
+          outcome: 'booking',
+          amount: voidPlan.voidedAmount,
+        },
+        at: now,
+      }),
+    ])
+    const kept = await readFolio(db, org, folio.agentId, id, c.env.QR_SECRET, c.env.API_BASE_URL)
+    await emitNotification(db, {
+      organizationId: org,
+      folioId: id,
+      event: 'payment_rejected_booking',
+      hasEmail: !!kept?.customer_email,
+    })
+    return c.json({ folio: kept })
+  }
+
   const statements: BatchItem<'sqlite'>[] = [
     db
       .update(folios)
@@ -3029,7 +3087,7 @@ export const rejectPayment = async (c: PosContext) => {
         // TECH_DEBT #25 — status/refund derive from the lines; the stamp is the fact.
         cancelledAt: now,
         cancelledBy: admin.userId,
-        cancellationReason: body.reason ?? 'Pago electrónico rechazado',
+        cancellationReason: reason,
         cancellationClawback: true, // the sale was void — the seller loses the commission
         updatedAt: now,
       })
@@ -3056,10 +3114,23 @@ export const rejectPayment = async (c: PosContext) => {
       actorId: admin.userId,
       payload: {
         reference: folio.paymentReference,
-        reason: body.reason ?? 'Pago electrónico rechazado',
+        reason,
       },
       at: now,
     }),
+    // bug: reject-settle-voids-deposit — the rejected rows stop reading as pending here too; the
+    // full reversal below is what moves their money.
+    db
+      .update(folioPayments)
+      .set({ verification: 'rejected' })
+      .where(
+        and(
+          eq(folioPayments.folioId, id),
+          eq(folioPayments.organizationId, org),
+          eq(folioPayments.entryType, 'payment'),
+          eq(folioPayments.verification, 'pending'),
+        ),
+      ),
   ]
   // Release the held spots (mirrors cancelBooking): zone counter + slot reconcile, or the slot total.
   for (const line of lineRows) {

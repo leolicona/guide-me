@@ -413,3 +413,18 @@ describe('the empty timeline', () => {
     expect(screen.getByText('Historial')).toBeInTheDocument()
   })
 })
+
+describe('bug: reject-settle-voids-deposit — a rejected transfer says whether the sale survived', () => {
+  it('outcome booking → the sale continues as an apartado; no outcome → it was cancelled', () => {
+    renderWithProviders(
+      <FolioTimeline
+        events={[
+          anEvent({ type: 'transfer_rejected', payload: { reason: 'No llegó', outcome: 'booking' } }),
+          anEvent({ type: 'transfer_rejected', payload: { reason: 'No llegó' } }),
+        ]}
+      />,
+    )
+    expect(screen.getByText('Transferencia rechazada — sigue como apartado')).toBeInTheDocument()
+    expect(screen.getByText('Transferencia rechazada — venta cancelada')).toBeInTheDocument()
+  })
+})

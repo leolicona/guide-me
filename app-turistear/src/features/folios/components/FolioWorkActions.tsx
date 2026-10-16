@@ -83,6 +83,13 @@ export function FolioWorkActions({
     : undefined
   const awaitingVerification =
     folio.payment_verification === 'pending' && folio.status !== 'cancelled'
+  // bug: reject-settle-voids-deposit — when the sale holds cleared money besides the pending
+  // transfer (a cash deposit under a transfer settlement), the server withdraws only the pending
+  // payment and the sale stays an apartado. Mirrored here for the sheet's copy only.
+  const rejectKeepsSale =
+    (folio.payments ?? [])
+      .filter((p) => !(p.kind === 'payment' && p.verification === 'pending'))
+      .reduce((sum, p) => sum + p.amount, 0) > 0
   // Rung 3 — the open refund obligation (US-A23/US-T05). A warning that carries a BUTTON is work,
   // not a notice, so it ranks as a rung: an orphaned petition on a cancelled folio gets resolved
   // before cash leaves the drawer.
@@ -337,7 +344,13 @@ export function FolioWorkActions({
         open={rejectingPayment}
         onClose={() => setRejectingPayment(false)}
         title="Rechazar pago"
-        submitLabel={rejectPayment.isPending ? 'Rechazando…' : 'Rechazar venta'}
+        submitLabel={
+          rejectPayment.isPending
+            ? 'Rechazando…'
+            : rejectKeepsSale
+              ? 'Rechazar solo este pago'
+              : 'Rechazar venta'
+        }
         busy={rejectPayment.isPending}
         error={
           rejectPayment.isError ? (
@@ -354,7 +367,9 @@ export function FolioWorkActions({
       >
         <Stack spacing={2} sx={{ px: 2, pb: 2 }}>
           <Typography variant="body2" color="textSecondary">
-            La venta se cancelará: se liberan los lugares y se descuenta la comisión del vendedor.
+            {rejectKeepsSale
+              ? 'Se anula solo este pago. La venta vuelve a ser apartado con lo que ya se cobró: los lugares siguen apartados y el vendedor conserva la comisión de ese dinero.'
+              : 'La venta se cancelará: se liberan los lugares y se descuenta la comisión del vendedor.'}
           </Typography>
           <TextField
             label="Motivo (opcional)"

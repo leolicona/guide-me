@@ -23,6 +23,7 @@ export type NotificationEvent =
   | 'payment_verified'
   | 'cancellation_approved'
   | 'payment_rejected'
+  | 'payment_rejected_booking'
   | 'booking_grace_entered'
   | 'departure_reminder'
   | 'booking_expired'
@@ -79,6 +80,16 @@ export const EVENTS: Record<NotificationEvent, EventDef> = {
     template:
       'Hola {customer_name}, no pudimos confirmar el pago de tu folio {folio_ref}, ' +
       'así que tuvimos que cancelarlo. Si crees que es un error, escríbeme. — {agent_name}',
+  },
+  // bug: reject-settle-voids-deposit — the rejected payment was not all the customer had paid, so
+  // the sale survives as an apartado. Telling them "cancelled" here would be false; telling them
+  // nothing leaves them believing they are paid in full.
+  payment_rejected_booking: {
+    origin: 'action-tail',
+    template:
+      'Hola {customer_name}, no pudimos confirmar tu último pago, así que no lo aplicamos. ' +
+      'Tu apartado sigue vigente con lo que ya pagaste y queda saldo pendiente. ' +
+      'Si crees que es un error, escríbeme. — {agent_name}',
   },
   booking_grace_entered: {
     origin: 'clock',

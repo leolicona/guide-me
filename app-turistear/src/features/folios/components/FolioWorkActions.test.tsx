@@ -276,3 +276,46 @@ describe('Design review, Should Fix 3 — the seller mounts no admin overlay', (
     expect(drawers().length).toBeGreaterThan(0)
   })
 })
+
+describe('bug: reject-settle-voids-deposit — the reject sheet says which outcome this tap has', () => {
+  const pay = (over: Partial<NonNullable<FolioDetail['payments']>[number]>) => ({
+    id: crypto.randomUUID(),
+    kind: 'payment' as const,
+    method: 'cash' as const,
+    amount: 45000,
+    reference: null,
+    verification: 'not_required' as const,
+    collected_at: 1_700_000_000,
+    ...over,
+  })
+
+  it('a cash deposit under a pending transfer settlement → only that payment is withdrawn', async () => {
+    renderWork(
+      folio({
+        payment_verification: 'pending',
+        payments: [
+          pay({}),
+          pay({ method: 'transfer', amount: 105000, verification: 'pending', reference: 'BBVA-1' }),
+        ],
+      }),
+    )
+    await userEvent.click(screen.getByRole('button', { name: 'Rechazar pago' }))
+
+    expect(await screen.findByText(/Se anula solo este pago/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Rechazar solo este pago' })).toBeInTheDocument()
+    expect(screen.queryByText(/La venta se cancelará/)).toBeNull()
+  })
+
+  it('a transfer that was all the sale had → the sale is cancelled, as before', async () => {
+    renderWork(
+      folio({
+        payment_verification: 'pending',
+        payments: [pay({ method: 'transfer', amount: 150000, verification: 'pending' })],
+      }),
+    )
+    await userEvent.click(screen.getByRole('button', { name: 'Rechazar pago' }))
+
+    expect(await screen.findByText(/La venta se cancelará/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Rechazar venta' })).toBeInTheDocument()
+  })
+})

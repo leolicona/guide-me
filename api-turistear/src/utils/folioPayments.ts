@@ -360,6 +360,177 @@ export const buildCancellationReversal = async (
   return rows
 }
 
+// bug: reject-settle-voids-deposit — withdraw a folio's PENDING electronic payments and nothing else.
+//
+// Rejecting a transfer used to mean "the sale is void": cancel every line, release every seat and
+// reverse every bucket through `buildCancellationReversal`. That held while the only money a folio
+// could wait on was its first payment. Once a settlement could be a transfer on top of a cash deposit
+// (US-LG03), the full reversal erased cash still in the seller's drawer — the defect D20 removed from
+// `cancelBooking`, reopened by the reject path.
+//
+// Per pending payment row this writes:
+//   · the row itself relabelled `rejected`, so it never reads as pending again (the ticket page and
+//     the payment breakdown both read the row, not the folio);
+//   · an offsetting `refund` row on the same method and collector, with negative allocations
+//     mirroring the row's own — the lines it paid owe again, so the folio derives `booking`;
+//   · the commission that same collection accrued, reversed. A settle writes its commission row in
+//     the payment's own batch, on the payment's method, so "same method, written at or after the
+//     payment" is that accrual. Each (method, collector) reversal is capped at what that bucket
+//     still holds, so an earlier clawback is never reversed twice.
+//
+// `cleared` is the money the folio keeps once the pending rows are gone (a rejected row and its
+// offset cancel out). The caller cancels the sale only when it is zero.
+export const buildPendingPaymentVoid = async (
+  db: Db,
+  input: { organizationId: string; folioId: string; at: Date },
+) => {
+  const ledger = await db
+    .select({
+      id: folioPayments.id,
+      entryType: folioPayments.entryType,
+      amount: folioPayments.amount,
+      method: folioPayments.method,
+      verification: folioPayments.verification,
+      reference: folioPayments.reference,
+      collectedBy: folioPayments.collectedBy,
+      createdAt: folioPayments.createdAt,
+    })
+    .from(folioPayments)
+    .where(
+      and(
+        eq(folioPayments.organizationId, input.organizationId),
+        eq(folioPayments.folioId, input.folioId),
+      ),
+    )
+
+  const isPending = (r: (typeof ledger)[number]) =>
+    r.entryType === 'payment' && r.verification === 'pending'
+  const pending = ledger.filter(isPending)
+  const cleared = ledger
+    .filter((r) => (r.entryType === 'payment' || r.entryType === 'refund') && !isPending(r))
+    .reduce((sum, r) => sum + r.amount, 0)
+
+  const allocations = pending.length
+    ? await db
+        .select({
+          paymentId: folioPaymentAllocations.paymentId,
+          folioLineId: folioPaymentAllocations.folioLineId,
+          amount: sql<number>`sum(${folioPaymentAllocations.amount})`,
+        })
+        .from(folioPaymentAllocations)
+        .where(
+          and(
+            eq(folioPaymentAllocations.organizationId, input.organizationId),
+            inArray(
+              folioPaymentAllocations.paymentId,
+              pending.map((p) => p.id),
+            ),
+          ),
+        )
+        .groupBy(folioPaymentAllocations.paymentId, folioPaymentAllocations.folioLineId)
+    : []
+
+  const statements = []
+  for (const p of pending) {
+    const offsetId = crypto.randomUUID()
+    statements.push(
+      db
+        .update(folioPayments)
+        .set({ verification: 'rejected' })
+        .where(
+          and(eq(folioPayments.id, p.id), eq(folioPayments.organizationId, input.organizationId)),
+        ),
+      refundRow(db, {
+        id: offsetId,
+        organizationId: input.organizationId,
+        folioId: input.folioId,
+        amount: p.amount,
+        method: p.method as Method,
+        collectedBy: p.collectedBy,
+        at: input.at,
+      }),
+      ...allocationRows(db, {
+        organizationId: input.organizationId,
+        paymentId: offsetId,
+        allocations: allocations
+          .filter((a) => a.paymentId === p.id && Number(a.amount) > 0)
+          .map((a) => ({ folioLineId: a.folioLineId, amount: Number(a.amount) })),
+        sign: -1,
+        createdAt: input.at,
+      }),
+    )
+  }
+
+  // The commission each pending collection accrued, grouped by the bucket it sits in.
+  const bucketKey = (method: string | null, collectedBy: string) => `${method}|${collectedBy}`
+  const accrued = new Map<string, { method: Method; collectedBy: string; amount: number }>()
+  const matched = new Set<string>()
+  for (const p of pending) {
+    for (const r of ledger) {
+      if (
+        r.entryType === 'commission' &&
+        r.method === p.method &&
+        r.createdAt.getTime() >= p.createdAt.getTime() &&
+        !matched.has(r.id)
+      ) {
+        matched.add(r.id)
+        const key = bucketKey(r.method, r.collectedBy)
+        const bucket = accrued.get(key) ?? {
+          method: r.method as Method,
+          collectedBy: r.collectedBy,
+          amount: 0,
+        }
+        bucket.amount += r.amount
+        accrued.set(key, bucket)
+      }
+    }
+  }
+  let commissionReversed = 0
+  for (const [key, bucket] of accrued) {
+    const held = ledger
+      .filter(
+        (r) =>
+          (r.entryType === 'commission' || r.entryType === 'commission_reversal') &&
+          bucketKey(r.method, r.collectedBy) === key,
+      )
+      .reduce((sum, r) => sum + r.amount, 0)
+    const amount = Math.min(bucket.amount, Math.max(0, held))
+    if (amount <= 0) continue
+    commissionReversed += amount
+    statements.push(
+      commissionReversalRow(db, {
+        organizationId: input.organizationId,
+        folioId: input.folioId,
+        amount,
+        method: bucket.method,
+        collectedBy: bucket.collectedBy,
+        at: input.at,
+      }),
+    )
+  }
+
+  // What the folio's verification axis reads once the pending rows are gone: `verified` while a
+  // verified transfer remains (with its reference), else nothing was ever electronic-and-open.
+  const verifiedRows = ledger
+    .filter((r) => r.entryType === 'payment' && r.verification === 'verified')
+    .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+
+  return {
+    pendingCount: pending.length,
+    cleared,
+    voidedAmount: pending.reduce((sum, p) => sum + p.amount, 0),
+    commissionReversed,
+    touchedLineIds: [
+      ...new Set(allocations.filter((a) => Number(a.amount) > 0).map((a) => a.folioLineId)),
+    ],
+    remainingVerification: (verifiedRows.length > 0 ? 'verified' : 'not_required') as
+      | 'verified'
+      | 'not_required',
+    remainingReference: verifiedRows[0]?.reference ?? null,
+    statements,
+  }
+}
+
 // US-LG08 — the folio's money movements for the per-payment breakdown on folio detail: each
 // collection (deposit, balance) and any cancellation reversal, in chronological order, with its own
 // method, reference and verification. Commission accruals are excluded —
@@ -370,7 +541,9 @@ export interface FolioPaymentEntry {
   method: 'cash' | 'card' | 'transfer' | 'link'
   amount: number // signed minor units (a refund is negative)
   reference: string | null
-  verification: 'not_required' | 'pending' | 'verified'
+  // `rejected` — a transfer an admin rejected while the sale kept other money
+  // (bug: reject-settle-voids-deposit).
+  verification: 'not_required' | 'pending' | 'verified' | 'rejected'
   collected_at: number // unix seconds
 }
 

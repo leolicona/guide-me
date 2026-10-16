@@ -25,6 +25,7 @@ const EVENT_LABEL: Record<string, string> = {
   payment_verified: 'Pago verificado',
   cancellation_approved: 'Cancelación aprobada',
   payment_rejected: 'Pago rechazado',
+  payment_rejected_booking: 'Pago rechazado (sigue apartado)',
   booking_grace_entered: 'Apartado por vencer',
   departure_reminder: 'Recordatorio de salida',
   refund_completed: 'Recibo de reembolso',

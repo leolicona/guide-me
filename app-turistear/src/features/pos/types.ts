@@ -205,7 +205,9 @@ export interface FolioPaymentEntry {
   /** Signed minor units — a refund (cancellation reversal) is negative. */
   amount: number
   reference: string | null
-  verification: PaymentVerification
+  /** `rejected` — a transfer an admin rejected while the sale kept other money; its reversal is
+   *  the `refund` entry beside it (bug: reject-settle-voids-deposit). */
+  verification: PaymentVerification | 'rejected'
   collected_at: number
 }
 

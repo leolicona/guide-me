@@ -106,7 +106,10 @@ function eventPrimary(ev: FolioEvent): ReactNode {
     case 'payment_verified':
       return 'Transferencia verificada'
     case 'transfer_rejected':
-      return 'Transferencia rechazada — venta cancelada'
+      // bug: reject-settle-voids-deposit — a sale that kept cleared money survives the reject.
+      return str(p, 'outcome') === 'booking'
+        ? 'Transferencia rechazada — sigue como apartado'
+        : 'Transferencia rechazada — venta cancelada'
     case 'tickets_sent':
       return 'Boletos enviados'
     case 'tickets_viewed':

@@ -930,7 +930,11 @@ export const folioPayments = sqliteTable('folio_payments', {
   // Money movements carry a method; commission accruals do not (null).
   method: text('method', { enum: ['cash', 'card', 'transfer', 'link'] }),
   reference: text('reference'), // bank ref; only a transfer payment sets it
-  verification: text('verification', { enum: ['not_required', 'pending', 'verified'] })
+  // `rejected` labels a transfer an admin rejected; its offsetting refund row is what moves the money
+  // (bug: reject-settle-voids-deposit). TEXT with no CHECK constraint, so no migration.
+  verification: text('verification', {
+    enum: ['not_required', 'pending', 'verified', 'rejected'],
+  })
     .notNull()
     .default('not_required'),
   // Who took THIS money — a settle may differ from the original seller (D8).
