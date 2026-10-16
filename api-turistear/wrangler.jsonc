@@ -49,7 +49,15 @@
     "AUTH_COOKIE_PREFIX": "gm-local",
     // passkey-auth D7, FR-064 — LOCAL ONLY: print sign-in codes in the API console instead
     // of emailing them. Never set it in `env.dev` or `env.production`.
-    "OTP_LOG_TO_CONSOLE": "true"
+    "OTP_LOG_TO_CONSOLE": "true",
+    // devolada-transfer-verification D17 — Devolada's collections API. Test credentials
+    // everywhere but production (DEVOLADA_KEY_MODE, the mode policy of D2). The notification
+    // address is empty here: a laptop's API_BASE_URL points at production, so Devolada must
+    // not deliver to it, and verdicts arrive through the sweep. The secret
+    // DEVOLADA_CREDENTIAL_KEY comes from `.dev.vars`.
+    "DEVOLADA_API_BASE_URL": "https://api.devoladapago.com",
+    "DEVOLADA_KEY_MODE": "test",
+    "DEVOLADA_WEBHOOK_URL": ""
   },
 
   "env": {
@@ -83,7 +91,11 @@
         "API_BASE_URL": "https://api-dev.turistearya.com",
         "APP_BASE_URL": "https://app-dev.turistearya.com",
         "RESEND_FROM": "no-reply@turistearya.com",
-        "AUTH_COOKIE_PREFIX": "gm-dev"
+        "AUTH_COOKIE_PREFIX": "gm-dev",
+        // devolada-transfer-verification D17 — test credentials; Devolada notifies this Worker.
+        "DEVOLADA_API_BASE_URL": "https://api.devoladapago.com",
+        "DEVOLADA_KEY_MODE": "test",
+        "DEVOLADA_WEBHOOK_URL": "https://api-dev.turistearya.com/api/webhooks/devolada"
       }
     },
 
@@ -116,7 +128,14 @@
         // passkey-auth D5 — its own cookie name. Host-only on the preview's API, so it never
         // meets dev's or prod's session cookie; `BETTER_AUTH_SECRET` comes from the GitHub `dev`
         // environment through preview.yml's secrets file (delivery-pipeline D5, research R2).
-        "AUTH_COOKIE_PREFIX": "gm-preview"
+        "AUTH_COOKIE_PREFIX": "gm-preview",
+        // devolada-transfer-verification D17 — test credentials and NO notification address: a
+        // preview serves dev's database and runs no cron, so the business keeps dev's address and
+        // dev follows the links a preview issues. DEVOLADA_CREDENTIAL_KEY is dev's value or none,
+        // never a throwaway (preview.yml).
+        "DEVOLADA_API_BASE_URL": "https://api.devoladapago.com",
+        "DEVOLADA_KEY_MODE": "test",
+        "DEVOLADA_WEBHOOK_URL": ""
       }
     },
 
@@ -149,7 +168,11 @@
         "API_BASE_URL": "https://api.turistearya.com",
         "APP_BASE_URL": "https://app.turistearya.com",
         "RESEND_FROM": "no-reply@turistearya.com",
-        "AUTH_COOKIE_PREFIX": "gm"
+        "AUTH_COOKIE_PREFIX": "gm",
+        // devolada-transfer-verification D17 — production takes only real credentials (D2).
+        "DEVOLADA_API_BASE_URL": "https://api.devoladapago.com",
+        "DEVOLADA_KEY_MODE": "real",
+        "DEVOLADA_WEBHOOK_URL": "https://api.turistearya.com/api/webhooks/devolada"
       }
     }
   }

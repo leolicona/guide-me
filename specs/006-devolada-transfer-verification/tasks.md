@@ -53,7 +53,7 @@ Write each story's tests first and watch them fail.
 
 **Purpose**: Configuration, error vocabulary and the constitution amendment that every later task relies on.
 
-- [ ] T001 Add the vars `DEVOLADA_API_BASE_URL`, `DEVOLADA_KEY_MODE` and `DEVOLADA_WEBHOOK_URL` to all four profiles in `api-turistear/wrangler.jsonc`. Named envs inherit no vars (lines 14-16), so repeat them in each profile:
+- [X] T001 Add the vars `DEVOLADA_API_BASE_URL`, `DEVOLADA_KEY_MODE` and `DEVOLADA_WEBHOOK_URL` to all four profiles in `api-turistear/wrangler.jsonc`. Named envs inherit no vars (lines 14-16), so repeat them in each profile:
 
   | Profile (`vars` lines) | `DEVOLADA_API_BASE_URL` | `DEVOLADA_KEY_MODE` | `DEVOLADA_WEBHOOK_URL` |
   |---|---|---|---|
@@ -63,12 +63,12 @@ Write each story's tests first and watch them fail.
   | production (146-153) | `https://api.devoladapago.com` | `real` | `https://api.turistearya.com/api/webhooks/devolada` |
 
   A preview registers no notification address. It serves dev's database, so the business keeps dev's address, and it runs no cron (D17). Add a comment citing `devolada-transfer-verification D17`.
-- [ ] T002 Declare the four Devolada bindings in `api-turistear/src/bindings.d.ts`, then run `pnpm cf-typegen:api` to refresh `api-turistear/worker-configuration.d.ts`:
+- [X] T002 Declare the four Devolada bindings in `api-turistear/src/bindings.d.ts`, then run `pnpm cf-typegen:api` to refresh `api-turistear/worker-configuration.d.ts`:
   - `DEVOLADA_API_BASE_URL: string`
   - `DEVOLADA_KEY_MODE: 'real' | 'test'`
   - `DEVOLADA_WEBHOOK_URL: string`
   - `DEVOLADA_CREDENTIAL_KEY: string` (secret)
-- [ ] T003 [P] Provision the secret `DEVOLADA_CREDENTIAL_KEY` in `.github/workflows/deploy-dev.yml`, `deploy-prod.yml`, `preview.yml`, `.github/scripts/preview-note.mjs` and `api-turistear/.dev.vars.example`, the way constitution VIII manages every API secret (D17; the preview exception is T006's):
+- [X] T003 [P] Provision the secret `DEVOLADA_CREDENTIAL_KEY` in `.github/workflows/deploy-dev.yml`, `deploy-prod.yml`, `preview.yml`, `.github/scripts/preview-note.mjs` and `api-turistear/.dev.vars.example`, the way constitution VIII manages every API secret (D17; the preview exception is T006's):
   - **Value**: 32 random bytes, base64 (`openssl rand -base64 32`), generated once per environment, a different value in `dev` and in `production`. It is never pasted again: a changed value makes every stored credential unreadable, and every connected organization would have to connect again.
   - **GitHub environments**: the developer adds it as a secret of the `dev` and `production` environments: in `dev` before PR 1's preview is used to validate, and in `production` before PR 1 is released with a `v*` tag.
   - **`.github/workflows/deploy-dev.yml` (47-62) and `deploy-prod.yml` (82-97)**, step «Secrets for the API»:
@@ -82,17 +82,17 @@ Write each story's tests first and watch them fail.
 
     Never a throwaway: a preview writes into dev's D1, and a credential encrypted under a throwaway key cannot be read by dev's Worker, nor by the preview's next deploy. Without the key, that preview's API fails closed (D17).
   - **Local**: document it in `api-turistear/.dev.vars.example` next to `BETTER_AUTH_SECRET`; `.dev.vars` holds it.
-- [ ] T004 [P] Pin the Devolada bindings in the `miniflare.bindings` block of `api-turistear/vitest.config.ts` (lines 21-31):
+- [X] T004 [P] Pin the Devolada bindings in the `miniflare.bindings` block of `api-turistear/vitest.config.ts` (lines 21-31):
   - `DEVOLADA_API_BASE_URL: 'https://devolada.test'`. The host cannot resolve, so an unstubbed call fails instead of reaching Devolada (D17).
   - `DEVOLADA_KEY_MODE: 'test'`
   - `DEVOLADA_WEBHOOK_URL: 'https://api.test/api/webhooks/devolada'`
   - `DEVOLADA_CREDENTIAL_KEY`: a fixed base64 string encoding 32 bytes.
-- [ ] T005 [P] Add the eleven new error codes to the `ErrorCode` union in `api-turistear/src/types/errors.ts` (lines 1-36), exactly as spec FR-023 declares them and contracts/turistear-api.md § Error codes details them, together with `FOLIO_CANCELLED`, which the resolve endpoint raises and which is in use today without being declared (research defect 9):
+- [X] T005 [P] Add the eleven new error codes to the `ErrorCode` union in `api-turistear/src/types/errors.ts` (lines 1-36), exactly as spec FR-023 declares them and contracts/turistear-api.md § Error codes details them, together with `FOLIO_CANCELLED`, which the resolve endpoint raises and which is in use today without being declared (research defect 9):
   - `DEVOLADA_CREDENTIAL_REJECTED`, `DEVOLADA_MODE_NOT_ALLOWED`, `DEVOLADA_CHANNEL_UNAVAILABLE`
   - `DEVOLADA_BUSINESS_SUSPENDED`, `DEVOLADA_WEBHOOK_CONFLICT`, `DEVOLADA_UNAVAILABLE`
   - `DEVOLADA_PAYMENT_NOT_RESOLVABLE`, `WEBHOOK_SIGNATURE_INVALID`, `WEBHOOK_PAYLOAD_INVALID`
   - `SETTLEMENT_IN_PROGRESS`, and `PAYMENT_LINK_TOO_SHORT`, which only ever travels as `payment_link_error`
-- [ ] T006 Run `/speckit-constitution` to amend `.specify/memory/constitution.md` (MINOR, 1.4.0 → 1.5.0, or the next MINOR if another amendment lands first), as recorded in plan.md § Complexity Tracking:
+- [X] T006 Run `/speckit-constitution` to amend `.specify/memory/constitution.md` (MINOR, 1.4.0 → 1.5.0, or the next MINOR if another amendment lands first), as recorded in plan.md § Complexity Tracking:
   - add Devolada to Principle VIII's list of services we do not own: module `api-turistear/src/services/devolada.ts`; failure modes in `specs/006-devolada-transfer-verification/contracts/devolada-integration.md`;
   - in Principle VIII's secrets paragraph:
     - name `DEVOLADA_CREDENTIAL_KEY` among the secrets no two environments share;

@@ -22,6 +22,11 @@ const THROWAWAY_COST = {
   BETTER_AUTH_SECRET: 'every push signs everyone out of this preview and voids pending sign-in codes',
 }
 
+// devolada-transfer-verification D17 — the one secret a preview never gets as a throwaway: it
+// encrypts rows in dev's database, which a throwaway key would leave unreadable to dev.
+const DEVOLADA_OFF =
+  "**Devolada is off on this preview**: the `dev` environment holds no `DEVOLADA_CREDENTIAL_KEY`, and a preview never gets a throwaway one. Connecting Devolada answers 500 here, and every transfer takes the manual path."
+
 const words = (s) => (s ?? '').split(/[\s,]+/).filter(Boolean)
 const code = (s) => `\`${s}\``
 const short = (sha) => (sha ?? '').slice(0, 7)
@@ -88,6 +93,7 @@ export function render(input) {
         ...input.throwaway.map((name) => `| ${code(name)} | ${THROWAWAY_COST[name] ?? 'unknown'} |`),
       )
     }
+    if (input.devoladaOff) lines.push('', DEVOLADA_OFF)
     lines.push('', `**Journeys** (\`e2e\` label): ${input.journeys}`, '', run)
     return lines.join('\n')
   }
@@ -174,6 +180,7 @@ async function main(mode) {
             applied,
             migrations,
             throwaway: words(env.THROWAWAY),
+            devoladaOff: env.DEVOLADA === 'off',
             journeys: { success: 'passed', failure: 'failed' }[env.JOURNEYS] ?? 'not run',
             runUrl: env.RUN_URL,
           })
