@@ -3538,7 +3538,7 @@ export const listAgentFolios = async (c: PosContext) => {
       agentId: folios.agentId,
       saleMode: folios.saleMode,
       // devolada-transfer-verification D14 — the seller reads the same flag the admin reads.
-      verificationAuto: sql<number>`case when ${verificationAutoFilter(now)} then 1 else 0 end`,
+      verificationAuto: sql<number>`case when ${verificationAutoFilter(org, now)} then 1 else 0 end`,
     })
     .from(folios)
     .innerJoin(users, eq(folios.agentId, users.id))

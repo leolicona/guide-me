@@ -9,10 +9,14 @@
 // closed links whose payment is in flight.
 import { describe, it, expect } from 'vitest'
 import { env } from 'cloudflare:test'
-import { and, eq, sql } from 'drizzle-orm'
+import { eq, sql } from 'drizzle-orm'
 import { getDb } from '../../src/db/client'
 import { folios } from '../../src/db/schema'
-import { verificationAutoFilter, verificationPendingFilter } from '../../src/utils/folioPendingWork'
+import {
+  pendingWorkCountQueries,
+  verificationAutoFilter,
+  verificationPendingFilter,
+} from '../../src/utils/folioPendingWork'
 import { linkPaymentRowsQuery, paymentLinkRowsQuery } from '../../src/utils/devoladaLinkView'
 import { previousKeysQuery } from '../../src/routes/devolada/connection'
 import { erasableCredentialsQuery } from '../../src/routes/devolada/sweep'
@@ -58,7 +62,7 @@ describe('BUG-042 — the Devolada reads enter an index', () => {
   it("a sale's links and their payments, by id and through the list's filters", async () => {
     for (const scope of [
       { folioIds: ['folio-1', 'folio-2'] },
-      { filters: [eq(folios.organizationId, 'org'), verificationPendingFilter()] },
+      { filters: [eq(folios.organizationId, 'org'), verificationPendingFilter('org')] },
     ]) {
       for (const query of [paymentLinkRowsQuery(db, 'org', scope), linkPaymentRowsQuery(db, 'org', scope)]) {
         const plan = await planOf(query)
@@ -69,17 +73,13 @@ describe('BUG-042 — the Devolada reads enter an index', () => {
   })
 
   it('verification_auto: the count, and the 0/1 column of the lists and the detail', async () => {
-    const count = await planOf(
-      db
-        .select({ n: sql<number>`count(*)` })
-        .from(folios)
-        .where(and(eq(folios.organizationId, 'org'), verificationAutoFilter(NOW))),
-    )
+    // The statement GET /folios/counts runs (test/folios/hoy-polled-reads.test.ts pins its entry).
+    const count = await planOf(pendingWorkCountQueries(db, 'org', NOW).verification_auto)
     const column = await planOf(
       db
         .select({
           id: folios.id,
-          verificationAuto: sql<number>`case when ${verificationAutoFilter(NOW)} then 1 else 0 end`,
+          verificationAuto: sql<number>`case when ${verificationAutoFilter('org', NOW)} then 1 else 0 end`,
         })
         .from(folios)
         .where(eq(folios.organizationId, 'org')),

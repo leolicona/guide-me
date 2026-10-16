@@ -54,11 +54,8 @@ import {
   DEFAULT_WINDOW_DAYS,
   listWindowFilter,
   overdueFilter,
-  refundPendingFilter,
-  requestPendingFilter,
-  undeliveredFilter,
+  pendingWorkCountQueries,
   verificationAutoFilter,
-  verificationPendingFilter,
 } from '../../utils/folioPendingWork'
 import {
   asDay,
@@ -157,7 +154,7 @@ export const listFolios = async (c: FoliosContext) => {
   }
   // US-A79 — apartados past their settle deadline. DERIVED here, never stored.
   const now = new Date()
-  if (overdueQ === 'true') filters.push(overdueFilter(now))
+  if (overdueQ === 'true') filters.push(overdueFilter(org, now))
 
   // The org's zone decides every calendar boundary on this route — the window (US-A84 rule 2) and,
   // since US-A83, the range too.
@@ -228,7 +225,7 @@ export const listFolios = async (c: FoliosContext) => {
       // US-A82 — no surface may infer Express from a null name (business rule 4).
       saleMode: folios.saleMode,
       // devolada-transfer-verification D14 — one predicate for the flag and the count.
-      verificationAuto: sql<number>`case when ${verificationAutoFilter(now)} then 1 else 0 end`,
+      verificationAuto: sql<number>`case when ${verificationAutoFilter(org, now)} then 1 else 0 end`,
     })
     .from(folios)
     .innerJoin(users, eq(folios.agentId, users.id))
@@ -289,32 +286,20 @@ export const listFolios = async (c: FoliosContext) => {
 // The counts describe the WHOLE organization and never the loaded window (rule 4). That is what
 // lets the list be bounded without the banner lying: `Hoy` says 2 refunds, the destination shows 2,
 // even when one was cancelled eight months ago (S-3/S-4).
+//
+// bug: folio-counts-full-scan — the statements live in folioPendingWork.ts so their query plan is
+// pinned on the exact SQL run here: each count is driven by its candidate set, never by the history.
 export const listFolioCounts = async (c: FoliosContext) => {
   const admin = c.get('user')
   const org = admin.organizationId
   const db = getDb(c.env)
-  const now = new Date()
 
-  const countWhere = async (predicate: SQL): Promise<number> => {
-    const [row] = await db
-      .select({ n: sql<number>`count(*)` })
-      .from(folios)
-      .where(and(eq(folios.organizationId, org), predicate))
-    return row?.n ?? 0
-  }
-
-  const [verification, refunds, overdue, undelivered, requests, verificationAuto] = await Promise.all([
-    countWhere(verificationPendingFilter()),
-    countWhere(refundPendingFilter()),
-    countWhere(overdueFilter(now)),
-    countWhere(undeliveredFilter()),
-    // Counted over FOLIOS, not over requests: two pending requests on one folio are one folio to
-    // act on, and the pill reads "1 Solicitud" beside a list that shows one row.
-    countWhere(requestPendingFilter(db, org)),
-    // devolada-transfer-verification D14 — the sales Devolada is resolving with nothing for the admin
-    // to do: «Por verificar» = verification − verification_auto, in the badge, the bar and Hoy.
-    countWhere(verificationAutoFilter(now)),
-  ])
+  const q = pendingWorkCountQueries(db, org, new Date())
+  const [verification, refunds, overdue, undelivered, requests, verificationAuto] = await Promise.all(
+    [q.verification, q.refunds, q.overdue, q.undelivered, q.folio_requests, q.verification_auto].map(
+      async (query) => (await query)[0]?.n ?? 0,
+    ),
+  )
 
   return c.json({
     verification,

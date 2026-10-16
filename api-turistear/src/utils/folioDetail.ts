@@ -117,7 +117,7 @@ export const readFolioDetail = async (
       refundedBy: folios.refundedBy,
       createdAt: folios.createdAt,
       // devolada-transfer-verification D14 — the same predicate the list rows and the counts read.
-      verificationAuto: sql<number>`case when ${verificationAutoFilter(readAt)} then 1 else 0 end`,
+      verificationAuto: sql<number>`case when ${verificationAutoFilter(org, readAt)} then 1 else 0 end`,
     })
     .from(folios)
     .innerJoin(users, eq(folios.agentId, users.id))

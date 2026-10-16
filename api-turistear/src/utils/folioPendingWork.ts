@@ -7,20 +7,18 @@
 // and its destination stop agreeing, which is the one thing this feature promises (S-4).
 //
 // The window (rule 2) lives beside them because it is the other half of the same union.
+//
+// bug: folio-counts-full-scan — every predicate OPENS with its candidate set,
+// `folios.id IN (<an org-scoped subquery one index serves>)`, and only then applies the checks that
+// need the folio's other rows. Written as a correlated EXISTS, a predicate could only be tested folio
+// by folio, so a count over it visited every folio the organization ever sold: /folios/counts read
+// 10,346 rows per call on 1,011 folios (measured 2026-10-15) to find a handful. The candidate set is
+// evaluated once (migration 0074 indexes each one). The org scope inside each subquery is
+// constitution III — no read of another tenant's rows, not even their ids — and it is why every
+// predicate now takes `org`. `IN` and `EXISTS` agree here: `folio_id` is NOT NULL, and an `IN` in a
+// WHERE is only ever asked "is it there".
 
-import {
-  and,
-  eq,
-  exists,
-  gte,
-  isNotNull,
-  isNull,
-  lt,
-  ne,
-  or,
-  sql,
-  type SQL,
-} from 'drizzle-orm'
+import { and, eq, gte, inArray, ne, or, sql, type SQL } from 'drizzle-orm'
 import type { Db } from '../db/client'
 import { folioRequests, folios } from '../db/schema'
 import { naiveEpoch, orgToday } from './tz'
@@ -36,10 +34,14 @@ export const DEFAULT_WINDOW_DAYS = 30
  * Cancelled folios are excluded because rejecting a payment cancels the folio and leaves its stale
  * `'pending'` flag behind — the same exclusion `?verification=pending` has always applied.
  */
-export const verificationPendingFilter = (): SQL =>
-  // TECH_DEBT #25 — "not cancelled" reads the lines (any live line), the column is gone.
+export const verificationPendingFilter = (org: string): SQL =>
   and(
-    eq(folios.paymentVerification, 'pending'),
+    // bug: folio-counts-full-scan — the candidates, through folios_org_verification_idx.
+    sql`folios.id in (
+      select f2.id from folios f2
+      where f2.organization_id = ${org} and f2.payment_verification = 'pending'
+    )`,
+    // TECH_DEBT #25 — "not cancelled" reads the lines (any live line), the column is gone.
     sql`exists (select 1 from folio_lines fl where fl.folio_id = folios.id and fl.cancelled_at is null)`,
   )!
 
@@ -53,15 +55,17 @@ export const verificationPendingFilter = (): SQL =>
  * connection: Devolada cannot be asked about it until the admin fixes the key, so the sale waits in
  * «Por verificar» meanwhile (spec clarification of 2026-10-16).
  *
- * One predicate for the row flag, the detail and the count, so they cannot disagree. Every
- * correlation goes through an index led by the correlated key (BUG-042): folio_payments
+ * One predicate for the row flag, the detail and the count, so they cannot disagree. It opens with
+ * the candidate set of `verificationPendingFilter` (bug: folio-counts-full-scan), and every
+ * correlation after it goes through an index led by the correlated key (BUG-042): folio_payments
  * (organization_id, folio_id), devolada_links (organization_id, folio_id), devolada_payments
- * (link_id) and devolada_connections (organization_id). PR 2 adds the attention clause (T050).
+ * (link_id) and devolada_connections (organization_id), one row per organization. PR 2 adds the
+ * attention clause (T050).
  */
-export const verificationAutoFilter = (now: Date): SQL => {
+export const verificationAutoFilter = (org: string, now: Date): SQL => {
   const nowSec = Math.floor(now.getTime() / 1000)
   return and(
-    verificationPendingFilter(),
+    verificationPendingFilter(org),
     sql`exists (
       select 1 from folio_payments p
       where p.organization_id = folios.organization_id and p.folio_id = folios.id
@@ -96,22 +100,25 @@ export const verificationAutoFilter = (now: Date): SQL => {
 
 /** Cash the company owes back and nobody has confirmed handing over (US-A78). */
 // TECH_DEBT #25 — the debt lives on the lines (D6); pending = any line still owed.
-export const refundPendingFilter = (): SQL =>
-  sql`exists (select 1 from folio_lines fl where fl.folio_id = folios.id and fl.refund_status = 'pending')`
+// bug: folio-counts-full-scan — the candidates, through folio_lines_org_refund_idx.
+export const refundPendingFilter = (org: string): SQL =>
+  sql`folios.id in (
+    select fl.folio_id from folio_lines fl
+    where fl.organization_id = ${org} and fl.refund_status = 'pending'
+  )`
 
 /** A hold past its settle deadline (US-A79). Derived from the clock at query time, NEVER stored —
  *  a stored stage needs a writer, and a cron that writes state drifts from the clock that defines
  *  it (`apartado-stages.spec.md` S7). */
-export const overdueFilter = (now: Date): SQL =>
-  and(
-    // TECH_DEBT #25 — overdue = any LIVE line still owing whose OWN clock passed (D5).
-    sql`exists (
-      select 1 from folio_lines fl
-      where fl.folio_id = folios.id and fl.cancelled_at is null
-        and fl.booking_expires_at is not null and fl.booking_expires_at < ${Math.floor(now.getTime() / 1000)}
-        and coalesce((select sum(a.amount) from folio_payment_allocations a where a.folio_line_id = fl.id), 0) < fl.line_total
-    )`,
-  )!
+export const overdueFilter = (org: string, now: Date): SQL =>
+  // TECH_DEBT #25 — overdue = any LIVE line still owing whose OWN clock passed (D5).
+  // bug: folio-counts-full-scan — the candidates, through folio_lines_org_live_clock_idx.
+  sql`folios.id in (
+    select fl.folio_id from folio_lines fl
+    where fl.organization_id = ${org} and fl.cancelled_at is null
+      and fl.booking_expires_at is not null and fl.booking_expires_at < ${Math.floor(now.getTime() / 1000)}
+      and coalesce((select sum(a.amount) from folio_payment_allocations a where a.folio_line_id = fl.id), 0) < fl.line_total
+  )`
 
 /**
  * Tickets that never reached the customer (US-A80).
@@ -120,8 +127,14 @@ export const overdueFilter = (now: Date): SQL =>
  * money cleared, which is what `deliverable` means) with neither timestamp set. Both columns are
  * `NOT NULL` with defaults, so no null-safe comparison is needed.
  */
-export const undeliveredFilter = (): SQL =>
+export const undeliveredFilter = (org: string): SQL =>
   and(
+    // bug: folio-counts-full-scan — the candidates (neither stamp set), through
+    // folios_org_undelivered_idx.
+    sql`folios.id in (
+      select f2.id from folios f2
+      where f2.organization_id = ${org} and f2.tickets_sent_at is null and f2.tickets_viewed_at is null
+    )`,
     // TECH_DEBT #25 — "paid" = the worst-case derivation: no live line under-allocated, some live line.
     sql`exists (select 1 from folio_lines fl where fl.folio_id = folios.id and fl.cancelled_at is null)`,
     sql`not exists (
@@ -130,35 +143,60 @@ export const undeliveredFilter = (): SQL =>
         and coalesce((select sum(a.amount) from folio_payment_allocations a where a.folio_line_id = fl.id), 0) < fl.line_total
     )`,
     ne(folios.paymentVerification, 'pending'),
-    isNull(folios.ticketsSentAt),
-    isNull(folios.ticketsViewedAt),
   )!
 
-/** A tourist is waiting on an answer (US-T04). `EXISTS` rather than a join, so a folio with two
- *  requests cannot appear twice in the list it decorates. */
+/** A tourist is waiting on an answer (US-T04). A membership test rather than a join, so a folio
+ *  with two requests cannot appear twice in the list it decorates. */
+// bug: folio-counts-full-scan — the candidates, through folio_requests_org_status_idx.
 export const requestPendingFilter = (db: Db, org: string): SQL =>
-  exists(
+  inArray(
+    folios.id,
     db
-      .select({ one: sql`1` })
+      .select({ folioId: folioRequests.folioId })
       .from(folioRequests)
-      .where(
-        and(
-          eq(folioRequests.folioId, folios.id),
-          eq(folioRequests.organizationId, org),
-          eq(folioRequests.status, 'pending'),
-        ),
-      ),
+      .where(and(eq(folioRequests.organizationId, org), eq(folioRequests.status, 'pending'))),
   )
 
 /** The union's set (a): every folio someone still has to act on, at any age (rule 3). */
 export const pendingWorkFilter = (db: Db, org: string, now: Date): SQL =>
   or(
-    verificationPendingFilter(),
-    refundPendingFilter(),
-    overdueFilter(now),
-    undeliveredFilter(),
+    verificationPendingFilter(org),
+    refundPendingFilter(org),
+    overdueFilter(org, now),
+    undeliveredFilter(org),
     requestPendingFilter(db, org),
   )!
+
+/**
+ * The five counts (US-A84 D7, rule 5) as the statements `GET /api/folios/counts` runs — built here
+ * so test/folios/hoy-polled-reads.test.ts plans the very statements the handler executes.
+ *
+ * bug: folio-counts-full-scan — the tenant term carries SQLite's unary `+`, which takes it out of
+ * index selection while it still filters. Production keeps no sqlite_stat1, and without statistics
+ * the planner prefers entering an org-leading index and testing each folio against the candidate
+ * list — every folio of the organization again. With the `+`, the only usable entry is the
+ * candidate set itself, then each candidate's row by primary key. Isolation holds twice: here, and
+ * in each predicate's org-scoped subquery.
+ */
+export const pendingWorkCountQueries = (db: Db, org: string, now: Date) => {
+  const count = (predicate: SQL) =>
+    db
+      .select({ n: sql<number>`count(*)` })
+      .from(folios)
+      .where(and(sql`+${folios.organizationId} = ${org}`, predicate))
+  return {
+    verification: count(verificationPendingFilter(org)),
+    refunds: count(refundPendingFilter(org)),
+    overdue: count(overdueFilter(org, now)),
+    undelivered: count(undeliveredFilter(org)),
+    // Counted over FOLIOS, not over requests: two pending requests on one folio are one folio to
+    // act on, and the pill reads "1 Solicitud" beside a list that shows one row.
+    folio_requests: count(requestPendingFilter(db, org)),
+    // devolada-transfer-verification D14 — the sales Devolada is resolving with nothing for the
+    // admin to do: «Por verificar» = verification − verification_auto, in the badge, the bar and Hoy.
+    verification_auto: count(verificationAutoFilter(org, now)),
+  }
+}
 
 /**
  * The union's set (b): folios created within the last `days` **org-local** calendar days (rule 2).
