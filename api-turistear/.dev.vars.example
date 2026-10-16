@@ -26,6 +26,15 @@ CORS_ORIGIN=http://localhost:5173,http://localhost:5174
 # Changing it signs everyone out and voids pending codes; passkeys survive it.
 BETTER_AUTH_SECRET=
 
+# Encrypts every stored Devolada credential (devolada-transfer-verification D1, D17): 32 random
+# bytes, base64 (`openssl rand -base64 32`). In dev and prod it is managed in the GitHub environments
+# `dev` and `production` — DIFFERENT in each, never committed — and every deploy plants it; a preview
+# takes the `dev` environment's value or none, never a throwaway. Never change it once set: a
+# different value makes every stored credential unreadable, and every connected organization would
+# have to connect again. Left empty, connecting Devolada answers 500 and transfers take the manual
+# path. Locally you also need a Devolada TEST key (dk_…) to connect in Ajustes.
+DEVOLADA_CREDENTIAL_KEY=
+
 # HMAC secret for QR tokens and operator shift sessions. Any value works locally; it only has to be
 # stable, or previously-issued local QRs stop verifying.
 QR_SECRET=change-me-any-stable-local-value

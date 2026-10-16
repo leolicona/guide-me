@@ -81,3 +81,12 @@ export const updateOrganizationSchema = z.object({
 })
 
 export type UpdateOrganizationInput = z.infer<typeof updateOrganizationSchema>
+
+// devolada-transfer-verification D2, D3 — connect, or replace the key. The format is checked by the
+// handler (`^dk_[0-9a-f]{32}$`) so its refusal carries its own message; `replace_webhook` lets the
+// admin take Devolada's one notification address from another system (FR-006).
+export const connectDevoladaSchema = z.object({
+  api_key: z.string(),
+  replace_webhook: z.boolean().optional(),
+})
+export type ConnectDevoladaInput = z.infer<typeof connectDevoladaSchema>

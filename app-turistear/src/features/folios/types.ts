@@ -11,6 +11,7 @@ import type {
   PaymentMethod,
   PaymentVerification,
 } from '../pos/types'
+import type { PaymentLinkView } from '../devolada/types'
 
 export type { Fulfillment }
 
@@ -68,6 +69,12 @@ export interface FolioListItem {
   cancellation_request?: CancellationRequestMark | null
   // Derived server-side from `booking_expires_at`, never stored (apartado-stages S7).
   overdue?: boolean
+  /** devolada-transfer-verification D14 — the latest unresolved payment link, otherwise the latest;
+   *  null when the sale has none (every sale of an unconnected organization). */
+  payment_link?: PaymentLinkView | null
+  /** D14 — Devolada is resolving the sale with nothing for the admin to do: it stays out of
+   *  «Por verificar». Decided by the server. */
+  verification_auto?: boolean
 }
 
 // US-A84 rule 6 — what a folio's cancellation requests amount to, for the row.
@@ -180,6 +187,10 @@ export interface FolioDetail {
   // rejected request left the folio untouched, so no event records it and its derived row there
   // is the only surface that shows it ever happened.
   folio_requests?: FolioCancellationRequest[]
+  /** devolada-transfer-verification D14 — every payment link of the sale, newest first. */
+  payment_links?: PaymentLinkView[]
+  /** D14 — Devolada is resolving the sale with nothing for the admin to do. */
+  verification_auto?: boolean
 }
 
 // One row of a folio's own request history (US-A84 D2). Leaner than `CancellationRequest`, which
@@ -215,6 +226,11 @@ export type FolioEventType =
   | 'rescheduled'
   | 'cancelled'
   | 'refund_confirmed'
+  // devolada-transfer-verification — the payment link's own story (data-model § folio_events).
+  | 'payment_link_issued'
+  | 'payment_link_closed'
+  | 'payment_verdict'
+  | 'transfer_not_received'
 
 export interface FolioEvent {
   id: string

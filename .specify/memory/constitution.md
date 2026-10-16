@@ -1,35 +1,40 @@
 <!--
-Sync Impact Report (v1.4.0, 2026-10-15)
-- Version change: 1.3.1 → 1.4.0 — MINOR. Guidance in VIII materially
-  changes; no principle is added, removed or redefined.
-  - Source: the developer's decision of 2026-10-15, "Los secrets se manejan a
-    través de GitHub environments."
-  - It reverses v1.3.0's "Dev's and prod's secrets stay on their Workers; no
-    workflow re-plants them" (specs/005-delivery-pipeline D17), now
-    superseded. The risk that rule guarded against stays named: a secret
-    enters an environment once, copied exactly from the Worker it already
-    runs on, and planting is additive, so a secret an environment does not
-    hold is never overwritten.
+Sync Impact Report (v1.5.0, 2026-10-16)
+- Version change: 1.4.0 → 1.5.0 — MINOR. Guidance in III and VIII and the
+  Technology Stack table materially expands; no principle is added, removed
+  or redefined.
+  - Source: specs/006-devolada-transfer-verification (plan § Complexity
+    Tracking; research D4, D12, D17), task T006, landing in that feature's
+    first pull request.
 - Modified sections (titles unchanged):
-  · VIII. A Service We Do Not Own Never Undoes a Sale: secrets are managed in
-    the GitHub environments `dev` and `production`; every deploy plants the
-    API's secrets on its Worker with the version it ships
-    (`wrangler deploy --secrets-file`, additive); a deploy without
-    `BETTER_AUTH_SECRET` stops before migrating. Previews unchanged.
-  · Development Workflow & Quality Gates: the dev deploy and the prod release
-    ship the API with their environment's secrets.
+  · III. Tenant Isolation: `devolada_links.devolada_link_id`, Devolada's
+    globally unique `paymentLinkId`, joins the exempt lookups, as Better
+    Auth's keys did in v1.2.0; the public webhook resolves the organization
+    through it, then re-reads with that organization's own credential (D4).
+    The actor-less sweeps are named: they select due rows across
+    organizations, then act on each with that row's own `organization_id`,
+    as `sweepExpiredBookings` already did (D12).
+  · VIII. A Service We Do Not Own Never Undoes a Sale: Devolada joins the
+    services we do not own (`services/devolada.ts`; failure modes in
+    specs/006-devolada-transfer-verification/contracts/devolada-integration.md).
+    The secrets paragraph names `DEVOLADA_CREDENTIAL_KEY`, what a changed
+    value costs, the deploy that stops on a malformed value, and the one
+    exception to the preview's throwaway: dev's value or none (D17).
+  · Technology Stack & Constraints: Devolada in the Integrations row; the
+    Runtime row names the three sweeps the cron runs in dev and production.
 - Added sections: none. Removed sections: none.
 - Templates: .specify/templates/plan-template.md ✅, spec-template.md ✅,
-  tasks-template.md ✅, checklist-template.md ✅. None names where a secret
-  lives; no template changed.
+  tasks-template.md ✅, checklist-template.md ✅. None names a service, a
+  secret or a sweep; no template changed.
 - Follow-up TODOs:
-  · specs/005-delivery-pipeline: plan D17 and contracts/environment.md are
-    annotated as superseded by this amendment.
-  · `.github/workflows/deploy-dev.yml` and `deploy-prod.yml` implement it in
-    specs/004-passkey-auth's pull request #170.
-  · The developer copies `QR_SECRET` and `RESEND_API_KEY` into the
-    `production` environment only with prod's exact current values; until
-    then prod's Worker keeps its own (planting is additive).
+  · The developer adds `DEVOLADA_CREDENTIAL_KEY` (`openssl rand -base64 32`,
+    a different value in each) to the GitHub environment `dev` before the
+    feature's first preview is used to validate, and to `production` before
+    its first `v*` release (specs/006-devolada-transfer-verification T003).
+  · Carried from v1.4.0: the developer copies `QR_SECRET` and
+    `RESEND_API_KEY` into the `production` environment only with prod's
+    exact current values; until then prod's Worker keeps its own (planting
+    is additive).
   · Carried from v1.3.1: debts `.specify/debt/password-material` and
     `.specify/debt/better-auth-rejection-reports`; the settings outside the
     repository (specs/005-delivery-pipeline/contracts/environment.md); and
@@ -126,10 +131,20 @@ reconstruct — instead of testing for each one.
   context; every UPDATE and DELETE carries the organization filter beside the
   id, so another organization's row matches nothing and the handler answers
   `404`. The only exempt reads are lookups by a globally unique key
-  (`users.email`, `invitations.token`, and Better Auth's own: a session token,
+  (`users.email`, `invitations.token`, Devolada's payment link id
+  `devolada_links.devolada_link_id`, and Better Auth's own: a session token,
   a passkey credential id, a verification identifier) and Better Auth's reads
   of the signed-in user's own rows by `user_id`, which is narrower than the
-  organization.
+  organization. Devolada's webhook has no actor: it learns whose sale it is
+  through the link id, then re-reads the payment with that organization's own
+  credential before anything changes (specs/006-devolada-transfer-verification
+  D4).
+- A scheduled sweep has no actor either. It selects its due rows across
+  organizations — expired apartados, departures to remind, Devolada links to
+  re-check — then acts on each with that row's own `organization_id`, so
+  every statement it runs about a row carries the row's organization beside
+  its id (`sweepExpiredBookings`; specs/006-devolada-transfer-verification
+  D12).
 - Every new tenant-scoped route ships cross-org isolation tests built on
   `seedTwoOrgs` (`api-turistear/test/helpers/tenancy.ts`). Isolation is
   proven in the API; a frontend test never satisfies this rule.
@@ -292,9 +307,18 @@ once. Every rule here prevents one way that glance goes wrong.
 ### VIII. A Service We Do Not Own Never Undoes a Sale
 
 - Each service we do not own is reached through one module or binding:
-  Resend (email, `services/resend.ts`), api.qrserver.com (the QR image only;
-  the signature is ours) and WhatsApp (an agent-sent `wa.me` link). A spec
-  that adds one records its contract and what breaks when it is down.
+  Resend (email, `services/resend.ts`), Devolada (transfer verification,
+  `services/devolada.ts`, its key set included), api.qrserver.com (the QR
+  image only; the signature is ours) and WhatsApp (an agent-sent `wa.me`
+  link). A spec that adds one records its contract and what breaks when it is
+  down: Devolada's are in
+  `specs/006-devolada-transfer-verification/contracts/devolada-integration.md`.
+- Devolada verifies an organization's transfers with that organization's own
+  account. A call to it carries a timeout and never sits inside a money
+  write. When it is down, a transfer takes today's manual path, the admin
+  verifies it, and nothing is cancelled: a cancellation for money that never
+  arrived needs a successful re-read showing none
+  (specs/006-devolada-transfer-verification D6, D9).
 - Resend also carries the email sign-in code, sent in the background. When it
   is down, a user with a passkey or a live session is unaffected, and a code
   does not arrive (specs/004-passkey-auth).
@@ -303,16 +327,24 @@ once. Every rule here prevents one way that glance goes wrong.
   never rolls back a sale, a payment or a cancellation.
 - Secrets are managed in the GitHub environments `dev` and `production`,
   never in the repo (`.dev.vars` is ignored), and no two environments share a
-  signing secret (`QR_SECRET`, `BETTER_AUTH_SECRET`). Every deploy plants the
-  API's secrets on its Worker with the version it ships
-  (`wrangler deploy --secrets-file`); planting is additive, so a secret the
-  environment does not hold keeps the Worker's current value. A value pasted
-  wrong invalidates every live ticket (`QR_SECRET`) or signs everyone out
-  (`BETTER_AUTH_SECRET`), so a secret enters an environment once, copied
-  exactly from the Worker it already runs on (or generated, for a new one),
-  and a deploy without `BETTER_AUTH_SECRET` stops before it migrates. A
-  preview takes dev's values from the GitHub `dev` environment, or a throwaway
-  value that its pull-request note names.
+  signing or encryption secret (`QR_SECRET`, `BETTER_AUTH_SECRET`,
+  `DEVOLADA_CREDENTIAL_KEY`). Every deploy plants the API's secrets on its
+  Worker with the version it ships (`wrangler deploy --secrets-file`);
+  planting is additive, so a secret the environment does not hold keeps the
+  Worker's current value. A value pasted wrong invalidates every live ticket
+  (`QR_SECRET`), signs everyone out (`BETTER_AUTH_SECRET`), or makes every
+  stored Devolada credential unreadable, so every connected organization must
+  connect again (`DEVOLADA_CREDENTIAL_KEY`). A secret therefore enters an
+  environment once, copied exactly from the Worker it already runs on (or
+  generated, for a new one), and a deploy without `BETTER_AUTH_SECRET`, or
+  with a `DEVOLADA_CREDENTIAL_KEY` that does not decode to 32 bytes, stops
+  before it migrates. A preview takes dev's values from the GitHub `dev`
+  environment, or a throwaway value that its pull-request note names — except
+  `DEVOLADA_CREDENTIAL_KEY`, which a preview gets from dev or not at all: a
+  preview writes into dev's database, and a credential encrypted under a
+  throwaway key could never be read there again. Without it, Devolada is off
+  on that preview, and its note says so (specs/006-devolada-transfer-verification
+  D17).
 
 Rationale: the sale is the fact and the receipt is a courtesy. A ticket can be
 sent again; a sale that vanished because an email bounced cannot be sold
@@ -325,7 +357,7 @@ Complexity Tracking.
 
 | Layer | Convention |
 | --- | --- |
-| Runtime | Cloudflare Workers, `compatibility_date` 2025-08-03, compatibility flag `nodejs_compat` (Better Auth's request context and the Node built-ins it imports). The API's one cron trigger (`*/15 * * * *`) runs the bookings auto-expiry sweep |
+| Runtime | Cloudflare Workers, `compatibility_date` 2025-08-03, compatibility flag `nodejs_compat` (Better Auth's request context and the Node built-ins it imports). The API's one cron trigger (`*/15 * * * *`) runs three independent sweeps in dev and production: bookings auto-expiry, departure reminders (with the review request) and Devolada recovery |
 | API | `api-turistear`: Hono 4 + `@hono/zod-validator` (Zod 4), JSX through `hono/jsx`, built and served by Vite 6 with `@cloudflare/vite-plugin` and `vite-ssr-components`. Middleware in `src/middleware/`, helpers in `src/utils/`, providers in `src/services/` |
 | Data | Cloudflare D1 through Drizzle ORM (`sqlite`); migrations `NNNN_snake_case.sql` in `api-turistear/migrations/`, applied with `wrangler d1 migrations` |
 | Auth | Better Auth 1.7.7 inside the API Worker; its handler owns `/api/auth/*`. Passkeys (WebAuthn/FIDO2, `@better-auth/passkey`) are the primary sign-in and a 6-digit email code (`emailOTP`) is the backup. Database sessions in D1 (7 days, renewed by use); one HttpOnly session cookie on `.turistearya.com` |
@@ -333,7 +365,7 @@ Complexity Tracking.
 | Language | TypeScript, ESM; Node 22; pnpm workspace (pnpm 10 in CI) |
 | Tests | Vitest 4 — `@cloudflare/vitest-pool-workers` for the API; jsdom, Testing Library, MSW 2 and axe-core for the app; Playwright 1.62 for journeys |
 | Environments | `dev` from every push to `main` (`api-dev` / `app-dev.turistearya.com`, D1 `guideme-db`) and `prod` from `v*` tags (`api` / `app.turistearya.com`, D1 `guideme-db-prod`). Beside dev, one preview per pull request: `api-guideme-pr-<n>` / `app-guideme-pr-<n>` on the account's `workers.dev` subdomain, on `guideme-db` |
-| Integrations | Resend (transactional email), api.qrserver.com (QR images), WhatsApp through agent-sent links — Principle VIII |
+| Integrations | Resend (transactional email), Devolada (transfer verification: payment links and Banxico's verdict, on each organization's own account), api.qrserver.com (QR images), WhatsApp through agent-sent links — Principle VIII |
 
 Additional constraints:
 
@@ -419,4 +451,4 @@ Additional constraints:
 - The developer decides. When a principle blocks a feature, the plan says so
   and proposes the amendment; it does not route around it.
 
-**Version**: 1.4.0 | **Ratified**: 2026-10-04 | **Last Amended**: 2026-10-15
+**Version**: 1.5.0 | **Ratified**: 2026-10-04 | **Last Amended**: 2026-10-16

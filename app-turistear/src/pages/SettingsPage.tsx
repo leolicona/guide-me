@@ -30,6 +30,7 @@ import {
   useUpdateOrganization,
 } from '../features/organization'
 import { InfoPopover } from '../components'
+import { DevoladaConnectionCard, REFERENCE_SWITCH_CONNECTED_COPY } from '../features/devolada'
 import {
   DEFAULT_TICKET_TEMPLATE,
   DEFAULT_REMINDER_TEMPLATE,
@@ -720,12 +721,25 @@ export default function SettingsPage() {
                     desactivas, el campo se vuelve opcional — el pago igual pasa por verificación
                     del administrador.
                   </Typography>
+                  {/* devolada-transfer-verification D16 — a transfer collected by enlace carries no
+                      reference; the switch still rules every transfer verified by hand. */}
+                  {org?.devolada?.status === 'connected' && (
+                    <Typography variant="body2" color="textSecondary" sx={{ mt: 0.5 }}>
+                      {REFERENCE_SWITCH_CONNECTED_COPY}
+                    </Typography>
+                  )}
                 </Box>
               }
               sx={{ alignItems: 'flex-start', mx: 0 }}
             />
           </CardContent>
         </Card>
+
+        {/* devolada-transfer-verification D16 — «Cobro con Devolada», right after «Punto de venta».
+            Admin only, like its endpoint: this whole page is behind the route's admin RoleGuard. */}
+        <Box sx={{ mt: 3 }}>
+          <DevoladaConnectionCard />
+        </Box>
 
         {/* US-A81 (group-redemption) — how a scan consumes un boleto's passes. Commits on tap
             (no dirty tracking): a two-value org-wide choice whose trade-off the copy states

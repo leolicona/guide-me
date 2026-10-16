@@ -1,3 +1,4 @@
+import type { PaymentLinkError, PaymentLinkView } from '../features/devolada/types'
 import { request } from './authService'
 import type {
   Folio,
@@ -131,13 +132,20 @@ export const getPosService = async (
 }
 
 // US-AG08 — confirm the cart → unique folio. Server owns all totals.
-export const confirmSale = async (data: ConfirmSaleInput): Promise<Folio> => {
-  const res = await request<{ folio: Folio }>('/api/pos/folios', {
+// devolada-transfer-verification D6 — a transfer of an organization connected to Devolada also
+// answers its payment link, or why there is none (`payment_link_error`: the sale was recorded on
+// today's manual path). Both keys are absent for everyone else.
+export interface ConfirmSaleResult {
+  folio: Folio
+  payment_link?: PaymentLinkView | null
+  payment_link_error?: PaymentLinkError
+}
+
+export const confirmSale = (data: ConfirmSaleInput): Promise<ConfirmSaleResult> =>
+  request<ConfirmSaleResult>('/api/pos/folios', {
     method: 'POST',
     body: JSON.stringify(data),
   })
-  return res.folio
-}
 
 // US-AG47 — void the seller's OWN Express sale inside the 60-second window (undelivered,
 // unscanned): seats released, payment + commission ledger rows fully reversed, refund recorded

@@ -33,12 +33,18 @@ const planOf = async (query: { toSQL(): { sql: string; params: unknown[] } }) =>
   return rows.results.map((r) => r.detail)
 }
 
+// devolada-transfer-verification D14 — `verification_auto` reads folio_payments as `p`, and the
+// Devolada tables as `l`, `dp` and `dc`. `devolada_connections` holds one row per organization
+// (devolada_connections_org_uq): entering it by organization reads that row, never a history.
+const ONE_ROW_PER_ORG = /USING INDEX devolada_connections_org_uq \(organization_id=\?\)$/
+
 const historyReads = (plan: string[]) =>
   plan.filter(
     (line) =>
-      /^SCAN (folios|f2|folio_lines|fl|folio_payment_allocations|a|folio_requests|slots|folio_payments)\b/.test(
+      /^SCAN (folios|f2|folio_lines|fl|folio_payment_allocations|a|folio_requests|slots|folio_payments|p|devolada_links|l|devolada_payments|dp|devolada_connections|dc)\b/.test(
         line,
-      ) || /^SEARCH \S+ USING (COVERING )?INDEX \S+ \(organization_id=\?\)$/.test(line),
+      ) ||
+      (/^SEARCH \S+ USING (COVERING )?INDEX \S+ \(organization_id=\?\)$/.test(line) && !ONE_ROW_PER_ORG.test(line)),
   )
 
 describe('bug: folio-counts-full-scan — the polled reads enter what is pending, not the history', () => {
@@ -93,8 +99,10 @@ describe('bug: folio-counts-full-scan — the polled reads enter what is pending
 //
 // The counts are now scoped twice: by the tenant term (`+folios.organization_id = ?`, which only
 // filters) and inside every predicate's candidate subquery. Either alone keeps the answer right,
-// so the test seeds pending work of all five kinds in BOTH orgs, in different amounts: a count
-// that loses its scope entirely reads the sum, and no kind can hide behind another being empty.
+// so the test seeds pending work of every kind in BOTH orgs, in different amounts: a count that
+// loses its scope entirely reads the sum, and no kind can hide behind another being empty. That
+// includes a sale Devolada is resolving, for `verification_auto` (devolada-transfer-verification
+// D14), which is pending verification too.
 
 const nowSec = () => Math.floor(Date.now() / 1000)
 
@@ -147,6 +155,24 @@ const seedEveryKind = async (organizationId: string, agentId: string) => {
   )
     .bind(crypto.randomUUID(), organizationId, requested, nowSec(), nowSec())
     .run()
+  // A transfer an open enlace collects, waiting for its first payment: Devolada resolves it.
+  const collected = await seedFolio({ organizationId, agentId, paymentVerification: 'pending' })
+  const credentialId = crypto.randomUUID()
+  await env.DB.prepare(
+    `INSERT INTO devolada_credentials (id, organization_id, mode, ciphertext, iv, key_hint, created_by, created_at)
+     VALUES (?, ?, 'test', 'x', 'y', 'abcd', ?, ?)`,
+  )
+    .bind(credentialId, organizationId, agentId, nowSec())
+    .run()
+  await env.DB.prepare(
+    `INSERT INTO devolada_links (id, organization_id, folio_id, folio_payment_id, kind, credential_id, mode, amount, devolada_link_id, expires_at, state, requested_by, created_at, updated_at)
+     VALUES (?, ?, ?, ?, 'sale', ?, 'test', 100000, ?, ?, 'open', ?, ?, ?)`,
+  )
+    .bind(
+      crypto.randomUUID(), organizationId, collected, `pmt_${collected}`, credentialId,
+      `lnk_${crypto.randomUUID()}`, nowSec() + 3600, agentId, nowSec(), nowSec(),
+    )
+    .run()
 }
 
 const counts = async (email: string) => {
@@ -158,6 +184,8 @@ const counts = async (email: string) => {
 }
 
 beforeEach(async () => {
+  await env.DB.exec('DELETE FROM devolada_links')
+  await env.DB.exec('DELETE FROM devolada_credentials')
   await env.DB.exec('DELETE FROM folio_requests')
   await env.DB.exec('DELETE FROM folio_payments')
   await env.DB.exec('DELETE FROM folio_lines')
@@ -174,8 +202,13 @@ describe('bug: folio-counts-full-scan — multitenancy', () => {
     await seedEveryKind(orgB.organizationId, orgB.adminUserId)
     await seedEveryKind(orgB.organizationId, orgB.adminUserId)
 
-    const one = { verification: 1, refunds: 1, overdue: 1, undelivered: 1, folio_requests: 1 }
-    const two = { verification: 2, refunds: 2, overdue: 2, undelivered: 2, folio_requests: 2 }
+    // The Devolada sale is pending verification too: «Por verificar» shows the difference.
+    const one = {
+      verification: 2, verification_auto: 1, refunds: 1, overdue: 1, undelivered: 1, folio_requests: 1,
+    }
+    const two = {
+      verification: 4, verification_auto: 2, refunds: 2, overdue: 2, undelivered: 2, folio_requests: 2,
+    }
     expect(await counts(orgA.adminEmail)).toEqual(one)
     expect(await counts(orgB.adminEmail)).toEqual(two)
   })

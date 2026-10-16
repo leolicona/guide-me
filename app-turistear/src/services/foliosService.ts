@@ -60,6 +60,9 @@ export const listFolios = async (filters: FolioFilters = {}): Promise<FolioListP
 // a number the filtered list will actually deliver (S-4).
 export interface FolioCounts {
   verification: number
+  /** devolada-transfer-verification D14 — the sales Devolada is resolving with nothing for the
+   *  admin to do. «Por verificar» = verification − verification_auto (`porVerificarCount`). */
+  verification_auto: number
   folio_requests: number
   refunds: number
   overdue: number

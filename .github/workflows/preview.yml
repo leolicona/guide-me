@@ -55,6 +55,7 @@ jobs:
       api-origin: ${{ steps.names.outputs.api-origin }}
       applied: ${{ steps.migrate.outputs.applied }}
       throwaway: ${{ steps.secrets.outputs.throwaway }}
+      devolada: ${{ steps.secrets.outputs.devolada }}
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup
@@ -103,12 +104,19 @@ jobs:
       # value can be read as dotenv syntax. The file stays in the runner's temp and is never
       # printed. BETTER_AUTH_SECRET (passkey-auth D5) must be 32+ characters or the API refuses
       # to start, so a shorter one is replaced like a missing one.
+      #
+      # devolada-transfer-verification D17 — DEVOLADA_CREDENTIAL_KEY is dev's value or NONE, never
+      # a throwaway: a preview writes into dev's D1, and a credential encrypted under a throwaway
+      # key could be read neither by dev's Worker nor by this preview's next deploy. Without it the
+      # preview's API fails closed (connecting answers 500, transfers take the manual path), and the
+      # comment says Devolada is off here.
       - name: Secrets for the preview
         id: secrets
         env:
           QR_SECRET: ${{ secrets.QR_SECRET }}
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
           BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET }}
+          DEVOLADA_CREDENTIAL_KEY: ${{ secrets.DEVOLADA_CREDENTIAL_KEY }}
         run: |
           set -euo pipefail
           throwaway=""
@@ -119,9 +127,16 @@ jobs:
               echo "::warning::$name is not in the dev environment; this preview gets a throwaway value (delivery-pipeline D5)."
             fi
           done
-          node -e 'const e = process.env; process.stdout.write(JSON.stringify({ QR_SECRET: e.QR_SECRET, RESEND_API_KEY: e.RESEND_API_KEY, BETTER_AUTH_SECRET: e.BETTER_AUTH_SECRET }))' \
+          devolada=on
+          if [ -z "$DEVOLADA_CREDENTIAL_KEY" ] || ! node -e 'const k = process.env.DEVOLADA_CREDENTIAL_KEY; process.exit(/^[A-Za-z0-9+\/]{43}=$/.test(k) && Buffer.from(k, "base64").length === 32 ? 0 : 1)'; then
+            devolada=off
+            export DEVOLADA_CREDENTIAL_KEY=""
+            echo "::notice::DEVOLADA_CREDENTIAL_KEY is not in the dev environment (or does not decode to 32 bytes); Devolada is off on this preview (devolada-transfer-verification D17)."
+          fi
+          node -e 'const e = process.env; process.stdout.write(JSON.stringify({ QR_SECRET: e.QR_SECRET, RESEND_API_KEY: e.RESEND_API_KEY, BETTER_AUTH_SECRET: e.BETTER_AUTH_SECRET, ...(e.DEVOLADA_CREDENTIAL_KEY ? { DEVOLADA_CREDENTIAL_KEY: e.DEVOLADA_CREDENTIAL_KEY } : {}) }))' \
             > "$RUNNER_TEMP/preview-secrets.json"
           echo "throwaway=$throwaway" >> "$GITHUB_OUTPUT"
+          echo "devolada=$devolada" >> "$GITHUB_OUTPUT"
 
       # The `preview` profile has no routes and no triggers, so this Worker can never claim
       # api-dev or run a second sweep (D3). Its three origins carry the pull request number, so
@@ -243,5 +258,6 @@ jobs:
           API_ORIGIN: ${{ needs.deploy.outputs.api-origin }}
           APPLIED: ${{ needs.deploy.outputs.applied }}
           THROWAWAY: ${{ needs.deploy.outputs.throwaway }}
+          DEVOLADA: ${{ needs.deploy.outputs.devolada }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: node .github/scripts/preview-note.mjs deploy

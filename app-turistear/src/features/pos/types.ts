@@ -2,6 +2,7 @@
 // (centavos) — render with the helpers in features/catalog/types.
 
 import type { ServiceCategory } from '../catalog/categories'
+import type { PaymentLinkView } from '../devolada/types'
 // US-AG59 — the petition row the folio detail carries. Type-only, so this is erased at build and
 // creates no runtime dependency between the two feature modules.
 import type { FolioDetail, FolioDetailLine } from '../folios/types'
@@ -275,4 +276,8 @@ export interface FolioHistoryItem {
   portal_link?: string | null
   /** US-AG45 — 'express' has no customer_name by design (D17); never inferred from a null name. */
   sale_mode?: 'standard' | 'express'
+  /** devolada-transfer-verification D14 — the latest unresolved payment link, otherwise the latest. */
+  payment_link?: PaymentLinkView | null
+  /** D14 — Devolada is resolving the sale with nothing for the admin to do. */
+  verification_auto?: boolean
 }

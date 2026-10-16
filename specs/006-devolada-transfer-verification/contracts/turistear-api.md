@@ -156,7 +156,8 @@ The connect sheet maps each refusal to copy. A broken connection's reason reuses
     "is_ours": true,
     "consecutive_failures": 0,
     "last_success_at": 1791290000,
-    "last_failure_at": null
+    "last_failure_at": null,
+    "failed_deliveries": 0
   },
   "health_error": null
 }
@@ -164,7 +165,9 @@ The connect sheet maps each refusal to copy. A broken connection's reason reuses
 
 - `mode` and `key_hint` are the current credential's. While disconnected there is no current credential, so `mode`, `key_hint`, `webhook` and `health_error` are all `null` (research D21).
 - `previous_keys` lists each retired credential that still has unresolved links, with how many (`pending_links`), so the admin knows not to revoke it at Devolada yet. It is `[]` when there is none, and it is kept while disconnected too (research D21; spec clarification of 2026-10-16).
-- `webhook` is read live from Devolada with an 8 s limit. When Devolada cannot be reached, `webhook` is `null` and `health_error` is `"DEVOLADA_UNAVAILABLE"`. Health never fails the request.
+- `webhook` is read live from Devolada with an 8 s limit. When Devolada cannot be reached, `webhook` is `null` and `health_error` is `"DEVOLADA_UNAVAILABLE"`. The same happens when this environment cannot read the current credential (`DEVOLADA_CREDENTIAL_KEY` changed or missing, research D17): nothing can be asked of Devolada. Health never fails the request.
+- `webhook.url` is `null` when Devolada has no notification address registered for the business.
+- `webhook.failed_deliveries` counts the notifications Devolada gave up delivering, from its list of failed deliveries; the sweep applies them anyway (research D12). Any above zero reads «Avisos con fallas», as `consecutive_failures` does. *(Added in build, PR 1.)*
 - `webhook.is_ours` is `null` where this environment registers no address (`DEVOLADA_WEBHOOK_URL` empty: local and pull-request previews). There, verdicts arrive only through the sweep, which is expected rather than a failure (research D3, D17).
 
 ## Endpoints

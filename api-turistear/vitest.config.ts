@@ -28,6 +28,14 @@ export default defineConfig({
           AUTH_COOKIE_PREFIX: 'gm-test',
           COOKIE_DOMAIN: '',
           OTP_LOG_TO_CONSOLE: '',
+          // devolada-transfer-verification D17, D18 — pinned. The host cannot resolve, so a call the
+          // fake Devolada (test/helpers/devolada.ts) does not answer fails instead of reaching
+          // Devolada. The key is a fixed 32 bytes, base64, so stored credentials stay readable
+          // across one suite's requests.
+          DEVOLADA_API_BASE_URL: 'https://devolada.test',
+          DEVOLADA_KEY_MODE: 'test',
+          DEVOLADA_WEBHOOK_URL: 'https://api.test/api/webhooks/devolada',
+          DEVOLADA_CREDENTIAL_KEY: 'dGVzdF9kZXZvbGFkYV9jcmVkZW50aWFsX2tleV8zMmI=',
         },
       },
     }),

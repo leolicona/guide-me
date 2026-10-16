@@ -72,7 +72,12 @@ export const FACETS: FacetDef[] = [
     label: 'Por verificar',
     // Same predicate US-A67's queue used: a rejected payment cancels the folio and leaves its stale
     // 'pending' flag behind, so a cancelled folio is not work.
-    match: (f) => f.payment_verification === 'pending' && f.status !== 'cancelled',
+    // devolada-transfer-verification D14 — nor is a sale Devolada is resolving with nothing for the
+    // admin to do: «Por verificar» holds only the admin's work. The server decides the flag and
+    // clears it the moment the admin is needed (an exception, an expired link, a broken key), and
+    // the row is back here without the client deriving anything.
+    match: (f) =>
+      f.payment_verification === 'pending' && f.status !== 'cancelled' && f.verification_auto !== true,
   },
   {
     key: 'solicitud',
@@ -107,6 +112,22 @@ export const FACETS: FacetDef[] = [
     match: (f) => f.cancellation_request != null,
   },
 ]
+
+/**
+ * devolada-transfer-verification D14 — the «Por verificar» number: ONE derivation for the admin's
+ * Ventas badge, the Ventas pending-work bar and Hoy, so the three can never disagree. The server
+ * counts every pending verification and, among them, the sales Devolada is resolving, each sale
+ * once; the difference is exactly what the `por_verificar` facet lists (US-A84 S-4: a pill
+ * promises a number its list delivers).
+ *
+ * Floored at 0: the two counts are separate statements, and a sale that leaves Devolada's hands
+ * between them must not render a negative pill. An API that predates the field sends no
+ * `verification_auto`, and every pending verification is the admin's, as before.
+ */
+export const porVerificarCount = (counts: {
+  verification: number
+  verification_auto?: number
+}): number => Math.max(0, counts.verification - (counts.verification_auto ?? 0))
 
 const BY_KEY = new Map(FACETS.map((f) => [f.key, f]))
 

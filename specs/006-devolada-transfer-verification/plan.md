@@ -77,7 +77,7 @@ otherwise stand.
 
 **Target Platform**:
 - **Workers**: `api-guideme` (production, from `v*` tags) and `api-guideme-dev` (every push to `main`), both with the cron `*/15 * * * *`. Each pull request also gets `api-guideme-pr-<n>` on `workers.dev`, on dev's D1, with no cron and no Devolada notification address.
-- **Devolada**: collections API v1 at `https://api.devoladapago.com`. Real credentials in production; test credentials in dev, previews and local.
+- **Devolada**: collections API v1 at `https://api.devoladapago.com` in production, and at its shared dev environment `https://api.dev.devoladapago.com` in dev, previews and local (research D17). Real credentials in production; test credentials elsewhere.
 
 **Project Type**: web service + web app (pnpm monorepo: `api-turistear`, `app-turistear`)
 

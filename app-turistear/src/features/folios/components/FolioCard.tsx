@@ -9,6 +9,7 @@ import ScheduleRounded from '@mui/icons-material/ScheduleRounded'
 import BlockRounded from '@mui/icons-material/BlockRounded'
 import { MoneyText } from '../../../components'
 import { BookingWhatsAppButton, TicketWhatsAppButton, isUrgentBooking } from '../../bookings'
+import { PaymentLinkStatusChip, type PaymentLinkView } from '../../devolada'
 import { MessageWhatsAppButton } from './MessageWhatsAppButton'
 import { VerifyAndSendButton } from './VerifyAndSendButton'
 import {
@@ -60,8 +61,9 @@ const LINE_MARK: Record<
 
 /** The money figure and the words beside it (D6). One figure — a paid folio printed the same
  *  integer twice under `Total` and `Pagado`, which is noise on the element that must read first.
- *  The wording is also what gives the rail colour a text anchor, so state is never colour-alone. */
-function MoneyLine({ reading }: { reading: MoneyReading }) {
+ *  The wording is also what gives the rail colour a text anchor, so state is never colour-alone.
+ *  `status` takes the place of the unverified wording (devolada-transfer-verification D14). */
+function MoneyLine({ reading, status }: { reading: MoneyReading; status?: React.ReactNode }) {
   const caption = (text: string) => (
     <Typography variant="body2" color="textSecondary" component="span">
       {text}
@@ -76,11 +78,21 @@ function MoneyLine({ reading }: { reading: MoneyReading }) {
           {caption('pagado')}
         </Stack>
       )
+    // devolada-transfer-verification D14 — while Devolada resolves the transfer, the link's chip is
+    // this money's reading: «por verificar» names the admin's work, and there is none.
     case 'unverified':
       return (
         <Stack direction="row" spacing={1} sx={{ alignItems: 'baseline', minWidth: 0 }}>
-          <MoneyText cents={reading.cents} variant="h6" srLabel="Total por verificar" />
-          {caption('por verificar')}
+          <MoneyText
+            cents={reading.cents}
+            variant="h6"
+            srLabel={status ? 'Total en verificación' : 'Total por verificar'}
+          />
+          {status ? (
+            <Box sx={{ display: 'flex', alignSelf: 'center' }}>{status}</Box>
+          ) : (
+            caption('por verificar')
+          )}
         </Stack>
       )
     case 'owing':
@@ -179,6 +191,11 @@ export interface FolioCardFolio {
   // US-A84 — the two states the row could not carry before, and the debt's clock.
   cancellation_request?: CancellationRequestMark | null
   cancelled_at?: number | null
+  /** devolada-transfer-verification D14 — the sale's current payment link (the latest unresolved,
+   *  otherwise the latest), and whether Devolada is resolving it with nothing for the admin to do.
+   *  Both decided by the server; absent or null without Devolada. */
+  payment_link?: PaymentLinkView | null
+  verification_auto?: boolean
 }
 
 /** US-A84 — the time channel's tone, mapped to MUI's chip colours. `default` is the grey resting
@@ -235,6 +252,13 @@ export function FolioCard({
   // where the button is NOT already naming it, so the admin never reads the same fact twice.
   const petitionMark = folio.cancellation_request === 'pending' && action !== 'request'
   const timeChip = folioTimeChip(folio, nowSeconds)
+  // devolada-transfer-verification D14 — the sale's payment link, in the label the server decided.
+  // While Devolada resolves the transfer, the chip IS the money's reading, so it stands where «por
+  // verificar» would. Any other link state is one more fact, carried with the card's other chips.
+  const link = folio.payment_link ?? null
+  const linkReadsMoney = folio.verification_auto === true && reading.kind === 'unverified'
+  const moneyLinkChip = link && linkReadsMoney ? link : null
+  const rowLinkChip = link && !linkReadsMoney ? link : null
   // D14 — a MIXED folio names its lines: one mark per line, icon-paired, only when the states
   // actually differ (a uniform folio stays quiet).
   const lineMarks = (folio.lines ?? []).filter((l) => l.money_state)
@@ -319,15 +343,21 @@ export function FolioCard({
           {/* The time channel (D1). One chip, whichever clock this folio is running against: the
               hold's deadline, or — once cancelled with money owed — the age of the debt. US-A84
               D10 moved that age here from the queues' sort order, so it survives a list that has
-              exactly one order. */}
-          {timeChip && (
-            <Chip
-              size="small"
-              variant="outlined"
-              color={CHIP_COLOR[timeChip.tone]}
-              label={timeChip.label}
-              sx={{ mt: 0.5, display: 'flex', width: 'fit-content' }}
-            />
+              exactly one order.
+              devolada-transfer-verification D14 — the link's chip shares the row, ahead of the
+              clock: the detail header's order, clearance before time. */}
+          {(rowLinkChip || timeChip) && (
+            <Stack direction="row" spacing={1} useFlexGap sx={{ mt: 0.5, flexWrap: 'wrap' }}>
+              {rowLinkChip && <PaymentLinkStatusChip label={rowLinkChip.label} />}
+              {timeChip && (
+                <Chip
+                  size="small"
+                  variant="outlined"
+                  color={CHIP_COLOR[timeChip.tone]}
+                  label={timeChip.label}
+                />
+              )}
+            </Stack>
           )}
           {/* D14 (line-autonomy) — a MIXED folio names its lines, one icon-paired mark each: the
               detail's truth, at a glance, only where the states differ. */}
@@ -358,7 +388,10 @@ export function FolioCard({
             spacing={1}
             sx={{ alignItems: 'center', justifyContent: 'space-between' }}
           >
-            <MoneyLine reading={reading} />
+            <MoneyLine
+              reading={reading}
+              status={moneyLinkChip ? <PaymentLinkStatusChip label={moneyLinkChip.label} /> : undefined}
+            />
             <DeliveryMarkIcon mark={mark} />
           </Stack>
         </CardContent>

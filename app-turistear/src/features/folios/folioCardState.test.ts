@@ -652,3 +652,42 @@ describe('BUG-035 — the rail does not change with who is reading', () => {
     expect(folioAction(waiting, { urgent: false, surface: 'seller' })).toBe('message')
   })
 })
+
+// devolada-transfer-verification US1 (D14) — a sale Devolada is resolving has nothing for the admin
+// to do, so its card carries no «Verificar y enviar»: offering it would invite releasing tickets
+// before the money is proven. The admin can still verify it from the sale (FR-018).
+describe('devolada-transfer-verification US1 — no verify while Devolada resolves the transfer', () => {
+  // An unverified transfer has no portal link (S-16 above), so it is off the delivery axis.
+  const resolving = {
+    status: 'paid' as const,
+    deliverable: false,
+    portal_link: null,
+    payment_verification: 'pending' as const,
+    verification_auto: true,
+  }
+
+  it('a row with `verification_auto` is offered no verify, on either surface', () => {
+    expect(folioAction(resolving, { urgent: false, surface: 'admin' })).toBe('message')
+    expect(folioAction(resolving, { urgent: false, surface: 'seller' })).toBe('message')
+  })
+
+  it('the same row without the flag is back to «Verificar y enviar»', () => {
+    expect(
+      folioAction({ ...resolving, verification_auto: false }, { urgent: false, surface: 'admin' }),
+    ).toBe('verify')
+  })
+
+  it('the flag withdraws only the verify rung — a live request still outranks everything', () => {
+    expect(
+      folioAction({ ...resolving, cancellation_request: 'pending' as const }, { urgent: false }),
+    ).toBe('request')
+  })
+
+  it('the rail rests green while Devolada resolves it, and turns amber the moment it is work', () => {
+    expect(folioAttention(resolving, { urgent: false })).toEqual({ level: 'ok', rail: 'success' })
+    expect(folioAttention({ ...resolving, verification_auto: false }, { urgent: false })).toEqual({
+      level: 'work',
+      rail: 'warning',
+    })
+  })
+})

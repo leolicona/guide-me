@@ -22,7 +22,6 @@ import RemoveRounded from '@mui/icons-material/RemoveRounded'
 import DeleteOutlineRounded from '@mui/icons-material/DeleteOutlineRounded'
 import PaymentsRounded from '@mui/icons-material/PaymentsRounded'
 import AccountBalanceRounded from '@mui/icons-material/AccountBalanceRounded'
-import HourglassTopRounded from '@mui/icons-material/HourglassTopRounded'
 import SavingsRounded from '@mui/icons-material/SavingsRounded'
 import { useConfirmSale } from '../features/pos/hooks'
 import { useMyOrganization } from '../features/organization'
@@ -38,6 +37,7 @@ import {
 } from '../store/posCart'
 
 import { StayCartLine } from '../features/pos/components/StayCartLine'
+import { TransferPaymentFields } from '../features/pos/components/TransferPaymentFields'
 import { ServiceError } from '../services/authService'
 import { formatMoney, amountToCents, centsToAmount } from '../features/catalog/types'
 import { ROUTES } from '../config/routes'
@@ -110,10 +110,6 @@ export default function PosCheckoutPage() {
   // sale type / button / validity derive from it. A suggested-deposit chip reuses the org minimum %.
   const { data: org } = useMyOrganization()
   const referenceRequired = org?.payment_reference_required ?? true
-  const referenceValid =
-    paymentMethod !== 'transfer' ||
-    reference.trim().length >= 4 ||
-    (!referenceRequired && reference.trim().length === 0)
   const total = cartTotal(lines)
   const minPct = org?.booking_min_down_payment_pct ?? 0
   const minCents = Math.ceil((total * minPct) / 100)
@@ -139,6 +135,20 @@ export default function PosCheckoutPage() {
           : amountCents >= minCents
             ? 'PARTIAL'
             : 'INSUFFICIENT'
+
+  // An amount under the total opens an apartado (below its minimum, until it reaches it), whose
+  // transfer deposit keeps today's manual path until deposits get their enlace (T058).
+  const isDeposit = saleState === 'PARTIAL' || saleState === 'INSUFFICIENT'
+  // devolada-transfer-verification D6, FR-009 — mirrors confirmSale's `collectsByLink`: a connected
+  // organization's full sale by transfer is collected by an enlace, so it carries no reference. A
+  // `broken` connection keeps today's rule; its seller sees the field (TransferPaymentFields).
+  const collectsByLink =
+    paymentMethod === 'transfer' && !isDeposit && org?.devolada?.status === 'connected'
+  const referenceValid =
+    paymentMethod !== 'transfer' ||
+    collectsByLink ||
+    reference.trim().length >= 4 ||
+    (!referenceRequired && reference.trim().length === 0)
 
   const chipLit = suggestedCents > 0 && amountCents === suggestedCents
   // Name + phone are required for EVERY sale now (D2); email only has to be valid-if-present.
@@ -169,13 +179,18 @@ export default function PosCheckoutPage() {
     const payload = toConfirmPayload(usePosCart.getState())
     if (saleState === 'PARTIAL') payload.down_payment = amountCents
     // US-AG41 — carry the transfer reference (ignored server-side for other methods). An empty
-    // optional reference (US-A88) is omitted, not sent as ''.
-    if (paymentMethod === 'transfer' && reference.trim())
+    // optional reference (US-A88) is omitted, not sent as ''; so is one typed before the sale
+    // turned into one an enlace collects (devolada-transfer-verification FR-009).
+    if (paymentMethod === 'transfer' && !collectsByLink && reference.trim())
       payload.payment_reference = reference.trim()
     confirm.mutate(payload, {
-      onSuccess: (folio) => {
+      onSuccess: ({ folio, payment_link_error }) => {
         clear()
-        navigate(ROUTES.FOLIO.replace(':id', folio.id))
+        // devolada-transfer-verification D6 — why the sale got no payment link, if it did not: the
+        // receipt shows it once (the sale itself was recorded on today's manual path).
+        navigate(ROUTES.FOLIO.replace(':id', folio.id), {
+          state: payment_link_error ? { paymentLinkError: payment_link_error } : undefined,
+        })
       },
     })
   }
@@ -371,7 +386,8 @@ export default function PosCheckoutPage() {
                     </Box>
                     <Box>
                       <b>Transferencia</b> la cobra la empresa: no suma a tu caja (generas comisión
-                      igual), y los boletos se envían cuando un administrador verifica el pago.
+                      igual), y los boletos se envían cuando se verifica el pago: lo verifica un
+                      administrador, o Devolada si la transferencia se cobra con enlace.
                     </Box>
                   </Stack>
                 </InfoPopover>
@@ -395,49 +411,27 @@ export default function PosCheckoutPage() {
                   </ToggleButton>
                 </ToggleButtonGroup>
 
-                {/* US-AG41 — a transfer carries its bank reference (optional per org, US-A88);
-                    the QR is held until verified either way. */}
-                {paymentMethod === 'transfer' && (
-                  <TextField
-                    label={
-                      referenceRequired
-                        ? 'Referencia de la transferencia'
-                        : 'Referencia de la transferencia (opcional)'
-                    }
-                    placeholder="Ej. BBVA 0099887766"
-                    value={reference}
-                    onChange={(e) => setReference(e.target.value)}
-                    error={reference.trim().length > 0 && !referenceValid}
-                    helperText={
-                      reference.trim().length > 0 && !referenceValid
-                        ? 'Captura al menos 4 caracteres.'
-                        : 'Número o folio del comprobante — el administrador lo verifica.'
-                    }
-                    fullWidth
-                    sx={{ mt: 2 }}
+                {/* Structured, at-a-glance consequence — flips with the selection. A transfer
+                    brings its bank reference with it (optional per org, US-A88), or the enlace
+                    that replaces it (devolada-transfer-verification D16). */}
+                {paymentMethod === 'transfer' ? (
+                  <TransferPaymentFields
+                    devolada={org?.devolada}
+                    deposit={isDeposit}
+                    referenceRequired={referenceRequired}
+                    reference={reference}
+                    onReferenceChange={setReference}
                   />
+                ) : (
+                  <Stack
+                    direction="row"
+                    spacing={0.75}
+                    sx={{ alignItems: 'center', mt: 1.5, color: 'text.secondary' }}
+                  >
+                    <SavingsRounded sx={{ fontSize: 18 }} />
+                    <Typography variant="caption">Entra a tu caja</Typography>
+                  </Stack>
                 )}
-
-                {/* Structured, at-a-glance consequence — flips with the selection. */}
-                <Stack
-                  direction="row"
-                  spacing={0.75}
-                  sx={{ alignItems: 'center', mt: 1.5, color: 'text.secondary' }}
-                >
-                  {paymentMethod === 'cash' ? (
-                    <>
-                      <SavingsRounded sx={{ fontSize: 18 }} />
-                      <Typography variant="caption">Entra a tu caja</Typography>
-                    </>
-                  ) : (
-                    <>
-                      <HourglassTopRounded sx={{ fontSize: 18 }} />
-                      <Typography variant="caption">
-                        En verificación · los boletos se envían al confirmar el pago
-                      </Typography>
-                    </>
-                  )}
-                </Stack>
             </SectionCard>
 
             <SectionCard>

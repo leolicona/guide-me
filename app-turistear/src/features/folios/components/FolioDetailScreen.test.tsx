@@ -1,9 +1,10 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { http, HttpResponse } from 'msw'
 import { Route, Routes } from 'react-router-dom'
 import { server } from '../../../test/server'
-import { renderWithProviders, screen } from '../../../test/renderWithProviders'
+import { renderWithProviders, screen, userEvent, within } from '../../../test/renderWithProviders'
 import { expectHeadingOutline, expectNoA11yViolations } from '../../../test/axe'
+import { aLinkPayment, aPaymentLink } from '../../../test/handlers/devolada'
 import { FolioDetailScreen } from './FolioDetailScreen'
 
 // US-A93 (docs/oversight/folio-surface-parity.spec.md D7/D8/D13) — ONE detail screen, two
@@ -225,5 +226,94 @@ describe('Could improve 8 — no ticket, no section', () => {
     // It used to render an expanded card whose whole content was «No hay boleto disponible para
     // esta línea» — the first thing the seller saw under the money.
     expect(screen.queryByText('Boletos de acceso')).toBeNull()
+  })
+})
+
+// --- devolada-transfer-verification US1 (D14, D16) ------------------------------------------------
+
+describe('devolada-transfer-verification US1 — a sale Devolada is resolving', () => {
+  // A transfer awaiting its verification: no portal link and no ticket until the money clears, and
+  // an enlace whose payment Devolada is checking — nothing for the admin to do.
+  const resolving = (over: Record<string, unknown> = {}) => {
+    const folio = aDetailFolio({
+      payment_method: 'transfer',
+      payment_verification: 'pending',
+      portal_link: null,
+      verification_auto: true,
+      payment_links: [aPaymentLink({ label: 'validating', payment: aLinkPayment() })],
+      ...over,
+    })
+    ;(folio.lines as Record<string, unknown>[])[0].qr_token = null
+    ;(folio.lines as Record<string, unknown>[])[0].qr = null
+    return folio
+  }
+
+  /** The header: the h1's container — the customer, their contact, and the one chip row. */
+  const header = async () => (await screen.findByRole('heading', { level: 1 })).parentElement!
+
+  it.each(SURFACES)('%s: the header shows the link’s chip, not «Por verificar»', async (surface) => {
+    withDetail(resolving())
+    const { container } = renderDetail(surface)
+
+    const head = await header()
+    expect(within(head).getByText('Verificando pago')).toBeInTheDocument()
+    // «Por verificar» names the admin's work, and there is none while Devolada resolves it.
+    expect(within(head).queryByText('Por verificar')).toBeNull()
+    expectHeadingOutline('María Fernández')
+    await expectNoA11yViolations(container)
+  })
+
+  it('the same sale without the flag names the admin’s work again, beside its link’s state', async () => {
+    withDetail(
+      resolving({
+        verification_auto: false,
+        payment_links: [aPaymentLink({ state: 'expired', label: 'not_received' })],
+      }),
+    )
+    const { container } = renderDetail('admin')
+
+    const head = await header()
+    expect(within(head).getByText('Por verificar')).toBeInTheDocument()
+    expect(within(head).getByText('No se recibió la transferencia')).toBeInTheDocument()
+    await expectNoA11yViolations(container)
+  })
+
+  // contracts § PaymentLinkView: the `url` goes to the sale's seller and to admins, who send it.
+  it.each(SURFACES)('%s: «Cobrar por WhatsApp» sends the enlace from the sale', async (surface) => {
+    const opened = vi.spyOn(window, 'open').mockReturnValue(null)
+    server.use(
+      http.get('/api/organizations/me', () =>
+        HttpResponse.json({
+          organization: { id: 'o1', name: 'Descubre Huasca', timezone: 'America/Cancun' },
+        }),
+      ),
+    )
+    // 13:30 in Cancún (UTC−5 all year), 18:30 UTC.
+    const expiresAt = Date.parse('2030-06-14T18:30:00Z') / 1000
+    withDetail(resolving({ payment_links: [aPaymentLink({ expires_at: expiresAt })] }))
+    const user = userEvent.setup()
+    const { container } = renderDetail(surface)
+
+    expect(await screen.findByRole('heading', { name: 'Enlace de pago' })).toBeInTheDocument()
+    // The expiry reads in the ORGANIZATION's zone, once its settings have loaded.
+    expect(await screen.findByText(/a las 13:30/)).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Cobrar por WhatsApp' }))
+    const url = decodeURIComponent(String(opened.mock.calls[0]![0]))
+    expect(url).toContain('https://wa.me/52')
+    expect(url).toContain('https://link.devoladapago.com/p/kq7m2x9d4tbn3wpa')
+    // It reads like every other message the sale sends: its seller, its organization.
+    expect(url).toContain('te escribe Ana de Descubre Huasca')
+    expect(url).toContain('a las 13:30')
+    await expectNoA11yViolations(container)
+  })
+
+  it('a sale with no enlace renders no link card', async () => {
+    withDetail()
+    const { container } = renderDetail('admin')
+
+    await screen.findAllByText('Tour Isla Mujeres')
+    expect(screen.queryByText('Enlace de pago')).toBeNull()
+    await expectNoA11yViolations(container)
   })
 })

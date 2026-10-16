@@ -81,6 +81,15 @@ test('a throwaway secret is named with what it costs', () => {
   assert.ok(!body.includes('`RESEND_API_KEY`'))
 })
 
+test('a preview without DEVOLADA_CREDENTIAL_KEY says Devolada is off there (devolada-transfer-verification D17)', () => {
+  const body = ready({ devoladaOff: true })
+  assert.ok(body.includes('**Devolada is off on this preview**'))
+  assert.ok(body.includes('never gets a throwaway one'))
+  // It is never listed as a throwaway secret: a preview gets dev's value or none.
+  assert.ok(!body.includes('Throwaway'))
+  assert.ok(!ready().includes('Devolada'))
+})
+
 test('the marker written by a ready preview is the one read back', () => {
   const body = ready({ migrations: ['0071_a.sql'] })
   assert.deepEqual(parseMarker(body), {

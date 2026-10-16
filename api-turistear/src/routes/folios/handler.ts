@@ -49,11 +49,13 @@ import {
   readListPortalLinks,
   serializeFolioListRow,
 } from '../../utils/folioListRows'
+import { loadPaymentLinkViews } from '../../utils/devoladaLinkView'
 import {
   DEFAULT_WINDOW_DAYS,
   listWindowFilter,
   overdueFilter,
   pendingWorkCountQueries,
+  verificationAutoFilter,
 } from '../../utils/folioPendingWork'
 import {
   asDay,
@@ -222,6 +224,8 @@ export const listFolios = async (c: FoliosContext) => {
       refundAmount: deriveRefundAmountSql,
       // US-A82 — no surface may infer Express from a null name (business rule 4).
       saleMode: folios.saleMode,
+      // devolada-transfer-verification D14 — one predicate for the flag and the count.
+      verificationAuto: sql<number>`case when ${verificationAutoFilter(org, now)} then 1 else 0 end`,
     })
     .from(folios)
     .innerJoin(users, eq(folios.agentId, users.id))
@@ -245,10 +249,11 @@ export const listFolios = async (c: FoliosContext) => {
   const decorationFilters = hasQuery
     ? [eq(folios.organizationId, org), inArray(folios.id, page.map((r) => r.id))]
     : filters
-  const [linesByFolio, portalLinkByFolio, requestByFolio] = await Promise.all([
+  const [linesByFolio, portalLinkByFolio, requestByFolio, paymentLinksByFolio] = await Promise.all([
     readListLines(db, org, decorationFilters, fulfillmentCtx),
     readListPortalLinks(db, org, decorationFilters, c.env.API_BASE_URL),
     readListCancellationRequests(db, org, decorationFilters),
+    loadPaymentLinkViews(db, org, { filters: decorationFilters }),
   ])
 
   return c.json({
@@ -265,6 +270,7 @@ export const listFolios = async (c: FoliosContext) => {
         linesByFolio,
         portalLinkByFolio,
         requestByFolio,
+        paymentLinksByFolio,
         nowMs: now.getTime(),
       }),
     ),
@@ -289,14 +295,15 @@ export const listFolioCounts = async (c: FoliosContext) => {
   const db = getDb(c.env)
 
   const q = pendingWorkCountQueries(db, org, new Date())
-  const [verification, refunds, overdue, undelivered, requests] = await Promise.all(
-    [q.verification, q.refunds, q.overdue, q.undelivered, q.folio_requests].map(
+  const [verification, refunds, overdue, undelivered, requests, verificationAuto] = await Promise.all(
+    [q.verification, q.refunds, q.overdue, q.undelivered, q.folio_requests, q.verification_auto].map(
       async (query) => (await query)[0]?.n ?? 0,
     ),
   )
 
   return c.json({
     verification,
+    verification_auto: verificationAuto,
     folio_requests: requests,
     refunds,
     overdue,

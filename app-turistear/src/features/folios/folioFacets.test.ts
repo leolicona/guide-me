@@ -5,6 +5,7 @@ import {
   facetPillLabel,
   matchesFacets,
   parseFacets,
+  porVerificarCount,
   serializeFacets,
   type FacetKey,
 } from './folioFacets'
@@ -195,5 +196,57 @@ describe('D15 — a mixed folio appears under every facet one of its lines earns
     } as unknown as FolioListItem
     expect(matchesFacets(legacy, ['pagado'])).toBe(true)
     expect(matchesFacets(legacy, ['reserva'])).toBe(false)
+  })
+})
+
+// --- devolada-transfer-verification US1 — Por verificar holds only the admin's work (D14) --------
+
+describe('devolada-transfer-verification US1 — a sale Devolada is resolving is not «Por verificar»', () => {
+  // A transfer waiting on its verification: the row the facet has always listed.
+  const pending = folio({ payment_verification: 'pending' })
+
+  it('a row with `verification_auto` is not in Por verificar', () => {
+    expect(matchesFacets({ ...pending, verification_auto: true }, ['por_verificar'])).toBe(false)
+  })
+
+  it('the same row without the flag is back — the server clears it, the client only follows', () => {
+    expect(matchesFacets({ ...pending, verification_auto: false }, ['por_verificar'])).toBe(true)
+    // A row from an API that predates the flag is the admin's work, as it always was.
+    expect(matchesFacets(pending, ['por_verificar'])).toBe(true)
+  })
+
+  it('the flag moves the sale out of the work section only — Pago still reads its money', () => {
+    expect(matchesFacets({ ...pending, verification_auto: true }, ['pagado'])).toBe(true)
+  })
+
+  it('porVerificarCount subtracts it', () => {
+    expect(porVerificarCount({ verification: 5, verification_auto: 2 })).toBe(3)
+    expect(porVerificarCount({ verification: 3, verification_auto: 0 })).toBe(3)
+    // An API that predates the field: every pending verification is the admin's.
+    expect(porVerificarCount({ verification: 3 })).toBe(3)
+    // Two counts read by two statements can disagree for an instant; a pill never goes negative.
+    expect(porVerificarCount({ verification: 1, verification_auto: 2 })).toBe(0)
+  })
+
+  it('the count promises exactly the rows the facet lists (US-A84 S-4)', () => {
+    const rows = [
+      folio({ id: 'manual', payment_verification: 'pending' }),
+      folio({ id: 'auto', payment_verification: 'pending', verification_auto: true }),
+      folio({ id: 'rejected', status: 'cancelled', payment_verification: 'pending' }),
+      folio({ id: 'cleared', payment_verification: 'verified' }),
+    ]
+    // What `GET /api/folios/counts` counts over the same rows: the pending verifications of live
+    // sales, and among them the ones Devolada is resolving.
+    const verification = rows.filter(
+      (f) => f.payment_verification === 'pending' && f.status !== 'cancelled',
+    )
+    const counts = {
+      verification: verification.length,
+      verification_auto: verification.filter((f) => f.verification_auto).length,
+    }
+
+    const listed = rows.filter((f) => matchesFacets(f, ['por_verificar']))
+    expect(listed.map((f) => f.id)).toEqual(['manual'])
+    expect(porVerificarCount(counts)).toBe(listed.length)
   })
 })
