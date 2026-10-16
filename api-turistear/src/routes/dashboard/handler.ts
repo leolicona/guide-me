@@ -1,6 +1,6 @@
 import type { Context } from 'hono'
 import { and, eq, gte, inArray, lte, sql } from 'drizzle-orm'
-import { getDb } from '../../db/client'
+import { getDb, type Db } from '../../db/client'
 import {
   folioLines,
   folioPayments,
@@ -25,6 +25,57 @@ export type DashboardContext = Context<{
 // (utils/folioStatus.ts:4-7).
 const lineAllocated = `coalesce((select sum(a.amount) from folio_payment_allocations a where a.folio_line_id = folio_lines.id), 0)`
 
+// bug: folio-counts-full-scan — the two day reads Hoy polls every 60 s, named so
+// test/folios/hoy-polled-reads.test.ts plans the statements this handler runs. Each enters its day
+// through an index migration 0074 added (`slots_org_date_idx`, `folio_payments_org_created_idx`);
+// before it, both narrowed by organization only and read every slot and every ledger row of the org.
+
+// Rule 2 — the day's active departures, chronological (D15). The service row is joined for the
+// name and the flex-cap config; a paused service's slot still departs today, so no status filter.
+export const daySlotsQuery = (db: Db, org: string, day: string) =>
+  db
+    .select({
+      slotId: slots.id,
+      serviceId: slots.serviceId,
+      serviceName: services.name,
+      startTime: slots.startTime,
+      capacity: slots.capacity,
+      booked: slots.booked,
+      isFlexible: services.isFlexible,
+      flexPct: services.flexCapacityPct,
+    })
+    .from(slots)
+    .innerJoin(services, eq(slots.serviceId, services.id))
+    .where(and(eq(slots.organizationId, org), eq(slots.date, day), eq(slots.status, 'active')))
+    .orderBy(slots.startTime)
+
+// Rules 5–7 — the day's money by the ledger's own dates (D10): net payment/refund rows stamped
+// inside the org-tz day. Commission accruals are excluded; verification state is ignored (D16).
+export const dayMoneyQueries = (db: Db, org: string, windowStart: Date, windowEnd: Date) => {
+  const moneyWhere = and(
+    eq(folioPayments.organizationId, org),
+    inArray(folioPayments.entryType, ['payment', 'refund']),
+    gte(folioPayments.createdAt, windowStart),
+    lte(folioPayments.createdAt, windowEnd),
+  )
+  return {
+    collected: db
+      .select({ total: sql<number>`coalesce(sum(${folioPayments.amount}), 0)` })
+      .from(folioPayments)
+      .where(moneyWhere),
+    perSeller: db
+      .select({
+        userId: folioPayments.collectedBy,
+        name: users.name,
+        total: sql<number>`coalesce(sum(${folioPayments.amount}), 0)`,
+      })
+      .from(folioPayments)
+      .leftJoin(users, eq(users.id, folioPayments.collectedBy))
+      .where(moneyWhere)
+      .groupBy(folioPayments.collectedBy),
+  }
+}
+
 // GET /api/dashboard/day — US-A14/A15/A16/A90 (docs/dashboard/occupancy-dashboard.spec.md).
 // One org-scoped read for the admin's Hoy: the day's departures with the vendidos/apartados seat
 // split, today's departed slots with their boarding, and the day's money as the ledger stamped it.
@@ -44,23 +95,7 @@ export const getDashboardDay = async (c: DashboardContext) => {
   const day = date ?? today
   const isToday = day === today
 
-  // Rule 2 — the day's active departures, chronological (D15). The service row is joined for the
-  // name and the flex-cap config; a paused service's slot still departs today, so no status filter.
-  const slotRows = await db
-    .select({
-      slotId: slots.id,
-      serviceId: slots.serviceId,
-      serviceName: services.name,
-      startTime: slots.startTime,
-      capacity: slots.capacity,
-      booked: slots.booked,
-      isFlexible: services.isFlexible,
-      flexPct: services.flexCapacityPct,
-    })
-    .from(slots)
-    .innerJoin(services, eq(slots.serviceId, services.id))
-    .where(and(eq(slots.organizationId, org), eq(slots.date, day), eq(slots.status, 'active')))
-    .orderBy(slots.startTime)
+  const slotRows = await daySlotsQuery(db, org, day)
 
   // Rule 3 — seats by the lines' derived money state; rule 4's boarding rides the same pass.
   const slotIds = slotRows.map((r) => r.slotId)
@@ -114,23 +149,14 @@ export const getDashboardDay = async (c: DashboardContext) => {
     }
   }
 
-  // Rules 5–7 — the day's money by the ledger's own dates (D10): net payment/refund rows stamped
-  // inside the org-tz day. Commission accruals are excluded; verification state is ignored (D16).
+  // Rules 5–7 — the day's money, inside the org-tz day (dayMoneyQueries).
   const nextDay = new Date(Date.parse(`${day}T00:00:00Z`) + 86_400_000).toISOString().slice(0, 10)
   const windowStart = new Date(naiveEpoch(day, '00:00', tz) * 1000)
   const windowEnd = new Date(naiveEpoch(nextDay, '00:00', tz) * 1000 - 1000)
-  const moneyWhere = and(
-    eq(folioPayments.organizationId, org),
-    inArray(folioPayments.entryType, ['payment', 'refund']),
-    gte(folioPayments.createdAt, windowStart),
-    lte(folioPayments.createdAt, windowEnd),
-  )
+  const money = dayMoneyQueries(db, org, windowStart, windowEnd)
 
   const [collectedRows, foliosRows, sellerRows] = await Promise.all([
-    db
-      .select({ total: sql<number>`coalesce(sum(${folioPayments.amount}), 0)` })
-      .from(folioPayments)
-      .where(moneyWhere),
+    money.collected,
     db
       .select({ n: sql<number>`count(*)` })
       .from(folios)
@@ -141,16 +167,7 @@ export const getDashboardDay = async (c: DashboardContext) => {
           lte(folios.createdAt, windowEnd),
         ),
       ),
-    db
-      .select({
-        userId: folioPayments.collectedBy,
-        name: users.name,
-        total: sql<number>`coalesce(sum(${folioPayments.amount}), 0)`,
-      })
-      .from(folioPayments)
-      .leftJoin(users, eq(users.id, folioPayments.collectedBy))
-      .where(moneyWhere)
-      .groupBy(folioPayments.collectedBy),
+    money.perSeller,
   ])
 
   const perSeller = sellerRows

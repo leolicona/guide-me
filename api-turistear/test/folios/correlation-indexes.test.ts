@@ -75,7 +75,7 @@ describe('BUG-042 — folio roll-up correlations enter an index', () => {
       anyLineStatusSql('paid'),
       anyLineStatusSql('booking'),
       anyLineStatusSql('cancelled'),
-      refundPendingFilter(),
+      refundPendingFilter('org'),
     ]) {
       const plan = await planOf(
         db
