@@ -39,7 +39,8 @@ export type FakeRoute =
   | 'deleteWebhook'
   | 'listDeliveries'
   | 'jwks'
-export type FailMode = 'timeout' | '500' | 'rate_limited' | 'unreachable'
+// `link_closed` answers a close the way Devolada answers one for a link it already closed.
+export type FailMode = 'timeout' | '500' | 'rate_limited' | 'unreachable' | 'link_closed'
 
 const FINAL: ReadonlySet<FakePaymentStatus> = new Set([
   'confirmed',
@@ -387,6 +388,10 @@ export const installFakeDevolada = async () => {
     if (mode === 'rate_limited') {
       const r = refusal(429, 'RATE_LIMITED')
       return json(r.status, r.payload, { 'Retry-After': '30' })
+    }
+    if (mode === 'link_closed') {
+      const r = refusal(409, 'LINK_CLOSED')
+      return json(r.status, r.payload)
     }
     const r = refusal(500, 'INTERNAL_SERVER_ERROR')
     return json(r.status, r.payload)

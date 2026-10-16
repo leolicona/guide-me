@@ -34,7 +34,7 @@ import {
 import { displayMethodSql, readFolioPayments } from './folioPayments'
 import { deriveOrgKey, verifyTicket, type TicketPayload } from './qr'
 import { loadPaymentLinkViews } from './devoladaLinkView'
-import { verificationAutoFilter } from './folioPendingWork'
+import { devoladaAttentionFilter, verificationAutoFilter } from './folioPendingWork'
 
 export interface FolioDetailOpts {
   /** Scope the read to one seller's own folios (the POS surface). Omit for the admin surface. */
@@ -116,8 +116,9 @@ export const readFolioDetail = async (
       refundedAt: folios.refundedAt,
       refundedBy: folios.refundedBy,
       createdAt: folios.createdAt,
-      // devolada-transfer-verification D14 — the same predicate the list rows and the counts read.
+      // devolada-transfer-verification D14 — the same predicates the list rows and the counts read.
       verificationAuto: sql<number>`case when ${verificationAutoFilter(org, readAt)} then 1 else 0 end`,
+      devoladaAttention: sql<number>`case when ${devoladaAttentionFilter(org)} then 1 else 0 end`,
     })
     .from(folios)
     .innerJoin(users, eq(folios.agentId, users.id))
@@ -386,6 +387,7 @@ export const readFolioDetail = async (
     // and whether Devolada is resolving the sale with nothing for the admin to do.
     payment_links: paymentLinks,
     verification_auto: Number(folio.verificationAuto) === 1,
+    devolada_attention: Number(folio.devoladaAttention) === 1,
     // US-A84 rule 7 — the absorbed request history (newest first). Empty for the vast majority of
     // folios, which is why it costs nothing to always send it.
     folio_requests: requestRows.map((r) => ({

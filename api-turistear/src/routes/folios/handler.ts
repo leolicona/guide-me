@@ -56,6 +56,7 @@ import {
   overdueFilter,
   pendingWorkCountQueries,
   verificationAutoFilter,
+  devoladaAttentionFilter,
 } from '../../utils/folioPendingWork'
 import {
   asDay,
@@ -224,8 +225,9 @@ export const listFolios = async (c: FoliosContext) => {
       refundAmount: deriveRefundAmountSql,
       // US-A82 — no surface may infer Express from a null name (business rule 4).
       saleMode: folios.saleMode,
-      // devolada-transfer-verification D14 — one predicate for the flag and the count.
+      // devolada-transfer-verification D14 — one predicate for each flag and its count.
       verificationAuto: sql<number>`case when ${verificationAutoFilter(org, now)} then 1 else 0 end`,
+      devoladaAttention: sql<number>`case when ${devoladaAttentionFilter(org)} then 1 else 0 end`,
     })
     .from(folios)
     .innerJoin(users, eq(folios.agentId, users.id))
@@ -295,15 +297,23 @@ export const listFolioCounts = async (c: FoliosContext) => {
   const db = getDb(c.env)
 
   const q = pendingWorkCountQueries(db, org, new Date())
-  const [verification, refunds, overdue, undelivered, requests, verificationAuto] = await Promise.all(
-    [q.verification, q.refunds, q.overdue, q.undelivered, q.folio_requests, q.verification_auto].map(
-      async (query) => (await query)[0]?.n ?? 0,
-    ),
-  )
+  const [verification, refunds, overdue, undelivered, requests, verificationAuto, devoladaAttention] =
+    await Promise.all(
+      [
+        q.verification,
+        q.refunds,
+        q.overdue,
+        q.undelivered,
+        q.folio_requests,
+        q.verification_auto,
+        q.devolada_attention,
+      ].map(async (query) => (await query)[0]?.n ?? 0),
+    )
 
   return c.json({
     verification,
     verification_auto: verificationAuto,
+    devolada_attention: devoladaAttention,
     folio_requests: requests,
     refunds,
     overdue,

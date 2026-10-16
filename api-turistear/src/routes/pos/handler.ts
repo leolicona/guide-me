@@ -91,9 +91,10 @@ import {
 import { cancelFolioLinesPriced, cancelFolioPriced, queueCancellationEmail, quoteCancellation, serializeQuote } from '../folios/handler'
 // devolada-transfer-verification D10 — verification cores shared with Devolada's webhook and sweep.
 import { releaseClearedFolio, verifyFolioPayment } from './verifyCore'
+import { buildInventoryReleaseStatements } from './unreceivedTransfer'
 import { readConnectionSummary } from '../devolada/connection'
 import { loadPaymentLinkViews } from '../../utils/devoladaLinkView'
-import { verificationAutoFilter } from '../../utils/folioPendingWork'
+import { devoladaAttentionFilter, verificationAutoFilter } from '../../utils/folioPendingWork'
 import { issuePaymentLink, type IssueLinkResult } from '../devolada/links'
 
 export type PosContext = Context<{
@@ -2971,43 +2972,10 @@ export const rejectPayment = async (c: PosContext) => {
       at: now,
     }),
   ]
-  // Release the held spots (mirrors cancelBooking): zone counter + slot reconcile, or the slot total.
-  for (const line of lineRows) {
-    if (!line.slotId) continue
-    if (line.zoneId) {
-      statements.push(
-        db
-          .update(slotZones)
-          .set({ booked: sql`${slotZones.booked} - ${line.quantity}`, updatedAt: now })
-          .where(
-            and(
-              eq(slotZones.slotId, line.slotId),
-              eq(slotZones.zoneId, line.zoneId),
-              eq(slotZones.organizationId, org),
-            ),
-          ),
-        reconcileSlotTotals(db, line.slotId),
-      )
-    } else {
-      statements.push(
-        db
-          .update(slots)
-          .set({ booked: sql`${slots.booked} - ${line.quantity}`, updatedAt: now })
-          .where(and(eq(slots.id, line.slotId), eq(slots.organizationId, org))),
-      )
-    }
-  }
+  // Release the held spots and the stay reservations, through the builder D11 shares
+  // (devolada-transfer-verification). Every line of the sale is passed, as before (research defect 3).
   statements.push(
-    db
-      .update(accommodationReservations)
-      .set({ status: 'cancelled', updatedAt: now })
-      .where(
-        and(
-          eq(accommodationReservations.folioId, id),
-          eq(accommodationReservations.organizationId, org),
-          eq(accommodationReservations.status, 'active'),
-        ),
-      ),
+    ...buildInventoryReleaseStatements(db, { organizationId: org, folioId: id, lines: lineRows, at: now }),
   )
   // US-LG — the void sale reverses out of the ledger (its electronic money leaves the sales bucket;
   // the seller's commission is clawed back). Dated now (cancelled_at).
@@ -3539,8 +3507,9 @@ export const listAgentFolios = async (c: PosContext) => {
       agentName: users.name,
       agentId: folios.agentId,
       saleMode: folios.saleMode,
-      // devolada-transfer-verification D14 — the seller reads the same flag the admin reads.
+      // devolada-transfer-verification D14 — the seller reads the same flags the admin reads.
       verificationAuto: sql<number>`case when ${verificationAutoFilter(org, now)} then 1 else 0 end`,
+      devoladaAttention: sql<number>`case when ${devoladaAttentionFilter(org)} then 1 else 0 end`,
     })
     .from(folios)
     .innerJoin(users, eq(folios.agentId, users.id))

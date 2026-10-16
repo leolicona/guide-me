@@ -102,7 +102,8 @@ describe('bug: folio-counts-full-scan — the polled reads enter what is pending
 // so the test seeds pending work of every kind in BOTH orgs, in different amounts: a count that
 // loses its scope entirely reads the sum, and no kind can hide behind another being empty. That
 // includes a sale Devolada is resolving, for `verification_auto` (devolada-transfer-verification
-// D14), which is pending verification too.
+// D14), which is pending verification too, and a cancelled sale with money to return, for
+// `devolada_attention`.
 
 const nowSec = () => Math.floor(Date.now() / 1000)
 
@@ -173,6 +174,28 @@ const seedEveryKind = async (organizationId: string, agentId: string) => {
       `lnk_${crypto.randomUUID()}`, nowSec() + 3600, agentId, nowSec(), nowSec(),
     )
     .run()
+  // Money that arrived on the enlace of a sale already cancelled: Devolada attention, which
+  // `verification` does not count (devolada-transfer-verification D14).
+  const cancelledWithMoney = await seedFolio({ organizationId, agentId, status: 'cancelled' })
+  const closedLink = crypto.randomUUID()
+  await env.DB.prepare(
+    `INSERT INTO devolada_links (id, organization_id, folio_id, kind, credential_id, mode, amount, devolada_link_id, expires_at, state, requested_by, created_at, updated_at)
+     VALUES (?, ?, ?, 'sale', ?, 'test', 100000, ?, ?, 'closed', ?, ?, ?)`,
+  )
+    .bind(
+      closedLink, organizationId, cancelledWithMoney, credentialId, `lnk_${crypto.randomUUID()}`,
+      nowSec() + 3600, agentId, nowSec(), nowSec(),
+    )
+    .run()
+  await env.DB.prepare(
+    `INSERT INTO devolada_payments (id, organization_id, link_id, folio_id, devolada_payment_id, status, proof_door, asked_amount, received_amount, devolada_created_at, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, 'unapplied', 'transfer', 100000, 100000, ?, ?, ?)`,
+  )
+    .bind(
+      crypto.randomUUID(), organizationId, closedLink, cancelledWithMoney, `pay_${crypto.randomUUID()}`,
+      nowSec(), nowSec(), nowSec(),
+    )
+    .run()
 }
 
 const counts = async (email: string) => {
@@ -184,6 +207,7 @@ const counts = async (email: string) => {
 }
 
 beforeEach(async () => {
+  await env.DB.exec('DELETE FROM devolada_payments')
   await env.DB.exec('DELETE FROM devolada_links')
   await env.DB.exec('DELETE FROM devolada_credentials')
   await env.DB.exec('DELETE FROM folio_requests')
@@ -202,12 +226,15 @@ describe('bug: folio-counts-full-scan — multitenancy', () => {
     await seedEveryKind(orgB.organizationId, orgB.adminUserId)
     await seedEveryKind(orgB.organizationId, orgB.adminUserId)
 
-    // The Devolada sale is pending verification too: «Por verificar» shows the difference.
+    // The Devolada sale is pending verification too: «Por verificar» shows the difference. The
+    // cancelled sale with money to return is counted by `devolada_attention` alone.
     const one = {
-      verification: 2, verification_auto: 1, refunds: 1, overdue: 1, undelivered: 1, folio_requests: 1,
+      verification: 2, verification_auto: 1, devolada_attention: 1,
+      refunds: 1, overdue: 1, undelivered: 1, folio_requests: 1,
     }
     const two = {
-      verification: 4, verification_auto: 2, refunds: 2, overdue: 2, undelivered: 2, folio_requests: 2,
+      verification: 4, verification_auto: 2, devolada_attention: 2,
+      refunds: 2, overdue: 2, undelivered: 2, folio_requests: 2,
     }
     expect(await counts(orgA.adminEmail)).toEqual(one)
     expect(await counts(orgB.adminEmail)).toEqual(two)

@@ -1,4 +1,4 @@
-import { and, eq, isNull } from 'drizzle-orm'
+import { and, eq, inArray, isNull } from 'drizzle-orm'
 import type { Db } from '../../db/client'
 import {
   devoladaLinks,
@@ -12,7 +12,13 @@ import { devoladaClient } from '../../services/devolada'
 import { folioEventRow } from '../../utils/folioEvents'
 import { toPaymentLinkView, type PaymentLinkView } from '../../utils/devoladaLinkView'
 import { naiveEpoch } from '../../utils/tz'
-import { brokenReasonOf, loadCurrentCredential, markConnectionBroken } from './connection'
+import {
+  brokenReasonOf,
+  fallBackLinkCredential,
+  loadCurrentCredential,
+  loadLinkCredential,
+  markConnectionBroken,
+} from './connection'
 
 // devolada-transfer-verification D6, D7 — issuing the payment link of a transfer.
 //
@@ -261,4 +267,132 @@ export async function issuePaymentLink(deps: IssueLinkDeps, input: IssueLinkInpu
     .set({ state: 'abandoned', updatedAt: new Date() })
     .where(and(scope, eq(devoladaLinks.state, 'creating')))
   return { link: null, error: 'DEVOLADA_UNAVAILABLE' }
+}
+
+/**
+ * D13, D21 — closes one of our links at Devolada (`PATCH {close: true}`), with the link's own
+ * credential, so the customer can no longer pay a sale that stopped taking that money. Fail-soft:
+ * it never throws, and whatever keeps the close from happening leaves a `closing` link `closing`,
+ * for the sweep to retry (D12 step 3):
+ * - Devolada's answer, or `LINK_CLOSED`, means the link is closed: a `closing` row becomes `closed`.
+ *   A row in another state keeps it — D11's own link ends `expired`, with no reason (D13);
+ * - a link whose create never recorded Devolada's id is not closed here: the create's outcome, or
+ *   the sweep's replay with the same key, learns the id first;
+ * - a rejected RETIRED credential takes D21's fallback: the link moves to the current credential,
+ *   and the next run closes it with that one, or becomes `failed` when no credential can read it;
+ * - a rejected or suspended CURRENT credential breaks the connection, and the link waits for the
+ *   admin's new key.
+ */
+export async function closePaymentLinkRemote(
+  deps: IssueLinkDeps,
+  link: Pick<DevoladaLink, 'id' | 'organizationId' | 'credentialId' | 'devoladaLinkId'>,
+): Promise<'closed' | 'pending' | 'failed' | 'rate_limited'> {
+  const { db, env } = deps
+  if (!link.devoladaLinkId) return 'pending'
+  try {
+    const credential = await loadLinkCredential(deps, link)
+    if (!credential) {
+      // Erased while the link was still unresolved: nothing can reach it any more (D21).
+      console.error('[devolada] cannot close a link whose credential was erased', link.id)
+      return 'pending'
+    }
+    if (!credential.apiKey) {
+      console.error('[devolada] link not closed: its credential is unreadable here', link.id)
+      return 'pending'
+    }
+    const res = await devoladaClient(env, credential.apiKey).closePaymentLink(link.devoladaLinkId, {
+      idempotencyKey: `close:${link.id}`,
+    })
+    if (res.ok || (res.kind === 'refused' && res.code === 'LINK_CLOSED')) {
+      await db
+        .update(devoladaLinks)
+        .set({ state: 'closed', updatedAt: new Date() })
+        .where(
+          and(
+            eq(devoladaLinks.id, link.id),
+            eq(devoladaLinks.organizationId, link.organizationId),
+            eq(devoladaLinks.state, 'closing'),
+          ),
+        )
+      return 'closed'
+    }
+    const reason = brokenReasonOf(res)
+    if (reason === 'DEVOLADA_CREDENTIAL_REJECTED' && !credential.isCurrent) {
+      return (await fallBackLinkCredential(deps, link)) === 'failed' ? 'failed' : 'pending'
+    }
+    if (reason === 'DEVOLADA_CREDENTIAL_REJECTED' || reason === 'DEVOLADA_BUSINESS_SUSPENDED') {
+      if (credential.isCurrent) await markConnectionBroken(db, link.organizationId, reason, credential.credentialId)
+      return 'pending'
+    }
+    if (res.code === 'RATE_LIMITED') return 'rate_limited'
+    if (res.kind === 'refused') console.error('[devolada] link close refused', link.id, res.code, res.message)
+    return 'pending'
+  } catch (err) {
+    console.error('[devolada] link close failed', link.id, err)
+    return 'pending'
+  }
+}
+
+/** D5 — the create's Idempotency-Key: the row's id, suffixed `#<n>` after a refusal. */
+export const createKeyOf = (link: Pick<DevoladaLink, 'id' | 'createAttempts'>): string =>
+  link.createAttempts > 1 ? `${link.id}#${link.createAttempts}` : link.id
+
+/**
+ * D12 step 3 — learns Devolada's id for a link whose create never recorded an outcome, by sending
+ * the same create again with the same key: Devolada answers the first request's link when it
+ * reached Devolada, and creates it now when it did not. Either way the id is stored. A refusal
+ * means Devolada never created it, and the link becomes `failed`. Fail-soft, like the close.
+ */
+export async function replayPaymentLinkCreate(
+  deps: IssueLinkDeps,
+  link: Pick<
+    DevoladaLink,
+    'id' | 'organizationId' | 'folioId' | 'credentialId' | 'devoladaLinkId' | 'amount' | 'expiresAt' | 'createAttempts'
+  >,
+): Promise<{ devoladaLinkId: string } | 'pending' | 'failed' | 'rate_limited'> {
+  const { db, env } = deps
+  const scope = and(eq(devoladaLinks.id, link.id), eq(devoladaLinks.organizationId, link.organizationId))
+  try {
+    const credential = await loadLinkCredential(deps, link)
+    if (!credential?.apiKey) {
+      console.error('[devolada] link create not replayed: its credential is unreadable here', link.id)
+      return 'pending'
+    }
+    const res = await devoladaClient(env, credential.apiKey).createPaymentLink(
+      {
+        customerRef: link.folioId,
+        askCents: link.amount,
+        mode: 'one_time',
+        expiresAt: Math.floor(link.expiresAt.getTime() / 1000),
+      },
+      { idempotencyKey: createKeyOf(link) },
+    )
+    if (res.ok) {
+      await db
+        .update(devoladaLinks)
+        .set({ devoladaLinkId: res.data.id, url: res.data.url, updatedAt: new Date() })
+        .where(and(scope, isNull(devoladaLinks.devoladaLinkId)))
+      return { devoladaLinkId: res.data.id }
+    }
+    if (res.code === 'RATE_LIMITED') return 'rate_limited'
+    const reason = brokenReasonOf(res)
+    if (reason === 'DEVOLADA_CREDENTIAL_REJECTED' || reason === 'DEVOLADA_BUSINESS_SUSPENDED') {
+      // D21 — a retired key's rejection: with no Devolada id, no other key can find the link.
+      if (reason === 'DEVOLADA_CREDENTIAL_REJECTED' && !credential.isCurrent) {
+        return (await fallBackLinkCredential(deps, link)) === 'failed' ? 'failed' : 'pending'
+      }
+      if (credential.isCurrent) await markConnectionBroken(db, link.organizationId, reason, credential.credentialId)
+      return 'pending'
+    }
+    if (res.kind !== 'refused') return 'pending'
+    console.error('[devolada] link create replay refused', link.id, res.code, res.message)
+    await db
+      .update(devoladaLinks)
+      .set({ state: 'failed', updatedAt: new Date() })
+      .where(and(scope, isNull(devoladaLinks.devoladaLinkId), inArray(devoladaLinks.state, ['closing', 'abandoned'])))
+    return 'failed'
+  } catch (err) {
+    console.error('[devolada] link create replay failed', link.id, err)
+    return 'pending'
+  }
 }

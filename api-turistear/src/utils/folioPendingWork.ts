@@ -46,6 +46,47 @@ export const verificationPendingFilter = (org: string): SQL =>
   )!
 
 /**
+ * devolada-transfer-verification D14 (data-model § Attention) — the sale has a Devolada payment
+ * that needs the admin, unresolved. Derived, never stored (constitution II). A payment needs the
+ * admin when it is:
+ * - `partial` or `invalid` on a settlement link: the admin accepts or dismisses it (D15). On a sale
+ *   or deposit link the sale stays pending, and today's Verificar or Rechazar decide it (FR-018);
+ * - `unapplied`, or `confirmed` on a cancelled sale: money to return (D9), until marked returned;
+ * - in flight and stalled — `validating` awaiting the payer's tracking key, `queued_for_credit` —
+ *   or last seen in flight on a link no credential can read (`failed`, D21), while nobody decided
+ *   it by hand: no resolution, the sale not cancelled, and a sale or deposit link's row still
+ *   pending (once the admin's Verificar flips it, the payment is decided).
+ *
+ * It opens with its candidate set — the organization's payments in one of those statuses, through
+ * devolada_payments (organization_id, status) — then each candidate's link by primary key (bug:
+ * folio-counts-full-scan, BUG-042). Cancelled sales are included: unapplied money outlives its sale.
+ */
+export const devoladaAttentionFilter = (org: string): SQL =>
+  sql`folios.id in (
+    select dp.folio_id from devolada_payments dp
+    join devolada_links l on l.id = dp.link_id and l.organization_id = dp.organization_id
+    where dp.organization_id = ${org}
+      and dp.status in ('partial', 'invalid', 'unapplied', 'confirmed', 'validating', 'queued_for_credit')
+      and dp.resolution is null
+      and (
+        (dp.status in ('partial', 'invalid') and l.kind = 'settlement')
+        or dp.status = 'unapplied'
+        or (dp.status = 'confirmed' and exists (
+          select 1 from folios fc where fc.id = dp.folio_id and fc.cancelled_at is not null
+        ))
+        or (
+          ((dp.status = 'validating' and dp.awaiting is not null)
+            or dp.status = 'queued_for_credit'
+            or (dp.status = 'validating' and l.state = 'failed'))
+          and not exists (select 1 from folios fc where fc.id = dp.folio_id and fc.cancelled_at is not null)
+          and (l.kind = 'settlement' or exists (
+            select 1 from folio_payments fp where fp.id = l.folio_payment_id and fp.verification = 'pending'
+          ))
+        )
+      )
+  )`
+
+/**
  * devolada-transfer-verification D14 — a sale Devolada is resolving with nothing for the admin to
  * do, so it stays out of «Por verificar» and out of its count (spec clarification of 2026-10-15).
  * Pending verification with a live line, and EVERY pending payment row is collected by an `open`
@@ -55,12 +96,13 @@ export const verificationPendingFilter = (org: string): SQL =>
  * connection: Devolada cannot be asked about it until the admin fixes the key, so the sale waits in
  * «Por verificar» meanwhile (spec clarification of 2026-10-16).
  *
+ * The sale also has no attention item (`devoladaAttentionFilter`), on any of its links.
+ *
  * One predicate for the row flag, the detail and the count, so they cannot disagree. It opens with
  * the candidate set of `verificationPendingFilter` (bug: folio-counts-full-scan), and every
  * correlation after it goes through an index led by the correlated key (BUG-042): folio_payments
  * (organization_id, folio_id), devolada_links (organization_id, folio_id), devolada_payments
- * (link_id) and devolada_connections (organization_id), one row per organization. PR 2 adds the
- * attention clause (T050).
+ * (link_id) and devolada_connections (organization_id), one row per organization.
  */
 export const verificationAutoFilter = (org: string, now: Date): SQL => {
   const nowSec = Math.floor(now.getTime() / 1000)
@@ -95,6 +137,7 @@ export const verificationAutoFilter = (org: string, now: Date): SQL => {
             ), case when l.expires_at > ${nowSec} then 1 else 0 end) = 1
         )
     )`,
+    sql`not (${devoladaAttentionFilter(org)})`,
   )!
 }
 
@@ -165,6 +208,9 @@ export const pendingWorkFilter = (db: Db, org: string, now: Date): SQL =>
     overdueFilter(org, now),
     undeliveredFilter(org),
     requestPendingFilter(db, org),
+    // devolada-transfer-verification D14 — a Devolada payment that needs the admin, cancelled
+    // sales with money to return included.
+    devoladaAttentionFilter(org),
   )!
 
 /**
@@ -192,9 +238,13 @@ export const pendingWorkCountQueries = (db: Db, org: string, now: Date) => {
     // Counted over FOLIOS, not over requests: two pending requests on one folio are one folio to
     // act on, and the pill reads "1 Solicitud" beside a list that shows one row.
     folio_requests: count(requestPendingFilter(db, org)),
-    // devolada-transfer-verification D14 — the sales Devolada is resolving with nothing for the
-    // admin to do: «Por verificar» = verification − verification_auto, in the badge, the bar and Hoy.
+    // devolada-transfer-verification D14 — «Por verificar» = verification − verification_auto +
+    // devolada_attention, in the badge, the bar and Hoy, and each sale counts once:
+    // `verification_auto`, the sales Devolada is resolving with nothing for the admin to do;
+    // `devolada_attention`, the sales with a Devolada payment that needs the admin which
+    // `verification` does not already count — cancelled, or not pending verification.
     verification_auto: count(verificationAutoFilter(org, now)),
+    devolada_attention: count(and(devoladaAttentionFilter(org), sql`not (${verificationPendingFilter(org)})`)!),
   }
 }
 

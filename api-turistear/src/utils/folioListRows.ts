@@ -212,6 +212,8 @@ export interface FolioListRow {
   saleMode: string | null
   /** devolada-transfer-verification D14 — `verificationAutoFilter` as a 0/1 column. */
   verificationAuto: number
+  /** devolada-transfer-verification D14 — `devoladaAttentionFilter` as a 0/1 column. */
+  devoladaAttention: number
 }
 
 export interface FolioListDecorations {
@@ -267,9 +269,11 @@ export const serializeFolioListRow = (r: FolioListRow, deco: FolioListDecoration
     // but none live; null ⇒ none.
     cancellation_request: deco.requestByFolio.get(r.id) ?? null,
     // devolada-transfer-verification D14 — the latest unresolved payment link, otherwise the latest;
-    // and whether Devolada is resolving the sale with nothing for the admin to do.
+    // whether Devolada is resolving the sale with nothing for the admin to do; and whether one of
+    // its Devolada payments needs the admin.
     payment_link: listRowPaymentLink(deco.paymentLinksByFolio.get(r.id)),
     verification_auto: Number(r.verificationAuto) === 1,
+    devolada_attention: Number(r.devoladaAttention) === 1,
     // US-A84 — surfaced per row so the card's time chip need not re-derive the deadline.
     overdue:
       r.status === 'booking' &&
