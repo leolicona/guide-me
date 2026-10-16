@@ -14,6 +14,7 @@ import portalRouter from './routes/portal'
 import posRouter from './routes/pos'
 import { sweepExpiredBookings } from './routes/pos/sweep'
 import { sweepDepartureReminders } from './routes/pos/reminders'
+import { sweepDevoladaPayments } from './routes/devolada/sweep'
 import reportsRouter from './routes/reports'
 import notificationsRouter from './routes/notifications'
 import onboardingRouter from './routes/onboarding'
@@ -119,7 +120,7 @@ app.get('/', (c) => {
 export default {
   fetch: app.fetch,
   scheduled: (
-    _event: ScheduledController,
+    controller: ScheduledController,
     env: CloudflareBindings,
     ctx: ExecutionContext,
   ) => {
@@ -147,6 +148,16 @@ export default {
           ),
         )
         .catch((err) => console.error('[reminders] departure-reminder sweep failed', err)),
+    )
+    // devolada-transfer-verification D12 — the Devolada recovery sweep, a THIRD independent
+    // waitUntil: a lost notification is applied at the next run. `now` is the trigger's own time,
+    // so local validation can advance the clock with `/cdn-cgi/local/scheduled?time=`.
+    ctx.waitUntil(
+      sweepDevoladaPayments(env, new Date(controller.scheduledTime))
+        .then((r) =>
+          console.log(`[devolada] checked=${r.checked} applied=${r.applied} failed=${r.failed}`),
+        )
+        .catch((err) => console.error('[devolada] recovery sweep failed', err)),
     )
   },
 }

@@ -298,3 +298,19 @@ export const insertPayment = async (input: {
     .run()
   return id
 }
+
+/** A bare sale row, for suites that only need a folio id to hang links on (the sweep's volume). */
+export const insertBareFolio = async (organizationId: string, agentId: string) => {
+  const id = crypto.randomUUID()
+  await env.DB.prepare(
+    `INSERT INTO folios (id, organization_id, agent_id, subtotal, total, amount_paid, payment_verification)
+     VALUES (?, ?, ?, 150000, 150000, 150000, 'pending')`,
+  )
+    .bind(id, organizationId, agentId)
+    .run()
+  return id
+}
+
+/** The organization's current credential id. */
+export const currentCredentialId = async (organizationId: string) =>
+  (await connectionRow(organizationId)).current_credential_id as string
