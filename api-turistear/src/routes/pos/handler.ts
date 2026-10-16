@@ -2580,13 +2580,15 @@ export const settleFolioLine = async (c: PosContext) => {
   if (line.cancelledAt) {
     throw new ApiError('LINE_ALREADY_CANCELLED', 409, 'This line is cancelled')
   }
-  // The LINE's own clock guards its own settle (D5) — a sibling's expiry is not this line's fact.
-  if (line.bookingExpiresAt && line.bookingExpiresAt.getTime() <= Date.now()) {
-    throw new ApiError('BOOKING_EXPIRED', 409, 'This line’s hold has expired')
-  }
+  // bug: settled-line-clock-expiry — paid is asked BEFORE the clock: a line paid in full keeps the
+  // clock it was born with, and refusing it as an expired hold names a hold it no longer has.
   const lineRemaining = Math.max(0, line.lineTotal - Math.max(0, Number(line.allocated ?? 0)))
   if (lineRemaining === 0) {
     throw new ApiError('LINE_ALREADY_PAID', 409, 'This line is already fully paid')
+  }
+  // The LINE's own clock guards its own settle (D5) — a sibling's expiry is not this line's fact.
+  if (line.bookingExpiresAt && line.bookingExpiresAt.getTime() <= Date.now()) {
+    throw new ApiError('BOOKING_EXPIRED', 409, 'This line’s hold has expired')
   }
 
   // Same body contract as settleBooking (US-LG03/US-AG41/US-A88): the balance is collected by
