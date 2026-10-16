@@ -33,6 +33,8 @@ import {
 } from './folioStatus'
 import { displayMethodSql, readFolioPayments } from './folioPayments'
 import { deriveOrgKey, verifyTicket, type TicketPayload } from './qr'
+import { loadPaymentLinkViews } from './devoladaLinkView'
+import { verificationAutoFilter } from './folioPendingWork'
 
 export interface FolioDetailOpts {
   /** Scope the read to one seller's own folios (the POS surface). Omit for the admin surface. */
@@ -72,6 +74,7 @@ export const readFolioDetail = async (
   opts: FolioDetailOpts = {},
 ) => {
   const { agentId, qrSecret, apiBaseUrl } = opts
+  const readAt = new Date()
   const folioRows = await db
     .select({
       id: folios.id,
@@ -113,6 +116,8 @@ export const readFolioDetail = async (
       refundedAt: folios.refundedAt,
       refundedBy: folios.refundedBy,
       createdAt: folios.createdAt,
+      // devolada-transfer-verification D14 — the same predicate the list rows and the counts read.
+      verificationAuto: sql<number>`case when ${verificationAutoFilter(readAt)} then 1 else 0 end`,
     })
     .from(folios)
     .innerJoin(users, eq(folios.agentId, users.id))
@@ -254,6 +259,9 @@ export const readFolioDetail = async (
   // US-LG08 — the per-payment breakdown (deposit vs balance, each with its own method).
   const payments = await readFolioPayments(db, org, folioId)
 
+  // devolada-transfer-verification D14 — the sale's payment links, newest first.
+  const paymentLinks = (await loadPaymentLinkViews(db, org, { folioIds: [folioId] })).get(folioId) ?? []
+
   // US-A93 — one verify per signed line, and only where a secret was supplied. The echo is a
   // convenience for the UI; the token itself stays the authority.
   const qrByLine = new Map<string, ReturnType<typeof qrEcho>>()
@@ -374,6 +382,10 @@ export const readFolioDetail = async (
     tickets_viewed_at: tsOrNull(folio.ticketsViewedAt),
     created_at: Math.floor(folio.createdAt.getTime() / 1000),
     payments,
+    // devolada-transfer-verification D14 — every payment link, newest first, labelled by the server;
+    // and whether Devolada is resolving the sale with nothing for the admin to do.
+    payment_links: paymentLinks,
+    verification_auto: Number(folio.verificationAuto) === 1,
     // US-A84 rule 7 — the absorbed request history (newest first). Empty for the vast majority of
     // folios, which is why it costs nothing to always send it.
     folio_requests: requestRows.map((r) => ({

@@ -43,6 +43,57 @@ export const verificationPendingFilter = (): SQL =>
     sql`exists (select 1 from folio_lines fl where fl.folio_id = folios.id and fl.cancelled_at is null)`,
   )!
 
+/**
+ * devolada-transfer-verification D14 — a sale Devolada is resolving with nothing for the admin to
+ * do, so it stays out of «Por verificar» and out of its count (spec clarification of 2026-10-15).
+ * Pending verification with a live line, and EVERY pending payment row is collected by an `open`
+ * link that either waits for its first payment before `expires_at`, or whose current payment is
+ * `validating` without `awaiting` — even past `expires_at`: the customer paid in time and Banxico
+ * has not answered yet. None of those links may use the current credential of a `broken`
+ * connection: Devolada cannot be asked about it until the admin fixes the key, so the sale waits in
+ * «Por verificar» meanwhile (spec clarification of 2026-10-16).
+ *
+ * One predicate for the row flag, the detail and the count, so they cannot disagree. Every
+ * correlation goes through an index led by the correlated key (BUG-042): folio_payments
+ * (organization_id, folio_id), devolada_links (organization_id, folio_id), devolada_payments
+ * (link_id) and devolada_connections (organization_id). PR 2 adds the attention clause (T050).
+ */
+export const verificationAutoFilter = (now: Date): SQL => {
+  const nowSec = Math.floor(now.getTime() / 1000)
+  return and(
+    verificationPendingFilter(),
+    sql`exists (
+      select 1 from folio_payments p
+      where p.organization_id = folios.organization_id and p.folio_id = folios.id
+        and p.verification = 'pending'
+    )`,
+    sql`not exists (
+      select 1 from folio_payments p
+      where p.organization_id = folios.organization_id and p.folio_id = folios.id
+        and p.verification = 'pending'
+        and not exists (
+          select 1 from devolada_links l
+          where l.organization_id = p.organization_id and l.folio_id = p.folio_id
+            and l.folio_payment_id = p.id and l.state = 'open'
+            and not exists (
+              select 1 from devolada_connections dc
+              where dc.organization_id = l.organization_id and dc.status = 'broken'
+                and dc.current_credential_id = l.credential_id
+            )
+            and coalesce((
+              select case
+                when dp.status = 'validating' and dp.awaiting is null then 1
+                else 0
+              end
+              from devolada_payments dp
+              where dp.link_id = l.id and dp.status <> 'superseded'
+              order by dp.devolada_created_at desc, dp.rowid desc limit 1
+            ), case when l.expires_at > ${nowSec} then 1 else 0 end) = 1
+        )
+    )`,
+  )!
+}
+
 /** Cash the company owes back and nobody has confirmed handing over (US-A78). */
 // TECH_DEBT #25 — the debt lives on the lines (D6); pending = any line still owed.
 export const refundPendingFilter = (): SQL =>

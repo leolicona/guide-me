@@ -49,6 +49,7 @@ import {
   readListPortalLinks,
   serializeFolioListRow,
 } from '../../utils/folioListRows'
+import { loadPaymentLinkViews } from '../../utils/devoladaLinkView'
 import {
   DEFAULT_WINDOW_DAYS,
   listWindowFilter,
@@ -56,6 +57,7 @@ import {
   refundPendingFilter,
   requestPendingFilter,
   undeliveredFilter,
+  verificationAutoFilter,
   verificationPendingFilter,
 } from '../../utils/folioPendingWork'
 import {
@@ -225,6 +227,8 @@ export const listFolios = async (c: FoliosContext) => {
       refundAmount: deriveRefundAmountSql,
       // US-A82 — no surface may infer Express from a null name (business rule 4).
       saleMode: folios.saleMode,
+      // devolada-transfer-verification D14 — one predicate for the flag and the count.
+      verificationAuto: sql<number>`case when ${verificationAutoFilter(now)} then 1 else 0 end`,
     })
     .from(folios)
     .innerJoin(users, eq(folios.agentId, users.id))
@@ -248,10 +252,11 @@ export const listFolios = async (c: FoliosContext) => {
   const decorationFilters = hasQuery
     ? [eq(folios.organizationId, org), inArray(folios.id, page.map((r) => r.id))]
     : filters
-  const [linesByFolio, portalLinkByFolio, requestByFolio] = await Promise.all([
+  const [linesByFolio, portalLinkByFolio, requestByFolio, paymentLinksByFolio] = await Promise.all([
     readListLines(db, org, decorationFilters, fulfillmentCtx),
     readListPortalLinks(db, org, decorationFilters, c.env.API_BASE_URL),
     readListCancellationRequests(db, org, decorationFilters),
+    loadPaymentLinkViews(db, org, { filters: decorationFilters }),
   ])
 
   return c.json({
@@ -268,6 +273,7 @@ export const listFolios = async (c: FoliosContext) => {
         linesByFolio,
         portalLinkByFolio,
         requestByFolio,
+        paymentLinksByFolio,
         nowMs: now.getTime(),
       }),
     ),
@@ -297,7 +303,7 @@ export const listFolioCounts = async (c: FoliosContext) => {
     return row?.n ?? 0
   }
 
-  const [verification, refunds, overdue, undelivered, requests] = await Promise.all([
+  const [verification, refunds, overdue, undelivered, requests, verificationAuto] = await Promise.all([
     countWhere(verificationPendingFilter()),
     countWhere(refundPendingFilter()),
     countWhere(overdueFilter(now)),
@@ -305,10 +311,14 @@ export const listFolioCounts = async (c: FoliosContext) => {
     // Counted over FOLIOS, not over requests: two pending requests on one folio are one folio to
     // act on, and the pill reads "1 Solicitud" beside a list that shows one row.
     countWhere(requestPendingFilter(db, org)),
+    // devolada-transfer-verification D14 — the sales Devolada is resolving with nothing for the admin
+    // to do: «Por verificar» = verification − verification_auto, in the badge, the bar and Hoy.
+    countWhere(verificationAutoFilter(now)),
   ])
 
   return c.json({
     verification,
+    verification_auto: verificationAuto,
     folio_requests: requests,
     refunds,
     overdue,

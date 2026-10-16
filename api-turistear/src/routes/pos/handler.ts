@@ -91,6 +91,10 @@ import {
 import { cancelFolioLinesPriced, cancelFolioPriced, queueCancellationEmail, quoteCancellation, serializeQuote } from '../folios/handler'
 // devolada-transfer-verification D10 — verification cores shared with Devolada's webhook and sweep.
 import { releaseClearedFolio, verifyFolioPayment } from './verifyCore'
+import { readConnectionSummary } from '../devolada/connection'
+import { loadPaymentLinkViews } from '../../utils/devoladaLinkView'
+import { verificationAutoFilter } from '../../utils/folioPendingWork'
+import { issuePaymentLink, type IssueLinkResult } from '../devolada/links'
 
 export type PosContext = Context<{
   Bindings: CloudflareBindings
@@ -998,6 +1002,9 @@ export const confirmSale = async (c: PosContext) => {
     .where(eq(organizations.id, org))
     .limit(1)
   const orgRow = orgRows[0]
+  // devolada-transfer-verification D6 — the organization's Devolada connection, read next to its
+  // row: a transfer of a connected organization is collected by a payment link.
+  const devolada = await readConnectionSummary(db, org)
   const weekendDays = parseCsvInts(orgRow?.lodgingWeekendDays ?? '5,6')
   // US-A66 — every wall-clock comparison below (cutoff, same-day booking grace, ticket expiry)
   // resolves in the org's time zone.
@@ -1399,12 +1406,18 @@ export const confirmSale = async (c: PosContext) => {
   // (verifyPayment). Cash clears immediately, exactly as before. `cleared` = the money is usable now.
   const method = input.payment_method ?? 'cash'
   const needsVerification = method === 'transfer'
+  // devolada-transfer-verification D6, FR-009 — a CONNECTED organization's full sale by transfer is
+  // collected by a payment link: the seller sends no reference, and one that is sent is not stored.
+  // A `broken` connection keeps today's rule, since its seller sees the field; a deposit keeps the
+  // manual path, reference rule included, until deposits get their link (PR 2).
+  const collectsByLink = needsVerification && !isBooking && devolada.status === 'connected'
   // US-AG41, relaxed by US-A88 — a transfer must carry its bank reference unless the org switched
   // the requirement off (`payment_reference_required`). Formerly a schema refine; it lives here now
   // because it reads the org row. Optionality never weakens verification: an unreferenced transfer
   // still lands `pending` below with its QR deferred.
   if (
     needsVerification &&
+    !collectsByLink &&
     (orgRow?.paymentReferenceRequired ?? true) &&
     !input.payment_reference
   ) {
@@ -1414,6 +1427,7 @@ export const confirmSale = async (c: PosContext) => {
       'A payment reference is required for a bank transfer',
     )
   }
+  const storedReference = needsVerification && !collectsByLink ? (input.payment_reference ?? null) : null
   const cleared = !needsVerification
   const paymentVerification: 'not_required' | 'pending' = needsVerification
     ? 'pending'
@@ -1495,7 +1509,7 @@ export const confirmSale = async (c: PosContext) => {
       // US-LG08 — the folio no longer stores a payment method; it is DERIVED from the ledger's
       // collection rows (the payment row written below), shown as the shared method or 'Mixto'.
       // US-AG41/US-A67 — the transfer's reference + the verification gate (see `cleared` above).
-      paymentReference: needsVerification ? (input.payment_reference ?? null) : null,
+      paymentReference: storedReference,
       paymentVerification,
       subtotal,
       discountTotal,
@@ -1805,7 +1819,7 @@ export const confirmSale = async (c: PosContext) => {
       folioId,
       amount: amountPaid,
       method,
-      reference: needsVerification ? (input.payment_reference ?? null) : null,
+      reference: storedReference,
       verification: paymentVerification,
       collectedBy: agent.userId,
     }),
@@ -1958,15 +1972,54 @@ export const confirmSale = async (c: PosContext) => {
     event: isBooking ? 'booking_created' : 'tickets_delivered',
     hasEmail: !!input.customer_email,
   })
+
+  // devolada-transfer-verification D6 — the transfer's payment link, issued AFTER the sale's batch
+  // committed (constitution VIII). Every transfer of an organization with a current credential
+  // leaves a link row; when none could be created the sale stays on today's manual path and the
+  // answer says why. A failure here never turns a committed sale into a 500.
+  let linkResult: IssueLinkResult | null = null
+  if (needsVerification && !isBooking && (devolada.status === 'connected' || devolada.status === 'broken')) {
+    const first = prepared[0]
+    try {
+      linkResult = await issuePaymentLink(
+        { db, env: c.env },
+        {
+          organizationId: org,
+          folioId,
+          folioPaymentId: salePaymentId,
+          folioLineId: null,
+          kind: 'sale',
+          amount: amountPaid,
+          requestedBy: agent.userId,
+          customerName: input.customer_name ?? null,
+          concept: first
+            ? `${orgName} · ${first.serviceName} ${first.slotDate ?? first.checkIn ?? ''}`.trim()
+            : orgName,
+        },
+      )
+    } catch (err) {
+      console.error('[devolada] link issuance failed after the sale committed', folioId, err)
+      linkResult = { link: null, error: 'DEVOLADA_UNAVAILABLE' }
+    }
+  }
+  const linkFields =
+    linkResult && (linkResult.link || linkResult.error)
+      ? {
+          payment_link: linkResult.link,
+          ...(linkResult.link ? {} : { payment_link_error: linkResult.error }),
+        }
+      : {}
+
   return c.json(
     {
+      ...linkFields,
       folio: {
         id: folioId,
         status,
         payment_method: method,
         // US-AG41/US-A67 — the transfer reference + verification gate. A pending folio has no QR
         // and its delivery is blocked until an admin verifies (portal_link stays null here).
-        payment_reference: needsVerification ? (input.payment_reference ?? null) : null,
+        payment_reference: storedReference,
         payment_verification: paymentVerification,
         customer_name: input.customer_name ?? null,
         customer_email: input.customer_email ?? null,
@@ -3484,6 +3537,8 @@ export const listAgentFolios = async (c: PosContext) => {
       agentName: users.name,
       agentId: folios.agentId,
       saleMode: folios.saleMode,
+      // devolada-transfer-verification D14 — the seller reads the same flag the admin reads.
+      verificationAuto: sql<number>`case when ${verificationAutoFilter(now)} then 1 else 0 end`,
     })
     .from(folios)
     .innerJoin(users, eq(folios.agentId, users.id))
@@ -3509,10 +3564,11 @@ export const listAgentFolios = async (c: PosContext) => {
   }
   // The decorations read the SAME filters, so they cover the page by construction — never a
   // second, differently-scoped query.
-  const [linesByFolio, portalLinkByFolio, requestByFolio] = await Promise.all([
+  const [linesByFolio, portalLinkByFolio, requestByFolio, paymentLinksByFolio] = await Promise.all([
     readListLines(db, org, filters, fulfillmentCtx),
     readListPortalLinks(db, org, filters, c.env.API_BASE_URL),
     readListCancellationRequests(db, org, filters),
+    loadPaymentLinkViews(db, org, { filters }),
   ])
 
   return c.json({
@@ -3527,6 +3583,7 @@ export const listAgentFolios = async (c: PosContext) => {
         linesByFolio,
         portalLinkByFolio,
         requestByFolio,
+        paymentLinksByFolio,
         nowMs: now.getTime(),
       }),
     ),

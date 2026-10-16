@@ -4,9 +4,15 @@ import { getDb } from '../../db/client'
 import { organizations } from '../../db/schema'
 import { ApiError } from '../../types/errors'
 import type { AppVariables } from '../../types/context'
-import type { UpdateOrganizationInput } from './schema'
+import type { ConnectDevoladaInput, UpdateOrganizationInput } from './schema'
 import { parseCancellationPolicy } from '../../utils/cancellationPolicy'
 import { bookingExpiryEpoch } from '../pos/handler'
+import {
+  connectDevolada,
+  disconnectDevolada,
+  readConnectionSummary,
+  readConnectionView,
+} from '../devolada/connection'
 
 type OrganizationsContext = Context<{
   Bindings: CloudflareBindings
@@ -107,7 +113,10 @@ export const getMyOrganization = async (c: OrganizationsContext) => {
     throw new ApiError('INTERNAL_ERROR', 500, 'Organization not found')
   }
 
-  return c.json({ organization: serializeOrg(org) })
+  // devolada-transfer-verification D1 — every role reads this payload, so it carries only the
+  // connection's status and mode, read on their own: never a credential column in `orgColumns`.
+  const devolada = await readConnectionSummary(db, user.organizationId)
+  return c.json({ organization: { ...serializeOrg(org), devolada } })
 }
 
 // US-A46 — admin updates the org booking policy. Org-scoped (the id comes from context); takes
@@ -286,5 +295,40 @@ export const updateMyOrganization = async (c: OrganizationsContext) => {
     .where(eq(organizations.id, user.organizationId))
     .limit(1)
 
-  return c.json({ organization: serializeOrg(result[0]!) })
+  const devolada = await readConnectionSummary(db, user.organizationId)
+  return c.json({ organization: { ...serializeOrg(result[0]!), devolada } })
+}
+
+// ─── devolada-transfer-verification — the organization's Devolada connection (admin only) ────────
+// contracts/turistear-api.md § Connection; research D1-D3, D21. The organization always comes from
+// the session (constitution III).
+
+export const getMyDevolada = async (c: OrganizationsContext) => {
+  const user = c.get('user')
+  const connection = await readConnectionView({ db: getDb(c.env), env: c.env }, user.organizationId)
+  return c.json({ connection })
+}
+
+export const connectMyDevolada = async (c: OrganizationsContext) => {
+  const user = c.get('user')
+  const input = c.req.valid('json' as never) as ConnectDevoladaInput
+  const connection = await connectDevolada(
+    { db: getDb(c.env), env: c.env },
+    {
+      organizationId: user.organizationId,
+      adminId: user.userId,
+      apiKey: input.api_key.trim(),
+      replaceWebhook: input.replace_webhook ?? false,
+    },
+  )
+  return c.json({ connection })
+}
+
+export const disconnectMyDevolada = async (c: OrganizationsContext) => {
+  const user = c.get('user')
+  const connection = await disconnectDevolada(
+    { db: getDb(c.env), env: c.env },
+    { organizationId: user.organizationId, adminId: user.userId },
+  )
+  return c.json({ connection })
 }

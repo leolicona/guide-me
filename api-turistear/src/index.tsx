@@ -20,6 +20,7 @@ import onboardingRouter from './routes/onboarding'
 import servicesRouter from './routes/services'
 import ticketRouter from './routes/ticket'
 import ticketsRouter from './routes/tickets'
+import webhooksRouter from './routes/webhooks'
 import type { AppVariables } from './types/context'
 
 // passkey-auth D2, R14 — keep the BFF: the HttpOnly cookie alone authenticates, so no answer may
@@ -89,6 +90,8 @@ app.route('/api/cash', cashRouter)
 app.route('/api/reports', reportsRouter)
 app.route('/api/dashboard', dashboardRouter)
 app.route('/api/notifications', notificationsRouter)
+// devolada-transfer-verification D4 — public: Devolada proves itself with its signature.
+app.route('/api/webhooks', webhooksRouter)
 
 app.get('/api/me', authMiddleware, (c) => c.json({ user: c.get('user') }))
 
