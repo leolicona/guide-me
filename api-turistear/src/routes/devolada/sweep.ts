@@ -269,4 +269,3 @@ async function eraseRetiredCredentials(db: Db, now: Date): Promise<void> {
       )
   }
 }
-
