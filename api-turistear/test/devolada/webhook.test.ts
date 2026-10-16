@@ -4,7 +4,8 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { env, SELF } from 'cloudflare:test'
 import { stubResend, type SentEmail } from '../helpers/auth-flows'
-import { installFakeDevolada, type FakeDevolada } from '../helpers/devolada'
+import { installFakeDevolada, WEBHOOK_REQUEST_URL, type FakeDevolada } from '../helpers/devolada'
+import { readCappedBody } from '../../src/routes/webhooks'
 import {
   call,
   clearDevoladaDb,
@@ -80,6 +81,24 @@ describe('a delivery that is not trusted changes nothing (D4)', () => {
     const res = await deliver(await fake.signedRaw(big))
     expect(res.status).toBe(400)
     expect(fake.callsTo('jwks')).toHaveLength(0)
+  })
+
+  it('a body streamed without a length is read only up to 64 KiB', async () => {
+    const chunk = new TextEncoder().encode('x'.repeat(16 * 1024))
+    let pulled = 0
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        // Far more than the limit: the reader must stop on its own.
+        if (pulled >= 64) return controller.close()
+        pulled += 1
+        controller.enqueue(chunk)
+      },
+    })
+    const req = new Request(WEBHOOK_REQUEST_URL, { method: 'POST', body })
+    expect(await readCappedBody(req, 64 * 1024)).toBeNull()
+    expect(pulled).toBeLessThan(64)
+    const small = new Request(WEBHOOK_REQUEST_URL, { method: 'POST', body: '{"ok":true}' })
+    expect(await readCappedBody(small, 64 * 1024)).toBe('{"ok":true}')
   })
 
   it('an unknown link is 200 and writes nothing', async () => {

@@ -127,8 +127,8 @@ async function sweepOrganization(
     return credentials.get(link.credentialId) ?? null
   }
 
-  // Grouped by sale, then by credential: one `GET /v1/payments?customerRef=` answers every link of
-  // the sale that credential can see. Groups keep the order the selection gave.
+  // Grouped by sale, then by credential: one read of the sale's payments by customer reference
+  // answers every link of the sale that credential can see. Groups keep the order the selection gave.
   const groups = new Map<string, DevoladaLink[]>()
   for (const link of links) {
     const key = `${link.folioId}|${link.credentialId}`
@@ -240,15 +240,20 @@ async function applySaleRead(
  * are read across organizations; each erase is guarded again by its own organization and by the
  * same condition, read through the `(credential_id, state)` index.
  */
-async function eraseRetiredCredentials(db: Db, now: Date): Promise<void> {
-  const noUnresolvedLink = sql`not exists (
-    select 1 from devolada_links dl
-    where dl.credential_id = ${devoladaCredentials.id} and ${unresolvedLinkSql('dl')}
-  )`
-  const candidates = await db
+const noUnresolvedLink = sql`not exists (
+  select 1 from devolada_links dl
+  where dl.credential_id = ${devoladaCredentials.id} and ${unresolvedLinkSql('dl')}
+)`
+
+/** The retired, unerased credentials with no unresolved link, across organizations. */
+export const erasableCredentialsQuery = (db: Db) =>
+  db
     .select({ id: devoladaCredentials.id, organizationId: devoladaCredentials.organizationId })
     .from(devoladaCredentials)
     .where(and(isNotNull(devoladaCredentials.retiredAt), isNull(devoladaCredentials.erasedAt), noUnresolvedLink))
+
+async function eraseRetiredCredentials(db: Db, now: Date): Promise<void> {
+  const candidates = await erasableCredentialsQuery(db)
   for (const credential of candidates) {
     await db
       .update(devoladaCredentials)

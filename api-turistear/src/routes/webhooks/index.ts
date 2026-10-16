@@ -12,15 +12,41 @@ import { devoladaWebhookEventSchema } from './schema'
 //   3. parse and validate the event.
 const MAX_BODY_BYTES = 64 * 1024
 
+const tooLarge = () => new ApiError('WEBHOOK_PAYLOAD_INVALID', 400, 'The body exceeds 64 KiB')
+
+/**
+ * The raw body, read up to `max` bytes; null past them. The endpoint is public, and a body sent
+ * without a length, or with a false one, is cut off at the limit instead of being held whole in
+ * memory first.
+ */
+export async function readCappedBody(req: Request, max: number): Promise<string | null> {
+  if (!req.body) return ''
+  const reader = req.body.getReader()
+  const chunks: Uint8Array[] = []
+  let size = 0
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    size += value.byteLength
+    if (size > max) {
+      await reader.cancel()
+      return null
+    }
+    chunks.push(value)
+  }
+  const bytes = new Uint8Array(size)
+  let offset = 0
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset)
+    offset += chunk.byteLength
+  }
+  return new TextDecoder().decode(bytes)
+}
+
 const verifiedDevoladaEvent: MiddlewareHandler<WebhooksEnv> = async (c, next) => {
-  const declared = Number(c.req.header('content-length') ?? 0)
-  if (declared > MAX_BODY_BYTES) {
-    throw new ApiError('WEBHOOK_PAYLOAD_INVALID', 400, 'The body exceeds 64 KiB')
-  }
-  const rawBody = await c.req.text()
-  if (new TextEncoder().encode(rawBody).byteLength > MAX_BODY_BYTES) {
-    throw new ApiError('WEBHOOK_PAYLOAD_INVALID', 400, 'The body exceeds 64 KiB')
-  }
+  if (Number(c.req.header('content-length') ?? 0) > MAX_BODY_BYTES) throw tooLarge()
+  const rawBody = await readCappedBody(c.req.raw, MAX_BODY_BYTES)
+  if (rawBody === null) throw tooLarge()
 
   let verified: boolean
   try {

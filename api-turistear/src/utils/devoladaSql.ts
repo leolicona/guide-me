@@ -19,8 +19,8 @@ export const currentPaymentStatusSql = (linkId: SQL): SQL =>
 
 /**
  * A link that something may still happen to at Devolada: creating, open, closing or abandoned,
- * or closed while its current payment is in flight (data-model § devolada_links). `alias` names
- * the outer `devolada_links` row.
+ * or closed while its current payment is in flight (data-model § devolada_links). Its credential is
+ * kept until none is left (research D12, D21). `alias` names the outer `devolada_links` row.
  */
 export const unresolvedLinkSql = (alias: string): SQL => {
   const a = sql.raw(alias)

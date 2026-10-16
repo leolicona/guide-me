@@ -154,6 +154,40 @@ export const toPaymentLinkView = (
  */
 export type LinkViewScope = { folioIds: string[] } | { filters: SQL[] }
 
+const folioScope = (
+  organizationId: string,
+  scope: LinkViewScope,
+  folioIdColumn: typeof devoladaLinks.folioId | typeof devoladaPayments.folioId,
+): (SQL | undefined)[] =>
+  'folioIds' in scope
+    ? [inArray(folioIdColumn, scope.folioIds), eq(folios.organizationId, organizationId)]
+    : scope.filters
+
+/** The scoped sales' links, newest first; the rowid keeps two links of one second in write order. */
+export const paymentLinkRowsQuery = (db: Db, organizationId: string, scope: LinkViewScope) =>
+  db
+    .select({ link: devoladaLinks, cancelledAt: folios.cancelledAt })
+    .from(devoladaLinks)
+    .innerJoin(folios, eq(folios.id, devoladaLinks.folioId))
+    .where(
+      and(eq(devoladaLinks.organizationId, organizationId), ...folioScope(organizationId, scope, devoladaLinks.folioId)),
+    )
+    .orderBy(sql`${devoladaLinks.createdAt} desc`, sql`devolada_links.rowid desc`)
+
+/** The scoped sales' Devolada payments, oldest first, for `currentPaymentOf`. */
+export const linkPaymentRowsQuery = (db: Db, organizationId: string, scope: LinkViewScope) =>
+  db
+    .select({ payment: devoladaPayments })
+    .from(devoladaPayments)
+    .innerJoin(folios, eq(folios.id, devoladaPayments.folioId))
+    .where(
+      and(
+        eq(devoladaPayments.organizationId, organizationId),
+        ...folioScope(organizationId, scope, devoladaPayments.folioId),
+      ),
+    )
+    .orderBy(asc(devoladaPayments.devoladaCreatedAt), sql`devolada_payments.rowid asc`)
+
 /**
  * Every payment link of the scoped sales, newest first, as the contract's `PaymentLinkView`. One
  * query for the links and one for their payments, both scoped by organization and backed by the
@@ -166,28 +200,10 @@ export async function loadPaymentLinkViews(
 ): Promise<Map<string, PaymentLinkView[]>> {
   const out = new Map<string, PaymentLinkView[]>()
   if ('folioIds' in scope && scope.folioIds.length === 0) return out
-  const folioScope = (folioIdColumn: typeof devoladaLinks.folioId | typeof devoladaPayments.folioId) =>
-    'folioIds' in scope
-      ? [inArray(folioIdColumn, scope.folioIds), eq(folios.organizationId, organizationId)]
-      : scope.filters
 
-  const linkRows = await db
-    .select({ link: devoladaLinks, cancelledAt: folios.cancelledAt })
-    .from(devoladaLinks)
-    .innerJoin(folios, eq(folios.id, devoladaLinks.folioId))
-    .where(and(eq(devoladaLinks.organizationId, organizationId), ...folioScope(devoladaLinks.folioId)))
-    // Newest first; the rowid keeps two links of one second in the order they were written.
-    .orderBy(sql`${devoladaLinks.createdAt} desc`, sql`devolada_links.rowid desc`)
+  const linkRows = await paymentLinkRowsQuery(db, organizationId, scope)
   if (linkRows.length === 0) return out
-
-  const paymentRows = await db
-    .select({ payment: devoladaPayments })
-    .from(devoladaPayments)
-    .innerJoin(folios, eq(folios.id, devoladaPayments.folioId))
-    .where(
-      and(eq(devoladaPayments.organizationId, organizationId), ...folioScope(devoladaPayments.folioId)),
-    )
-    .orderBy(asc(devoladaPayments.devoladaCreatedAt), sql`devolada_payments.rowid asc`)
+  const paymentRows = await linkPaymentRowsQuery(db, organizationId, scope)
 
   const paymentsByLink = new Map<string, DevoladaPayment[]>()
   for (const { payment } of paymentRows) {

@@ -474,29 +474,31 @@ export interface DevoladaConnectionView {
 const sec = (d: Date | null): number | null => (d ? Math.floor(d.getTime() / 1000) : null)
 
 /**
- * D21 — each retired credential not yet erased that still has unresolved links, with how many, so
- * the admin knows not to revoke it at Devolada yet. Read through the `(credential_id, state)` index.
+ * D21 — each retired credential not yet erased, with how many unresolved links it still serves, so
+ * the admin knows not to revoke it at Devolada yet; the caller keeps those with any. It starts from
+ * the organization's few retired credentials and counts each one's links through the
+ * `(credential_id, state)` index, as the sweep's cleanup does, instead of reading every link the
+ * organization ever issued (BUG-042). A link's credential is always one of its own organization's
+ * (D21), so the credential id scopes the count. The outer column is spelled out: in a one-table
+ * select list drizzle renders `${devoladaCredentials.id}` as a bare "id", which inside the
+ * subquery would name the link's own id.
  */
-async function readPreviousKeys(db: Db, organizationId: string) {
-  return db
+export const previousKeysQuery = (db: Db, organizationId: string) =>
+  db
     .select({
       key_hint: devoladaCredentials.keyHint,
-      pending_links: sql<number>`count(*)`,
+      pending_links: sql<number>`(select count(*) from devolada_links dl
+        where dl.credential_id = devolada_credentials.id and ${unresolvedLinkSql('dl')})`,
     })
     .from(devoladaCredentials)
-    .innerJoin(devoladaLinks, eq(devoladaLinks.credentialId, devoladaCredentials.id))
     .where(
       and(
         eq(devoladaCredentials.organizationId, organizationId),
         isNotNull(devoladaCredentials.retiredAt),
         isNull(devoladaCredentials.erasedAt),
-        eq(devoladaLinks.organizationId, organizationId),
-        unresolvedLinkSql('devolada_links'),
       ),
     )
-    .groupBy(devoladaCredentials.id)
     .orderBy(desc(devoladaCredentials.retiredAt))
-}
 
 /**
  * The admin's view of the connection (contract § DevoladaConnectionView), or null when the
@@ -540,10 +542,9 @@ export async function readConnectionView(
   }
 
   const { connection } = row
-  const previousKeys = (await readPreviousKeys(db, organizationId)).map((k) => ({
-    key_hint: k.key_hint,
-    pending_links: Number(k.pending_links),
-  }))
+  const previousKeys = (await previousKeysQuery(db, organizationId))
+    .map((k) => ({ key_hint: k.key_hint, pending_links: Number(k.pending_links) }))
+    .filter((k) => k.pending_links > 0)
   const base = {
     status: connection.status,
     mode: connection.status === 'disconnected' ? null : (row.mode ?? null),
