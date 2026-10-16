@@ -42,10 +42,12 @@
   SC-009. One default was added in the same pass: an unpaid **settlement** returns the sale to an
   apartado instead of cancelling it, because a sale holding cleared money is never cancelled
   automatically. All items pass; the spec is ready for `/speckit-plan`.
-- **Accepted exception to "no implementation details"**: Context names three test files as the
-  scope boundary. Constitution I requires the boundary as a mechanical test naming the suites that
-  must pass unedited, and the constitution supersedes the template's guidance. Nothing else in the
-  spec names a technology.
+- **Accepted exceptions to "no implementation details"**: Context names three test files as the
+  scope boundary, because constitution I requires the boundary as a mechanical test naming the
+  suites that must pass unedited. FR-023 names the error codes, because constitution IV requires
+  every code to be declared in the spec before it exists in code, as specs/004-passkey-auth did in
+  its FR-070. The constitution supersedes the template's guidance. Nothing else in the spec names a
+  technology.
 - Devolada's own vocabulary (*confirmed*, *partial*, *invalid*, *expired*, *unapplied*,
   *superseded*, CLABE, CEP) is used deliberately: it is the provider's business language, which
   the admin will see, not an implementation choice. Its contract is kept verbatim in
@@ -65,3 +67,66 @@
   until the admin has something to do (FR-015 gained that sentence, and US1 scenario 2 now names
   the right labels), and a link's 24-hour lifetime is confirmed, with the stay rule stated in the
   Assumptions. All items still pass.
+- **/speckit-analyze, second run (2026-10-15)**, after the PR merged into `main`, found no CRITICAL
+  item, and 4 HIGH, 10 MEDIUM and 12 LOW items. All were resolved in place. The developer took the
+  three recommended decisions, recorded under `## Clarifications` (Session 2026-10-15):
+  - a link that would stay open less than 15 minutes is not created (FR-010, Assumptions);
+  - a link is never closed under a payment being verified while the sale lives (FR-011, US4
+    scenarios 4-5);
+  - the UI's word for the link is «enlace» (FR-022).
+
+  FR-007 now says *transfer* where it said *electronic payment*, and FR-023 declares the error
+  codes. All items still pass.
+- **/speckit-analyze, third run (2026-10-15)** found no CRITICAL item, and 2 HIGH, 2 MEDIUM and
+  4 LOW items. All were resolved in place. The developer decided three more clarifications
+  (Session 2026-10-15):
+  - the admin may switch Devolada accounts at any time, because each link is followed with the key
+    that created it (FR-004, research D21);
+  - «Verificar» records a settlement by hand, also while Devolada is still verifying it (FR-018, US3
+    scenario 5);
+  - a disconnected organization's pending links still clear by notification (FR-004).
+
+  US4's Independent Test now uses an apartado, because a pending transfer sale cannot be cancelled.
+  All items still pass.
+- **/speckit-analyze, fourth run (2026-10-15)** found no CRITICAL item, and 3 HIGH, 7 MEDIUM and
+  9 LOW items. All were resolved in place. The developer decided two more clarifications (Session
+  2026-10-15):
+  - a payment whose sale was cancelled or rejected while it was being verified is followed to its
+    verdict, by notification and by the system's own checks, with its key kept until then (FR-004,
+    FR-012);
+  - an apartado whose settlement payment awaits the admin's decision does not expire by its clock,
+    and «Verificar» records that settlement even after the clock ran out (FR-016, FR-018, US3
+    scenario 6).
+
+  US2 scenario 5 now covers a lost notification, and FR-013 compares a notification's mode with its
+  link's. All items still pass.
+- **/speckit-analyze, fifth run (2026-10-15)** found no CRITICAL item, and 1 HIGH, 2 MEDIUM and
+  4 LOW items. All were resolved in place. The developer extended the last clarification to the
+  deposit: an apartado whose deposit payment awaits the admin's decision does not expire by its
+  clock either (FR-016, US3 scenario 7). FR-011 and US4 scenarios 2 and 4 now state the per-line
+  rules the fourth run gave D13. All items still pass.
+- **/speckit-analyze, sixth run (2026-10-16)** found no CRITICAL item, and 1 HIGH, 4 MEDIUM and
+  4 LOW items. All were resolved in place. The developer decided three clarifications (Session
+  2026-10-16):
+  - any transfer deposit collected by an enlace that is not verified yet keeps its apartado from
+    expiring, whatever happened to the enlace (FR-016, US3 scenario 7);
+  - the admin learns that the connection broke in Ajustes only, and sellers at checkout;
+  - every transfer stays verified through its enlace with Devolada, as already defined: the
+    previous account's key stays valid until its enlaces finish, and if it is revoked anyway, a
+    cancelled sale has nothing left to follow.
+
+  D21's fallback now applies to retired keys only, and FR-004 and FR-011 were reworded. All items
+  still pass.
+- **/speckit-analyze, seventh run (2026-10-16)** found no CRITICAL item, and 1 HIGH, 4 MEDIUM and
+  4 LOW items. All were resolved in place. The developer decided three more clarifications
+  (Session 2026-10-16):
+  - when no enlace can be created (too little time, a broken connection or an unreadable key), a
+    failed enlace is still recorded without calling Devolada, so the admin sees the sale and an
+    apartado's deposit keeps it waiting (FR-010, FR-016);
+  - while Devolada rejects the current key, the sales whose enlaces use it return to Por verificar
+    (FR-015);
+  - Ajustes says how many enlaces a previous key still has, and asks the admin not to revoke it at
+    Devolada until they finish (FR-005).
+
+  The Assumptions now define an apartado's clock and its release time, and FR-016 and US3 use them;
+  US3 scenario 8 states that a settlement of one line holds only that line. All items still pass.
