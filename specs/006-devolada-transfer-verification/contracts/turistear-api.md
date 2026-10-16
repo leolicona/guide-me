@@ -62,7 +62,7 @@ none of the new response keys on checkout or settle.
 |---|---|---|---|
 | `link_failed` | state `failed`, `abandoned` or `creating` (no usable link) | Sin enlace de pago — verificar a mano | warning |
 | `confirmed` | payment `confirmed` | Pago confirmado | paid |
-| `unapplied` | payment `unapplied`, or `confirmed` on a cancelled sale | Dinero recibido sin venta | warning |
+| `unapplied` | payment `unapplied`, or `confirmed` on a cancelled sale | Dinero por devolver | warning |
 | `partial` | payment `partial` | Pago incompleto | warning |
 | `invalid` | payment `invalid` | Banxico no confirma la transferencia | error |
 | `not_received` | payment `expired`, or state `expired` | No se recibió la transferencia | error |
@@ -87,6 +87,7 @@ never appear (research D16).
 | Ajustes card, key hint | Clave …abcd |
 | Ajustes card, health | Avisos funcionando · Avisos con fallas · Verificación en pausa · Avisos: solo revisión periódica (when `is_ours` is `null`) |
 | Ajustes card, last verdict | Último veredicto: {fecha y hora} |
+| Ajustes card, one line per entry of `previous_keys` | La clave anterior …abcd todavía tiene N enlaces pendientes. No la revoques en Devolada hasta que terminen. (with 1: «… tiene 1 enlace pendiente …») |
 | Ajustes, the reference switch while connected | Con Devolada conectado, las transferencias se cobran con enlace de pago |
 | Connect sheet, field and submit | Clave de API de Devolada · Conectar |
 | Address conflict, confirm | ¿Reemplazar la dirección de avisos? |
@@ -149,6 +150,7 @@ The connect sheet maps each refusal to copy. A broken connection's reason reuses
   "broken_reason": null,
   "last_verdict_at": 1791290000,
   "credit_paused_since": null,
+  "previous_keys": [{ "key_hint": "9f3c", "pending_links": 2 }],
   "webhook": {
     "url": "https://api.turistearya.com/api/webhooks/devolada",
     "is_ours": true,
@@ -161,6 +163,7 @@ The connect sheet maps each refusal to copy. A broken connection's reason reuses
 ```
 
 - `mode` and `key_hint` are the current credential's. While disconnected there is no current credential, so `mode`, `key_hint`, `webhook` and `health_error` are all `null` (research D21).
+- `previous_keys` lists each retired credential that still has unresolved links, with how many (`pending_links`), so the admin knows not to revoke it at Devolada yet. It is `[]` when there is none, and it is kept while disconnected too (research D21; spec clarification of 2026-10-16).
 - `webhook` is read live from Devolada with an 8 s limit. When Devolada cannot be reached, `webhook` is `null` and `health_error` is `"DEVOLADA_UNAVAILABLE"`. Health never fails the request.
 - `webhook.is_ours` is `null` where this environment registers no address (`DEVOLADA_WEBHOOK_URL` empty: local and pull-request previews). There, verdicts arrive only through the sweep, which is expected rather than a failure (research D3, D17).
 
@@ -214,7 +217,7 @@ Replacing the key, even with another Devolada business's, retires the previous c
 
 The request is unchanged. For a connected organization with `"payment_method": "transfer"`, `payment_reference` is neither required nor stored (FR-009).
 
-The 201 response is unchanged for everyone else. For a connected organization's transfer sale:
+The 201 response is unchanged for everyone else. For the transfer sale of an organization whose connection is `connected` or `broken`:
 
 ```json
 {
@@ -224,7 +227,8 @@ The 201 response is unchanged for everyone else. For a connected organization's 
 }
 ```
 
-- `payment_link_error` is present only when `payment_link` is `null`. Its values are `DEVOLADA_UNAVAILABLE`, `DEVOLADA_CREDENTIAL_REJECTED`, `DEVOLADA_BUSINESS_SUSPENDED`, `DEVOLADA_CHANNEL_UNAVAILABLE`, and `PAYMENT_LINK_TOO_SHORT` when the link would stay open less than 15 minutes (research D7). That last one writes no link and calls nothing at Devolada.
+- `payment_link_error` is present only when `payment_link` is `null`. Its values are `DEVOLADA_UNAVAILABLE`, `DEVOLADA_CREDENTIAL_REJECTED`, `DEVOLADA_BUSINESS_SUSPENDED`, `DEVOLADA_CHANNEL_UNAVAILABLE`, and `PAYMENT_LINK_TOO_SHORT` when the link would stay open less than 15 minutes (research D7). A `broken` connection answers its `broken_reason`.
+- Every one of them leaves the sale's link `failed`, or `abandoned` after a timeout, so the sale's `payment_links` show «Sin enlace de pago — verificar a mano». `PAYMENT_LINK_TOO_SHORT`, a `broken` connection and a credential this environment cannot read call nothing at Devolada (research D6).
 - The sale then stays on today's manual path (FR-010).
 - These values are a fallback signal, not an HTTP error: the request succeeded.
 - The idempotent replay (200 `{ folio, replayed: true }`) returns the sale with `payment_links`.
@@ -238,7 +242,7 @@ For a connected organization with `"method": "transfer"`, no settlement is recor
 ```
 
 - **Link already open** (one per sale, D8): a transfer settlement for the same scope as the open link (the same line, or the whole sale) returns that link. Any other transfer settlement answers 409 `SETTLEMENT_IN_PROGRESS`: another line, the whole sale while one line's link is open, or one line while the whole sale's link is open.
-- **Link cannot be created**: today's manual settlement is recorded instead, and `payment_link_error` says why (FR-010), `PAYMENT_LINK_TOO_SHORT` included, as for a settlement after departure.
+- **Link cannot be created**: today's manual settlement is recorded instead, a `failed` link records the attempt, and `payment_link_error` says why (FR-010), `PAYMENT_LINK_TOO_SHORT` included, as for a settlement after departure. A settlement of one line is bounded by that line's own start and clock (research D7).
 - **Guards and error codes**: as today (`ALREADY_SETTLED`, `FOLIO_CANCELLED`, `BOOKING_EXPIRED`, …).
 - **Cash settlement while a settlement link is open**: it closes the link when it settles part of what the link collects (D13): any cash settlement closes a whole-sale link, and one line's link closes with a settlement of that line or of the whole sale. While the link's payment is in flight, such a settlement answers 409 `SETTLEMENT_IN_PROGRESS` instead (FR-011). A cash settlement of another line leaves one line's link open.
 - **Until PR 3**, no settlement closes a settlement link yet, so any settlement other than the same transfer answers 409 `SETTLEMENT_IN_PROGRESS` while one is open (research D19).
@@ -255,7 +259,7 @@ For a connected organization with `"method": "transfer"`, no settlement is recor
 |---|---|
 | `GET /pos/folios/:id`, `GET /folios/:id` | `folio.payment_links: PaymentLinkView[]`, newest first; `folio.verification_auto` and `folio.devolada_attention` (booleans, D14) |
 | `GET /pos/folios`, `GET /folios` | each row gains `payment_link: PaymentLinkView | null` (the latest unresolved link, otherwise the latest), `verification_auto: boolean` and `devolada_attention: boolean`. Devolada attention items join the pending-work set, so they are listed whatever their age (D14) |
-| `GET /folios/counts` | adds `verification_auto` (sales Devolada is handling with nothing for the admin to do) and `devolada_attention` (sales needing the admin that `verification` does not already count). Each sale counts once: «Por verificar» = `verification − verification_auto + devolada_attention`, in the badge, the pending-work bar and Hoy. Admin badge = that number + `folio_requests` |
+| `GET /folios/counts` | adds `verification_auto` (sales Devolada is handling with nothing for the admin to do, while the key their links use works) and `devolada_attention` (sales needing the admin that `verification` does not already count). Each sale counts once: «Por verificar» = `verification − verification_auto + devolada_attention`, in the badge, the pending-work bar and Hoy. Admin badge = that number + `folio_requests` |
 | `GET /organizations/me` | adds `devolada: OrganizationDevoladaSummary` |
 
 ### Resolving Devolada exceptions — admin (`/devolada` router, `requireRole('admin')`)
@@ -274,7 +278,7 @@ For a connected organization with `"method": "transfer"`, no settlement is recor
 | `dismiss` | settlement link, payment `partial` or `invalid`, or in flight on a link no credential can read (`failed`, D21), unresolved | closes the link when a credential can still reach it; the apartado continues |
 | `returned` | payment `unapplied` (or `confirmed` on a cancelled sale), unresolved | records that the money was returned outside the system |
 
-`note` is optional, up to 500 characters. While a settlement payment awaits `accept` or `dismiss`, the apartado does not expire by its clock (research D8).
+`note` is optional, up to 500 characters. While a settlement payment awaits `accept` or `dismiss`, the apartado does not expire: the sweep holds it past its release time, or only its line for a settlement of one line (research D8).
 
 | Status | Body / code |
 |---|---|
@@ -285,7 +289,7 @@ For a connected organization with `"method": "transfer"`, no settlement is recor
 | 409 | `DEVOLADA_PAYMENT_NOT_RESOLVABLE`: the action does not fit the payment's status or kind, it was already resolved, or `accept` on an apartado already settled another way |
 | 409 | `FOLIO_CANCELLED`: `accept` on a cancelled sale |
 
-Sale and deposit exceptions use today's `POST /pos/folios/:id/verify` and `/reject` (FR-018). From PR 3, `/reject` closes the sale's links. `/verify` closes the links of the rows it verifies, except one whose payment is in flight, which stays open until its verdict (D13). While a deposit collected by an enlace is not verified yet, whatever happened to the enlace, the apartado does not expire by its clock: it waits for Devolada's verdict or for one of them (research D8).
+Sale and deposit exceptions use today's `POST /pos/folios/:id/verify` and `/reject` (FR-018). From PR 3, `/reject` closes the sale's links. `/verify` closes the links of the rows it verifies, except one whose payment is in flight, which stays open until its verdict (D13). While a deposit collected by an enlace is not verified yet, whatever happened to the enlace, its creation failing included, the apartado does not expire: it waits for Devolada's verdict or for one of them (research D8).
 
 ### Webhook — public, Devolada only (`/webhooks` router, no auth)
 
@@ -319,7 +323,7 @@ The spec declares them (FR-023). Each is added to the `ErrorCode` union in `api-
 | `WEBHOOK_SIGNATURE_INVALID` | 401 | webhook | the signature does not verify against Devolada's keys |
 | `WEBHOOK_PAYLOAD_INVALID` | 400 | webhook | malformed or oversized body |
 | `SETTLEMENT_IN_PROGRESS` | 409 | settle, line cancel | the apartado's balance is being collected by an enlace: the write would close it while its payment is in flight, or the request is for another scope than the open link (D8, D13). Until PR 3, any open settlement link (D19) |
-| `PAYMENT_LINK_TOO_SHORT` | — | checkout, settle, line cancel | never an HTTP error: the link would stay open less than 15 minutes, so none was created (D7) |
+| `PAYMENT_LINK_TOO_SHORT` | — | checkout, settle, line cancel | never an HTTP error: the link would stay open less than 15 minutes, so none was created at Devolada, and a `failed` link records it (D6, D7) |
 
 The four `DEVOLADA_*` causes, and `PAYMENT_LINK_TOO_SHORT`, travel without an HTTP error as
 `payment_link_error` on checkout, settlement and line-cancel responses.

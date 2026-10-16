@@ -20,7 +20,9 @@ Banxico's verdict, which Devolada reports, instead of by an admin. The approach,
   accounts at any time (D21).
 - **Links**: each transfer gets a one-time Devolada link, issued *after* the sale's money
   write commits, with today's manual path as the fallback (D6, D7). A link that would stay open less
-  than 15 minutes is not issued (D7). A settlement is a link too, and
+  than 15 minutes is not issued; like a broken connection or an unreadable key, it leaves a failed
+  link without calling Devolada, so the admin sees it and a deposit's apartado waits (D6, D7). A
+  settlement of one line is bounded by that line's own clock (D7). A settlement is a link too, and
   is recorded only once proven. This is the one place the design departs from today's flow: nothing
   in the code can undo a settlement (D8).
 - **Verdicts**: they arrive two ways.
@@ -37,8 +39,10 @@ Banxico's verdict, which Devolada reports, instead of by an admin. The approach,
   - Everything else → reaches Por verificar or the seller, labelled by the server (D14, D15).
   - The admin can always verify by hand, a settlement still in verification included. While a
     deposit a link collects is not verified yet, or a settlement payment awaits that decision, the
-    apartado does not expire (D8, D15; spec clarifications of 2026-10-15 and 2026-10-16).
-- **Por verificar holds only work for the admin**: a sale Devolada is still resolving stays out of it, and out of its count, until the admin has something to do (D14; spec clarification of 2026-10-15).
+    apartado does not expire; a settlement of one line holds only that line (D8, D15; spec
+    clarifications of 2026-10-15 and 2026-10-16).
+- **Por verificar holds only work for the admin**: a sale Devolada is still resolving stays out of it, and out of its count, until the admin has something to do, or until Devolada rejects the key its link uses (D14; spec clarifications of 2026-10-15 and 2026-10-16).
+- **Ajustes** shows the connection's health, and each previous key that still has pending links, so the admin does not revoke it at Devolada too early (D16, D21).
 - **Closing links**: links close whenever their sale stops taking money, but never under a payment in flight while the sale lives (D13; spec clarification of 2026-10-15).
 
 Delivery is three PRs, one per story group (D19).
@@ -164,7 +168,7 @@ api-turistear/
 │   └── routes/
 │       ├── devolada/
 │       │   ├── index.ts, handler.ts, schema.ts              NEW  admin: POST /payments/:id/resolve (D15)
-│       │   ├── connection.ts                                NEW  connect/disconnect/health; credentials per link (D1–D3, D21)
+│       │   ├── connection.ts                                NEW  connect/disconnect/health, previous keys still in use; credentials per link (D1–D3, D21)
 │       │   ├── links.ts                                     NEW  issue, close, replace links (D6, D7, D13)
 │       │   ├── apply.ts                                     NEW  applyDevoladaPayment state machine (D9)
 │       │   └── sweep.ts                                     NEW  sweepDevoladaPayments(env, now) (D12)
@@ -178,7 +182,7 @@ api-turistear/
 │       │   ├── verifyCore.ts                                NEW  verifyFolioPayment + releaseClearedFolio (D10)
 │       │   ├── settleCore.ts                                NEW  settlement core shared by both settle handlers and D8
 │       │   ├── unreceivedTransfer.ts                        NEW  cancelForUnreceivedTransfer + shared release builder (D11)
-│       │   └── sweep.ts                                     guard: skip apartados with a link being created or open, a pending deposit a link collects, or a settlement payment awaiting the admin (D8)
+│       │   └── sweep.ts                                     guard: hold apartados with a link being created or open, a pending deposit a link collects, or a settlement payment awaiting the admin; a settlement of one line holds only that line (D8)
 │       └── folios/handler.ts                                cancel cores mark links `closing` in their batch (D13)
 ├── test/
 │   ├── helpers/devolada.ts                                  NEW  fake Devolada, key pair/JWKS, signed-webhook builder

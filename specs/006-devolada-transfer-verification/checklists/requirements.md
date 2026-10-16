@@ -117,3 +117,16 @@
 
   D21's fallback now applies to retired keys only, and FR-004 and FR-011 were reworded. All items
   still pass.
+- **/speckit-analyze, seventh run (2026-10-16)** found no CRITICAL item, and 1 HIGH, 4 MEDIUM and
+  4 LOW items. All were resolved in place. The developer decided three more clarifications
+  (Session 2026-10-16):
+  - when no enlace can be created (too little time, a broken connection or an unreadable key), a
+    failed enlace is still recorded without calling Devolada, so the admin sees the sale and an
+    apartado's deposit keeps it waiting (FR-010, FR-016);
+  - while Devolada rejects the current key, the sales whose enlaces use it return to Por verificar
+    (FR-015);
+  - Ajustes says how many enlaces a previous key still has, and asks the admin not to revoke it at
+    Devolada until they finish (FR-005).
+
+  The Assumptions now define an apartado's clock and its release time, and FR-016 and US3 use them;
+  US3 scenario 8 states that a settlement of one line holds only that line. All items still pass.

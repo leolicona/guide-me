@@ -175,7 +175,7 @@ says otherwise.
 
 ### D6 — The link is issued after the sale commits
 
-- **Decision**: when the organization is connected and the method is `transfer`, `confirmSale` first writes the sale exactly as today (pending row, allocations, commission). Then it:
+- **Decision**: when the organization has a current credential (its connection is `connected` or `broken`) and the method is `transfer`, `confirmSale` first writes the sale exactly as today (pending row, allocations, commission). Then, while the connection is `connected`, it:
   1. inserts a `devolada_links` row in state `creating`;
   2. calls `createPaymentLink` with:
      - `mode: one_time`;
@@ -186,6 +186,8 @@ says otherwise.
      - `concept` = "‹organization› · ‹first service› ‹date›", at most 200 characters;
   3. on success, stores the link and answers `{folio, payment_link}`;
   4. on a refusal, marks the row `failed`; on a timeout, marks it `abandoned`. In both cases it answers `{folio, payment_link: null, payment_link_error}` and the sale stays on today's manual path.
+
+  When no call can succeed, the row is written straight as `failed`, without calling Devolada, and the answer is the same: the link would stay open less than 15 minutes (D7), the connection is `broken`, or this environment cannot read the credential (D17). So every transfer of an organization with a current credential leaves a link row: the sale shows «Sin enlace de pago — verificar a mano», and a deposit's row keeps its apartado waiting for the admin (D8). *(Amended 2026-10-16 by /speckit-analyze; spec clarification of 2026-10-16.)*
 
   The seller sends no reference. For a connected organization the handler neither requires nor stores one, so the US-A88 switch governs only the manual path.
 - **Rationale**:
@@ -202,10 +204,12 @@ says otherwise.
 - **Decision**:
   - A link expires at the earliest of:
     - 24 hours after it is issued;
-    - the start of the sale's first live service;
-    - for deposits and settlements, also the earliest live line clock (`booking_expires_at`).
+    - the start of the first live service it collects for;
+    - for deposits and settlements, also the earliest live line clock (`booking_expires_at`) among those lines.
+
+    A sale, deposit or whole-sale settlement link collects for every live line of the sale. A settlement of one line collects for that line alone, so only its own start and its own clock bound it: each line runs its own clock (US-AG54 D5), and `settleFolioLine` checks only that line's (`routes/pos/handler.ts:2528-2530`). Bounded by an earlier line, every later line's settlement would take the manual path once that earlier line's clock had passed. *(Amended 2026-10-16 by /speckit-analyze.)*
   - A slot line starts at `slot_date` + `slot_start_time` in the organization's time zone; a stay at the end of its check-in day.
-  - **A link that would stay open less than 15 minutes is not issued** (`MIN_LINK_LIFETIME`, one constant in `routes/devolada/links.ts`). Nothing is written and Devolada is not called. The sale or the settlement takes today's manual path, as when Devolada fails (FR-010), and the response says `payment_link_error: 'PAYMENT_LINK_TOO_SHORT'`. Decided by the developer on 2026-10-15.
+  - **A link that would stay open less than 15 minutes is not issued** (`MIN_LINK_LIFETIME`, one constant in `routes/devolada/links.ts`). Devolada is not called, and a `failed` row records it (D6). The sale or the settlement takes today's manual path, as when Devolada fails (FR-010), and the response says `payment_link_error: 'PAYMENT_LINK_TOO_SHORT'`. Decided by the developer on 2026-10-15; the `failed` row on 2026-10-16.
   - `customerRef` = folio id, so every link of a sale shares the customer's Devolada reference.
 - **Rationale**:
   - The spec's Assumptions: 24 hours or the first service, never past it. Confirmed by the developer on 2026-10-15.
@@ -241,7 +245,14 @@ says otherwise.
     A second processor — the webhook and the sweep at once, a Devolada retry, an admin's double tap on *accept* (D15) — matches nothing and writes nothing.
   - **An unpaid settlement link** simply closes.
   - **One open settlement link per sale**: a repeated transfer settlement for the same scope as the open link (the same line, or the whole sale) returns that link. Any other transfer settlement answers 409 `SETTLEMENT_IN_PROGRESS`, like the writes D13 refuses while the link's payment is in flight: another line, the whole sale while one line's link is open, or one line while the whole sale's link is open. *(Amended 2026-10-15 by /speckit-analyze.)*
-  - **The expiry sweep** skips a sale while it has a link being created or open. It also skips it while a deposit that a link collects is still pending, whatever happened to that link: *partial*, *invalid*, *unapplied*, expired but kept by D11, unreadable by any credential, or never created. Devolada's verdict, or the admin's Verificar or Rechazar, decides it first; otherwise defect 4 would count as collected a deposit that never arrived. And it skips it while a settlement payment awaits the admin's decision (data-model § Attention): a *partial* or *invalid* verdict nobody has decided, or a payment in flight on a link no credential can read (D21). The customer may have paid, so the apartado waits for *accept* or *dismiss* (D15). Decided by the developer on 2026-10-15 for the settlement, and on 2026-10-15 and 2026-10-16 for the deposit.
+  - **The expiry sweep holds an apartado while its money is undecided.** An apartado's *clock* is a line's deadline to pay its balance (`booking_expires_at`). The line *expires* when `sweepExpiredBookings` releases it, at its release time: its departure minus the organization's grace offset, never before the clock. In between, the sweep sends the grace notice «Tu apartado está por liberarse» (`routes/pos/sweep.ts:122-134`). A held line gets neither the notice nor the release. The sweep holds an apartado while:
+    - it has a link being created or open;
+    - a deposit that a link collects is still pending, whatever happened to that link: *partial*, *invalid*, *unapplied*, expired but kept by D11, unreadable by any credential, or never created, for any reason (D6). Devolada's verdict, or the admin's Verificar or Rechazar, decides it first; otherwise defect 4 would count as collected a deposit that never arrived;
+    - a settlement payment awaits the admin's decision (data-model § Attention): a *partial* or *invalid* verdict nobody has decided, or a payment in flight on a link no credential can read (D21). The customer may have paid, so the apartado waits for *accept* or *dismiss* (D15).
+
+    A settlement link of one line, and its payment, hold only that line: the other lines are released at their own release time, as each line runs its own clock (US-AG54 D5). Every other link, and a pending deposit, which is allocated across the lines, hold every line.
+
+    Decided by the developer on 2026-10-15 for the settlement, and on 2026-10-15 and 2026-10-16 for the deposit. *(Amended 2026-10-16 by /speckit-analyze: the per-line hold, the grace notice, and deposits whose link was never created.)*
   - **One bypass**: a settlement whose payment was submitted before its link expired is still recorded after the apartado's clock ran out, by its verdict or by the admin's *accept* (D15). The `BOOKING_EXPIRED` pre-check is skipped for that case only.
 - **Rationale**:
   - FR-016's settlement branch requires an unpaid settlement to leave the apartado intact.
@@ -270,7 +281,7 @@ says otherwise.
   | `partial`, `invalid` | snapshot; the sale stays pending, so it shows in Por verificar with asked and received amounts and its label; the admin uses Verificar or Rechazar as today (FR-018). For a deposit, the apartado does not expire until then (D8) | link closed; an attention item the admin *accepts* (records the settlement as the admin) or *dismisses* (the apartado continues) (D15). The apartado does not expire until then (D8) |
   | `expired`, or the link expired with no payment | FR-016 system cancellation (D11) | link `expired`; the apartado continues |
   | the link expired after a `partial`, `invalid` or `unapplied` verdict | link `expired`; nothing else: the admin decides (FR-016) | the link is already closed |
-  | `unapplied` | attention item «Dinero recibido sin venta»; the admin marks it *returned* (D15) | same |
+  | `unapplied` | attention item «Dinero por devolver»; the admin marks it *returned* (D15) | same |
   | `superseded` | recorded and ignored; the correction arrives as a new payment | same |
   | `confirmed`, but the sale is already cancelled (a close that never reached Devolada) | treated as `unapplied`: a cancelled sale is never verified | same |
 
@@ -391,10 +402,10 @@ says otherwise.
 - **Decision**:
   - **Sale reads**: `readFolioDetail` gains `payment_links[]`, and list rows gain `payment_link` (contracts/turistear-api.md § PaymentLinkView). Each carries the kind, state, amount, URL, expiry, the latest payment's facts, and a `label` code decided by the server. The client only maps codes to copy.
   - **Por verificar holds only work for the admin** (spec clarification of 2026-10-15). Two flags on every list row and on the detail, both decided by the server:
-    - `verification_auto`: the sale is pending verification with a live line, and Devolada is handling it with nothing for the admin to do. Every pending payment row is collected by an `open` link that either waits for its first payment before `expires_at`, or whose current payment is *validating* without `awaiting`. A payment still *validating* past `expires_at` keeps the flag: the customer paid in time and Banxico has not answered yet. The sale also has no unresolved attention item.
+    - `verification_auto`: the sale is pending verification with a live line, and Devolada is handling it with nothing for the admin to do. Every pending payment row is collected by an `open` link that either waits for its first payment before `expires_at`, or whose current payment is *validating* without `awaiting`. A payment still *validating* past `expires_at` keeps the flag: the customer paid in time and Banxico has not answered yet. The sale also has no unresolved attention item, and none of those links uses the current credential of a `broken` connection: Devolada cannot be asked about it until the admin fixes the key, so the admin may verify it by hand meanwhile (spec clarification of 2026-10-16).
     - `devolada_attention`: the sale has an unresolved attention item (data-model § Attention).
 
-    The «Por verificar» facet lists the sales pending verification that are not `verification_auto`, plus every `devolada_attention` sale. A `verification_auto` sale offers no «Verificar y enviar» on its card, and the admin can still verify it from the sale (FR-018). It returns to the queue by itself as soon as its link expires with no payment, its credit pauses, the customer owes a tracking key, an exception arrives, or no credential can read its link any more (D21).
+    The «Por verificar» facet lists the sales pending verification that are not `verification_auto`, plus every `devolada_attention` sale. A `verification_auto` sale offers no «Verificar y enviar» on its card, and the admin can still verify it from the sale (FR-018). It returns to the queue by itself as soon as its link expires with no payment, its credit pauses, the customer owes a tracking key, an exception arrives, no credential can read its link any more (D21), or Devolada rejects the current credential its link uses; in that last case it leaves again once the connection is `connected`.
 
     The words follow the flag. On a `verification_auto` sale, the detail's header shows the link's chip instead of «Por verificar», and the receipt's pending payment rows read «En verificación»: «Por verificar» names the admin's work (`app:features/folios/components/FolioStateSheet.tsx:57-58`).
 
@@ -453,6 +464,7 @@ says otherwise.
 - **Decision**:
   - **Ajustes**: a card «Cobro con Devolada» after «Punto de venta» (`app:pages/SettingsPage.tsx:668-728`).
     - It shows the status chip, mode, key hint and health.
+    - While a retired credential still has unresolved links, it also shows «La clave anterior …abcd todavía tiene N enlaces pendientes. No la revoques en Devolada hasta que terminen.», one line per such key (D21; spec clarification of 2026-10-16).
     - The credential is the «Clave de API de Devolada», and its hint reads «Clave …abcd». «Llave» already names the passkeys, the «llave de acceso», across the app since specs/004-passkey-auth.
     - Connecting or replacing the key happens in a `FormSheet`; replacing the address and disconnecting use `ConfirmSheet`.
     - While connected, the reference switch says it applies only without Devolada.
@@ -503,7 +515,7 @@ says otherwise.
     - locally it lives in `.dev.vars`, documented in `.dev.vars.example`.
   - **Without a readable key**, the API fails closed. That covers a key that was never planted, and one that is not the key a credential was encrypted with:
     - connecting answers 500 `INTERNAL_ERROR`;
-    - a sale issues no link and stays on the manual path (FR-010), never answering 500 after it committed;
+    - a sale gets a `failed` link without calling Devolada (D6) and stays on the manual path (FR-010), never answering 500 after it committed;
     - the webhook answers 503, and the sweep skips the links of that credential.
 
     Every case is logged without the key.
@@ -581,7 +593,8 @@ says otherwise.
 
       D11 never cancels a sale over a link that no credential can read.
   - **A suspended business is not a rejected key.** `BUSINESS_SUSPENDED` on a retired credential's call changes nothing: a suspension may be lifted, so those links are retried at the next run, and the connection, which belongs to the current key, is untouched. *(Amended 2026-10-15 by /speckit-analyze.)*
-  - **The current credential never takes the fallback.** When Devolada rejects it, the connection becomes `broken` (FR-005), and every link that uses it waits as it is: asking the current credential again would only fail again, and would mark `failed` links the admin's next key can still read. Once the admin replaces the key, the old one is retired, and the fallback can move those links to the new one. *(Amended 2026-10-16 by /speckit-analyze.)*
+  - **The current credential never takes the fallback.** When Devolada rejects it, the connection becomes `broken` (FR-005), and every link that uses it waits as it is: asking the current credential again would only fail again, and would mark `failed` links the admin's next key can still read. Their sales return to Por verificar meanwhile (D14). Once the admin replaces the key, the old one is retired, and the fallback can move those links to the new one. *(Amended 2026-10-16 by /speckit-analyze.)*
+  - **The admin is told while a retired key is still needed.** The connection view lists each retired credential that still has unresolved links, with its hint and their count, and the Ajustes card asks the admin not to revoke it at Devolada until they finish (D16; spec clarification of 2026-10-16). The count goes through the `(credential_id, state)` index; a `closed` link counts while its current payment is in flight.
   - The webhook's mode check compares the event with the link's own `mode`, copied from its credential (D4).
 - **Rationale**:
   - Devolada v1 does not say which business a key belongs to (Requests to Devolada, 1), so the system cannot tell a key rotation from a switch to another business.
@@ -617,3 +630,4 @@ Each should go through the lite path (`/speckit-bug-assess`). This feature guard
 10. Unstubbed outbound calls in API tests reach the real provider (Resend), with the test key `vitest.config.ts` pins, so nothing is delivered. For example, `test:pos/payment-verification.test.ts` does not call `stubResend`.
 11. The `payment_rejected` customer message, which D11 reuses, says «tu folio…» where constitution VII says «Venta»; so does the approved-cancellation message just above it. `src/utils/notifications.ts:74-81`. Because D11 newly sends `payment_rejected`, this one goes through the lite path **before PR 2** ships, not after the feature (T077).
 12. The `link` payment method, hidden at checkout (US-AG41 D1), reads «Link de pago» in its labels and «enlace» in the timeline: two words for one concept, and «link» is a word this feature never uses (D16, constitution VII). `app:features/cash/components/paymentPresentation.ts:4-8`, `app:pages/FolioReceiptPage.tsx:39`, `app:features/pos/components/PaymentBreakdown.tsx:16`, `app:features/folios/components/FolioTimeline.tsx:58`. Its fix names the method; that name must not be «Enlace de pago», which this feature gives the Devolada enlace.
+13. The grace stage contradicts itself. Once a line's clock passes, its grace notice tells the customer «Comunícate con … para liquidar y conservar tu reserva», and Ajustes says the place is released at that clock. But `settleBooking` and `settleFolioLine` already refuse with `BOOKING_EXPIRED`, «Liquidar» stays on screen, and the seats are held until the release time. `routes/pos/handler.ts:2160-2161, 2528-2530`; `services/resend.ts:407-421`; `app:pages/SettingsPage.tsx:368, 379-380`. D7 bounds deposit and settlement links by the same clock, so a fix that lets the grace stage take a settlement moves D7's bound with it.

@@ -124,6 +124,18 @@ both as the fallback when Devolada is unavailable and as the admin's override.
   (FR-004), so that key stays valid at Devolada until its enlaces finish. If it is revoked anyway,
   the enlace can no longer be followed: a live sale goes to the admin to verify by hand, and a
   cancelled one has nothing left to follow.
+- Q: When no enlace could be created for a transfer, because less than 15 minutes were left, the
+  connection was broken, or this environment could not read the key, what is recorded? → A: A
+  failed enlace, without calling Devolada. The sale shows «Sin enlace de pago — verificar a mano»,
+  and an apartado's deposit keeps the apartado waiting for the admin's «Verificar» or «Rechazar»,
+  like any other deposit whose enlace failed (FR-010, FR-016).
+- Q: While Devolada rejects the current key, what happens to a sale whose enlace uses it? → A: It
+  returns to Por verificar, so the admin can verify it by hand, and leaves it by itself once the
+  key works again. This is not a new warning: Ajustes stays the only place that names the broken
+  connection (FR-005, FR-015).
+- Q: How does the admin learn not to revoke the previous account's key while its enlaces are
+  pending? → A: The «Cobro con Devolada» card in Ajustes says so, with the key's hint and how many
+  enlaces it still has pending, until they finish (FR-004, FR-005).
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -249,12 +261,18 @@ its test payment (no tickets). Then settle by transfer and confirm the settlemen
    sale is paid, and Devolada's later verdict records nothing a second time.
 6. **Given** an apartado whose settlement payment waits for the admin — it fell short, Banxico
    contradicts it, or the system can no longer read it because its key stopped working — **When**
-   the apartado's clock runs out, **Then** the apartado does not expire, the sale waits in Por
-   verificar, and the admin's «Verificar» still records the settlement.
+   the apartado's clock runs out and its release time arrives (Assumptions), **Then** the
+   apartado does not expire, the sale waits in Por verificar, and the admin's «Verificar» still
+   records the settlement.
 7. **Given** an apartado whose transfer deposit, collected by an enlace, is not verified yet —
    Devolada is still verifying it, or it went to the admin for any reason, the enlace's creation
-   failing included — **When** the apartado's clock runs out, **Then** the apartado does not
-   expire until Devolada confirms the deposit or the admin verifies or rejects it.
+   failing for any reason included (FR-010) — **When** the apartado's clock runs out and its
+   release time arrives, **Then** the apartado does not expire until Devolada confirms the deposit
+   or the admin verifies or rejects it.
+8. **Given** an apartado of several lines, one of them being settled through its own enlace,
+   **When** another line reaches its release time unpaid, **Then** that other line is released as
+   today, and the line being settled keeps its hold and its enlace. A deposit, or a settlement of
+   the whole sale, holds every line.
 
 ---
 
@@ -274,8 +292,9 @@ admin alert. *(A sale whose transfer is still pending cannot be cancelled, only 
 **Acceptance Scenarios**:
 
 1. **Given** a sale with an open link, **When** the sale is cancelled by a person, **Then** its link
-   is closed. *(The apartado expiry never meets an open link: a deposit or settlement link expires
-   with the apartado's own clock.)*
+   is closed. *(The apartado expiry never closes an open link: a deposit or settlement link
+   expires by the apartado's clock, before its release time, and one whose payment is still being
+   verified holds the apartado, FR-016.)*
 2. **Given** an open link for the whole balance, **When** a line of the sale is cancelled and the
    amount due changes, **Then** the link is closed and a new link for the new amount replaces it. A
    link for one line's balance closes, with no replacement, only when that line is cancelled.
@@ -311,11 +330,13 @@ admin alert. *(A sale whose transfer is still pending cannot be cancelled, only 
 - **The credential is revoked, or the organization's Devolada business is suspended** → the
   connection shows as broken in Ajustes, with the reason: that card is where the admin learns of
   it, and sellers are told at checkout. New transfer sales fall back to the manual path, and links
-  that use the rejected key wait, until the admin fixes it. A link whose previous key no longer
-  works is followed with the current key when it can see it; otherwise, if its sale is still alive,
-  the sale goes to the admin to verify by hand.
+  that use the rejected key wait, their sales back in Por verificar, until the admin fixes it. A
+  link whose previous key no longer works is followed with the current key when it can see it;
+  otherwise, if its sale is still alive, the sale goes to the admin to verify by hand.
 - **The admin switches to another Devolada account while payments are pending** → each link is
-  still followed with the key of the account that created it (FR-004).
+  still followed with the key of the account that created it (FR-004). While that key still has
+  pending enlaces, Ajustes shows how many and asks the admin not to revoke it at Devolada yet
+  (FR-005).
 - **The Devolada account already sends its notifications to another system** → connecting warns the
   admin before replacing that address, because Devolada keeps one address per business.
 - **Devolada answers slowly at checkout** → the seller waits no longer than SC-006 allows before
@@ -345,7 +366,9 @@ admin alert. *(A sale whose transfer is still pending cannot be cancelled, only 
   2026-10-15 and 2026-10-16)*
 - **FR-005**: The connection screen MUST show its health: the last verdict received, failing
   notification deliveries, a rejected credential or suspended business, and paused validation
-  credit.
+  credit. While a previous key still has pending enlaces, it MUST also show that key's hint and
+  how many, and ask the admin not to revoke it at Devolada until they finish. *(Clarified
+  2026-10-16)*
 - **FR-006**: Before taking over the Devolada account's notification address, the system MUST warn
   the admin when another address is already registered.
 
@@ -362,9 +385,12 @@ admin alert. *(A sale whose transfer is still pending cannot be cancelled, only 
   transfer (the typed bank reference, cleared by an admin). The link replaces it; the manual path
   exists for the seller only as the FR-010 fallback. *(Clarified 2026-10-06.)*
 - **FR-010**: If a link cannot be created (Devolada unreachable or refusing, the business
-  suspended, or less than 15 minutes left before it would expire), the sale MUST still complete on
-  today's manual path and the seller MUST be told why. A sale is never lost or blocked by Devolada,
-  and never delayed beyond SC-006. *(constitution VIII; Clarified 2026-10-15)*
+  suspended, the connection broken, a key this environment cannot read, or less than 15 minutes
+  left before it would expire), the sale MUST still complete on today's manual path and the seller
+  MUST be told why. A sale is never lost or blocked by Devolada, and never delayed beyond SC-006.
+  The failed enlace is still recorded, without calling Devolada when no call can succeed, so the
+  admin sees «Sin enlace de pago — verificar a mano» and an apartado's deposit keeps its apartado
+  waiting for the admin (FR-016). *(constitution VIII; Clarified 2026-10-15 and 2026-10-16)*
 - **FR-011**: A link MUST stop accepting payment when its sale stops taking that money: cancellation
   by anyone, rejection, apartado expiry, a change in the amount due, and the link's own expiry
   (Assumptions). While the sale stays alive, a link is never closed under a payment being verified:
@@ -393,9 +419,10 @@ admin alert. *(A sale whose transfer is still pending cannot be cancelled, only 
   (asked, claimed, received): *partial*, *invalid* and *unapplied* verdicts, a payment waiting on
   the customer's tracking key, and paused validation credit. They go to the admin in Por verificar;
   the tracking-key case also goes to the seller. A payment Devolada is still resolving, with
-  nothing for the admin to do, is not listed there *(Clarified 2026-10-15)*. An *expired* verdict
-  or an unpaid link expiry is not queued — FR-016 resolves it — and its reason shows on the sale
-  and in its timeline.
+  nothing for the admin to do, is not listed there *(Clarified 2026-10-15)*, unless its enlace uses
+  a key Devolada now rejects: it is listed again until the key is fixed *(Clarified 2026-10-16)*.
+  An *expired* verdict or an unpaid link expiry is not queued — FR-016 resolves it — and its
+  reason shows on the sale and in its timeline.
 - **FR-016**: When a payment ends *expired*, or its link expires with no payment at all, no money
   arrived. The system MUST then withdraw that payment without waiting for an admin:
   - for a full sale or an apartado deposit, cancel the sale the way an admin's Rechazar does
@@ -406,11 +433,12 @@ admin alert. *(A sale whose transfer is still pending cannot be cancelled, only 
     A sale holding cleared money is never cancelled automatically. *(Amended by plan D8.)*
 
   A payment that ends *invalid* MUST stay in Por verificar for the admin to verify or reject.
-  *(Clarified 2026-10-06.)* An apartado MUST NOT expire by its clock while its transfer deposit,
-  collected by an enlace, is not verified yet, whatever happened to the enlace: Devolada's verdict,
-  or the admin's Verificar or Rechazar, decides it first. Nor while the admin has its settlement
-  payment to decide: one that ended *partial* or *invalid*, or one the system can no longer read.
-  *(Clarified 2026-10-15 and 2026-10-16)*
+  *(Clarified 2026-10-06.)* An apartado MUST NOT expire (Assumptions) while its transfer deposit,
+  collected by an enlace, is not verified yet, whatever happened to the enlace, its creation
+  failing for any reason included: Devolada's verdict, or the admin's Verificar or Rechazar,
+  decides it first. Nor while the admin has its settlement payment to decide: one that ended
+  *partial* or *invalid*, or one the system can no longer read. A settlement of one line holds
+  only that line; the other lines keep their own clocks. *(Clarified 2026-10-15 and 2026-10-16)*
 - **FR-017**: A *superseded* payment MUST be ignored in favour of its correction. While a payment
   is *validating*, the sale MUST show «Verificando pago» and release nothing.
 - **FR-018**: The admin's manual Verificar and Rechazar MUST remain available for every awaiting
@@ -456,10 +484,12 @@ admin alert. *(A sale whose transfer is still pending cannot be cancelled, only 
   it and when.
 - **Devolada credential** — each API key the organization has connected: write-only, with its mode
   (real or test) and masked hint. A replaced key is kept, unreadable to anyone, while a link it
-  serves, or a payment of such a link, is unresolved, and then erased.
+  serves, or a payment of such a link, is unresolved, and then erased. Until then, Ajustes shows
+  its hint and how many enlaces it still serves.
 - **Payment link** — one per transfer of a sale: the sale and which payment it collects
   (sale · deposit · settlement), the credential that created it, the amount asked, the link's
-  address, its expiry, and its state (open · paid · expired · closed).
+  address, its expiry, and its state (open · paid · expired · closed · failed). A failed one is
+  recorded too when no enlace could be created (FR-010).
 - **Devolada payment (verdict)** — what Devolada reports for a link: its id, status, the amounts
   asked, claimed and received, the match (exact · short · over), Devolada's receipt number, the
   verdict's time, and what it awaits from the customer, if anything.
@@ -504,17 +534,25 @@ admin alert. *(A sale whose transfer is still pending cannot be cancelled, only 
   (scope boundary).
 - One one-time link per transfer. The customer identity Devolada sees is the sale, so all the links
   of one sale share the customer's payment reference.
+- **An apartado's clock, and when it expires** (today's rules, US-AG07 and US-AG54): each line of
+  an apartado has a clock, its deadline to pay the balance («Plazo para pagar el saldo»: by default
+  24 hours before departure, or later for an apartado made closer to it). Then comes the grace
+  stage, when the customer is told that their places are about to be released. The line
+  **expires** at its release time («Liberación de apartado»: by default 15 minutes before
+  departure, never before its clock), when the bookings sweep releases it. FR-016 and Story 3 use
+  these words.
 - A link stays open until whichever comes first: 24 hours after it is issued, the start of the
-  sale's first service, or, for an apartado's deposit or settlement, the apartado's own clock.
-  FR-016 decides what happens when it closes unpaid. Because closing unpaid now cancels the sale,
+  sale's first service, or, for an apartado's deposit or settlement, the apartado's own clock. A
+  settlement of one line counts only that line's own start and clock (research D7). FR-016
+  decides what happens when it closes unpaid. Because closing unpaid now cancels the sale,
   this window is a product decision; the plan may tune it, but never past the first service. A stay
   has no start time, only a check-in date, so its link may stay open until the end of the check-in
   day: a guest who arrives that day can still pay by transfer (research D7). *(Confirmed
   2026-10-15.)*
-- A link that would stay open less than 15 minutes is not created, and the payment takes the manual
-  path (FR-010). The organization's own settings can put a sale or a settlement after its service
-  has started, and a link born expired would cancel the sale before the customer could pay.
-  *(Clarified 2026-10-15.)*
+- A link that would stay open less than 15 minutes is not created at Devolada, and the payment
+  takes the manual path; a failed enlace records it (FR-010). The organization's own settings can
+  put a sale or a settlement after its service has started, and a link born expired would cancel
+  the sale before the customer could pay. *(Clarified 2026-10-15 and 2026-10-16.)*
 - The organization's «Referencia obligatoria en transferencias» switch (US-A88) applies only to the
   manual path. A linked payment's reference is Devolada's receipt number.
 - A fee the organization configures in Devolada is charged to the customer on top of the amount

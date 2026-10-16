@@ -66,8 +66,9 @@ Connecting, replacing the key and disconnecting each retire the previous current
 (`devolada_credentials`, below).
 
 **Rules**:
-- A sale gets a payment link only while the connection is `connected` (FR-004, FR-010).
-- A `broken` connection makes new transfer sales fall back to the manual path, and the seller is told why (FR-010).
+- A sale gets a working payment link only while the connection is `connected` (FR-004, FR-010).
+- A `broken` connection makes new transfer sales fall back to the manual path, and the seller is told why. Each still gets a `failed` link row, without calling Devolada (FR-010, D6).
+- While the connection is `broken`, the sales whose links use its current credential are not `verification_auto` (§ Flags and counts): they wait in Por verificar until the key works again (D14).
 - An admin opening a `broken` connection repeats D2's probe with the current credential, at most once every 15 minutes (`probed_at`); a success makes it `connected` again.
 
 ### `devolada_credentials` — every key the organization connects (research D1, D21)
@@ -91,6 +92,7 @@ Connecting, replacing the key and disconnecting each retire the previous current
 - Every call about a link uses the link's credential: the one that created it, until D21's fallback moves the link to the current one. Only new links use the connection's current credential (D21).
 - A retired credential is kept while a link that uses it is unresolved (`devolada_links` § Rules); the sweep erases its ciphertext after (D12). The row stays for audit.
 - When Devolada rejects a link's retired credential (`AUTHENTICATION_ERROR`), the link moves to the current credential if that one can read it, or else becomes `failed` (D21). When it rejects the current credential, the connection becomes `broken`, and the links that use it wait until the admin replaces the key. A suspended business (`BUSINESS_SUSPENDED`) is not a rejection: a retired credential's links are retried at the next run.
+- While a retired credential has unresolved links, the connection view shows its `key_hint` and how many, so the admin knows not to revoke it at Devolada yet (D21; spec clarification of 2026-10-16).
 
 ### `devolada_links` — one per transfer we asked for (D6–D8, D13)
 
@@ -128,6 +130,7 @@ Connecting, replacing the key and disconnecting each retire the previous current
 ```text
 creating ── 201 ─────────────────────────────────────▶ open
 creating ── refusal ─────────────────────────────────▶ failed   (final; sale on the manual path)
+(none) ── no call can succeed (D6) ──────────────────▶ failed   (final; too short, connection broken or key unreadable)
 creating ── timeout ─────────────────────────────────▶ abandoned
 creating ── no outcome after 5 minutes (D12) ────────▶ abandoned (the request died)
 creating ── the sale stops taking it (D13) ──────────▶ closing  (the create still records Devolada's id)
@@ -154,8 +157,8 @@ open ── no credential can read it (D21) ────────────
   - deposit: the deposit;
   - settlement: the balance of the sale or of the line.
 - It never changes; a new amount means a new link (D13).
-- `expires_at` ≤ the first live service start, and ≤ the earliest live line clock for `deposit` and `settlement` (D7).
-- A link that would stay open less than 15 minutes is never written: the payment takes the manual path (D7).
+- `expires_at` ≤ the first live service start it collects for, and ≤ the earliest of those lines' clocks for `deposit` and `settlement`. A settlement of one line counts only that line; every other link counts every live line of the sale (D7).
+- When no call can succeed, the row is written straight as `failed`, without calling Devolada: the link would stay open less than 15 minutes, the connection is `broken`, or the credential cannot be read here. The payment takes the manual path, and the row shows the admin «Sin enlace de pago — verificar a mano» and keeps a deposit's apartado waiting (D6, D7, D8).
 - A link is **unresolved** while it is `creating`, `open`, `closing` or `abandoned`, or while it is `closed` and its current payment is still in flight: something may still happen to it at Devolada. A cancellation or Rechazar closes a link under a payment in flight (D13), and that payment's verdict, usually *unapplied*, is money to return, so the sweep follows it (D12). `paid`, `expired` and `failed` links, and `closed` ones whose payments are final, are resolved. A credential is kept while a link that uses it is unresolved (D21).
 - A payment is **in flight** while it is `validating` (awaiting included) or `queued_for_credit`.
 
@@ -209,18 +212,18 @@ A payment is decided by hand once its `resolution` is set (an admin's *accept* o
 
 A `settlement` payment **awaits the admin's decision** when it needs the admin through the first clause, or through the `failed` link clause.
 
-**The apartado does not expire by its clock** (D8, FR-016) while:
+**The apartado does not expire** (D8, FR-016): the bookings sweep neither sends its grace notice nor releases it at its release time while:
 - a link of the sale is `creating` or `open`;
-- a deposit row that a link collects is still pending, whatever the link's state, `failed` and `abandoned` included: Devolada's verdict, or the admin's Verificar or Rechazar, decides it;
+- a deposit row that a link collects is still pending, whatever the link's state, `failed` and `abandoned` included, a row written `failed` without a call among them: Devolada's verdict, or the admin's Verificar or Rechazar, decides it;
 - a settlement payment awaits the admin's decision.
 
-The customer may have paid, and the expiry would otherwise count as collected a deposit that never arrived (research defect 4).
+The customer may have paid, and the expiry would otherwise count as collected a deposit that never arrived (research defect 4). A settlement link of one line, and its payment, hold only that line, whose siblings keep their own clocks; every other link, and a pending deposit, hold every line (D8).
 
 A sale or deposit with `partial` or `invalid` is attended through the sale's pending verification, as today.
 
 **Flags and counts** (research D14), derived per sale on every read, never stored:
 - `devolada_attention`: the sale has at least one payment that needs the admin, as defined above.
-- `verification_auto`: the sale is pending verification with a live line; every pending payment row is collected by an `open` link that either has no payment yet and is not past `expires_at`, or whose current payment is `validating` without `awaiting`, even past `expires_at`; and the sale has no attention item. The attention clause arrives with the attention items, in PR 2.
+- `verification_auto`: the sale is pending verification with a live line; every pending payment row is collected by an `open` link that either has no payment yet and is not past `expires_at`, or whose current payment is `validating` without `awaiting`, even past `expires_at`; none of those links uses the current credential of a `broken` connection; and the sale has no attention item. The attention clause arrives with the attention items, in PR 2.
 - Each sale counts once in «Por verificar»: `verification − verification_auto + devolada_attention`. The `devolada_attention` count includes only sales that `verification` does not already count, because they are cancelled or their payment verification is not pending.
 
 ### `devolada_events` — notification inbox (D4)
@@ -276,14 +279,16 @@ A sale or deposit with `partial` or `invalid` is attended through the sale's pen
 | Only admins read or change the connection, or resolve exceptions | routers (`requireRole('admin')`) | FR-001, FR-015 |
 | A connected organization's transfer is collected by a link; any `payment_reference` sent is ignored | confirm, settle | FR-009 |
 | A link's amount equals the payment it collects | link issue | FR-007 |
-| A link is issued only if it stays open at least 15 minutes | link issue | FR-010, D7 |
+| A link is issued only if it stays open at least 15 minutes and the connection is `connected` with a readable credential; otherwise a `failed` row records it, without calling Devolada | link issue | FR-010, D6, D7 |
+| A settlement of one line is bounded by that line's own start and clock | link issue | D7 |
 | Every call about a link uses the link's credential; a rejected retired one hands the link to the current credential, or marks it `failed`; a rejected current one marks the connection `broken`, and its links wait for the new key; a suspended business is retried | webhook, sweep, link close | FR-004, D21 |
 | A payment is followed to its verdict after its link closed too, and its credential is kept until then | sweep | FR-004, FR-012, D12 |
 | The admin's *accept* records a settlement for an exception or for a payment still in flight; *dismiss* applies to exceptions only | resolve | FR-018, D15 |
 | One open settlement link per sale; a transfer settlement for another scope (another line, or the whole sale against one line's link, and the reverse) is refused with `SETTLEMENT_IN_PROGRESS` | partial unique index; settle | D8, D13 |
 | A settlement link closes only when the write touches what it collects: its own line, or the whole sale | line cancel, settle | D13 |
 | While the sale lives, no write closes a link under a payment in flight: a line cancellation or a cash settlement that would close it is refused with `SETTLEMENT_IN_PROGRESS`, and a manual Verificar leaves it open | line cancel, settle, verify | FR-011, D13 |
-| An apartado never expires by its clock while it has a link being created or open, a pending deposit row that a link collects, or a settlement payment awaiting the admin's decision | bookings expiry sweep | FR-016, D8 |
+| An apartado never expires while it has a link being created or open, a pending deposit row that a link collects, or a settlement payment awaiting the admin's decision; a settlement of one line holds only that line | bookings expiry sweep | FR-016, D8 |
+| While the connection is `broken`, no sale whose link uses its current credential is `verification_auto` | flags, counts | FR-015, D14 |
 | A settlement link records at most one settlement: its batch is claimed by `folio_payment_id IS NULL` and every other statement is gated on that claim | settlement core | D8 |
 | A verification releases tickets only in the call whose guarded row flip and rollup update both matched | verify core | D10 |
 | The system cancellation writes nothing unless its own guarded transition matched | `cancelForUnreceivedTransfer` | D11 |
