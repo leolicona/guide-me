@@ -86,6 +86,12 @@ export const clearTenancyDb = async () => {
  */
 export const clearFullDb = async () => {
   for (const table of [
+    // devolada-transfer-verification — they reference folios, payments, lines and users.
+    'devolada_events',
+    'devolada_payments',
+    'devolada_links',
+    'devolada_connections',
+    'devolada_credentials',
     'cash_drops',
     'payouts',
     'agent_expenses',

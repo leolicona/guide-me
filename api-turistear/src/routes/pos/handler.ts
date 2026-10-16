@@ -89,6 +89,8 @@ import {
 // folio differently. Reaching across routes is deliberate: the alternative is a second copy of the
 // release + reversal logic, which is exactly what this replaced.
 import { cancelFolioLinesPriced, cancelFolioPriced, queueCancellationEmail, quoteCancellation, serializeQuote } from '../folios/handler'
+// devolada-transfer-verification D10 — verification cores shared with Devolada's webhook and sweep.
+import { releaseClearedFolio, verifyFolioPayment } from './verifyCore'
 
 export type PosContext = Context<{
   Bindings: CloudflareBindings
@@ -817,7 +819,7 @@ export async function signLineTickets(
 }
 
 // Best-effort tourist-portal token (US-T01) — never fails the committed sale. Shared by both paths.
-async function issuePortalLink(
+export async function issuePortalLink(
   db: Db,
   env: CloudflareBindings,
   org: string,
@@ -2781,19 +2783,14 @@ export const verifyPayment = async (c: PosContext) => {
   const id = c.req.param('id')
   const db = getDb(c.env)
   const org = admin.organizationId
-  const { tz } = await loadOrgTiming(db, org)
 
   const folioRows = await db
     .select({
       id: folios.id,
       agentId: folios.agentId,
       status: deriveStatusSql, // TECH_DEBT #25
-      paymentMethod: displayMethodSql,
       paymentVerification: folios.paymentVerification,
       paymentReference: folios.paymentReference,
-      customerName: folios.customerName,
-      customerEmail: folios.customerEmail,
-      total: folios.total,
     })
     .from(folios)
     .where(and(eq(folios.id, id), eq(folios.organizationId, org)))
@@ -2804,186 +2801,44 @@ export const verifyPayment = async (c: PosContext) => {
     throw new ApiError('NOT_PENDING_VERIFICATION', 409, 'This payment is not awaiting verification')
   }
 
+  // devolada-transfer-verification D10 — the admin's Verificar runs the same cores as Devolada's
+  // verdict, for EVERY pending row of the sale. US-LG07 (paid-ledger, step 2): the rows flip with
+  // the folio rollup, so Step 4 (rows authoritative) inherits a correct per-row verification
+  // state; money amounts are untouched (verify moves no money).
   const now = new Date()
-  const verifyFields = {
-    paymentVerification: 'verified' as const,
-    paymentVerifiedAt: now,
-    paymentVerifiedBy: admin.userId,
-    updatedAt: now,
-  }
-
-  // US-LG07 (paid-ledger, step 2) — keep the ledger shadow faithful: flip this folio's PENDING
-  // payment rows to verified alongside the folio rollup, so Step 4 (rows authoritative) inherits a
-  // correct per-row verification state. Money amounts are untouched (verify moves no money).
-  const verifyPaymentRows = db
-    .update(folioPayments)
-    .set({ verification: 'verified', verifiedAt: now, verifiedBy: admin.userId })
-    .where(
-      and(
-        eq(folioPayments.folioId, id),
-        eq(folioPayments.organizationId, org),
-        eq(folioPayments.entryType, 'payment'),
-        eq(folioPayments.verification, 'pending'),
-      ),
-    )
-
-  // US-A24 — the clearance's narrative row, on the same clock as payment_verified_at.
-  const verifiedEventRow = () =>
-    folioEventRow(db, {
-      organizationId: org,
-      folioId: id,
-      type: 'payment_verified',
-      actorId: admin.userId,
-      payload: { reference: folio.paymentReference },
-      at: now,
-    })
+  const deps = { db, env: c.env, waitUntil: (p: Promise<unknown>) => c.executionCtx.waitUntil(p) }
+  const { flipped, rollupVerified } = await verifyFolioPayment(deps, {
+    organizationId: org,
+    folioId: id,
+    paymentId: 'all',
+    actorId: admin.userId,
+    at: now,
+    eventPayload: { reference: folio.paymentReference },
+  })
 
   // A booking (deposit) is confirmed but mints no QR — its tickets wait for settle.
   if (folio.status !== 'paid') {
-    await db.batch([
-      db
-        .update(folios)
-        .set(verifyFields)
-        .where(and(eq(folios.id, id), eq(folios.organizationId, org))),
-      verifyPaymentRows,
-      verifiedEventRow(),
-    ])
     const out = await readFolio(db, org, folio.agentId, id, c.env.QR_SECRET, c.env.API_BASE_URL)
     // US-A86 — the inbound this prevents is the most repeated one in the product: "¿ya les llegó
     // mi transferencia?", asked until somebody answers it.
-    await emitNotification(db, {
-      organizationId: org,
-      folioId: id,
-      event: 'payment_verified',
-      hasEmail: !!out?.customer_email,
-    })
+    if (flipped) {
+      await emitNotification(db, {
+        organizationId: org,
+        folioId: id,
+        event: 'payment_verified',
+        hasEmail: !!out?.customer_email,
+      })
+    }
     return c.json({ folio: out })
   }
 
-  // A paid folio → run the deferred paid-path side effects (mirrors settle's cleared branch).
-  const allLineRows = await db
-    .select({
-      id: folioLines.id,
-      serviceId: folioLines.serviceId,
-      slotId: folioLines.slotId,
-      serviceName: folioLines.serviceName,
-      slotDate: folioLines.slotDate,
-      slotStartTime: folioLines.slotStartTime,
-      checkIn: folioLines.checkIn,
-      checkOut: folioLines.checkOut,
-      quantity: folioLines.quantity,
-      unitPrice: folioLines.unitPrice,
-      lineTotal: folioLines.lineTotal,
-      cancelledAt: folioLines.cancelledAt,
-    })
-    .from(folioLines)
-    .where(and(eq(folioLines.folioId, id), eq(folioLines.organizationId, org)))
-  // US-A89 (F4, PR-7) — verification releases tickets for the lines that LIVE: re-signing a
-  // cancelled line's QR would hand back a pass for a seat already returned to the pool.
-  const lineRows = allLineRows.filter((l) => !l.cancelledAt)
-
-  const slotLineRows = lineRows.filter((l) => l.slotId && l.slotDate)
-  const identity = folio.customerName?.trim() || folio.customerEmail?.trim() || `folio:${id}`
-  const tickets = await signLineTickets(
-    c.env,
-    org,
-    id,
-    identity,
-    slotLineRows.map((l) => ({
-      id: l.id,
-      serviceId: l.serviceId,
-      slotId: l.slotId!,
-      quantity: l.quantity,
-      slotDate: l.slotDate!,
-    })),
-    tz,
-  )
-
-  const statements: BatchItem<'sqlite'>[] = [
-    db
-      .update(folios)
-      .set(verifyFields)
-      .where(and(eq(folios.id, id), eq(folios.organizationId, org))),
-    verifyPaymentRows,
-    verifiedEventRow(),
-  ]
-  for (const line of slotLineRows) {
-    statements.push(
-      db
-        .update(folioLines)
-        .set({ qrToken: tickets.get(line.id)!.token })
-        .where(and(eq(folioLines.id, line.id), eq(folioLines.organizationId, org))),
-    )
+  // A paid folio → run the deferred paid-path side effects (mirrors settle's cleared branch), only
+  // in the call whose own row flip and rollup both matched (D10): a second verification never
+  // re-signs the QR already delivered nor sends the tickets twice.
+  if (flipped && rollupVerified) {
+    await releaseClearedFolio(deps, { organizationId: org, folioId: id, at: now })
   }
-  await db.batch(statements as [BatchItem<'sqlite'>, ...BatchItem<'sqlite'>[]])
-
-  // Deferred portal token + ticket email (auto-delivery on verify, US-A67 D8).
-  const portalLink = await issuePortalLink(
-    db,
-    c.env,
-    org,
-    id,
-    lineRows.map((l) => l.slotDate ?? l.checkOut ?? l.checkIn).filter((d): d is string => !!d),
-  )
-  const extraRows = await db
-    .select({
-      folioLineId: folioLineExtras.folioLineId,
-      name: folioLineExtras.name,
-      price: folioLineExtras.price,
-      quantity: folioLineExtras.quantity,
-    })
-    .from(folioLineExtras)
-    .where(and(eq(folioLineExtras.folioId, id), eq(folioLineExtras.organizationId, org)))
-  const extrasByLine = new Map<string, typeof extraRows>()
-  for (const ex of extraRows) {
-    const list = extrasByLine.get(ex.folioLineId) ?? []
-    list.push(ex)
-    extrasByLine.set(ex.folioLineId, list)
-  }
-  const orgRows = await db
-    .select({ name: organizations.name })
-    .from(organizations)
-    .where(eq(organizations.id, org))
-    .limit(1)
-  dispatchTicketEmail(
-    c,
-    orgRows[0]?.name ?? 'Turistear Ya!',
-    id,
-    {
-      customerEmail: folio.customerEmail,
-      customerName: folio.customerName,
-      paymentMethod: folio.paymentMethod,
-      total: folio.total,
-      createdAt: now,
-    },
-    slotLineRows.map((line) => ({
-      serviceName: line.serviceName,
-      slotDate: line.slotDate!,
-      slotStartTime: line.slotStartTime!,
-      quantity: line.quantity,
-      unitPrice: line.unitPrice,
-      lineTotal: line.lineTotal,
-      qrToken: tickets.get(line.id)!.token,
-      extras: (extrasByLine.get(line.id) ?? []).map((ex) => ({
-        name: ex.name,
-        price: ex.price,
-        quantity: ex.quantity,
-      })),
-    })),
-    portalLink,
-  )
-
   const out = await readFolio(db, org, folio.agentId, id, c.env.QR_SECRET, c.env.API_BASE_URL)
-  // US-A86 — the money cleared AND the tickets exist now, so both events are real: one answers
-  // "¿ya les llegó mi transferencia?", the other IS the product.
-  await emitNotification(db, {
-    organizationId: org, folioId: id, event: 'payment_verified',
-    hasEmail: !!out?.customer_email,
-  })
-  await emitNotification(db, {
-    organizationId: org, folioId: id, event: 'tickets_delivered',
-    hasEmail: !!out?.customer_email,
-  })
   return c.json({ folio: out })
 }
 

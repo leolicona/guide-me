@@ -113,7 +113,7 @@ Write each story's tests first and watch them fail.
 
 **⚠️ CRITICAL**: No user story work can begin until this phase is complete
 
-- [ ] T007 Write `api-turistear/migrations/0073_devolada_transfer_verification.sql` (or the next free number, data-model.md). Create `devolada_connections`, `devolada_credentials`, `devolada_links`, `devolada_payments` and `devolada_events` with exactly the columns, foreign keys and indexes of data-model.md, including:
+- [X] T007 Write `api-turistear/migrations/0073_devolada_transfer_verification.sql` (or the next free number, data-model.md). Create `devolada_connections`, `devolada_credentials`, `devolada_links`, `devolada_payments` and `devolada_events` with exactly the columns, foreign keys and indexes of data-model.md, including:
   - `UNIQUE(organization_id)` on connections;
   - `devolada_links.credential_id` NOT NULL → `devolada_credentials`, and the `(organization_id, retired_at)` index on credentials (D21);
   - `UNIQUE(devolada_link_id)`;
@@ -122,7 +122,7 @@ Write each story's tests first and watch them fail.
   - every `(organization_id, …)` composite.
 
   The migration is additive only, with a prose header citing `devolada-transfer-verification D1-D9, D21`, like the other migrations.
-- [ ] T008 Mirror migration 0073 in `api-turistear/src/db/schema.ts`:
+- [X] T008 Mirror migration 0073 in `api-turistear/src/db/schema.ts`:
   - five `sqliteTable` definitions with their `$inferSelect`/`$inferInsert` types;
   - the TypeScript enums from data-model.md:
     - connection: status;
@@ -131,8 +131,8 @@ Write each story's tests first and watch them fail.
     - payment: status, proof_door, match, awaiting, awaiting_reason, resolution;
     - event: outcome;
   - `'payment_not_received'` added to the `cancellationSource` enums of `folios` and `folio_lines` (D11).
-- [ ] T009 Add `payment_link_issued`, `payment_link_closed`, `payment_verdict` and `transfer_not_received` to `FolioEventType` in `api-turistear/src/utils/folioEvents.ts` (lines 14-24) and to its Drizzle mirror in `api-turistear/src/db/schema.ts` (lines 998-1011). Document each payload shape from data-model.md § Changes to existing types in a comment.
-- [ ] T010 [P] Implement `api-turistear/src/utils/devoladaCredential.ts` (D1):
+- [X] T009 Add `payment_link_issued`, `payment_link_closed`, `payment_verdict` and `transfer_not_received` to `FolioEventType` in `api-turistear/src/utils/folioEvents.ts` (lines 14-24) and to its Drizzle mirror in `api-turistear/src/db/schema.ts` (lines 998-1011). Document each payload shape from data-model.md § Changes to existing types in a comment.
+- [X] T010 [P] Implement `api-turistear/src/utils/devoladaCredential.ts` (D1):
   - `encryptCredential(env, organizationId, plaintext): Promise<{ciphertext, iv}>`
   - `decryptCredential(env, organizationId, {ciphertext, iv}): Promise<string>`
   - `keyHint(apiKey): string`, returning the last four characters.
@@ -142,7 +142,7 @@ Write each story's tests first and watch them fail.
   - use a fresh 12-byte IV per write, with `additionalData` = UTF-8 `organizationId`;
   - encode ciphertext and IV as base64url;
   - throw if the secret is missing.
-- [ ] T011 Implement `api-turistear/src/utils/devoladaSignature.ts` (D4), after T012:
+- [X] T011 Implement `api-turistear/src/utils/devoladaSignature.ts` (D4), after T012:
   - a module-level `Map<kid, CryptoKey>` cache;
   - `verifyDevoladaSignature(env, {timestamp, keyId, signatureHeader, rawBody}): Promise<boolean>`:
     - require the `v1=` prefix;
@@ -151,7 +151,7 @@ Write each story's tests first and watch them fail.
     - on an unknown `kid`, refetch the key set once through `getSigningKeys` (T012) and re-check. Refetch at most once a minute per isolate, so forged requests with random `kid`s cannot multiply calls to Devolada;
     - return `false` on any malformed input;
   - throw `DevoladaUnavailableError` (exported) when the key set cannot be fetched.
-- [ ] T012 [P] Implement `api-turistear/src/services/devolada.ts` (D5), the only code allowed to call Devolada. `devoladaClient(env, apiKey)` exposes:
+- [X] T012 [P] Implement `api-turistear/src/services/devolada.ts` (D5), the only code allowed to call Devolada. `devoladaClient(env, apiKey)` exposes:
   - `createPaymentLink(body, {idempotencyKey, fast})`
   - `closePaymentLink(id, {idempotencyKey})`
   - `getPayment(id)`
@@ -169,7 +169,7 @@ Write each story's tests first and watch them fail.
   - returns `{ok: true, data} | {ok: false, kind: 'refused' | 'retryable' | 'timeout', code, message, status, retryAfter?}` instead of throwing.
 
   Map errors per contracts/devolada-integration.md § Error mapping. Never log the API key.
-- [ ] T013 [P] Implement the stateful fake Devolada in `api-turistear/test/helpers/devolada.ts` (D18). `installFakeDevolada()` spies `globalThis.fetch` for `https://devolada.test` and passes every other URL through; call `vi.restoreAllMocks()` in `afterEach`. It chains to the spy's current implementation (`getMockImplementation()`) instead of replacing it, so a test that called `stubResend()` (`api-turistear/test/helpers/auth-flows.ts:54-69`) first still captures the ticket emails. It emulates the v1 contract:
+- [X] T013 [P] Implement the stateful fake Devolada in `api-turistear/test/helpers/devolada.ts` (D18). `installFakeDevolada()` spies `globalThis.fetch` for `https://devolada.test` and passes every other URL through; call `vi.restoreAllMocks()` in `afterEach`. It chains to the spy's current implementation (`getMockImplementation()`) instead of replacing it, so a test that called `stubResend()` (`api-turistear/test/helpers/auth-flows.ts:54-69`) first still captures the ticket emails. It emulates the v1 contract:
   - **businesses** keyed by API key: mode, channel `ok|clabe|bank`, suspended, and a key that can be revoked or rotated, so one business may hold several keys;
   - **one-time links**: `expiresAt` may be in the past; idempotent replay by key, refusals included; `PATCH close`; `GET /v1/payment-links/{id}`, which answers `NOT_FOUND` across businesses;
   - **payments**:
@@ -184,20 +184,20 @@ Write each story's tests first and watch them fail.
   - `failNext(route, 'timeout' | '500' | 'rate_limited' | 'unreachable')`;
   - a `calls` log for assertions;
   - `signedEvent(devoladaPaymentId, {eventId?, keyId?, tamperBody?, wrongKey?})`, which returns a `Request` for `SELF.fetch('http://api.local/api/webhooks/devolada')` with valid `Devolada-*` headers.
-- [ ] T014 [P] Write `api-turistear/test/devolada/credential-cipher.test.ts`, citing `devolada-transfer-verification US1`:
+- [X] T014 [P] Write `api-turistear/test/devolada/credential-cipher.test.ts`, citing `devolada-transfer-verification US1`:
   - round trip;
   - two encryptions differ (fresh IV);
   - decrypting with another organization id fails (AAD binding);
   - a missing secret throws;
   - `keyHint` returns the last four characters.
-- [ ] T015 [P] Write `api-turistear/test/devolada/signature.test.ts`, citing `devolada-transfer-verification US1` and using the fake's key pair:
+- [X] T015 [P] Write `api-turistear/test/devolada/signature.test.ts`, citing `devolada-transfer-verification US1` and using the fake's key pair:
   - a valid signature verifies;
   - an altered body or timestamp fails;
   - an unknown `kid` fetches the key set once, then serves from cache;
   - a burst of requests with unknown `kid`s refetches the key set at most once a minute;
   - a malformed header returns `false`;
   - an unreachable key set throws `DevoladaUnavailableError`.
-- [ ] T016 Extract the verification cores into `api-turistear/src/routes/pos/verifyCore.ts` (D10), with `deps = {db, env, waitUntil}` (precedent: `queueCancellationEmail`, `routes/folios/handler.ts:819`):
+- [X] T016 Extract the verification cores into `api-turistear/src/routes/pos/verifyCore.ts` (D10), with `deps = {db, env, waitUntil}` (precedent: `queueCancellationEmail`, `routes/folios/handler.ts:819`):
   - `verifyFolioPayment(deps, {organizationId, folioId, paymentId: string | 'all', actorId: string | null, reference?: string, at, refuseCancelled?: boolean})`:
     - flip rows with a guarded `UPDATE folio_payments SET verification='verified', verified_at, verified_by … WHERE organization_id = ? AND folio_id = ? AND verification = 'pending' [AND id = ?] RETURNING id`;
     - roll `folios.payment_verification` up to `verified` (with `payment_verified_at` / `_by`) with a guarded `UPDATE folios … WHERE payment_verification = 'pending' AND NOT EXISTS (SELECT 1 FROM folio_payments WHERE folio_id = ? AND organization_id = ? AND verification = 'pending') RETURNING id`;
