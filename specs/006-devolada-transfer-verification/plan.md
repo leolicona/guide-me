@@ -28,15 +28,16 @@ Banxico's verdict, which Devolada reports, instead of by an admin. The approach,
     link's own credential**, one of the owning organization's own, before anything changes (D4,
     D21).
   - A 15-minute recovery sweep on the existing cron. It follows every payment to its verdict, one
-    on a link already closed included, so money owed back is always flagged (D12).
+    on a link already closed included, so money owed back is flagged while a key of the link's
+    account can read it (D12, D21).
 - **Applying a verdict** (D9):
   - *confirmed* → verifies one ledger row, through cores extracted from `verifyPayment` (D10).
   - Money that never arrived → cancels the sale through a guarded system cancellation, with none of
     `rejectPayment`'s defects (D11).
   - Everything else → reaches Por verificar or the seller, labelled by the server (D14, D15).
   - The admin can always verify by hand, a settlement still in verification included. While a
-    deposit or settlement payment awaits that decision, the apartado does not expire (D8, D15;
-    spec clarifications of 2026-10-15).
+    deposit a link collects is not verified yet, or a settlement payment awaits that decision, the
+    apartado does not expire (D8, D15; spec clarifications of 2026-10-15 and 2026-10-16).
 - **Por verificar holds only work for the admin**: a sale Devolada is still resolving stays out of it, and out of its count, until the admin has something to do (D14; spec clarification of 2026-10-15).
 - **Closing links**: links close whenever their sale stops taking money, but never under a payment in flight while the sale lives (D13; spec clarification of 2026-10-15).
 
@@ -129,7 +130,7 @@ and resolved by one MINOR amendment through `/speckit-constitution` (T006):
 
 ```text
 specs/006-devolada-transfer-verification/
-├── spec.md                 # /speckit-specify (+ clarifications 2026-10-06 and 2026-10-15; FR-016 amended by D8)
+├── spec.md                 # /speckit-specify (+ clarifications 2026-10-06, 2026-10-15 and 2026-10-16; FR-016 amended by D8)
 ├── plan.md                 # This file
 ├── research.md             # Phase 0: D1–D21, defects found, requests to Devolada
 ├── data-model.md           # Phase 1: five tables, states, validation rules
@@ -177,7 +178,7 @@ api-turistear/
 │       │   ├── verifyCore.ts                                NEW  verifyFolioPayment + releaseClearedFolio (D10)
 │       │   ├── settleCore.ts                                NEW  settlement core shared by both settle handlers and D8
 │       │   ├── unreceivedTransfer.ts                        NEW  cancelForUnreceivedTransfer + shared release builder (D11)
-│       │   └── sweep.ts                                     guard: skip sales with an open link or a payment in flight (D8)
+│       │   └── sweep.ts                                     guard: skip apartados with a link being created or open, a pending deposit a link collects, or a settlement payment awaiting the admin (D8)
 │       └── folios/handler.ts                                cancel cores mark links `closing` in their batch (D13)
 ├── test/
 │   ├── helpers/devolada.ts                                  NEW  fake Devolada, key pair/JWKS, signed-webhook builder

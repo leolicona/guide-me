@@ -40,7 +40,7 @@ devolada_payments ·· *    devolada_events       (by devolada_payment_id; no FK
 | `replaced_webhook_url` | text NULL | the address the admin agreed to replace (FR-006) |
 | `broken_reason` | text NULL | `DEVOLADA_CREDENTIAL_REJECTED` · `DEVOLADA_BUSINESS_SUSPENDED` · `DEVOLADA_CHANNEL_UNAVAILABLE` |
 | `broken_at` | integer NULL | |
-| `credit_paused_at` | integer NULL | set when a payment reports `queued_for_credit`; cleared when one validates again |
+| `credit_paused_at` | integer NULL | set when a payment of a link on the current credential reports `queued_for_credit`; cleared when a payment stored as `queued_for_credit` moves to any other status, a final verdict included, since a re-read may never show the `validating` in between |
 | `last_verdict_at` | integer NULL | last final verdict applied (FR-005) |
 | `probed_at` | integer NULL | last time reading a `broken` connection repeated D2's probe; another read probes again only 15 minutes later |
 | `connected_by` | text NOT NULL → users | |
@@ -90,7 +90,7 @@ Connecting, replacing the key and disconnecting each retire the previous current
 **Rules**:
 - Every call about a link uses the link's credential: the one that created it, until D21's fallback moves the link to the current one. Only new links use the connection's current credential (D21).
 - A retired credential is kept while a link that uses it is unresolved (`devolada_links` § Rules); the sweep erases its ciphertext after (D12). The row stays for audit.
-- When Devolada rejects a link's credential (`AUTHENTICATION_ERROR`), the link moves to the current credential if that one can read it, or else becomes `failed` (D21). A suspended business (`BUSINESS_SUSPENDED`) is not a rejection: its links are retried at the next run.
+- When Devolada rejects a link's retired credential (`AUTHENTICATION_ERROR`), the link moves to the current credential if that one can read it, or else becomes `failed` (D21). When it rejects the current credential, the connection becomes `broken`, and the links that use it wait until the admin replaces the key. A suspended business (`BUSINESS_SUSPENDED`) is not a rejection: a retired credential's links are retried at the next run.
 
 ### `devolada_links` — one per transfer we asked for (D6–D8, D13)
 
@@ -130,6 +130,7 @@ creating ── 201 ────────────────────
 creating ── refusal ─────────────────────────────────▶ failed   (final; sale on the manual path)
 creating ── timeout ─────────────────────────────────▶ abandoned
 creating ── no outcome after 5 minutes (D12) ────────▶ abandoned (the request died)
+creating ── the sale stops taking it (D13) ──────────▶ closing  (the create still records Devolada's id)
 abandoned ── sweep: create replay finds it ──────────▶ closing
 abandoned ── sweep: replay is refused ───────────────▶ failed
 open ── confirmed applied (D9) ──────────────────────▶ paid     (final)
@@ -140,9 +141,10 @@ open ── past expires_at after a partial, invalid
 open ── the sale stops taking it (D13), or a
         partial/invalid settlement verdict ──────────▶ closing  (never under a payment in flight
                                                                  while the sale lives, D13)
-closing ── Devolada acknowledges (or LINK_CLOSED) ───▶ closed   (final; a payment still in flight
-                                                                 is followed to its verdict, D12)
+closing ── Devolada acknowledges (or LINK_CLOSED) ───▶ closed   (a payment still in flight is
+                                                                 followed to its verdict, D12)
 closing ── no credential can read it (D21) ──────────▶ failed   (final; the sale already stopped taking it)
+closed ── no credential can read it (D21) ───────────▶ failed   (final; its payment in flight can no longer be followed)
 open ── no credential can read it (D21) ─────────────▶ failed   (final; D21 says who decides)
 ```
 
@@ -205,11 +207,14 @@ open ── no credential can read it (D21) ────────────
 
 A payment is decided by hand once its `resolution` is set (an admin's *accept* or *dismiss* of a settlement, D15), once its ledger row on a sale or deposit link is verified (the admin's Verificar), or once its sale is cancelled (Rechazar, or any cancellation). Money that then arrives is covered by the *unapplied* clauses above.
 
-A payment **awaits the admin's decision** when it is:
-- a `settlement` payment that needs the admin through the first clause, or through the `failed` link clause;
-- a `deposit` payment that ended `partial` or `invalid`, or that was last seen in flight on a link no credential can read, while its ledger row is still pending and its sale is not cancelled. The admin decides it with today's Verificar or Rechazar.
+A `settlement` payment **awaits the admin's decision** when it needs the admin through the first clause, or through the `failed` link clause.
 
-While one does, the apartado does not expire by its clock: the customer may have paid (D8, FR-016).
+**The apartado does not expire by its clock** (D8, FR-016) while:
+- a link of the sale is `creating` or `open`;
+- a deposit row that a link collects is still pending, whatever the link's state, `failed` and `abandoned` included: Devolada's verdict, or the admin's Verificar or Rechazar, decides it;
+- a settlement payment awaits the admin's decision.
+
+The customer may have paid, and the expiry would otherwise count as collected a deposit that never arrived (research defect 4).
 
 A sale or deposit with `partial` or `invalid` is attended through the sale's pending verification, as today.
 
@@ -272,13 +277,13 @@ A sale or deposit with `partial` or `invalid` is attended through the sale's pen
 | A connected organization's transfer is collected by a link; any `payment_reference` sent is ignored | confirm, settle | FR-009 |
 | A link's amount equals the payment it collects | link issue | FR-007 |
 | A link is issued only if it stays open at least 15 minutes | link issue | FR-010, D7 |
-| Every call about a link uses the link's credential; a rejected one hands the link to the current credential, or marks it `failed` for the admin; a suspended business is retried | webhook, sweep, link close | FR-004, D21 |
+| Every call about a link uses the link's credential; a rejected retired one hands the link to the current credential, or marks it `failed`; a rejected current one marks the connection `broken`, and its links wait for the new key; a suspended business is retried | webhook, sweep, link close | FR-004, D21 |
 | A payment is followed to its verdict after its link closed too, and its credential is kept until then | sweep | FR-004, FR-012, D12 |
 | The admin's *accept* records a settlement for an exception or for a payment still in flight; *dismiss* applies to exceptions only | resolve | FR-018, D15 |
 | One open settlement link per sale; a transfer settlement for another scope (another line, or the whole sale against one line's link, and the reverse) is refused with `SETTLEMENT_IN_PROGRESS` | partial unique index; settle | D8, D13 |
 | A settlement link closes only when the write touches what it collects: its own line, or the whole sale | line cancel, settle | D13 |
 | While the sale lives, no write closes a link under a payment in flight: a line cancellation or a cash settlement that would close it is refused with `SETTLEMENT_IN_PROGRESS`, and a manual Verificar leaves it open | line cancel, settle, verify | FR-011, D13 |
-| An apartado never expires by its clock while it has a link being created or open, or a deposit or settlement payment awaiting the admin's decision | bookings expiry sweep | FR-016, D8 |
+| An apartado never expires by its clock while it has a link being created or open, a pending deposit row that a link collects, or a settlement payment awaiting the admin's decision | bookings expiry sweep | FR-016, D8 |
 | A settlement link records at most one settlement: its batch is claimed by `folio_payment_id IS NULL` and every other statement is gated on that claim | settlement core | D8 |
 | A verification releases tickets only in the call whose guarded row flip and rollup update both matched | verify core | D10 |
 | The system cancellation writes nothing unless its own guarded transition matched | `cancelForUnreceivedTransfer` | D11 |

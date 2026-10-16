@@ -285,7 +285,7 @@ For a connected organization with `"method": "transfer"`, no settlement is recor
 | 409 | `DEVOLADA_PAYMENT_NOT_RESOLVABLE`: the action does not fit the payment's status or kind, it was already resolved, or `accept` on an apartado already settled another way |
 | 409 | `FOLIO_CANCELLED`: `accept` on a cancelled sale |
 
-Sale and deposit exceptions use today's `POST /pos/folios/:id/verify` and `/reject` (FR-018). From PR 3, `/reject` closes the sale's links. `/verify` closes the links of the rows it verifies, except one whose payment is in flight, which stays open until its verdict (D13). While a deposit exception, or a deposit payment no key can read any more, waits for one of them, the apartado does not expire by its clock either (research D8).
+Sale and deposit exceptions use today's `POST /pos/folios/:id/verify` and `/reject` (FR-018). From PR 3, `/reject` closes the sale's links. `/verify` closes the links of the rows it verifies, except one whose payment is in flight, which stays open until its verdict (D13). While a deposit collected by an enlace is not verified yet, whatever happened to the enlace, the apartado does not expire by its clock: it waits for Devolada's verdict or for one of them (research D8).
 
 ### Webhook — public, Devolada only (`/webhooks` router, no auth)
 

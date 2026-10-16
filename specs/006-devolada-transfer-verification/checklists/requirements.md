@@ -105,3 +105,15 @@
   deposit: an apartado whose deposit payment awaits the admin's decision does not expire by its
   clock either (FR-016, US3 scenario 7). FR-011 and US4 scenarios 2 and 4 now state the per-line
   rules the fourth run gave D13. All items still pass.
+- **/speckit-analyze, sixth run (2026-10-16)** found no CRITICAL item, and 1 HIGH, 4 MEDIUM and
+  4 LOW items. All were resolved in place. The developer decided three clarifications (Session
+  2026-10-16):
+  - any transfer deposit collected by an enlace that is not verified yet keeps its apartado from
+    expiring, whatever happened to the enlace (FR-016, US3 scenario 7);
+  - the admin learns that the connection broke in Ajustes only, and sellers at checkout;
+  - every transfer stays verified through its enlace with Devolada, as already defined: the
+    previous account's key stays valid until its enlaces finish, and if it is revoked anyway, a
+    cancelled sale has nothing left to follow.
+
+  D21's fallback now applies to retired keys only, and FR-004 and FR-011 were reworded. All items
+  still pass.

@@ -55,9 +55,9 @@ Nothing else about the customer (phone, email) or the seller ever leaves Turiste
 
 | Devolada answers | On | Turistear does |
 |---|---|---|
-| `AUTHENTICATION_ERROR` (401) | a call with the current credential | connection → `broken` (`DEVOLADA_CREDENTIAL_REJECTED`); checkout falls back; the admin is warned in Ajustes |
+| `AUTHENTICATION_ERROR` (401) | a call with the current credential | connection → `broken` (`DEVOLADA_CREDENTIAL_REJECTED`); checkout falls back; the links that use it wait, unchanged, for the admin's new key (research D21); the admin sees it in Ajustes |
 | `AUTHENTICATION_ERROR` (401) | a call with a retired credential | the link moves to the current credential if that one can read it; otherwise it becomes `failed`, and D21 says who decides (research D21) |
-| `BUSINESS_SUSPENDED` (409) | a call with the current credential | connection → `broken`; checkout falls back |
+| `BUSINESS_SUSPENDED` (409) | a call with the current credential | connection → `broken`; checkout falls back; the links that use it wait |
 | `BUSINESS_SUSPENDED` (409) | a call with a retired credential | retried at the next run; the connection, which belongs to the current key, is untouched (research D21) |
 | `CHANNEL_UNAVAILABLE` (409) | issue link | connection → `broken`, recording `clabe` or `bank`; checkout falls back |
 | `VALIDATION_ERROR` (400) | any call | our bug: logged with Devolada's `message`; the link → `failed`; the key gets a new suffix |
@@ -92,7 +92,7 @@ Devolada's rules this satisfies:
 | Unreachable at checkout or settlement | No link is created. The sale completes on today's manual path | Seller: an alert on the receipt. Admin: Por verificar «Sin enlace de pago — verificar a mano» | None needed: the admin verifies as today |
 | Its notifications stop (outage, address taken by another system) | Verdicts arrive late | Ajustes health: `consecutive_failures`, `is_ours = false` | The sweep re-reads every open link, and every closed link whose payment is still in flight, at least every 15 minutes (SC-003) |
 | Keys endpoint unreachable | The webhook answers 503 | — | Devolada retries for 4 h; the sweep needs no keys |
-| Credential revoked or business suspended | Connection `broken`; new transfers fall back, and the seller is told why. Links created with a revoked retired key move to the current key, or go to the admin; a retired key's suspended business is retried | Admin, in Ajustes | The admin replaces the key, or Devolada lifts the suspension. The next time an admin opens «Cobro con Devolada», the probe confirms it and the connection is `connected` again (research D2) |
+| Credential revoked or business suspended | Connection `broken`; new transfers fall back, and the seller is told why. Links that use the current key wait for the admin's fix. Links created with a revoked previous key move to the current key; when no key can read them, a live sale goes to the admin and a cancelled one is not followed further. A previous key's suspended business is retried | Admin, in Ajustes only (spec clarification of 2026-10-16) | The admin replaces the key, or Devolada lifts the suspension. The next time an admin opens «Cobro con Devolada», the probe confirms it and the connection is `connected` again (research D2). The previous account's key stays valid at Devolada until its links finish |
 | Validation credit exhausted | Payments wait as `queued_for_credit`; tickets wait with them | Admin: «Verificación en pausa» in Ajustes | The business tops up at Devolada; validation resumes by itself |
 | Down longer than a link's lifetime | Nothing is cancelled: the unpaid branch needs a successful re-read showing no payment in flight (D9) | — | When Devolada answers again, the sweep applies whatever happened |
 | Devolada answers wrongly (a verdict a human disputes) | — | Admin | Verificar or Rechazar by hand remain available (FR-018) |
