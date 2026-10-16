@@ -6,7 +6,7 @@ This guide only runs and checks things. Implementation detail lives in `tasks.md
 ## Prerequisites
 
 - **Toolchain and local data**: Node 22, `pnpm install`, the local database (`docs/DEVELOPMENT.md` in the archive), and `api-turistear/.dev.vars` from `.dev.vars.example`, `BETTER_AUTH_SECRET` included.
-- **A Devolada test credential** (`dk_…`) from a Devolada business set aside for testing, from its panel under **Integraciones → API**. Never use a business that a real integration also uses: Devolada keeps one notification address per business (research D3).
+- **A Devolada test credential** (`dk_…`) from a business set aside for testing in **Devolada's dev environment** (`api.dev.devoladapago.com`), from its panel under **Integraciones → API**. Devolada production does not know a dev key (it answers «Devolada rechazó la clave»). Never use a business that a real integration also uses: Devolada keeps one notification address per business (research D3).
 - **For step 14**, a second test business set aside the same way, and its test key.
 - **`api-turistear/.dev.vars`** gains:
 
@@ -15,7 +15,7 @@ This guide only runs and checks things. Implementation detail lives in `tasks.md
   ```
 
 - **The wrangler local profile**:
-  - sets `DEVOLADA_API_BASE_URL=https://api.devoladapago.com`, `DEVOLADA_KEY_MODE=test` and an empty `DEVOLADA_WEBHOOK_URL`;
+  - sets `DEVOLADA_API_BASE_URL=https://api.dev.devoladapago.com`, `DEVOLADA_KEY_MODE=test` and an empty `DEVOLADA_WEBHOOK_URL`;
   - registers no notification address locally, so verdicts arrive through the sweep.
 - **Elsewhere**: the dev environment (`api-dev.turistearya.com`) receives real notifications. A pull request's preview registers no address and runs no cron (research D17).
 
@@ -75,9 +75,9 @@ the previous one, or the verdict you just advanced is not read.
 Find a test payment's id with your test key, then move it to a verdict:
 
 ```bash
-curl -s "https://api.devoladapago.com/v1/payments?customerRef=<folio id>" \
+curl -s "https://api.dev.devoladapago.com/v1/payments?customerRef=<folio id>" \
   -H "Authorization: Bearer <dk_ test key>"
-curl -s -X POST "https://api.devoladapago.com/v1/test/payments/<payment id>/advance" \
+curl -s -X POST "https://api.dev.devoladapago.com/v1/test/payments/<payment id>/advance" \
   -H "Authorization: Bearer <dk_ test key>" -H "Content-Type: application/json" \
   -d '{"to":"confirmed"}'
 ```

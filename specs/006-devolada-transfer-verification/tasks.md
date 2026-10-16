@@ -57,9 +57,9 @@ Write each story's tests first and watch them fail.
 
   | Profile (`vars` lines) | `DEVOLADA_API_BASE_URL` | `DEVOLADA_KEY_MODE` | `DEVOLADA_WEBHOOK_URL` |
   |---|---|---|---|
-  | local (40-53) | `https://api.devoladapago.com` | `test` | `""` |
-  | dev (80-87) | `https://api.devoladapago.com` | `test` | `https://api-dev.turistearya.com/api/webhooks/devolada` |
-  | preview (110-120) | `https://api.devoladapago.com` | `test` | `""` |
+  | local (40-53) | `https://api.dev.devoladapago.com` | `test` | `""` |
+  | dev (80-87) | `https://api.dev.devoladapago.com` | `test` | `https://api-dev.turistearya.com/api/webhooks/devolada` |
+  | preview (110-120) | `https://api.dev.devoladapago.com` | `test` | `""` |
   | production (146-153) | `https://api.devoladapago.com` | `real` | `https://api.turistearya.com/api/webhooks/devolada` |
 
   A preview registers no notification address. It serves dev's database, so the business keeps dev's address, and it runs no cron (D17). Add a comment citing `devolada-transfer-verification D17`.
