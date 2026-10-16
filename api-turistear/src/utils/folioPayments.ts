@@ -56,21 +56,30 @@ interface PaymentRowInput {
   // same batch (the id must exist before the insert statement is built). Omit where nothing
   // references the row.
   id?: string
+  /** devolada-transfer-verification D8 — a payment proven when it is recorded: who verified it
+   *  (NULL = «Sistema») and when. */
+  verifiedBy?: string | null
+  verifiedAt?: Date | null
+  /** devolada-transfer-verification D8 — write the row only while this holds (`insertWhere`). */
+  gate?: SQL
 }
 
-export const paymentRow = (db: Db, input: PaymentRowInput) =>
-  db.insert(folioPayments).values({
+export const paymentRow = (db: Db, input: PaymentRowInput) => {
+  const row = {
     id: input.id ?? crypto.randomUUID(),
     organizationId: input.organizationId,
     folioId: input.folioId,
-    entryType: 'payment',
+    entryType: 'payment' as const,
     amount: input.amount,
     method: input.method,
     reference: input.reference ?? null,
     verification: input.verification,
     collectedBy: input.collectedBy,
+    ...(input.verifiedAt ? { verifiedAt: input.verifiedAt, verifiedBy: input.verifiedBy ?? null } : {}),
     ...(input.createdAt ? { createdAt: input.createdAt } : {}),
-  })
+  }
+  return input.gate ? insertWhere(db, folioPayments, row, input.gate) : db.insert(folioPayments).values(row)
+}
 
 interface CommissionRowInput {
   organizationId: string
@@ -79,20 +88,24 @@ interface CommissionRowInput {
   method: Method // the collection method this commission accrues on (for the cash/electronic bucket)
   collectedBy: string // the agent/manager whose caja earns it
   createdAt?: Date
+  /** devolada-transfer-verification D8 — write the row only while this holds (`insertWhere`). */
+  gate?: SQL
 }
 
-export const commissionRow = (db: Db, input: CommissionRowInput) =>
-  db.insert(folioPayments).values({
+export const commissionRow = (db: Db, input: CommissionRowInput) => {
+  const row = {
     id: crypto.randomUUID(),
     organizationId: input.organizationId,
     folioId: input.folioId,
-    entryType: 'commission',
+    entryType: 'commission' as const,
     amount: input.amount,
     method: input.method,
-    verification: 'not_required',
+    verification: 'not_required' as const,
     collectedBy: input.collectedBy,
     ...(input.createdAt ? { createdAt: input.createdAt } : {}),
-  })
+  }
+  return input.gate ? insertWhere(db, folioPayments, row, input.gate) : db.insert(folioPayments).values(row)
+}
 
 interface ReversalRowInput {
   organizationId: string

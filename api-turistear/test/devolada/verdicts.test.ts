@@ -9,6 +9,7 @@ import { getDb } from '../../src/db/client'
 import { cancelForUnreceivedTransfer } from '../../src/routes/pos/unreceivedTransfer'
 import { stubResend } from '../helpers/auth-flows'
 import { installFakeDevolada, type FakeDevolada } from '../helpers/devolada'
+import { seedTwoOrgs } from '../helpers/tenancy'
 import {
   PHONE,
   call,
@@ -275,8 +276,8 @@ describe('money that settled nothing (D9, D15)', () => {
     expect(porVerificar(before)).toBe(1)
     const stored = await storedPayment(paymentId)
 
-    const other = await seedSellers('verdict-other')
-    expect((await call(other.adminEmail, 'POST', `/devolada/payments/${stored.id}/resolve`, { action: 'returned' })).status).toBe(404)
+    const { orgB } = await seedTwoOrgs()
+    expect((await call(orgB.adminEmail, 'POST', `/devolada/payments/${stored.id}/resolve`, { action: 'returned' })).status).toBe(404)
     const accept = await call(org.adminEmail, 'POST', `/devolada/payments/${stored.id}/resolve`, { action: 'accept' })
     expect(accept.status).toBe(409)
     expect(accept.json.error.code).toBe('DEVOLADA_PAYMENT_NOT_RESOLVABLE')
@@ -478,8 +479,8 @@ describe('each sale counts once in «Por verificar» (D14)', () => {
     expect((await call(org.adminEmail, 'POST', `/pos/folios/${folioId}/reject`, {})).status).toBe(200)
     fake.advance(paymentId, 'unapplied')
     await notify(paymentId)
-    const other = await seedSellers('verdict-other')
-    expect((await counts(other.adminEmail)).devolada_attention).toBe(0)
-    expect(await adminRow(folioId, other.adminEmail)).toBeUndefined()
+    const { orgB } = await seedTwoOrgs()
+    expect((await counts(orgB.adminEmail)).devolada_attention).toBe(0)
+    expect(await adminRow(folioId, orgB.adminEmail)).toBeUndefined()
   })
 })

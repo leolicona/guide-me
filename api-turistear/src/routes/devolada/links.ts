@@ -333,6 +333,33 @@ export async function closePaymentLinkRemote(
   }
 }
 
+export const SETTLEMENT_IN_PROGRESS_MESSAGE = 'The sale already has a payment link to settle it; wait for its result'
+
+/**
+ * D8 — the sale's settlement link still taking money (`creating` or `open`): one per sale, by the
+ * partial unique index. Until PR 3 closes and replaces settlement links, it holds every other
+ * settlement and every line cancellation of the sale (research D19).
+ */
+export async function openSettlementLink(
+  db: Db,
+  organizationId: string,
+  folioId: string,
+): Promise<{ id: string; folioLineId: string | null } | null> {
+  const [open] = await db
+    .select({ id: devoladaLinks.id, folioLineId: devoladaLinks.folioLineId })
+    .from(devoladaLinks)
+    .where(
+      and(
+        eq(devoladaLinks.organizationId, organizationId),
+        eq(devoladaLinks.folioId, folioId),
+        eq(devoladaLinks.kind, 'settlement'),
+        inArray(devoladaLinks.state, ['creating', 'open']),
+      ),
+    )
+    .limit(1)
+  return open ?? null
+}
+
 /** D5 — the create's Idempotency-Key: the row's id, suffixed `#<n>` after a refusal. */
 export const createKeyOf = (link: Pick<DevoladaLink, 'id' | 'createAttempts'>): string =>
   link.createAttempts > 1 ? `${link.id}#${link.createAttempts}` : link.id

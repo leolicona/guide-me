@@ -95,7 +95,14 @@ import { buildInventoryReleaseStatements } from './unreceivedTransfer'
 import { readConnectionSummary } from '../devolada/connection'
 import { loadPaymentLinkViews } from '../../utils/devoladaLinkView'
 import { devoladaAttentionFilter, verificationAutoFilter } from '../../utils/folioPendingWork'
-import { issuePaymentLink, type IssueLinkResult } from '../devolada/links'
+import {
+  issuePaymentLink,
+  openSettlementLink,
+  SETTLEMENT_IN_PROGRESS_MESSAGE,
+  type IssueLinkResult,
+  type PaymentLinkError,
+} from '../devolada/links'
+import { applySettlement, planSettlement } from './settleCore'
 
 export type PosContext = Context<{
   Bindings: CloudflareBindings
@@ -1407,11 +1414,11 @@ export const confirmSale = async (c: PosContext) => {
   // (verifyPayment). Cash clears immediately, exactly as before. `cleared` = the money is usable now.
   const method = input.payment_method ?? 'cash'
   const needsVerification = method === 'transfer'
-  // devolada-transfer-verification D6, FR-009 — a CONNECTED organization's full sale by transfer is
-  // collected by a payment link: the seller sends no reference, and one that is sent is not stored.
-  // A `broken` connection keeps today's rule, since its seller sees the field; a deposit keeps the
-  // manual path, reference rule included, until deposits get their link (PR 2).
-  const collectsByLink = needsVerification && !isBooking && devolada.status === 'connected'
+  // devolada-transfer-verification D6, D8, FR-009 — a CONNECTED organization's transfer, a full sale
+  // or an apartado's deposit, is collected by a payment link: the seller sends no reference, and one
+  // that is sent is not stored. A `broken` connection keeps today's rule, since its seller sees the
+  // field.
+  const collectsByLink = needsVerification && devolada.status === 'connected'
   // US-AG41, relaxed by US-A88 — a transfer must carry its bank reference unless the org switched
   // the requirement off (`payment_reference_required`). Formerly a schema refine; it lives here now
   // because it reads the org row. Optionality never weakens verification: an unreferenced transfer
@@ -1974,12 +1981,14 @@ export const confirmSale = async (c: PosContext) => {
     hasEmail: !!input.customer_email,
   })
 
-  // devolada-transfer-verification D6 — the transfer's payment link, issued AFTER the sale's batch
-  // committed (constitution VIII). Every transfer of an organization with a current credential
-  // leaves a link row; when none could be created the sale stays on today's manual path and the
-  // answer says why. A failure here never turns a committed sale into a 500.
+  // devolada-transfer-verification D6, D8 — the transfer's payment link, issued AFTER the sale's
+  // batch committed (constitution VIII): a full sale's, or an apartado's deposit's, which verifies
+  // only the deposit row. Every transfer of an organization with a current credential leaves a link
+  // row; when none could be created the sale stays on today's manual path and the answer says why —
+  // a deposit's `failed` link still holds its apartado for the admin (D8). A failure here never
+  // turns a committed sale into a 500.
   let linkResult: IssueLinkResult | null = null
-  if (needsVerification && !isBooking && (devolada.status === 'connected' || devolada.status === 'broken')) {
+  if (needsVerification && (devolada.status === 'connected' || devolada.status === 'broken')) {
     const first = prepared[0]
     try {
       linkResult = await issuePaymentLink(
@@ -1989,7 +1998,7 @@ export const confirmSale = async (c: PosContext) => {
           folioId,
           folioPaymentId: salePaymentId,
           folioLineId: null,
-          kind: 'sale',
+          kind: isBooking ? 'deposit' : 'sale',
           amount: amountPaid,
           requestedBy: agent.userId,
           customerName: input.customer_name ?? null,
@@ -2175,62 +2184,63 @@ export const markTicketsSent = async (c: PosContext) => {
 // (percent on the full total + fixed, which only accrues at `paid`). Caller-scoped; inventory is
 // untouched (the spots were reserved at booking time). Guards: foreign/unknown → 404; already
 // paid → 409; cancelled → 409; past its expiry → 409.
-export const settleBooking = async (c: PosContext) => {
+export const settleBooking = (c: PosContext) => settle(c, null)
+
+// US-AG54 (docs/folios/line-autonomy.spec.md, F3 — D4) — settle ONE line: collect ITS remaining
+// balance, sign ITS QR, book ITS commission, and touch nothing of its siblings. "Liquidar todo"
+// stays `settleBooking` (one payment row, N allocations — the ledger's grain is the money event);
+// this is the gesture that makes "pago completo el martes ahora, el jueves la semana que viene"
+// exist. The folio flips to `paid` only when the LAST live line completes — the delivery tail
+// (portal + email) stays with that completing settle, exactly where settleBooking runs it.
+export const settleFolioLine = (c: PosContext) => settle(c, c.req.param('lineId') ?? '')
+
+// Both settles. The money itself — the balance, the ledger rows, the commission, settled_at, the
+// event and the tickets — is the settle core's (routes/pos/settleCore.ts), shared with the
+// settlements Devolada proves (devolada-transfer-verification D8).
+async function settle(c: PosContext, folioLineId: string | null) {
   const agent = c.get('user')
-  const id = c.req.param('id')
+  const id = c.req.param('id') ?? ''
   const db = getDb(c.env)
   const org = agent.organizationId
-  // US-A66 — ticket expiry below is measured in the org's time zone.
-  const { tz } = await loadOrgTiming(db, org)
+  const deps = { db, env: c.env, waitUntil: (p: Promise<unknown>) => c.executionCtx.waitUntil(p) }
 
-  const folioRows = await db
-    .select({
-      id: folios.id,
-      status: deriveStatusSql, // TECH_DEBT #25
-      total: folios.total,
-      bookingExpiresAt: deriveBookingExpiresAtSql, // TECH_DEBT #25 — epoch seconds
-      customerName: folios.customerName,
-      customerEmail: folios.customerEmail,
-      // The deposit's method — the settle default when the caller sends none (US-LG08).
-      paymentMethod: depositMethodSql,
-      // US-A67 — the deposit's verification state coming in: a still-`pending` transfer DEPOSIT must
-      // keep the QR deferred even when the BALANCE is settled by cash (money not yet confirmed).
-      paymentVerification: folios.paymentVerification,
-      // US-LG03 dual-write — the deposit already collected + commission already accrued, so the
-      // balance movement (total − deposit) and the commission top-up post as their own ledger rows.
-      amountPaid: folios.amountPaid,
-      commissionAmount: folios.commissionAmount,
-    })
-    .from(folios)
-    .where(folioActionFilter(id, agent))
-    .limit(1)
-
-  const folio = folioRows[0]
-  if (!folio) throw new ApiError('NOT_FOUND', 404, 'Folio not found')
-  if (folio.status === 'paid') {
-    throw new ApiError('ALREADY_SETTLED', 409, 'Folio is already paid')
-  }
-  if (folio.status === 'cancelled') {
-    throw new ApiError('FOLIO_CANCELLED', 409, 'Folio is cancelled')
-  }
-  if (folio.bookingExpiresAt && folio.bookingExpiresAt * 1000 <= Date.now()) {
-    throw new ApiError('BOOKING_EXPIRED', 409, 'Booking has expired')
-  }
+  const [own] = await db.select({ id: folios.id }).from(folios).where(folioActionFilter(id, agent)).limit(1)
+  if (!own) throw new ApiError('NOT_FOUND', 404, 'Folio not found')
+  // Today's guards, in their order, and what this settlement collects.
+  const plan = await planSettlement(db, { organizationId: org, folioId: id, folioLineId }, { now: new Date() })
 
   // US-LG03 (paid-ledger, step 3) — the balance is collected by ITS OWN method, chosen at settle,
   // independent of the deposit. `method` defaults to the deposit's method for a body-less cash
-  // settle (backward compatible). A TRANSFER balance is a fresh electronic payment: it requires a
-  // reference, re-arms verification to `pending`, and DEFERS the QR/portal/email until an admin
-  // verifies it. Any non-transfer balance settles immediately — UNLESS the deposit was itself a
-  // still-`pending` transfer, whose money is not yet confirmed, so the QR must keep waiting (US-A67).
+  // settle (backward compatible). A TRANSFER balance is a fresh electronic payment: it re-arms
+  // verification to `pending` and DEFERS the QR/portal/email until an admin verifies it. Any
+  // non-transfer balance settles immediately — UNLESS the deposit was itself a still-`pending`
+  // transfer, whose money is not yet confirmed, so the QR must keep waiting (US-A67).
   const parsed = settleSchema.safeParse(await c.req.json().catch(() => ({})))
-  if (!parsed.success) {
-    throw new ApiError('VALIDATION_ERROR', 400, 'Invalid settle payload')
-  }
+  if (!parsed.success) throw new ApiError('VALIDATION_ERROR', 400, 'Invalid settle payload')
   const body: SettleInput = parsed.data
-  const settleMethod = body.method ?? folio.paymentMethod
-  const balanceNeedsVerification = settleMethod === 'transfer'
-  if (balanceNeedsVerification && !body.payment_reference) {
+  const settleMethod = body.method ?? plan.folio.depositMethod
+
+  // devolada-transfer-verification D8, D19 — one open settlement link per sale. A transfer
+  // settlement of the same scope (the same line, or the whole sale) gets that link back. Until
+  // PR 3 closes and replaces settlement links, every other settlement waits for it.
+  const respondWithOpenLink = async () => {
+    const open = await openSettlementLink(db, org, id)
+    if (!open) return null
+    if (settleMethod === 'transfer' && open.folioLineId === folioLineId) {
+      const folio = await readFolio(db, org, agent.userId, id, c.env.QR_SECRET, c.env.API_BASE_URL)
+      return c.json({ folio, payment_link: folio?.payment_links.find((l) => l.id === open.id) ?? null })
+    }
+    throw new ApiError('SETTLEMENT_IN_PROGRESS', 409, SETTLEMENT_IN_PROGRESS_MESSAGE)
+  }
+  const answered = await respondWithOpenLink()
+  if (answered) return answered
+
+  // devolada-transfer-verification D8, FR-009 — a connected organization's transfer is collected
+  // by a link: no reference is asked, and no settlement is recorded until Devolada proves it. A
+  // `broken` connection only records the `failed` link, and keeps today's reference rule.
+  const devolada = await readConnectionSummary(db, org)
+  const byLink = settleMethod === 'transfer' && (devolada.status === 'connected' || devolada.status === 'broken')
+  if (settleMethod === 'transfer' && devolada.status !== 'connected' && !body.payment_reference) {
     // US-A88 — the reference is only demanded while the org keeps the requirement on. Read lazily:
     // most settles are cash and never pay for this query. An unreferenced transfer still re-arms
     // `pending` below — optionality never weakens verification (US-A67).
@@ -2240,518 +2250,58 @@ export const settleBooking = async (c: PosContext) => {
       .where(eq(organizations.id, org))
       .limit(1)
     if (orgRef?.required ?? true) {
-      throw new ApiError(
-        'VALIDATION_ERROR',
-        400,
-        'A payment reference is required to settle a bank transfer',
-      )
+      throw new ApiError('VALIDATION_ERROR', 400, 'A payment reference is required to settle a bank transfer')
     }
   }
-  // The QR can mint now only if THIS balance clears AND no earlier payment is still awaiting an admin.
-  const cleared = !balanceNeedsVerification && folio.paymentVerification !== 'pending'
 
-  const allLineRows = await db
-    .select({
-      id: folioLines.id,
-      serviceId: folioLines.serviceId,
-      slotId: folioLines.slotId,
-      serviceName: folioLines.serviceName,
-      slotDate: folioLines.slotDate,
-      slotStartTime: folioLines.slotStartTime,
-      checkIn: folioLines.checkIn,
-      checkOut: folioLines.checkOut,
-      quantity: folioLines.quantity,
-      unitPrice: folioLines.unitPrice,
-      lineTotal: folioLines.lineTotal,
-      commissionType: folioLines.commissionType,
-      commissionValue: folioLines.commissionValue,
-      cancelledAt: folioLines.cancelledAt,
-    })
-    .from(folioLines)
-    .where(and(eq(folioLines.folioId, id), eq(folioLines.organizationId, org)))
-  // US-AG54 (line-autonomy F3) — the settle collects, signs and commissions only what LIVES: a
-  // cancelled line's seats went back, its money reversed, its commission clawed — charging its
-  // remainder here would bill the customer for a line that no longer exists.
-  const lineRows = allLineRows.filter((l) => !l.cancelledAt)
-  const hasCancelledLines = lineRows.length !== allLineRows.length
-
-  // Full commission from the per-line snapshot: percent on the full line total + fixed (which
-  // only accrues now that the folio reaches `paid`, US-AG07 D8). No re-read of the service.
-  // Live lines only — a cancelled line's commission already met its reversal in the ledger.
-  const commissionAmount = lineRows.reduce(
-    (sum, l) =>
-      sum +
-      (l.commissionType === 'fixed'
-        ? l.commissionValue * l.quantity
-        : Math.round((l.lineTotal * l.commissionValue) / 10000)),
-    0,
-  )
-
-  // US-LG03 (paid-ledger, step 2) — the balance movement + commission top-up as ledger rows,
-  // shadowing the scalar update below (Σ payment rows == amount_paid; Σ commission rows ==
-  // commission_amount). The balance is what this settle collects on top of the deposit; the top-up
-  // is the commission that only accrues now the folio reaches `paid` (fixed + percent-on-balance).
-  // Step 2 still re-uses the deposit's method (folio.paymentMethod) — the settle-chosen method
-  // arrives in Step 3. A transfer settle's balance row is `pending` (mirrors the re-armed folio).
-  // The balance: with every line alive this is the scalar arithmetic it always was; once a line
-  // has been cancelled the honest balance is what the LIVE lines are still owed, which only the
-  // allocations can say (their money already excludes the reversal).
-  const commissionTopUp = Math.max(0, commissionAmount - folio.commissionAmount)
-
-  // US-LG09 — the settle payment's allocations: each line receives exactly what it is still owed
-  // (line_total − its net allocated sum), in cascade order. When the sums do not close — a folio
-  // hand-seeded by an older test, never a post-0062 production folio — the shadow is SKIPPED
-  // rather than blocking the settle: F1's allocations are a verified shadow, not yet an authority.
-  const allocatedRows = await db
-    .select({
-      folioLineId: folioPaymentAllocations.folioLineId,
-      allocated: sql<number>`coalesce(sum(${folioPaymentAllocations.amount}), 0)`,
-    })
-    .from(folioPaymentAllocations)
-    .innerJoin(folioLines, eq(folioPaymentAllocations.folioLineId, folioLines.id))
-    .where(and(eq(folioLines.folioId, id), eq(folioLines.organizationId, org)))
-    .groupBy(folioPaymentAllocations.folioLineId)
-  const allocatedByLine = new Map(allocatedRows.map((r) => [r.folioLineId, Number(r.allocated)]))
-  const remainingByLine = orderForCascade(lineRows)
-    .map((l) => ({
-      folioLineId: l.id,
-      amount: Math.max(0, l.lineTotal - (allocatedByLine.get(l.id) ?? 0)),
-    }))
-    .filter((x) => x.amount > 0)
-  const remainingTotal = remainingByLine.reduce((s, x) => s + x.amount, 0)
-  // Every line alive → the scalar arithmetic it always was (and hand-seeded legacy fixtures keep
-  // working via the shadow skip below). A cancelled line in the folio → the allocations are the
-  // only honest ledger of what the live lines are still owed.
-  const balanceAmount = hasCancelledLines ? remainingTotal : folio.total - folio.amountPaid
-  const balanceAllocations = remainingTotal === balanceAmount ? remainingByLine : []
-
-  const settleLedgerRows = (): BatchItem<'sqlite'>[] => {
-    const rows: BatchItem<'sqlite'>[] = []
-    if (balanceAmount > 0) {
-      const balancePaymentId = crypto.randomUUID()
-      rows.push(
-        paymentRow(db, {
-          id: balancePaymentId,
-          organizationId: org,
-          folioId: id,
-          amount: balanceAmount,
-          method: settleMethod,
-          reference: balanceNeedsVerification ? (body.payment_reference ?? null) : null,
-          verification: balanceNeedsVerification ? 'pending' : 'not_required',
-          collectedBy: agent.userId,
-        }),
-        ...allocationRows(db, {
-          organizationId: org,
-          paymentId: balancePaymentId,
-          allocations: balanceAllocations,
-          sign: 1,
-        }),
-      )
-    }
-    if (commissionTopUp > 0) {
-      rows.push(
-        commissionRow(db, {
-          organizationId: org,
-          folioId: id,
-          amount: commissionTopUp,
-          method: settleMethod,
-          collectedBy: agent.userId,
-        }),
-      )
-    }
-    return rows
-  }
-
-  // US-A67 — the folio reaches `paid` but DEFERS the QR when it is not cleared. Two reasons land
-  // here: (a) the BALANCE is a transfer — record its reference + re-arm verification to `pending`;
-  // or (b) the balance cleared (cash/card/link) but the DEPOSIT was a still-`pending` transfer,
-  // whose money remains unconfirmed — leave that pending state (and its reference) untouched.
-  // verifyPayment signs the QR + sends the tickets once an admin confirms the money.
-  if (!cleared) {
-    const deferUpdate = balanceNeedsVerification
-      ? { paymentReference: body.payment_reference ?? null, paymentVerification: 'pending' as const }
-      : {}
-    const settledNow = new Date()
-    const transferStatements: BatchItem<'sqlite'>[] = [
-      db
-        .update(folios)
-        .set({
-          // TECH_DEBT #25 — status derives from the lines (this settle fully allocates them).
-          // With a cancelled line this is NOT the folio's total: the customer pays what the live
-          // lines are owed, and amount_paid records what was actually collected.
-          amountPaid: folio.amountPaid + balanceAmount,
-          commissionAmount: folio.commissionAmount + commissionTopUp,
-          settledAt: settledNow,
-          settledBy: agent.userId,
-          ...deferUpdate,
-          updatedAt: settledNow,
-        })
-        .where(and(eq(folios.id, id), eq(folios.organizationId, org))),
-      ...settleLedgerRows(),
-      // US-A24 — the settlement's narrative row, on the same clock as settled_at (S-6).
-      folioEventRow(db, {
-        organizationId: org,
-        folioId: id,
-        type: 'payment',
-        actorId: agent.userId,
-        payload: { amount: balanceAmount, method: settleMethod, kind: 'settlement' },
-        at: settledNow,
-      }),
-    ]
-    await db.batch(transferStatements as [BatchItem<'sqlite'>, ...BatchItem<'sqlite'>[]])
-    const pending = await readFolio(db, org, agent.userId, id, c.env.QR_SECRET, c.env.API_BASE_URL)
-    return c.json({ folio: pending })
-  }
-
-  // Sign the per-line tickets now (the booking had none) — SLOT lines only; a lodging stay line
-  // has no scannable QR (its access is the reservation).
-  const slotLineRows = lineRows.filter((l) => l.slotId && l.slotDate)
-  const identity =
-    folio.customerName?.trim() || folio.customerEmail?.trim() || `folio:${id}`
-  const tickets = await signLineTickets(
-    c.env,
-    org,
-    id,
-    identity,
-    slotLineRows.map((l) => ({
-      id: l.id,
-      serviceId: l.serviceId,
-      slotId: l.slotId!,
-      quantity: l.quantity,
-      slotDate: l.slotDate!,
-    })),
-    tz,
-  )
-
-  const settledNow = new Date()
-  const statements: BatchItem<'sqlite'>[] = [
-    db
-      .update(folios)
-      .set({
-        // TECH_DEBT #25 — status derives from the lines (see the deferred branch).
-        amountPaid: folio.amountPaid + balanceAmount,
-        commissionAmount: folio.commissionAmount + commissionTopUp,
-        settledAt: settledNow,
-        settledBy: agent.userId,
-        updatedAt: settledNow,
-      })
-      .where(and(eq(folios.id, id), eq(folios.organizationId, org))),
-    ...settleLedgerRows(),
-    // US-A24 — the settlement's narrative row, on the same clock as settled_at (S-6).
-    folioEventRow(db, {
-      organizationId: org,
-      folioId: id,
-      type: 'payment',
-      actorId: agent.userId,
-      payload: { amount: balanceAmount, method: settleMethod, kind: 'settlement' },
-      at: settledNow,
-    }),
-  ]
-  for (const line of slotLineRows) {
-    statements.push(
-      db
-        .update(folioLines)
-        .set({ qrToken: tickets.get(line.id)!.token })
-        .where(and(eq(folioLines.id, line.id), eq(folioLines.organizationId, org))),
-    )
-  }
-  await db.batch(statements as [BatchItem<'sqlite'>, ...BatchItem<'sqlite'>[]])
-
-  // Best-effort portal token + ticket email (the deferred half of confirmSale).
-  const portalLink = await issuePortalLink(
-    db,
-    c.env,
-    org,
-    id,
-    // Slot dates, plus a stay's checkout as its last date; drop nulls.
-    lineRows.map((l) => l.slotDate ?? l.checkOut ?? l.checkIn).filter((d): d is string => !!d),
-  )
-
-  const extraRows = await db
-    .select({
-      folioLineId: folioLineExtras.folioLineId,
-      name: folioLineExtras.name,
-      price: folioLineExtras.price,
-      quantity: folioLineExtras.quantity,
-    })
-    .from(folioLineExtras)
-    .where(and(eq(folioLineExtras.folioId, id), eq(folioLineExtras.organizationId, org)))
-  const extrasByLine = new Map<string, typeof extraRows>()
-  for (const ex of extraRows) {
-    const list = extrasByLine.get(ex.folioLineId) ?? []
-    list.push(ex)
-    extrasByLine.set(ex.folioLineId, list)
-  }
-
-  const orgRows = await db
-    .select({ name: organizations.name })
-    .from(organizations)
-    .where(eq(organizations.id, org))
-    .limit(1)
-  dispatchTicketEmail(
-    c,
-    orgRows[0]?.name ?? 'Turistear Ya!',
-    id,
-    {
-      customerEmail: folio.customerEmail,
-      customerName: folio.customerName,
-      // US-LG08 — the folio is now paid: show its display method ('Mixto' when the deposit and the
-      // balance were collected differently), matching the folio detail the customer will open.
-      paymentMethod: folio.paymentMethod === settleMethod ? folio.paymentMethod : 'Mixto',
-      total: folio.total,
-      createdAt: new Date(),
-    },
-    // Access-ticket lines are slot lines only (a stay has no per-line QR).
-    slotLineRows.map((line) => ({
-      serviceName: line.serviceName,
-      slotDate: line.slotDate!,
-      slotStartTime: line.slotStartTime!,
-      quantity: line.quantity,
-      unitPrice: line.unitPrice,
-      lineTotal: line.lineTotal,
-      qrToken: tickets.get(line.id)!.token,
-      extras: (extrasByLine.get(line.id) ?? []).map((ex) => ({
-        name: ex.name,
-        price: ex.price,
-        quantity: ex.quantity,
-      })),
-    })),
-    portalLink,
-  )
-
-  const settled = await readFolio(db, org, agent.userId, id, c.env.QR_SECRET, c.env.API_BASE_URL)
-  return c.json({ folio: settled })
-}
-
-// US-AG54 (docs/folios/line-autonomy.spec.md, F3 — D4) — settle ONE line: collect ITS remaining
-// balance, sign ITS QR, book ITS commission, and touch nothing of its siblings. "Liquidar todo"
-// stays `settleBooking` (one payment row, N allocations — the ledger's grain is the money event);
-// this is the gesture that makes "pago completo el martes ahora, el jueves la semana que viene"
-// exist. The folio flips to `paid` only when the LAST live line completes — the delivery tail
-// (portal + email) stays with that completing settle, exactly where settleBooking runs it.
-export const settleFolioLine = async (c: PosContext) => {
-  const agent = c.get('user')
-  const id = c.req.param('id')
-  const lineId = c.req.param('lineId')
-  const db = getDb(c.env)
-  const org = agent.organizationId
-  const { tz } = await loadOrgTiming(db, org)
-
-  const folioRows = await db
-    .select({
-      id: folios.id,
-      status: deriveStatusSql, // TECH_DEBT #25
-      total: folios.total,
-      amountPaid: folios.amountPaid,
-      commissionAmount: folios.commissionAmount,
-      customerName: folios.customerName,
-      customerEmail: folios.customerEmail,
-      paymentMethod: depositMethodSql,
-      paymentVerification: folios.paymentVerification,
-    })
-    .from(folios)
-    .where(folioActionFilter(id, agent))
-    .limit(1)
-  const folio = folioRows[0]
-  if (!folio) throw new ApiError('NOT_FOUND', 404, 'Folio not found')
-  if (folio.status === 'paid') throw new ApiError('ALREADY_SETTLED', 409, 'Folio is already paid')
-  if (folio.status === 'cancelled') throw new ApiError('FOLIO_CANCELLED', 409, 'Folio is cancelled')
-
-  const lineRows = await db
-    .select({
-      id: folioLines.id,
-      serviceId: folioLines.serviceId,
-      slotId: folioLines.slotId,
-      serviceName: folioLines.serviceName,
-      slotDate: folioLines.slotDate,
-      slotStartTime: folioLines.slotStartTime,
-      quantity: folioLines.quantity,
-      lineTotal: folioLines.lineTotal,
-      commissionType: folioLines.commissionType,
-      commissionValue: folioLines.commissionValue,
-      cancelledAt: folioLines.cancelledAt,
-      bookingExpiresAt: folioLines.bookingExpiresAt,
-      allocated: sql<number>`coalesce((select sum(a.amount) from folio_payment_allocations a where a.folio_line_id = folio_lines.id), 0)`,
-    })
-    .from(folioLines)
-    .where(and(eq(folioLines.folioId, id), eq(folioLines.organizationId, org)))
-  const line = lineRows.find((l) => l.id === lineId)
-  // Cross-org and wrong-folio land indistinguishably on 404 (S-14).
-  if (!line) throw new ApiError('FOLIO_LINE_NOT_FOUND', 404, 'Line not found in this folio')
-  if (line.cancelledAt) {
-    throw new ApiError('LINE_ALREADY_CANCELLED', 409, 'This line is cancelled')
-  }
-  // bug: settled-line-clock-expiry — paid is asked BEFORE the clock: a line paid in full keeps the
-  // clock it was born with, and refusing it as an expired hold names a hold it no longer has.
-  const lineRemaining = Math.max(0, line.lineTotal - Math.max(0, Number(line.allocated ?? 0)))
-  if (lineRemaining === 0) {
-    throw new ApiError('LINE_ALREADY_PAID', 409, 'This line is already fully paid')
-  }
-  // The LINE's own clock guards its own settle (D5) — a sibling's expiry is not this line's fact.
-  if (line.bookingExpiresAt && line.bookingExpiresAt.getTime() <= Date.now()) {
-    throw new ApiError('BOOKING_EXPIRED', 409, 'This line’s hold has expired')
-  }
-
-  // Same body contract as settleBooking (US-LG03/US-AG41/US-A88): the balance is collected by
-  // its own method; a transfer re-arms verification and defers the QR.
-  const parsed = settleSchema.safeParse(await c.req.json().catch(() => ({})))
-  if (!parsed.success) throw new ApiError('VALIDATION_ERROR', 400, 'Invalid settle payload')
-  const body: SettleInput = parsed.data
-  const settleMethod = body.method ?? folio.paymentMethod
-  const balanceNeedsVerification = settleMethod === 'transfer'
-  if (balanceNeedsVerification && !body.payment_reference) {
-    const [orgRef] = await db
-      .select({ required: organizations.paymentReferenceRequired })
-      .from(organizations)
-      .where(eq(organizations.id, org))
-      .limit(1)
-    if (orgRef?.required ?? true) {
-      throw new ApiError(
-        'VALIDATION_ERROR',
-        400,
-        'A payment reference is required to settle a bank transfer',
-      )
-    }
-  }
-  const cleared = !balanceNeedsVerification && folio.paymentVerification !== 'pending'
-
-  // The commission this line's completion books: its full snapshot minus what the deposit's
-  // percent-on-collected already attributed to it (the same arithmetic settleBooking runs
-  // folio-wide, applied to one line). Fixed accrues only now, when the line reaches paid (D8/D9).
-  const lineFullCommission =
-    line.commissionType === 'fixed'
-      ? line.commissionValue * line.quantity
-      : Math.round((line.lineTotal * line.commissionValue) / 10000)
-  const lineAccrued =
-    line.commissionType === 'fixed'
-      ? 0
-      : Math.round(
-          (Math.round((line.lineTotal * line.commissionValue) / 10000) *
-            Math.max(0, Number(line.allocated ?? 0))) /
-            line.lineTotal,
-        )
-  const commissionDelta = Math.max(0, lineFullCommission - lineAccrued)
-
-  // Does THIS settle complete the folio? (Every other live line already fully allocated.)
-  const liveLines = lineRows.filter((l) => !l.cancelledAt)
-  const completing = liveLines.every(
-    (l) => l.id === lineId || Math.max(0, Number(l.allocated ?? 0)) >= l.lineTotal,
-  )
-
-  // The line's QR mints with ITS money (slot lines only), deferred while anything is unverified.
-  let lineTicket: { token: string } | null = null
-  if (cleared && line.slotId && line.slotDate) {
-    const identity = folio.customerName?.trim() || folio.customerEmail?.trim() || `folio:${id}`
-    const tickets = await signLineTickets(
-      c.env,
-      org,
-      id,
-      identity,
-      [
+  let linkError: PaymentLinkError | null = null
+  if (byLink) {
+    const live = plan.lines.filter((l) => !l.cancelledAt)
+    const first = plan.line ?? live[0]
+    const [orgRow] = await db.select({ name: organizations.name }).from(organizations).where(eq(organizations.id, org)).limit(1)
+    const orgName = orgRow?.name ?? 'Turistear Ya!'
+    try {
+      const result = await issuePaymentLink(
+        { db, env: c.env },
         {
-          id: line.id,
-          serviceId: line.serviceId,
-          slotId: line.slotId,
-          quantity: line.quantity,
-          slotDate: line.slotDate,
+          organizationId: org,
+          folioId: id,
+          folioPaymentId: null,
+          folioLineId,
+          kind: 'settlement',
+          amount: plan.amount,
+          requestedBy: agent.userId,
+          customerName: plan.folio.customerName,
+          concept: first ? `${orgName} · ${first.serviceName} ${first.slotDate ?? first.checkIn ?? ''}`.trim() : orgName,
         },
-      ],
-      tz,
-    )
-    lineTicket = tickets.get(line.id) ?? null
+      )
+      if (result.link) {
+        const folio = await readFolio(db, org, agent.userId, id, c.env.QR_SECRET, c.env.API_BASE_URL)
+        return c.json({ folio, payment_link: result.link })
+      }
+      linkError = result.error ?? 'DEVOLADA_UNAVAILABLE'
+    } catch (err) {
+      // Another request opened the sale's settlement link first (one per sale): answer as above.
+      const raced = await respondWithOpenLink()
+      if (raced) return raced
+      console.error('[devolada] settlement link issuance failed', id, err)
+      linkError = 'DEVOLADA_UNAVAILABLE'
+    }
   }
 
-  const settledNow = new Date()
-  const linePaymentId = crypto.randomUUID()
-  const statements: BatchItem<'sqlite'>[] = [
-    paymentRow(db, {
-      id: linePaymentId,
-      organizationId: org,
-      folioId: id,
-      amount: lineRemaining,
-      method: settleMethod,
-      reference: balanceNeedsVerification ? (body.payment_reference ?? null) : null,
-      verification: balanceNeedsVerification ? 'pending' : 'not_required',
-      collectedBy: agent.userId,
-    }),
-    ...allocationRows(db, {
-      organizationId: org,
-      paymentId: linePaymentId,
-      allocations: [{ folioLineId: lineId, amount: lineRemaining }],
-      sign: 1,
-    }),
-    db
-      .update(folios)
-      .set({
-        amountPaid: folio.amountPaid + lineRemaining,
-        commissionAmount: folio.commissionAmount + commissionDelta,
-        ...(completing
-          ? { settledAt: settledNow, settledBy: agent.userId } // status derives (TECH_DEBT #25)
-          : {}),
-        ...(balanceNeedsVerification
-          ? {
-              paymentReference: body.payment_reference ?? null,
-              paymentVerification: 'pending' as const,
-            }
-          : {}),
-        updatedAt: settledNow,
-      })
-      .where(and(eq(folios.id, id), eq(folios.organizationId, org))),
-    folioEventRow(db, {
-      organizationId: org,
-      folioId: id,
-      type: 'payment',
-      actorId: agent.userId,
-      folioLineId: lineId,
-      payload: {
-        amount: lineRemaining,
-        method: settleMethod,
-        kind: 'settlement',
-        line: {
-          service_name: line.serviceName,
-          slot_date: line.slotDate,
-          slot_start_time: line.slotStartTime,
-        },
-      },
-      at: settledNow,
-    }),
-  ]
-  if (commissionDelta > 0) {
-    statements.push(
-      commissionRow(db, {
-        organizationId: org,
-        folioId: id,
-        amount: commissionDelta,
-        method: settleMethod,
-        collectedBy: agent.userId,
-      }),
-    )
-  }
-  if (lineTicket) {
-    statements.push(
-      db
-        .update(folioLines)
-        .set({ qrToken: lineTicket.token })
-        .where(and(eq(folioLines.id, lineId), eq(folioLines.organizationId, org))),
-    )
-  }
-  await db.batch(statements as [BatchItem<'sqlite'>, ...BatchItem<'sqlite'>[]])
-
-  // Completing AND cleared → the delivery tail (portal + ticket email), exactly where the
-  // whole-folio settle runs it. A deferred (transfer) completion waits for verifyPayment, which
-  // already owns that tail.
-  if (completing && cleared) {
-    await issuePortalLink(
-      db,
-      c.env,
-      org,
-      id,
-      lineRows.map((l) => l.slotDate ?? l.checkIn).filter((d): d is string => !!d),
-    )
-  }
-
-  const updated = await readFolio(db, org, agent.userId, id, c.env.QR_SECRET, c.env.API_BASE_URL)
-  return c.json({ folio: updated })
+  // Today's manual settlement — also the fallback when no link could be created (FR-010): the
+  // `failed` or `abandoned` link stays as the record, and the answer says why.
+  await applySettlement(deps, plan, {
+    method: settleMethod,
+    reference: body.payment_reference ?? null,
+    verification: settleMethod === 'transfer' ? 'pending' : 'not_required',
+    collectedBy: agent.userId,
+    settledBy: agent.userId,
+    actorId: agent.userId,
+    at: new Date(),
+  })
+  const folio = await readFolio(db, org, agent.userId, id, c.env.QR_SECRET, c.env.API_BASE_URL)
+  return c.json(linkError ? { folio, payment_link: null, payment_link_error: linkError } : { folio })
 }
 
 // US-AG54 / US-AG07.4 (line-autonomy F3) — the AGENT cancels one apartada line of their own
@@ -2786,6 +2336,12 @@ export const cancelBookingLine = async (c: PosContext) => {
       409,
       'El pago está por verificar — verifica o rechaza el pago antes de cancelar',
     )
+  }
+  // devolada-transfer-verification D19 — the apartado's balance is being collected by a settlement
+  // link. Until PR 3 closes and replaces it, a line cancellation would leave it asking a stale
+  // amount, so it waits for the link's result.
+  if (await openSettlementLink(db, org, id)) {
+    throw new ApiError('SETTLEMENT_IN_PROGRESS', 409, SETTLEMENT_IN_PROGRESS_MESSAGE)
   }
   const [line] = await db
     .select({ id: folioLines.id, cancelledAt: folioLines.cancelledAt })

@@ -75,6 +75,7 @@ import {
 // US-A22 (line-autonomy) — the refund debt's per-line split shares the allocation engine's
 // largest-remainder rule, and the cascade ordering keeps every split deterministic.
 import { orderForCascade, prorateByWeight } from '../../utils/folioAllocations'
+import { openSettlementLink, SETTLEMENT_IN_PROGRESS_MESSAGE } from '../devolada/links'
 
 export type FoliosContext = Context<{
   Bindings: CloudflareBindings
@@ -1226,6 +1227,12 @@ export const cancelFolioLine = async (c: FoliosContext) => {
       409,
       'El pago está por verificar — verifica o rechaza el pago antes de cancelar',
     )
+  }
+  // devolada-transfer-verification D19 — the apartado's balance is being collected by a settlement
+  // link. Until PR 3 closes and replaces it, a line cancellation would leave it asking a stale
+  // amount, so it waits for the link's result.
+  if (await openSettlementLink(db, org, id)) {
+    throw new ApiError('SETTLEMENT_IN_PROGRESS', 409, SETTLEMENT_IN_PROGRESS_MESSAGE)
   }
 
   const lineRows = await db

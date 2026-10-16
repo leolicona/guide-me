@@ -13,6 +13,7 @@ import { eq, sql } from 'drizzle-orm'
 import { getDb } from '../../src/db/client'
 import { folios } from '../../src/db/schema'
 import {
+  devoladaAttentionFilter,
   pendingWorkCountQueries,
   verificationAutoFilter,
   verificationPendingFilter,
@@ -20,6 +21,7 @@ import {
 import { linkPaymentRowsQuery, paymentLinkRowsQuery } from '../../src/utils/devoladaLinkView'
 import { previousKeysQuery } from '../../src/routes/devolada/connection'
 import { erasableCredentialsQuery } from '../../src/routes/devolada/sweep'
+import { dueApartadosQuery } from '../../src/routes/pos/sweep'
 
 const db = getDb(env)
 const NOW = new Date('2026-06-14T12:00:00Z')
@@ -54,7 +56,7 @@ const scansInsideCorrelated = (plan: PlanRow[]): string[] => {
 const devoladaScans = (plan: PlanRow[]): string[] =>
   plan
     .map((row) => row.detail)
-    .filter((line) => /^SCAN (devolada_(links|payments|connections)|l|dl|dp|dc)\b/.test(line))
+    .filter((line) => /^SCAN (devolada_(links|payments|connections)|l|dl|dp|dc|hl|ll|hd|hp)\b/.test(line))
 
 const details = (plan: PlanRow[]) => plan.map((row) => row.detail)
 
@@ -106,5 +108,36 @@ describe('BUG-042 — the Devolada reads enter an index', () => {
     expect(scansInsideCorrelated(plan), details(plan).join('\n')).toEqual([])
     expect(details(plan).some((l) => /SEARCH dl USING .*INDEX devolada_links_credential_idx/.test(l))).toBe(true)
     expect(details(plan).some((l) => /SEARCH dp USING INDEX devolada_payments_link_idx/.test(l))).toBe(true)
+  })
+
+  it('devolada_attention: the count, and the 0/1 column, enter by their candidate payments', async () => {
+    const count = await planOf(pendingWorkCountQueries(db, 'org', NOW).devolada_attention)
+    const column = await planOf(
+      db
+        .select({ id: folios.id, attention: sql<number>`case when ${devoladaAttentionFilter('org')} then 1 else 0 end` })
+        .from(folios)
+        .where(eq(folios.organizationId, 'org')),
+    )
+    for (const plan of [count, column]) {
+      expect(scansInsideCorrelated(plan), details(plan).join('\n')).toEqual([])
+      expect(devoladaScans(plan), details(plan).join('\n')).toEqual([])
+      // The candidates: the organization's payments in an attention status, then each one's link.
+      expect(details(plan).some((l) => /SEARCH dp USING INDEX devolada_payments_status_idx \(organization_id=\? AND status=\?\)/.test(l)), details(plan).join('\n')).toBe(true)
+      expect(details(plan).some((l) => /SEARCH l USING INDEX sqlite_autoindex_devolada_links_1 \(id=\?\)/.test(l)), details(plan).join('\n')).toBe(true)
+    }
+  })
+
+  it("the apartado expiry sweep's holds read each apartado's links through (organization_id, folio_id)", async () => {
+    const plan = await planOf(dueApartadosQuery(db, NOW))
+    expect(scansInsideCorrelated(plan), details(plan).join('\n')).toEqual([])
+    expect(devoladaScans(plan), details(plan).join('\n')).toEqual([])
+    for (const alias of ['hl', 'll']) {
+      expect(
+        details(plan).some((l) => new RegExp(`SEARCH ${alias} USING INDEX devolada_links_folio_idx \\(organization_id=\\? AND folio_id=\\?\\)`).test(l)),
+        details(plan).join('\n'),
+      ).toBe(true)
+    }
+    // A settlement payment awaiting the admin is read through `devolada_payments (link_id)`.
+    expect(details(plan).some((l) => /SEARCH hd USING INDEX devolada_payments_link_idx/.test(l)), details(plan).join('\n')).toBe(true)
   })
 })
