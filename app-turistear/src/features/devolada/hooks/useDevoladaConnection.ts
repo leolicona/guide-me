@@ -32,11 +32,14 @@ const useInvalidateDevolada = () => {
     ])
 }
 
+// FR-003 — the key is never kept: a mutation's variables (the key included) would otherwise stay in
+// the mutation cache for five minutes after the sheet lets go of them.
 export function useConnectDevolada() {
   const invalidate = useInvalidateDevolada()
   return useMutation({
     mutationFn: (input: ConnectDevoladaInput) => connectDevolada(input),
     onSuccess: invalidate,
+    gcTime: 0,
   })
 }
 
