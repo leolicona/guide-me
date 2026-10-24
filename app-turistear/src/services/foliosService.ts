@@ -10,6 +10,7 @@ import type {
   RejectCancellationRequestInput,
 } from '../features/folios/types'
 import type { CancellationQuote } from '../features/organization/types'
+import type { PaymentLinkError, PaymentLinkView } from '../features/devolada/types'
 
 // Admin folio management (US-A21): browse folios and cancel one in full. All calls require
 // the admin role (enforced server-side). Money is integer minor units.
@@ -126,22 +127,37 @@ export const cancelFolio = async (
 }
 
 // US-A22 (line-autonomy F2) — cancel ONE line; its siblings come out untouched. Same contract as
-// the total cancel: reason only, money always derived by the org's ladder.
+// the total cancel: reason only, money always derived by the org's ladder. devolada D13 — when it
+// closed the apartado's whole-sale settlement enlace while the sale still owes, the answer adds
+// that enlace's replacement, or null with why (bookingsService `CancelResult`).
 export const cancelFolioLine = async (
   id: string,
   lineId: string,
   options: CancelFolioOptions = {},
-): Promise<{ folio: FolioDetail; cancellation: CancellationOutcome | null }> => {
+): Promise<{
+  folio: FolioDetail
+  cancellation: CancellationOutcome | null
+  payment_link?: PaymentLinkView | null
+  payment_link_error?: PaymentLinkError
+}> => {
   const body: Record<string, unknown> = {}
   if (options.reason) body.reason = options.reason
   const res = await request<{
     folio: FolioDetail
     cancellation?: CancellationOutcome | null
+    payment_link?: PaymentLinkView | null
+    payment_link_error?: PaymentLinkError
   }>(`/api/folios/${id}/lines/${lineId}/cancel`, {
     method: 'POST',
     body: JSON.stringify(body),
   })
-  return { folio: res.folio, cancellation: res.cancellation ?? null }
+  const { payment_link, payment_link_error } = res
+  return {
+    folio: res.folio,
+    cancellation: res.cancellation ?? null,
+    ...(payment_link !== undefined ? { payment_link } : {}),
+    ...(payment_link_error ? { payment_link_error } : {}),
+  }
 }
 
 // --- Tourist cancellation requests + refund tracking (US-T04/T05, US-A23) ---

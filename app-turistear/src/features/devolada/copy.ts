@@ -115,9 +115,14 @@ export const RESOLVE_ACTION_COPY = {
   dismiss: 'Descartar',
   returned: 'Ya lo devolví',
 } as const
-/** BookingActions chip in place of the settle buttons while a settlement link is open (PR 2). */
+/** BookingActions chip in place of the settle buttons it would refuse: while a settlement link's
+ *  payment is in flight (research D13, D16). */
 export const SETTLEMENT_VERIFYING_COPY = 'Liquidación en verificación'
-/** A line cancellation or a settlement refused with `SETTLEMENT_IN_PROGRESS` (D8, D19). */
+/** A line cancellation closed the whole-sale settlement link and issued its replacement (D13). */
+export const LINK_REPLACED_COPY = 'El enlace de pago cambió — vuelve a enviarlo'
+/** …and could not issue the replacement: the seller settles the new balance again (D13). */
+export const LINK_NOT_REPLACED_COPY = 'El enlace de pago cambió y no se pudo crear el nuevo — vuelve a liquidar el saldo'
+/** A line cancellation or a settlement refused with `SETTLEMENT_IN_PROGRESS` (D8, D13). */
 export const SETTLEMENT_IN_PROGRESS_COPY =
   'La venta ya tiene un enlace de pago para liquidar; espera su resultado'
 

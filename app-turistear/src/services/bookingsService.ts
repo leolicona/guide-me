@@ -1,6 +1,7 @@
 import { request } from './authService'
 import type { Folio, PaymentMethod } from '../features/pos/types'
 import type { PaymentLinkError, PaymentLinkView } from '../features/devolada/types'
+import type { CancellationOutcome } from './foliosService'
 
 // US-LG03 — how the BALANCE is being collected at settle, independent of the deposit. `method`
 // defaults server-side to the deposit's method when omitted; a transfer carries its bank reference.
@@ -53,28 +54,31 @@ export const settleFolioLine = (
     body: payload ? JSON.stringify(payload) : undefined,
   })
 
+// devolada-transfer-verification D13 — what a cancellation answers (contracts § Line
+// cancellations). A line cancellation that closed the apartado's whole-sale settlement enlace while
+// the sale still owes adds `payment_link`: the replacement for the new balance, or null with
+// `payment_link_error` saying why. Both keys are absent otherwise, and on a whole cancellation.
+export interface CancelResult {
+  folio: Folio
+  cancellation?: CancellationOutcome | null
+  payment_link?: PaymentLinkView | null
+  payment_link_error?: PaymentLinkError
+}
+
 // US-AG54 / US-AG07.4 — the agent cancels one apartada line of their own folio; the ladder
 // decides the money, same as every other cancellation entrance.
-export const cancelBookingLine = async (
-  id: string,
-  lineId: string,
-  reason?: string,
-): Promise<Folio> => {
-  const res = await request<{ folio: Folio }>(`/api/pos/folios/${id}/lines/${lineId}/cancel`, {
+export const cancelBookingLine = (id: string, lineId: string, reason?: string): Promise<CancelResult> =>
+  request<CancelResult>(`/api/pos/folios/${id}/lines/${lineId}/cancel`, {
     method: 'POST',
     body: JSON.stringify(reason ? { reason } : {}),
   })
-  return res.folio
-}
 
 // US-AG07.4 — manual cancellation of a booking (release spots; deposit retained).
-export const cancelBooking = async (id: string, reason?: string): Promise<Folio> => {
-  const res = await request<{ folio: Folio }>(`/api/pos/folios/${id}/cancel`, {
+export const cancelBooking = (id: string, reason?: string): Promise<CancelResult> =>
+  request<CancelResult>(`/api/pos/folios/${id}/cancel`, {
     method: 'POST',
     body: JSON.stringify({ reason }),
   })
-  return res.folio
-}
 
 // US-AG07.3 — claim the WhatsApp reminder (atomic; call BEFORE opening WhatsApp).
 export const claimReminder = async (

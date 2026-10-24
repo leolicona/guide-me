@@ -285,6 +285,7 @@ says otherwise.
   | `unapplied` | attention item «Dinero por devolver»; the admin marks it *returned* (D15) | same |
   | `superseded` | recorded and ignored; the correction arrives as a new payment | same |
   | `confirmed`, but the sale is already cancelled (a close that never reached Devolada) | treated as `unapplied`: a cancelled sale is never verified. Money the sale took before an ordinary cancellation — its row verified by hand, its settlement accepted — was priced by that cancellation: the link only ends `paid`, which always means its money reached the sale *(amended 2026-10-16 in build)* | same |
+  | `confirmed`, on a live sale whose link a write closed first (D13; a close that never reached Devolada) | as `confirmed` above: the row a sale or deposit link collects is the sale's money, so the link ends `paid` | treated as `unapplied`: a cash settlement or a line cancellation changed what the sale owes, so nothing is recorded through that link. The claim refuses a link whose `closed_reason` is set *(amended 2026-10-24 in build, PR 3)* |
 
 - **Rationale**:
   - FR-014 to FR-017 and Story 2.
@@ -385,8 +386,10 @@ says otherwise.
     - the admin's manual Verificar leaves that link open. Its verdict is recorded and releases nothing a second time (D10), and the link is closed once that verdict is final;
     - while a settlement link's payment is in flight, a line cancellation or a cash settlement that would close that link answers 409 `SETTLEMENT_IN_PROGRESS`, and the seller waits for the verdict;
     - cancelling the sale, and Rechazar, still close it: the sale is gone, so money that arrives after is rightly *unapplied* (D9). The sweep follows that payment until its verdict (D12).
+  - **A link whose money already reached the sale is never closed while its payment is in flight**, not even by a cancellation or Rechazar: a sale or deposit link whose row the admin verified by hand, or a settlement link whose payment the admin accepted (D15). Closing it would turn that payment `unapplied`, money to return that the sale already holds and its cancellation already priced. Its verdict ends it: *confirmed* → `paid`; *partial* or *invalid* → `closing` with `verified_by_admin`. One rule for every write, which also gives the manual Verificar its "leave that link open" *(amended 2026-10-24 in build, PR 3)*.
+  - The refusals (409 `SETTLEMENT_IN_PROGRESS`) read the link's payment before the write. A payment that goes in flight between that read and the batch, or that has not reached us yet, is closed under: Devolada turns it `unapplied`, or confirms it before the close arrives, and either way it is money to return (D9), never lost *(amended 2026-10-24 in build, PR 3)*.
   - After the write, the handler closes them at Devolada (`PATCH {close: true}`) under `waitUntil`. The sweep retries until Devolada acknowledges. A `closing` link whose retired credential Devolada rejects takes D21's fallback; while the current credential is rejected, the link stays `closing` until the admin fixes the key.
-  - When a line cancellation closes a whole-sale settlement link and the sale still owes, a replacement settlement link (D6) for the new balance is issued and returned. A line's own link closes without a replacement when its line is cancelled.
+  - When a line cancellation closes a whole-sale settlement link and the sale still owes, a replacement settlement link (D6) for the new balance is issued and returned. A line's own link closes without a replacement when its line is cancelled. The replacement is issued by the first link's seller (`requested_by`), who collects the settlement (D8) *(amended 2026-10-24 in build, PR 3)*.
 - **Rationale**:
   - FR-011 and Story 4.
   - Marking inside the batch keeps the link's state consistent with the money; the HTTP close stays outside it (VIII).
