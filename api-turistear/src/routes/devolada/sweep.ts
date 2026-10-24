@@ -3,7 +3,7 @@ import { getDb, type Db } from '../../db/client'
 import { devoladaCredentials, devoladaLinks, type DevoladaLink } from '../../db/schema'
 import { devoladaClient, type DevoladaPaymentRead } from '../../services/devolada'
 import { currentPaymentOf } from '../../utils/devoladaLinkView'
-import { IN_FLIGHT_STATUSES, unresolvedLinkSql } from '../../utils/devoladaSql'
+import { currentPaymentStatusSql, IN_FLIGHT_STATUSES, unresolvedLinkSql } from '../../utils/devoladaSql'
 import { cancelForUnreceivedTransfer } from '../pos/unreceivedTransfer'
 import { applyDevoladaPayment } from './apply'
 import {
@@ -26,9 +26,9 @@ import { closePaymentLinkRemote, replayPaymentLinkCreate } from './links'
 //
 // A link past its expiry is acted on only after a successful re-read: with no payment, or an expired
 // one, D9's unpaid branch cancels its sale (D11); with a payment in flight it stays open; with any
-// other verdict it only expires, and the admin decides (FR-016). Links left `closing` are closed
-// at Devolada until it acknowledges. The replay of abandoned links and the follow-up of closed ones
-// come with PR 3 (research D19).
+// other verdict it only expires, and the admin decides (FR-016). A link closed under a payment in
+// flight is re-read too, until that payment's verdict (FR-012). Links left `closing` are closed at
+// Devolada until it acknowledges, and abandoned ones are replayed with the same key and closed.
 
 /** A link nothing has reported on for this long is re-read. */
 const RECHECK_AFTER_SECONDS = 10 * 60
@@ -88,6 +88,10 @@ export async function sweepDevoladaPayments(env: CloudflareBindings, now: Date):
       asc(devoladaLinks.createdAt),
     )
 
+  // D12 step 1 — and closed links whose current payment is still in flight, unchecked for 10 minutes:
+  // a cancellation or Rechazar closed them under that payment, whose verdict is money to return.
+  const followed = await closedInFlightLinksQuery(db, nowSec)
+
   // D12 step 3 — links left `closing`: the sale stopped taking that money, and Devolada has not
   // acknowledged the close yet. Read now, so a link this run marks `closing` is closed once, by the
   // write that marked it.
@@ -97,14 +101,27 @@ export async function sweepDevoladaPayments(env: CloudflareBindings, now: Date):
     .where(eq(devoladaLinks.state, 'closing'))
     .orderBy(asc(devoladaLinks.updatedAt), asc(devoladaLinks.createdAt))
 
-  const byOrg = new Map<string, { due: DevoladaLink[]; closing: DevoladaLink[] }>()
+  // D12 step 3 — abandoned links whose create is surely over: the request timed out, or died.
+  const abandoned = await db
+    .select()
+    .from(devoladaLinks)
+    .where(
+      and(
+        eq(devoladaLinks.state, 'abandoned'),
+        lte(devoladaLinks.createdAt, new Date((nowSec - CREATING_TIMEOUT_SECONDS) * 1000)),
+      ),
+    )
+    .orderBy(asc(devoladaLinks.createdAt))
+
+  const byOrg = new Map<string, OrgLinks>()
   const bucketOf = (org: string) => {
     let bucket = byOrg.get(org)
-    if (!bucket) byOrg.set(org, (bucket = { due: [], closing: [] }))
+    if (!bucket) byOrg.set(org, (bucket = { due: [], closing: [], abandoned: [] }))
     return bucket
   }
-  for (const link of due) bucketOf(link.organizationId).due.push(link)
+  for (const link of [...due, ...followed]) bucketOf(link.organizationId).due.push(link)
   for (const link of closing) bucketOf(link.organizationId).closing.push(link)
+  for (const link of abandoned) bucketOf(link.organizationId).abandoned.push(link)
 
   for (const [org, links] of byOrg) {
     try {
@@ -121,10 +138,41 @@ export async function sweepDevoladaPayments(env: CloudflareBindings, now: Date):
   return result
 }
 
+/**
+ * D12 step 1, FR-012 — closed links whose CURRENT payment is still in flight and nothing reported on
+ * for 10 minutes, across organizations. The candidates come from devolada_payments (status, link_id),
+ * each link by its primary key, and its current payment through devolada_payments (link_id).
+ */
+export const closedInFlightLinksQuery = (db: Db, nowSec: number) =>
+  db
+    .select()
+    .from(devoladaLinks)
+    .where(
+      and(
+        sql`${devoladaLinks.id} in (
+          select dp.link_id from devolada_payments dp where dp.status in ('validating', 'queued_for_credit'))`,
+        // Unary `+` keeps the planner off (state, expires_at): closed links only grow, while the
+        // payments in flight are a handful.
+        sql`+${devoladaLinks.state} = 'closed'`,
+        sql`${currentPaymentStatusSql(sql`devolada_links.id`)} in ('validating', 'queued_for_credit')`,
+        or(
+          isNull(devoladaLinks.lastCheckedAt),
+          lte(devoladaLinks.lastCheckedAt, new Date((nowSec - RECHECK_AFTER_SECONDS) * 1000)),
+        ),
+      ),
+    )
+    .orderBy(asc(devoladaLinks.lastCheckedAt), asc(devoladaLinks.createdAt))
+
+interface OrgLinks {
+  due: DevoladaLink[]
+  closing: DevoladaLink[]
+  abandoned: DevoladaLink[]
+}
+
 async function sweepOrganization(
   deps: { db: Db; env: CloudflareBindings; waitUntil: (p: Promise<unknown>) => void },
   org: string,
-  { due: links, closing }: { due: DevoladaLink[]; closing: DevoladaLink[] },
+  { due: links, closing, abandoned }: OrgLinks,
   nowSec: number,
   result: DevoladaSweepResult,
 ): Promise<void> {
@@ -228,6 +276,39 @@ async function sweepOrganization(
       result.failed += 1
     }
   }
+
+  // D12 step 3 — an abandoned link is replayed with the same key and its own credential (D21): the
+  // link Devolada created then, or creates now, is closed as `abandoned`, since its sale took the
+  // manual path. A refused replay means Devolada never created it: the link is `failed`. A rejected
+  // retired key takes D21's fallback; a rejected current one breaks the connection, and the link
+  // stays `abandoned` until the admin's new key.
+  for (const link of abandoned) {
+    if (skipped.has(link.credentialId)) continue
+    try {
+      const credential = await credentialOf(link)
+      if (!credential?.apiKey) continue
+      spend()
+      const replayed = await replayPaymentLinkCreate(deps, link)
+      if (replayed === 'rate_limited') throw new OrgStop()
+      if (replayed === 'pending') result.failed += 1
+      if (typeof replayed === 'string') continue
+      const [marked] = await db
+        .update(devoladaLinks)
+        .set({ state: 'closing', closedReason: 'abandoned', updatedAt: new Date(nowSec * 1000) })
+        .where(and(eq(devoladaLinks.id, link.id), eq(devoladaLinks.organizationId, org), eq(devoladaLinks.state, 'abandoned')))
+        .returning()
+      if (!marked) continue
+      spend()
+      if (!credential.isCurrent) spend()
+      const closed = await closePaymentLinkRemote(deps, marked)
+      if (closed === 'rate_limited') throw new OrgStop()
+      if (closed === 'pending') result.failed += 1
+    } catch (err) {
+      if (err instanceof OrgStop) throw err
+      console.error('[devolada] sweep failed to replay an abandoned link', link.id, err)
+      result.failed += 1
+    }
+  }
 }
 
 /**
@@ -264,6 +345,8 @@ async function applySaleRead(
       .update(devoladaLinks)
       .set({ lastCheckedAt: now })
       .where(and(eq(devoladaLinks.id, link.id), eq(devoladaLinks.organizationId, org)))
+    // A closed link is followed for its payment's verdict only, applied above (FR-012).
+    if (link.state !== 'open') continue
     if (link.expiresAt.getTime() > now.getTime()) continue
     const current = currentPaymentOf(
       payments

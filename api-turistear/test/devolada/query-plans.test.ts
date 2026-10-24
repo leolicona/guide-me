@@ -20,7 +20,8 @@ import {
 } from '../../src/utils/folioPendingWork'
 import { linkPaymentRowsQuery, paymentLinkRowsQuery } from '../../src/utils/devoladaLinkView'
 import { previousKeysQuery } from '../../src/routes/devolada/connection'
-import { erasableCredentialsQuery } from '../../src/routes/devolada/sweep'
+import { closedInFlightLinksQuery, erasableCredentialsQuery } from '../../src/routes/devolada/sweep'
+import { lineCancellationReasonSql, markLinksClosingStatement } from '../../src/routes/devolada/links'
 import { dueApartadosQuery } from '../../src/routes/pos/sweep'
 
 const db = getDb(env)
@@ -139,5 +140,28 @@ describe('BUG-042 — the Devolada reads enter an index', () => {
     }
     // A settlement payment awaiting the admin is read through `devolada_payments (link_id)`.
     expect(details(plan).some((l) => /SEARCH hd USING INDEX devolada_payments_link_idx/.test(l)), details(plan).join('\n')).toBe(true)
+  })
+
+  // devolada-transfer-verification US4.
+  it("the sweep's closed links whose payment is in flight enter by devolada_payments (status, link_id)", async () => {
+    const plan = await planOf(closedInFlightLinksQuery(db, Math.floor(NOW.getTime() / 1000)))
+    expect(scansInsideCorrelated(plan), details(plan).join('\n')).toEqual([])
+    expect(devoladaScans(plan), details(plan).join('\n')).toEqual([])
+    expect(details(plan).some((l) => /SEARCH dp USING COVERING INDEX devolada_payments_status_link_idx \(status=\?\)/.test(l)), details(plan).join('\n')).toBe(true)
+    expect(details(plan).some((l) => /SEARCH devolada_links USING INDEX sqlite_autoindex_devolada_links_1 \(id=\?\)/.test(l)), details(plan).join('\n')).toBe(true)
+    expect(details(plan).some((l) => /SEARCH dp USING INDEX devolada_payments_link_idx/.test(l)), details(plan).join('\n')).toBe(true)
+  })
+
+  it("a write's closing statement reads the sale's links through (organization_id, folio_id)", async () => {
+    for (const statement of [
+      markLinksClosingStatement(db, 'org', 'folio', 'cancelled', { at: NOW }),
+      markLinksClosingStatement(db, 'org', 'folio', lineCancellationReasonSql('org', 'folio'), { at: NOW, forLines: ['line'] }),
+      markLinksClosingStatement(db, 'org', 'folio', 'verified_by_admin', { at: NOW, rowsVerified: { at: NOW, actorId: 'admin' } }),
+    ]) {
+      const plan = await planOf(statement)
+      expect(scansInsideCorrelated(plan), details(plan).join('\n')).toEqual([])
+      expect(devoladaScans(plan), details(plan).join('\n')).toEqual([])
+      expect(details(plan).some((l) => /SEARCH devolada_links USING INDEX devolada_links_folio_idx \(organization_id=\? AND folio_id=\?\)/.test(l)), details(plan).join('\n')).toBe(true)
+    }
   })
 })
