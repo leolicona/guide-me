@@ -2,7 +2,13 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { http, HttpResponse } from 'msw'
 import { Route, Routes } from 'react-router-dom'
 import { server } from '../../../test/server'
-import { renderWithProviders, screen, userEvent, within } from '../../../test/renderWithProviders'
+import {
+  renderWithProviders,
+  screen,
+  userEvent,
+  waitFor,
+  within,
+} from '../../../test/renderWithProviders'
 import { expectHeadingOutline, expectNoA11yViolations } from '../../../test/axe'
 import { aLinkPayment, aPaymentLink } from '../../../test/handlers/devolada'
 import { FolioDetailScreen } from './FolioDetailScreen'
@@ -315,5 +321,65 @@ describe('devolada-transfer-verification US1 — a sale Devolada is resolving', 
     await screen.findAllByText('Tour Isla Mujeres')
     expect(screen.queryByText('Enlace de pago')).toBeNull()
     await expectNoA11yViolations(container)
+  })
+})
+
+// --- devolada-transfer-verification US3 (research D8, D15, D19; contracts § Line cancellations) --
+
+describe('devolada-transfer-verification US3 — a line cancellation while a settlement enlace is open', () => {
+  // A sale the admin verified by hand while its settlement transfer was in flight: paid, and its
+  // enlace stays open until Devolada's verdict (D15). Two live lines, so one can be cancelled alone.
+  const verifiedInFlight = () => {
+    const base = aDetailFolio()
+    const line = (base.lines as Record<string, unknown>[])[0]
+    return aDetailFolio({
+      payment_method: 'Mixto',
+      payment_verification: 'verified',
+      total: 225_000,
+      amount_paid: 225_000,
+      lines: [line, { ...line, id: 'l2', service_name: 'Cenote Ik Kil', line_total: 75_000 }],
+      payment_links: [
+        aPaymentLink({
+          kind: 'settlement',
+          label: 'validating',
+          payment: aLinkPayment({ resolution: 'accepted' }),
+        }),
+      ],
+    })
+  }
+
+  it('the admin is told an enlace is collecting, and keeps only the way out', async () => {
+    server.use(
+      http.post('/api/folios/:id/lines/:lineId/cancel', () =>
+        HttpResponse.json(
+          { error: { code: 'SETTLEMENT_IN_PROGRESS', message: 'A settlement link is open' } },
+          { status: 409 },
+        ),
+      ),
+    )
+    withDetail(verifiedInFlight())
+    const user = userEvent.setup()
+    renderDetail('admin')
+
+    const [, second] = await screen.findAllByRole('button', { name: 'Cancelar esta actividad' })
+    await user.click(second)
+    await user.click(await screen.findByRole('button', { name: 'Cancelar actividad' }))
+
+    const sheet = screen.getByRole('dialog')
+    expect(
+      await within(sheet).findByText(
+        'La venta ya tiene un enlace de pago para liquidar; espera su resultado',
+      ),
+    ).toBeInTheDocument()
+    expect(within(sheet).queryByRole('button', { name: 'Cancelar actividad' })).toBeNull()
+    await expectNoA11yViolations(document.body)
+
+    // The refusal belonged to that line's sheet: the next one opens clean.
+    await user.click(within(sheet).getByRole('button', { name: 'Conservar actividad' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    await user.click(screen.getAllByRole('button', { name: 'Cancelar esta actividad' })[0])
+    const next = await screen.findByRole('dialog')
+    expect(within(next).getByRole('button', { name: 'Cancelar actividad' })).toBeInTheDocument()
+    expect(within(next).queryByText(/espera su resultado/)).toBeNull()
   })
 })

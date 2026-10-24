@@ -6,6 +6,7 @@ import { cancelFolioLinesPriced } from '../folios/handler'
 import { sendBookingReminderEmail } from '../../services/resend'
 import { naiveEpoch } from '../../utils/tz'
 import { emitNotification, recordEmailOutcome } from '../../utils/notifications'
+import { apartadoHeldSql, lineHeldSql } from '../../utils/devoladaSql'
 
 // US-AG07 (P3) / US-A77 — the apartado sweep, run every 15 minutes by the scheduled Worker
 // (src/index.tsx).
@@ -30,6 +31,11 @@ import { emitNotification, recordEmailOutcome } from '../../utils/notifications'
 // contradicts. `reminder_status` is the notification guard, deliberately shared with the agent's
 // manual WhatsApp claim: whoever told the customer first, the customer was told.
 //
+// devolada-transfer-verification D8 — an apartado whose money is undecided is HELD: neither warned
+// nor released, while a Devolada link may still collect it, a deposit a link collects is still
+// pending, or a settlement payment awaits the admin's decision. A settlement link of one line holds
+// only that line; anything else holds them all.
+//
 // Every write is filtered by the folio's OWN organization_id, so processing one org's row can never
 // touch another's. Returns what happened, for the log.
 export interface SweepResult {
@@ -38,15 +44,12 @@ export interface SweepResult {
   failed: number
 }
 
-export async function sweepExpiredBookings(env: CloudflareBindings): Promise<SweepResult> {
-  const db = getDb(env)
-  const now = new Date()
-  const nowSec = Math.floor(now.getTime() / 1000)
-  const result: SweepResult = { notified: 0, cancelled: 0, failed: 0 }
-
-  // Everything past its stage-① boundary: candidates for BOTH a notification and a cancellation.
-  // Which one each gets is decided per folio, below, by where the grace instant falls.
-  const due = await db
+/**
+ * The apartados past their stage-① boundary, across organizations. Built here so the query-plan
+ * test plans the very statement the sweep runs (test/devolada/query-plans.test.ts).
+ */
+export const dueApartadosQuery = (db: Db, now: Date) =>
+  db
     .select({
       id: folios.id,
       organizationId: folios.organizationId,
@@ -58,13 +61,25 @@ export async function sweepExpiredBookings(env: CloudflareBindings): Promise<Swe
     })
     .from(folios)
     // TECH_DEBT #25 — due = any LIVE line still owing whose OWN clock passed (D5); the folio
-    // roll-up columns are gone. The per-line grace decision below is unchanged.
+    // roll-up columns are gone. The per-line grace decision below is unchanged. A held line is not
+    // due, and a held apartado is not either (devolada D8).
     .where(sql`exists (
       select 1 from folio_lines fl
       where fl.folio_id = folios.id and fl.cancelled_at is null
         and fl.booking_expires_at is not null and fl.booking_expires_at <= ${Math.floor(now.getTime() / 1000)}
         and coalesce((select sum(a.amount) from folio_payment_allocations a where a.folio_line_id = fl.id), 0) < fl.line_total
-    )`)
+        and not ${lineHeldSql('fl')}
+    ) and not ${apartadoHeldSql('folios')}`)
+
+export async function sweepExpiredBookings(env: CloudflareBindings): Promise<SweepResult> {
+  const db = getDb(env)
+  const now = new Date()
+  const nowSec = Math.floor(now.getTime() / 1000)
+  const result: SweepResult = { notified: 0, cancelled: 0, failed: 0 }
+
+  // Everything past its stage-① boundary: candidates for BOTH a notification and a cancellation.
+  // Which one each gets is decided per folio, below, by where the grace instant falls.
+  const due = await dueApartadosQuery(db, now)
 
   if (due.length === 0) return result
 
@@ -106,6 +121,7 @@ export async function sweepExpiredBookings(env: CloudflareBindings): Promise<Swe
           bookingExpiresAt: folioLines.bookingExpiresAt,
           lineTotal: folioLines.lineTotal,
           allocated: sql<number>`coalesce((select sum(a.amount) from folio_payment_allocations a where a.folio_line_id = folio_lines.id), 0)`,
+          held: sql<number>`${lineHeldSql('folio_lines')}`,
         })
         .from(folioLines)
         .where(
@@ -126,8 +142,11 @@ export async function sweepExpiredBookings(env: CloudflareBindings): Promise<Swe
       // settle path clears it); read as a hold, it was cancelled here as "Apartado vencido" once its
       // stale clock and its departure had passed — a paid tour — and its grace moved the release
       // instant the stage-② warning quotes.
+      //
+      // devolada D8 — a line its own settlement link holds is neither released nor counted for the
+      // grace notice: it waits for that link's verdict, or the admin's decision.
       const holdingLines = lineRows.filter(
-        (l) => !l.cancelledAt && Number(l.allocated ?? 0) < l.lineTotal,
+        (l) => !l.cancelledAt && Number(l.allocated ?? 0) < l.lineTotal && !Number(l.held),
       )
       const lineFacts = holdingLines.map((l) => {
         const departure = l.slotDate

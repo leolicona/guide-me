@@ -136,14 +136,11 @@ export default function PosCheckoutPage() {
             ? 'PARTIAL'
             : 'INSUFFICIENT'
 
-  // An amount under the total opens an apartado (below its minimum, until it reaches it), whose
-  // transfer deposit keeps today's manual path until deposits get their enlace (T058).
-  const isDeposit = saleState === 'PARTIAL' || saleState === 'INSUFFICIENT'
   // devolada-transfer-verification D6, FR-009 — mirrors confirmSale's `collectsByLink`: a connected
-  // organization's full sale by transfer is collected by an enlace, so it carries no reference. A
-  // `broken` connection keeps today's rule; its seller sees the field (TransferPaymentFields).
-  const collectsByLink =
-    paymentMethod === 'transfer' && !isDeposit && org?.devolada?.status === 'connected'
+  // organization's transfer is collected by an enlace, so it carries no reference. Since T058 that
+  // includes an apartado's deposit, which gets its own enlace. A `broken` connection keeps today's
+  // rule; its seller sees the field (TransferPaymentFields).
+  const collectsByLink = paymentMethod === 'transfer' && org?.devolada?.status === 'connected'
   const referenceValid =
     paymentMethod !== 'transfer' ||
     collectsByLink ||
@@ -179,8 +176,9 @@ export default function PosCheckoutPage() {
     const payload = toConfirmPayload(usePosCart.getState())
     if (saleState === 'PARTIAL') payload.down_payment = amountCents
     // US-AG41 — carry the transfer reference (ignored server-side for other methods). An empty
-    // optional reference (US-A88) is omitted, not sent as ''; so is one typed before the sale
-    // turned into one an enlace collects (devolada-transfer-verification FR-009).
+    // optional reference (US-A88) is omitted, not sent as ''; so is any reference while an enlace
+    // collects the transfer, one typed before the organization loaded included
+    // (devolada-transfer-verification FR-009).
     if (paymentMethod === 'transfer' && !collectsByLink && reference.trim())
       payload.payment_reference = reference.trim()
     confirm.mutate(payload, {
@@ -417,7 +415,6 @@ export default function PosCheckoutPage() {
                 {paymentMethod === 'transfer' ? (
                   <TransferPaymentFields
                     devolada={org?.devolada}
-                    deposit={isDeposit}
                     referenceRequired={referenceRequired}
                     reference={reference}
                     onReferenceChange={setReference}

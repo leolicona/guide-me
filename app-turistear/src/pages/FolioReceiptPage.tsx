@@ -30,7 +30,7 @@ import { useMyOrganization } from '../features/organization'
 import { useMe } from '../features/auth/hooks/useMe'
 import { formatMoney } from '../features/catalog/types'
 import { folioLineMeta } from '../features/folios/folioLineLabel'
-import { FolioStatusChip } from '../features/folios'
+import { FolioStatusChip, saleCancellationSource } from '../features/folios'
 import { SectionCard } from '../components'
 import { ROUTES } from '../config/routes'
 import type { DisplayMethod } from '../features/pos/types'
@@ -90,12 +90,13 @@ export default function FolioReceiptPage() {
               )}
             </Box>
 
-            {/* devolada-transfer-verification D16 — the sale's latest enlace, a failed one
-                included, right under the status: sending it is how the seller collects (FR-008).
-                When the checkout could create none, the card says why (FR-010). It renders
-                nothing for a sale without Devolada. */}
+            {/* devolada-transfer-verification D16 — the sale's or the deposit's latest enlace, a
+                failed one included, right under the status: sending it is how the seller collects
+                (FR-008). When the checkout could create none, the card says why (FR-010). A
+                settlement's enlace is BookingActions' to show, beside the settle it replaces (D8).
+                It renders nothing for a sale without Devolada. */}
             <PaymentLinkCard
-              link={folio.payment_links?.[0] ?? null}
+              link={folio.payment_links?.find((l) => l.kind !== 'settlement') ?? null}
               error={paymentLinkError ?? null}
               message={{
                 folio,
@@ -230,6 +231,7 @@ export default function FolioReceiptPage() {
                     <PaymentBreakdown
                       payments={folio.payments}
                       verificationAuto={folio.verification_auto}
+                      cancellationSource={saleCancellationSource(folio)}
                     />
                   </>
                 )}

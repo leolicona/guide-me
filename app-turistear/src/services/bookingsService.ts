@@ -1,11 +1,23 @@
 import { request } from './authService'
 import type { Folio, PaymentMethod } from '../features/pos/types'
+import type { PaymentLinkError, PaymentLinkView } from '../features/devolada/types'
 
 // US-LG03 — how the BALANCE is being collected at settle, independent of the deposit. `method`
 // defaults server-side to the deposit's method when omitted; a transfer carries its bank reference.
 export interface SettlePayload {
   method: PaymentMethod
   payment_reference?: string
+}
+
+// devolada-transfer-verification D8 — what a settle answers (contracts/turistear-api.md § Checkout
+// and settlement). For an organization connected to Devolada, a transfer settlement records
+// nothing yet: `folio` is still an apartado and `payment_link` is the enlace that collects the
+// balance. When no enlace could be created, the settlement WAS recorded on today's manual path and
+// `payment_link_error` says why (FR-010). Both keys are absent for everyone else.
+export interface SettleResult {
+  folio: Folio
+  payment_link?: PaymentLinkView | null
+  payment_link_error?: PaymentLinkError
 }
 
 // Apartado (booking) management API — distinct from the sale-creation flow (`confirmSale` lives
@@ -20,28 +32,26 @@ export interface ReminderClaim {
 }
 
 // US-AG07 / US-LG03 — one-shot settlement of a booking: collect the balance (by its own method) →
-// paid + QR. A transfer balance defers the QR to admin verification (US-A67).
-export const settleBooking = async (id: string, payload?: SettlePayload): Promise<Folio> => {
-  const res = await request<{ folio: Folio }>(`/api/pos/folios/${id}/settle`, {
+// paid + QR. A transfer balance defers the QR to admin verification (US-A67), or, connected to
+// Devolada, is collected by an enlace first (SettleResult).
+export const settleBooking = (id: string, payload?: SettlePayload): Promise<SettleResult> =>
+  request<SettleResult>(`/api/pos/folios/${id}/settle`, {
     method: 'POST',
     body: payload ? JSON.stringify(payload) : undefined,
   })
-  return res.folio
-}
 
 // US-AG54 (line-autonomy F3) — settle ONE line: its balance, its QR, its commission; the folio
-// completes only with its last live line. Same body contract as the whole-folio settle.
-export const settleFolioLine = async (
+// completes only with its last live line. Same body and answer contract as the whole-folio settle;
+// its enlace carries the line's `folio_line_id`.
+export const settleFolioLine = (
   id: string,
   lineId: string,
   payload?: SettlePayload,
-): Promise<Folio> => {
-  const res = await request<{ folio: Folio }>(`/api/pos/folios/${id}/lines/${lineId}/settle`, {
+): Promise<SettleResult> =>
+  request<SettleResult>(`/api/pos/folios/${id}/lines/${lineId}/settle`, {
     method: 'POST',
     body: payload ? JSON.stringify(payload) : undefined,
   })
-  return res.folio
-}
 
 // US-AG54 / US-AG07.4 — the agent cancels one apartada line of their own folio; the ladder
 // decides the money, same as every other cancellation entrance.

@@ -3,7 +3,8 @@ import { getDb, type Db } from '../../db/client'
 import { devoladaCredentials, devoladaLinks, type DevoladaLink } from '../../db/schema'
 import { devoladaClient, type DevoladaPaymentRead } from '../../services/devolada'
 import { currentPaymentOf } from '../../utils/devoladaLinkView'
-import { unresolvedLinkSql } from '../../utils/devoladaSql'
+import { IN_FLIGHT_STATUSES, unresolvedLinkSql } from '../../utils/devoladaSql'
+import { cancelForUnreceivedTransfer } from '../pos/unreceivedTransfer'
 import { applyDevoladaPayment } from './apply'
 import {
   brokenReasonOf,
@@ -12,6 +13,7 @@ import {
   markConnectionBroken,
   type LinkCredential,
 } from './connection'
+import { closePaymentLinkRemote, replayPaymentLinkCreate } from './links'
 
 // devolada-transfer-verification D12 — the recovery sweep, a third independent run on the API's
 // cron (every 15 minutes, dev and production; a preview has none).
@@ -22,9 +24,11 @@ import {
 // across organizations, then acts on each with that row's own `organization_id` (constitution III).
 // It is fail-soft per organization and per sale, and it never cancels anything on the clock alone.
 //
-// PR 1 (research D19): an unpaid link past its expiry only moves to `expired`, after a successful
-// re-read, and its sale is already back in «Por verificar» (D14). PR 2 replaces that step with D9's
-// unpaid branch; PR 3 adds the replay of abandoned links and the follow-up of closed ones.
+// A link past its expiry is acted on only after a successful re-read: with no payment, or an expired
+// one, D9's unpaid branch cancels its sale (D11); with a payment in flight it stays open; with any
+// other verdict it only expires, and the admin decides (FR-016). Links left `closing` are closed
+// at Devolada until it acknowledges. The replay of abandoned links and the follow-up of closed ones
+// come with PR 3 (research D19).
 
 /** A link nothing has reported on for this long is re-read. */
 const RECHECK_AFTER_SECONDS = 10 * 60
@@ -40,6 +44,8 @@ export interface DevoladaSweepResult {
 }
 
 class OrgStop extends Error {}
+
+const IN_FLIGHT: ReadonlySet<string> = new Set(IN_FLIGHT_STATUSES)
 
 export async function sweepDevoladaPayments(env: CloudflareBindings, now: Date): Promise<DevoladaSweepResult> {
   const db = getDb(env)
@@ -82,12 +88,23 @@ export async function sweepDevoladaPayments(env: CloudflareBindings, now: Date):
       asc(devoladaLinks.createdAt),
     )
 
-  const byOrg = new Map<string, DevoladaLink[]>()
-  for (const link of due) {
-    const list = byOrg.get(link.organizationId) ?? []
-    list.push(link)
-    byOrg.set(link.organizationId, list)
+  // D12 step 3 — links left `closing`: the sale stopped taking that money, and Devolada has not
+  // acknowledged the close yet. Read now, so a link this run marks `closing` is closed once, by the
+  // write that marked it.
+  const closing = await db
+    .select()
+    .from(devoladaLinks)
+    .where(eq(devoladaLinks.state, 'closing'))
+    .orderBy(asc(devoladaLinks.updatedAt), asc(devoladaLinks.createdAt))
+
+  const byOrg = new Map<string, { due: DevoladaLink[]; closing: DevoladaLink[] }>()
+  const bucketOf = (org: string) => {
+    let bucket = byOrg.get(org)
+    if (!bucket) byOrg.set(org, (bucket = { due: [], closing: [] }))
+    return bucket
   }
+  for (const link of due) bucketOf(link.organizationId).due.push(link)
+  for (const link of closing) bucketOf(link.organizationId).closing.push(link)
 
   for (const [org, links] of byOrg) {
     try {
@@ -107,7 +124,7 @@ export async function sweepDevoladaPayments(env: CloudflareBindings, now: Date):
 async function sweepOrganization(
   deps: { db: Db; env: CloudflareBindings; waitUntil: (p: Promise<unknown>) => void },
   org: string,
-  links: DevoladaLink[],
+  { due: links, closing }: { due: DevoladaLink[]; closing: DevoladaLink[] },
   nowSec: number,
   result: DevoladaSweepResult,
 ): Promise<void> {
@@ -181,9 +198,42 @@ async function sweepOrganization(
       result.failed += 1
     }
   }
+
+  // D12 step 3 — close each `closing` link at Devolada with its own credential (D21), until Devolada
+  // acknowledges. One whose create never recorded Devolada's id is first replayed with the same key,
+  // once that create is surely over; one whose current credential is rejected waits for the new key.
+  for (const link of closing) {
+    if (skipped.has(link.credentialId)) continue
+    try {
+      const credential = await credentialOf(link)
+      if (!credential?.apiKey) continue
+      let target = link
+      if (!link.devoladaLinkId) {
+        if (link.createdAt.getTime() > (nowSec - CREATING_TIMEOUT_SECONDS) * 1000) continue
+        spend()
+        const replayed = await replayPaymentLinkCreate(deps, link)
+        if (replayed === 'rate_limited') throw new OrgStop()
+        if (typeof replayed === 'string') continue
+        target = { ...link, devoladaLinkId: replayed.devoladaLinkId }
+      }
+      spend()
+      // A retired credential may need D21's fallback read on top of the close.
+      if (!credential.isCurrent) spend()
+      const closed = await closePaymentLinkRemote(deps, target)
+      if (closed === 'rate_limited') throw new OrgStop()
+      if (closed === 'pending') result.failed += 1
+    } catch (err) {
+      if (err instanceof OrgStop) throw err
+      console.error('[devolada] sweep failed to close a link', link.id, err)
+      result.failed += 1
+    }
+  }
 }
 
-/** Applies one sale's re-read to every link of ours it names, then expires the unpaid due ones. */
+/**
+ * Applies one sale's re-read to every link of ours it names, then acts on the due links past their
+ * expiry, by each link's current payment (D9, D12 step 2).
+ */
 async function applySaleRead(
   deps: { db: Db; env: CloudflareBindings; waitUntil: (p: Promise<unknown>) => void },
   org: string,
@@ -214,16 +264,26 @@ async function applySaleRead(
       .update(devoladaLinks)
       .set({ lastCheckedAt: now })
       .where(and(eq(devoladaLinks.id, link.id), eq(devoladaLinks.organizationId, org)))
-    // Until PR 2 (D19): after this successful re-read, an unpaid link past its expiry — no payment,
-    // or an expired one — moves to `expired`, and NOTHING is cancelled: its sale is already back in
-    // «Por verificar» (D14), and the next run stops re-reading it.
     if (link.expiresAt.getTime() > now.getTime()) continue
     const current = currentPaymentOf(
       payments
         .filter((p) => p.paymentLinkId === link.devoladaLinkId)
         .map((p) => ({ status: p.status, devoladaCreatedAt: new Date(p.createdAt * 1000) })),
     )
-    if (current && current.status !== 'expired') continue
+    // In flight: the customer paid in time and Banxico has not answered; the link stays open.
+    // Confirmed: applied above, and nothing is cancelled.
+    if (current && (IN_FLIGHT.has(current.status) || current.status === 'confirmed')) continue
+    if (!current || current.status === 'expired') {
+      // D9's unpaid branch: a sale or deposit link cancels its sale through D11, which keeps a sale
+      // that holds other money or another payment in flight. An unpaid settlement link only
+      // expires, and the apartado continues (D8).
+      if (link.kind !== 'settlement') {
+        await cancelForUnreceivedTransfer(deps, { organizationId: org, folioId, linkId: link.id, at: now })
+        continue
+      }
+    }
+    // A partial, invalid or unapplied verdict, or an unpaid settlement link: the link expires and
+    // nothing else happens. The admin decides (FR-016), and the next run stops re-reading it.
     await db
       .update(devoladaLinks)
       .set({ state: 'expired', updatedAt: now })

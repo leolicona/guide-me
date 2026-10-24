@@ -14,10 +14,12 @@ export const aFolio = (over: Record<string, unknown> = {}) => ({
   created_at: 1_800_000_000,
   cancelled_at: null,
   // devolada-transfer-verification — an unconnected organization's values (contracts/turistear-api
-  // § Reads): no link on the row, none on the detail, never resolved by Devolada.
+  // § Reads): no link on the row, none on the detail, never resolved by Devolada, and nothing of
+  // Devolada's for the admin to decide.
   payment_link: null,
   payment_links: [],
   verification_auto: false,
+  devolada_attention: false,
   ...over,
 })
 
@@ -33,6 +35,7 @@ export const aCancellationRequest = (over: Record<string, unknown> = {}) => ({
 export const aFolioCounts = (over: Partial<Record<string, number>> = {}) => ({
   verification: 0,
   verification_auto: 0,
+  devolada_attention: 0,
   folio_requests: 0,
   refunds: 0,
   overdue: 0,

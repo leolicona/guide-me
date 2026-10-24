@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
+  devoladaWork,
   folioAttention,
   folioAction,
   folioTimeChip,
@@ -8,7 +9,12 @@ import {
   folioMoneyAxis,
   folioSoldAtLabel,
   folioSoldSummary,
+  linkEvidence,
+  saleCancellationSource,
+  verificationLink,
 } from './folioCardState'
+import { aLinkPayment, aPaymentLink } from '../../test/handlers/devolada'
+import type { PaymentLinkView } from '../devolada/types'
 
 // US-A82 / US-AG49 — the card's derivations.
 // Spec: docs/oversight/folio-list-scanability.spec.md (Scenarios S-2…S-6).
@@ -689,5 +695,251 @@ describe('devolada-transfer-verification US1 — no verify while Devolada resolv
       level: 'work',
       rail: 'warning',
     })
+  })
+})
+
+// --- devolada-transfer-verification US2 / US3 — the Devolada payment in front of the admin --------
+
+// A sale's enlace, as `GET /api/folios/:id` and the list rows carry it (contracts § PaymentLinkView).
+const link = (over: Record<string, unknown> = {}) => aPaymentLink(over) as PaymentLinkView
+const payment = (over: Record<string, unknown> = {}) => aLinkPayment(over)
+
+// devolada-transfer-verification US2 — a sale whose Devolada payment needs the admin has its verb:
+// «Revisar pago», decided on the sale beside the evidence, ranked where the detail ranks its rung.
+describe('devolada-transfer-verification US2 — the card’s verb for Devolada attention', () => {
+  const late = {
+    status: 'cancelled' as const,
+    deliverable: false,
+    payment_verification: 'pending' as const,
+    devolada_attention: true,
+  }
+
+  it('money to return on a cancelled sale is the admin’s `resolve`, and the rail says work', () => {
+    expect(folioAction(late, { urgent: false, surface: 'admin' })).toBe('resolve')
+    expect(folioAttention(late, { urgent: false })).toEqual({ level: 'work', rail: 'warning' })
+  })
+
+  it('an apartado’s settlement exception is `resolve` too: there is no pending row to verify', () => {
+    const settlement = { status: 'booking' as const, deliverable: false, devolada_attention: true }
+    expect(folioAction(settlement, { urgent: false, surface: 'admin' })).toBe('resolve')
+  })
+
+  it('a sale exception stays «Verificar y enviar» (FR-018); a request still outranks everything', () => {
+    const pending = { status: 'paid' as const, deliverable: false, payment_verification: 'pending' as const }
+    expect(folioAction({ ...pending, devolada_attention: true }, { urgent: false })).toBe('verify')
+    expect(
+      folioAction({ ...late, cancellation_request: 'pending' as const }, { urgent: false }),
+    ).toBe('request')
+  })
+
+  it('it outranks the refund — money that arrived is answered for before cash leaves the drawer', () => {
+    expect(
+      folioAction({ ...late, refund_status: 'pending' as const }, { urgent: false, surface: 'admin' }),
+    ).toBe('resolve')
+  })
+
+  it('the seller is never handed the decision', () => {
+    expect(folioAction(late, { urgent: false, surface: 'seller' })).toBe('message')
+  })
+})
+
+describe('devolada-transfer-verification US2 — which payment shows its amounts (FR-015)', () => {
+  it.each(['partial', 'invalid', 'unapplied', 'needs_tracking_key', 'credit_paused', 'not_received', 'link_failed'])(
+    '%s shows the payment',
+    (label) => {
+      const p = payment()
+      expect(linkEvidence(link({ label, payment: p }))).toBe(p)
+    },
+  )
+
+  it('a payment Devolada is clearing on its own, or a confirmed one, has nothing to weigh', () => {
+    for (const label of ['validating', 'confirmed', 'awaiting_payment']) {
+      expect(linkEvidence(link({ label, payment: payment() }))).toBeNull()
+    }
+  })
+
+  it('no payment, no evidence — an enlace that expired unpaid shows its label alone', () => {
+    expect(linkEvidence(link({ state: 'expired', label: 'not_received', payment: null }))).toBeNull()
+    expect(linkEvidence(null)).toBeNull()
+  })
+})
+
+describe('devolada-transfer-verification US2 — the enlace behind «Pago por verificar»', () => {
+  it('is the newest sale or deposit enlace not paid yet', () => {
+    const deposit = link({ id: 'dep', kind: 'deposit', label: 'partial', payment: payment({ status: 'partial' }) })
+    const older = link({ id: 'old', kind: 'sale', state: 'failed', label: 'link_failed' })
+    expect(verificationLink({ payment_links: [deposit, older] })).toBe(deposit)
+  })
+
+  it('never a settlement (no pending row, D8), a paid enlace, or money to return', () => {
+    expect(
+      verificationLink({
+        payment_links: [
+          link({ kind: 'settlement', label: 'partial', payment: payment({ status: 'partial' }) }),
+          link({ kind: 'deposit', state: 'paid', label: 'confirmed', payment: payment({ status: 'confirmed' }) }),
+          link({ kind: 'sale', state: 'closed', label: 'unapplied', payment: payment({ status: 'unapplied' }) }),
+        ],
+      }),
+    ).toBeNull()
+    expect(verificationLink({})).toBeNull()
+  })
+})
+
+describe('devolada-transfer-verification US2 — money to return (D15 `returned`)', () => {
+  it('unapplied money, on any enlace, asks for «Ya lo devolví»', () => {
+    for (const kind of ['sale', 'deposit', 'settlement']) {
+      const unapplied = link({ kind, state: 'closed', label: 'unapplied', payment: payment({ status: 'unapplied' }) })
+      expect(devoladaWork({ status: 'cancelled', payment_links: [unapplied] })).toMatchObject({
+        link: unapplied,
+        decision: 'returned',
+        actions: ['returned'],
+      })
+    }
+  })
+
+  it('a confirmed payment the cancelled sale never took is money to return too (D9)', () => {
+    // Rechazar ended the sale while its enlace stayed open; the customer paid anyway.
+    const late = link({ label: 'unapplied', payment: payment({ status: 'confirmed', receipt_number: 'DV-9' }) })
+    expect(devoladaWork({ status: 'cancelled', payment_links: [late] })).toMatchObject({
+      decision: 'returned',
+      actions: ['returned'],
+    })
+  })
+
+  it('a `paid` enlace’s money was the sale’s before it was cancelled: its refund is the ladder’s', () => {
+    const paid = link({ state: 'paid', label: 'unapplied', payment: payment({ status: 'confirmed' }) })
+    expect(devoladaWork({ status: 'cancelled', payment_links: [paid] })).toBeNull()
+  })
+
+  it('an enlace no key can read still asks for its money back, whatever its label says (D21)', () => {
+    const lost = link({ state: 'failed', label: 'link_failed', payment: payment({ status: 'unapplied' }) })
+    expect(devoladaWork({ status: 'cancelled', payment_links: [lost] })).toMatchObject({
+      decision: 'returned',
+    })
+  })
+
+  it('once returned, it is never offered again', () => {
+    const returned = link({
+      state: 'closed',
+      label: 'unapplied',
+      payment: payment({ status: 'unapplied', resolution: 'returned' }),
+    })
+    expect(devoladaWork({ status: 'cancelled', payment_links: [returned] })).toBeNull()
+  })
+
+  it('a sale or deposit exception is not this rung’s: «Pago por verificar» decides it (FR-018)', () => {
+    for (const label of ['partial', 'invalid', 'needs_tracking_key', 'credit_paused']) {
+      const exception = link({ kind: 'sale', label, payment: payment({ status: 'partial' }) })
+      expect(devoladaWork({ status: 'paid', payment_links: [exception] })).toBeNull()
+    }
+  })
+})
+
+// devolada-transfer-verification US3 — an apartado's settlement records nothing until it is proven
+// (D8), so the admin decides its exceptions here: «Verificar» (accept) or «Descartar» (dismiss).
+describe('devolada-transfer-verification US3 — settlement decisions (D15)', () => {
+  const settlement = (over: Record<string, unknown> = {}) => link({ kind: 'settlement', ...over })
+
+  it.each(['partial', 'invalid'])('a %s settlement on an apartado: Verificar and Descartar', (label) => {
+    const exception = settlement({ state: 'closed', label, payment: payment({ status: label }) })
+    expect(devoladaWork({ status: 'booking', payment_links: [exception] })).toMatchObject({
+      decision: 'decide',
+      actions: ['accept', 'dismiss'],
+    })
+  })
+
+  it('an exception whose enlace no key can read any more is still decided (D21)', () => {
+    const lost = settlement({ state: 'failed', label: 'link_failed', payment: payment({ status: 'invalid' }) })
+    expect(devoladaWork({ status: 'booking', payment_links: [lost] })).toMatchObject({
+      decision: 'decide',
+      actions: ['accept', 'dismiss'],
+    })
+  })
+
+  it('once the sale no longer owes it (cancelled, or settled another way), only Descartar', () => {
+    const exception = settlement({ state: 'closed', label: 'partial', payment: payment({ status: 'partial' }) })
+    for (const status of ['cancelled', 'paid'] as const) {
+      expect(devoladaWork({ status, payment_links: [exception] })).toMatchObject({
+        decision: 'dismiss',
+        actions: ['dismiss'],
+      })
+    }
+  })
+
+  it('an enlace no key can read, its payment last seen in flight: Verificar and Descartar (D21)', () => {
+    const unreadable = settlement({ state: 'failed', label: 'link_failed', payment: payment() })
+    expect(devoladaWork({ status: 'booking', payment_links: [unreadable] })).toMatchObject({
+      decision: 'decide',
+      actions: ['accept', 'dismiss'],
+    })
+    // On a cancelled sale the cancellation decided it; what may still arrive is money to return.
+    expect(devoladaWork({ status: 'cancelled', payment_links: [unreadable] })).toBeNull()
+    // With no payment ever reported there is nothing to decide.
+    expect(
+      devoladaWork({ status: 'booking', payment_links: [settlement({ state: 'failed', label: 'link_failed' })] }),
+    ).toBeNull()
+  })
+
+  it('a settlement still in flight gets «Verificar» alone — never «Descartar» (D13, D15)', () => {
+    for (const [label, p] of [
+      ['validating', payment()],
+      ['needs_tracking_key', payment({ awaiting: 'payer_tracking_key' })],
+      ['credit_paused', payment({ status: 'queued_for_credit' })],
+    ] as const) {
+      expect(
+        devoladaWork({ status: 'booking', payment_links: [settlement({ label, payment: p })] }),
+      ).toMatchObject({ decision: 'in_flight', actions: ['accept'] })
+    }
+    // Not on a sale that no longer owes it, nor on a cancelled one.
+    expect(devoladaWork({ status: 'cancelled', payment_links: [settlement({ label: 'validating', payment: payment() })] })).toBeNull()
+  })
+
+  it('a payment the admin already decided is never offered again', () => {
+    const accepted = settlement({ label: 'validating', payment: payment({ resolution: 'accepted' }) })
+    const dismissed = settlement({ state: 'closed', label: 'partial', payment: payment({ status: 'partial', resolution: 'dismissed' }) })
+    expect(devoladaWork({ status: 'booking', payment_links: [accepted, dismissed] })).toBeNull()
+  })
+
+  it('what needs the admin comes before an optional verification, whatever its age', () => {
+    const verifying = settlement({ id: 'new', label: 'validating', payment: payment() })
+    const unapplied = link({ id: 'old', kind: 'deposit', state: 'closed', label: 'unapplied', payment: payment({ status: 'unapplied' }) })
+    expect(devoladaWork({ status: 'booking', payment_links: [verifying, unapplied] })?.link.id).toBe('old')
+    expect(devoladaWork({ status: 'booking', payment_links: [verifying] })?.link.id).toBe('new')
+  })
+
+  it('a sale without Devolada has no rung', () => {
+    expect(devoladaWork({ status: 'booking' })).toBeNull()
+    expect(devoladaWork({ status: 'booking', payment_links: [] })).toBeNull()
+  })
+})
+
+describe('devolada-transfer-verification US2 — who cancelled the sale (D11)', () => {
+  it('a live sale has no cancellation source', () => {
+    expect(saleCancellationSource({ status: 'paid', lines: [] })).toBeNull()
+  })
+
+  it('a sale withdrawn because its transfer never arrived reads `payment_not_received`', () => {
+    expect(
+      saleCancellationSource({
+        status: 'cancelled',
+        lines: [
+          { cancelled_at: 1_800_000_000, cancellation_source: 'payment_not_received' },
+          { cancelled_at: 1_800_000_000, cancellation_source: 'payment_not_received' },
+        ],
+      }),
+    ).toBe('payment_not_received')
+  })
+
+  it('a line cancelled before the sale keeps its own source: the last cancellation decides', () => {
+    expect(
+      saleCancellationSource({
+        status: 'cancelled',
+        lines: [
+          { cancelled_at: 1_700_000_000, cancellation_source: 'admin' },
+          { cancelled_at: 1_800_000_000, cancellation_source: 'payment_not_received' },
+        ],
+      }),
+    ).toBe('payment_not_received')
+    expect(saleCancellationSource({ status: 'cancelled' })).toBeNull()
   })
 })

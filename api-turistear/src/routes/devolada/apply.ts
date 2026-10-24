@@ -1,4 +1,4 @@
-import { and, eq, inArray, sql } from 'drizzle-orm'
+import { and, desc, eq, inArray, ne, sql } from 'drizzle-orm'
 import type { Db } from '../../db/client'
 import {
   devoladaConnections,
@@ -10,9 +10,14 @@ import {
   type DevoladaPaymentStatus,
 } from '../../db/schema'
 import type { DevoladaPaymentRead } from '../../services/devolada'
+import { folioEventRowWhere } from '../../utils/folioEvents'
 import { deriveStatusSql } from '../../utils/folioStatus'
+import { ApiError } from '../../types/errors'
+import { applySettlement, planSettlement } from '../pos/settleCore'
+import { cancelForUnreceivedTransfer } from '../pos/unreceivedTransfer'
 import { releaseClearedFolio, verifyFolioPayment } from '../pos/verifyCore'
 import { setCreditPaused } from './connection'
+import { closePaymentLinkRemote } from './links'
 
 // devolada-transfer-verification D9 — applying what Devolada reports for a payment. The webhook and
 // the sweep share this one function, and both call it with a RE-READ, never with a webhook body.
@@ -21,11 +26,16 @@ import { setCreditPaused } from './connection'
 // repeat return early, but that read is only an optimization: the guarantee is the guarded write
 // each branch makes (D10's flip and rollup).
 //
-// This is PR 1 (research D19): `validating`, `queued_for_credit` and an `awaiting` wait are
-// snapshots, and `confirmed` on a `sale` link verifies that payment row and releases the tickets.
-// Every other status, and every other kind of link, is only recorded — WITHOUT marking it applied,
-// so the PR that handles it applies it then: a later PR's preview writes deposit and settlement
-// links into dev's database while dev still runs this code.
+// Sale and deposit links (the D9 table's first column): `confirmed` verifies that payment row and
+// releases the tickets of a sale that is now paid; `partial`, `invalid` and `unapplied` record a
+// verdict for the admin; `expired` cancels a sale whose money never arrived (D11); `superseded` is
+// recorded and ignored. `validating`, `queued_for_credit` and an `awaiting` wait are snapshots.
+//
+// Settlement links (the second column, D8): `confirmed` records the settlement through the settle
+// core, claimed by the link; `partial` and `invalid` close the link and wait for the admin's accept
+// or dismiss (D15); `expired` only expires the link, and the apartado continues.
+//
+// Every final status stamps the connection's `last_verdict_at` (FR-005).
 
 export interface ApplyDeps {
   db: Db
@@ -115,6 +125,112 @@ const markApplied = (db: Db, row: DevoladaPayment, now: Date) =>
     .set({ appliedStatus: row.status, appliedAt: now })
     .where(and(eq(devoladaPayments.id, row.id), eq(devoladaPayments.organizationId, row.organizationId)))
 
+/** FR-005 — the connection's health shows when Devolada last decided a payment. */
+const stampLastVerdict = (db: Db, organizationId: string, now: Date) =>
+  db
+    .update(devoladaConnections)
+    .set({ lastVerdictAt: now, updatedAt: now })
+    .where(eq(devoladaConnections.organizationId, organizationId))
+
+/** A final status whose whole action is to be recorded. */
+async function finish(db: Db, row: DevoladaPayment, now: Date): Promise<'applied'> {
+  await db.batch([markApplied(db, row, now), stampLastVerdict(db, row.organizationId, now)])
+  return 'applied'
+}
+
+/**
+ * A verdict the admin must see (D9): `partial`, `invalid`, `unapplied`, or `confirmed` on a
+ * cancelled sale. The sale's timeline gets a `payment_verdict` event with a NULL actor, written by
+ * the processor that marks the verdict applied and never by a second one (the webhook and the
+ * sweep at once): the event is gated on the mark not being there yet, and comes first in the batch.
+ */
+async function recordVerdict(db: Db, link: DevoladaLink, row: DevoladaPayment, now: Date): Promise<'applied'> {
+  const notYetApplied = sql`NOT EXISTS (SELECT 1 FROM devolada_payments ap
+    WHERE ap.id = ${row.id} AND ap.applied_status = ${row.status})`
+  await db.batch([
+    folioEventRowWhere(
+      db,
+      {
+        organizationId: link.organizationId,
+        folioId: link.folioId,
+        type: 'payment_verdict',
+        actorId: null,
+        folioLineId: link.folioLineId,
+        payload: {
+          link_id: link.id,
+          status: row.status,
+          asked: row.askedAmount,
+          received: row.receivedAmount,
+          receipt_number: row.receiptNumber,
+          awaiting: row.awaiting,
+        },
+        at: row.verdictAt ?? now,
+      },
+      notYetApplied,
+    ),
+    markApplied(db, row, now),
+    stampLastVerdict(db, link.organizationId, now),
+  ])
+  return 'applied'
+}
+
+/**
+ * The money a link collects reached its sale: a sale or deposit link's row is verified (by
+ * Devolada, or by the admin's Verificar), or a settlement link holds the row it recorded (D8, D15).
+ * A `paid` link always means this.
+ */
+const appliedSql = (link: Pick<DevoladaLink, 'id' | 'organizationId'>) => sql`EXISTS (
+  SELECT 1 FROM devolada_links al
+  WHERE al.id = ${link.id} AND al.organization_id = ${link.organizationId}
+    AND al.folio_payment_id IS NOT NULL
+    AND (al.kind = 'settlement' OR EXISTS (
+      SELECT 1 FROM folio_payments ap WHERE ap.id = al.folio_payment_id AND ap.verification = 'verified')))`
+
+async function moneyApplied(db: Db, link: DevoladaLink): Promise<boolean> {
+  const [row] = await db
+    .select({ applied: sql<number>`${appliedSql(link)}` })
+    .from(devoladaLinks)
+    .where(and(eq(devoladaLinks.id, link.id), eq(devoladaLinks.organizationId, link.organizationId)))
+    .limit(1)
+  return !!row?.applied
+}
+
+/** The link collected its money: it ends `paid` — only while that money was applied. */
+const linkPaidStatement = (db: Db, link: DevoladaLink, now: Date) =>
+  db
+    .update(devoladaLinks)
+    .set({ state: 'paid', updatedAt: now })
+    .where(
+      and(
+        eq(devoladaLinks.id, link.id),
+        eq(devoladaLinks.organizationId, link.organizationId),
+        inArray(devoladaLinks.state, ['open', 'closing', 'closed', 'expired']),
+        appliedSql(link),
+      ),
+    )
+
+async function markLinkPaid(db: Db, link: DevoladaLink, row: DevoladaPayment, now: Date): Promise<'applied'> {
+  await db.batch([linkPaidStatement(db, link, now), markApplied(db, row, now), stampLastVerdict(db, row.organizationId, now)])
+  return 'applied'
+}
+
+/** Whether `row` is its link's current payment: the latest non-superseded one (data-model). */
+async function isCurrentPayment(db: Db, row: DevoladaPayment): Promise<boolean> {
+  const [current] = await db
+    .select({ id: devoladaPayments.id })
+    .from(devoladaPayments)
+    .where(
+      and(
+        eq(devoladaPayments.linkId, row.linkId),
+        eq(devoladaPayments.organizationId, row.organizationId),
+        ne(devoladaPayments.status, 'superseded'),
+      ),
+    )
+    .orderBy(desc(devoladaPayments.devoladaCreatedAt), desc(sql`rowid`))
+    .limit(1)
+  return current?.id === row.id
+}
+
 /**
  * D9 — applies one re-read payment of one of our links. Answers whether a branch acted
  * (`applied`), or the payment was only recorded or already applied (`no_change`).
@@ -163,8 +279,6 @@ export async function applyDevoladaPayment(
       return 'applied'
     }
     case 'confirmed': {
-      // PR 1 applies a sale link only; deposits and settlements come with PR 2 (D19).
-      if (link.kind !== 'sale' || !link.folioPaymentId) return 'no_change'
       const sale = (
         await db
           .select({ cancelledAt: folios.cancelledAt, status: deriveStatusSql })
@@ -172,16 +286,64 @@ export async function applyDevoladaPayment(
           .where(and(eq(folios.id, link.folioId), eq(folios.organizationId, org)))
           .limit(1)
       )[0]
-      // A cancelled sale is never verified: its money is to be returned, which PR 2 brings (D9).
-      if (!sale || sale.cancelledAt) return 'no_change'
+      if (!sale) return 'no_change'
+      if (sale.cancelledAt) {
+        // A cancelled sale is never verified (D9). Money it already held — its row verified by hand,
+        // its settlement accepted — was priced by its cancellation: the link only ends `paid`. Any
+        // other is money to return, as `unapplied`.
+        if (await moneyApplied(db, link)) return markLinkPaid(db, link, stored, now)
+        return recordVerdict(db, link, stored, now)
+      }
+      if (link.kind === 'settlement') return applyConfirmedSettlement(deps, link, stored, now)
+      if (!link.folioPaymentId) return 'no_change'
       return applyConfirmedSale(deps, link, stored, sale.status, now)
     }
+    case 'partial':
+    case 'invalid':
+      if (link.kind === 'settlement') {
+        // D9 — the link closes, and the admin accepts or dismisses the payment (D15); the apartado
+        // waits for that decision (D8).
+        await db
+          .update(devoladaLinks)
+          .set({ state: 'closing', updatedAt: now })
+          .where(and(eq(devoladaLinks.id, link.id), eq(devoladaLinks.organizationId, org), eq(devoladaLinks.state, 'open')))
+        deps.waitUntil(closePaymentLinkRemote(deps, link))
+        return recordVerdict(db, link, stored, now)
+      }
+      // The sale stays pending: it shows in Por verificar with the amounts and its label, and the
+      // admin uses Verificar or Rechazar as today (FR-018). A deposit's apartado waits (D8).
+      return recordVerdict(db, link, stored, now)
+    case 'unapplied':
+      // «Dinero por devolver»: an attention item until the admin marks it returned (D15).
+      return recordVerdict(db, link, stored, now)
+    case 'expired':
+      if (link.kind === 'settlement') {
+        // An unpaid settlement leaves the apartado intact: the link only expires (D8).
+        await db
+          .update(devoladaLinks)
+          .set({ state: 'expired', updatedAt: now })
+          .where(and(eq(devoladaLinks.id, link.id), eq(devoladaLinks.organizationId, org), eq(devoladaLinks.state, 'open')))
+        return finish(db, stored, now)
+      }
+      // D11 acts on the link's current payment only: a newer one still being decided keeps the sale.
+      // D11's own checks keep a sale holding other money, verified by hand, or with another payment
+      // in flight; a `'kept'` or `'noop'` result leaves this snapshot as the record.
+      if (await isCurrentPayment(db, stored)) {
+        await cancelForUnreceivedTransfer(deps, { organizationId: org, folioId: link.folioId, linkId: link.id, at: now })
+      }
+      return finish(db, stored, now)
+    case 'superseded':
+      // Recorded and ignored: the correction arrives as a new payment with its own id.
+      return finish(db, stored, now)
     default:
       return 'no_change'
   }
 }
 
-/** D9, D10 — a confirmed transfer of a sale link: verify THAT row, release once, close the link. */
+/**
+ * D9, D10 — a confirmed transfer of a sale or deposit link: verify THAT row, release once, mark the
+ * link paid. A deposit releases nothing: its apartado is not paid yet (US3 scenario 2).
+ */
 async function applyConfirmedSale(
   deps: ApplyDeps,
   link: DevoladaLink,
@@ -212,6 +374,9 @@ async function applyConfirmedSale(
   if (flipped && rollupVerified && saleStatus === 'paid') {
     await releaseClearedFolio(deps, { organizationId: org, folioId: link.folioId, at: verdictAt })
   }
+  // The row was verified neither now nor by hand: the sale was cancelled after it was read. Its
+  // money is money to return (D9).
+  if (!flipped && !(await moneyApplied(db, link))) return recordVerdict(db, link, stored, now)
   // 3-5. The receipt number becomes the sale's reference, the link is paid, and the connection
   //      records its last verdict (FR-005).
   await db.batch([
@@ -221,21 +386,58 @@ async function applyConfirmedSale(
       .where(
         and(eq(folios.id, link.folioId), eq(folios.organizationId, org), sql`${folios.cancelledAt} IS NULL`),
       ),
-    db
-      .update(devoladaLinks)
-      .set({ state: 'paid', updatedAt: now })
-      .where(
-        and(
-          eq(devoladaLinks.id, link.id),
-          eq(devoladaLinks.organizationId, org),
-          inArray(devoladaLinks.state, ['open', 'closing', 'closed']),
-        ),
-      ),
-    db
-      .update(devoladaConnections)
-      .set({ lastVerdictAt: now, updatedAt: now })
-      .where(eq(devoladaConnections.organizationId, org)),
+    // The link collected its money: `paid`, an `expired` one included (D11 kept its sale, and the
+    // money arrived anyway).
+    linkPaidStatement(db, link, now),
+    stampLastVerdict(db, org, now),
     markApplied(db, stored, now),
   ])
   return 'applied'
 }
+
+/**
+ * D8 — a confirmed transfer of a settlement link records the settlement, as the seller who issued
+ * the link would have: method transfer, Devolada's receipt as the reference, verified by «Sistema»
+ * and dated by the verdict. The link is the claim, so nothing is recorded twice; a claim already
+ * taken — by the admin's accept (D15), or another processor — records nothing more, and the link
+ * ends `paid`. A payment submitted before its link expired is recorded past the apartado's clock.
+ */
+async function applyConfirmedSettlement(
+  deps: ApplyDeps,
+  link: DevoladaLink,
+  stored: DevoladaPayment,
+  now: Date,
+): Promise<'applied'> {
+  const { db } = deps
+  const verdictAt = stored.verdictAt ?? now
+  let plan
+  try {
+    plan = await planSettlement(
+      db,
+      { organizationId: link.organizationId, folioId: link.folioId, folioLineId: link.folioLineId },
+      { now, bypassExpiry: stored.devoladaCreatedAt.getTime() < link.expiresAt.getTime() },
+    )
+  } catch (err) {
+    if (!(err instanceof ApiError)) throw err
+    // The apartado no longer owes this: settled by the admin's accept, which claimed the link.
+    if (await moneyApplied(db, link)) return markLinkPaid(db, link, stored, now)
+    console.error('[devolada] confirmed settlement could not be recorded', link.id, err.code)
+    return recordVerdict(db, link, stored, now)
+  }
+  const { recorded } = await applySettlement(deps, plan, {
+    method: 'transfer',
+    reference: stored.receiptNumber,
+    verification: 'verified',
+    verifiedBy: null,
+    verifiedAt: verdictAt,
+    collectedBy: link.requestedBy,
+    settledBy: link.requestedBy,
+    actorId: null,
+    at: verdictAt,
+    recordedAt: verdictAt,
+    claim: { linkId: link.id, markPaid: true },
+  })
+  if (!recorded) return markLinkPaid(db, link, stored, now)
+  return finish(db, stored, now)
+}
+

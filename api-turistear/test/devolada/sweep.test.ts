@@ -1,6 +1,9 @@
-// devolada-transfer-verification US1 — the recovery sweep follows every open link to its verdict
-// when a notification never arrives, each with the key that created it, within Devolada's budget,
-// fail-soft per organization (FR-004, FR-012, SC-003; research D12, D17, D19, D21).
+// devolada-transfer-verification US1, US2 — the recovery sweep follows every open link to its
+// verdict when a notification never arrives, each with the key that created it, within Devolada's
+// budget, fail-soft per organization (FR-004, FR-012, SC-003; research D12, D17, D19, D21). Past a
+// link's expiry, and only after a successful re-read, it cancels a sale whose money never arrived
+// (FR-016, SC-009; research D9, D11), and it closes at Devolada the links a sale stopped taking
+// (research D12 step 3, D13).
 // Dates are frozen in tests (apply-migrations.ts), so the sweep is called with an explicit `now`.
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { env } from 'cloudflare:test'
@@ -290,35 +293,184 @@ describe('links in other states (D12, D19)', () => {
     expect((await linkById(young)).state).toBe('creating')
   })
 
-  it('until PR 2: an unpaid link past its expiry moves to expired after a successful re-read, nothing is cancelled, and it is not re-read again', async () => {
-    const business = await connectToFake(fake, org.adminEmail)
-    const { folioId, link } = await sale()
-    const past = new Date((link.expires_at + 60) * 1000)
-
-    fake.failNext('listPayments', '500')
-    await sweepDevoladaPayments(env, past)
-    expect((await linkById(link.id)).state).toBe('open')
-
-    await sweepDevoladaPayments(env, new Date(past.getTime() + 60_000))
-    expect((await linkById(link.id)).state).toBe('expired')
-    expect(await folioRow(folioId)).toMatchObject({ cancelled_at: null, payment_verification: 'pending' })
-    const row = (await call(org.adminEmail, 'GET', '/folios')).json.folios.find((f: any) => f.id === folioId)
-    expect(row.payment_link.label).toBe('not_received')
-    expect(row.verification_auto).toBe(false)
-
-    const calls = listCallsFor(business.apiKey).length
-    await sweepDevoladaPayments(env, new Date(past.getTime() + 30 * 60_000))
-    expect(listCallsFor(business.apiKey)).toHaveLength(calls)
-  })
-
-  it('a link whose payment expired at Devolada moves to expired too; one with a payment in flight stays open', async () => {
+  it('a link whose payment expired at Devolada cancels its sale; one with a payment in flight stays open', async () => {
     await connectToFake(fake, org.adminEmail)
-    const { link: expiredOne } = await sale()
-    const { link: inFlight } = await sale()
+    const { folioId: expiredSale, link: expiredOne } = await sale()
+    const { folioId: inFlightSale, link: inFlight } = await sale()
     fake.advance(fake.submitProof(expiredOne.devolada_link_id), 'expired')
     fake.submitProof(inFlight.devolada_link_id)
     await sweepDevoladaPayments(env, new Date((expiredOne.expires_at + 60) * 1000))
     expect((await linkById(expiredOne.id)).state).toBe('expired')
+    expect((await folioRow(expiredSale)).cancellation_source).toBe('payment_not_received')
     expect((await linkById(inFlight.id)).state).toBe('open')
+    expect((await folioRow(inFlightSale)).cancelled_at).toBeNull()
   })
 })
+
+describe('money that never arrived (D9, D11, FR-016, SC-009)', () => {
+  const booked = async (slotId: string) =>
+    (await env.DB.prepare(`SELECT booked FROM slots WHERE id = ?`).bind(slotId).first<any>()).booked as number
+
+  it('an unpaid link past its expiry cancels its sale only after a successful re-read, and its seats are back after one run', async () => {
+    const business = await connectToFake(fake, org.adminEmail)
+    const { folioId, link } = await sale()
+    const past = new Date((link.expires_at + 60) * 1000)
+    expect(await booked(org.slotId)).toBe(1)
+
+    // A failing re-read cancels nothing: the sweep never cancels on the clock alone.
+    fake.failNext('listPayments', '500')
+    await sweepDevoladaPayments(env, past)
+    expect((await linkById(link.id)).state).toBe('open')
+    expect((await folioRow(folioId)).cancelled_at).toBeNull()
+    expect(await booked(org.slotId)).toBe(1)
+
+    await sweepDevoladaPayments(env, new Date(past.getTime() + 60_000))
+    expect(await folioRow(folioId)).toMatchObject({
+      cancellation_source: 'payment_not_received',
+      cancellation_reason: 'No se recibió la transferencia',
+      cancelled_by: null,
+    })
+    expect((await linkById(link.id)).state).toBe('expired')
+    expect(await booked(org.slotId)).toBe(0)
+    const row = (await call(org.adminEmail, 'GET', '/folios')).json.folios.find((f: any) => f.id === folioId)
+    expect(row.payment_link.label).toBe('not_received')
+
+    const calls = listCallsFor(business.apiKey).length
+    await sweepDevoladaPayments(env, new Date(past.getTime() + 30 * 60_000))
+    expect(listCallsFor(business.apiKey)).toHaveLength(calls)
+    expect(await booked(org.slotId)).toBe(0)
+  })
+
+  it('a payment validating at the expiry keeps the sale and the link open', async () => {
+    await connectToFake(fake, org.adminEmail)
+    const { folioId, link } = await sale()
+    fake.submitProof(link.devolada_link_id)
+    await sweepDevoladaPayments(env, new Date((link.expires_at + 60) * 1000))
+    expect((await linkById(link.id)).state).toBe('open')
+    expect((await folioRow(folioId)).cancelled_at).toBeNull()
+  })
+
+  it('a payment that ended partial or invalid cancels nothing at the expiry: the link expires, the admin decides, and it is not re-read again', async () => {
+    const business = await connectToFake(fake, org.adminEmail)
+    const { folioId: partialSale, link: partialLink } = await sale()
+    const { folioId: invalidSale, link: invalidLink } = await sale()
+    fake.advance(fake.submitProof(partialLink.devolada_link_id), 'partial', 100000)
+    fake.advance(fake.submitProof(invalidLink.devolada_link_id), 'invalid')
+    const past = new Date((partialLink.expires_at + 60) * 1000)
+    await sweepDevoladaPayments(env, past)
+    for (const [folioId, link, label] of [
+      [partialSale, partialLink, 'partial'],
+      [invalidSale, invalidLink, 'invalid'],
+    ] as const) {
+      expect((await linkById(link.id)).state).toBe('expired')
+      expect(await folioRow(folioId)).toMatchObject({ cancelled_at: null, payment_verification: 'pending' })
+      const row = (await call(org.adminEmail, 'GET', '/folios')).json.folios.find((f: any) => f.id === folioId)
+      expect(row.payment_link.label).toBe(label)
+      expect(row.verification_auto).toBe(false)
+    }
+    const calls = listCallsFor(business.apiKey).length
+    await sweepDevoladaPayments(env, new Date(past.getTime() + 30 * 60_000))
+    expect(listCallsFor(business.apiKey)).toHaveLength(calls)
+  })
+})
+
+describe('closing links (D12 step 3, D13, D21)', () => {
+  /** A sale whose link the sale stopped taking: `closing`, with Devolada's id or without it. */
+  const closingLink = async (opts: { forgetId?: boolean; createdMinutesAgo?: number } = {}) => {
+    const { folioId, link } = await sale()
+    await env.DB.prepare(
+      `UPDATE devolada_links SET state = 'closing', closed_reason = 'cancelled', devolada_link_id = ?, created_at = ? WHERE id = ?`,
+    )
+      .bind(
+        opts.forgetId ? null : link.devolada_link_id,
+        sec(at(-(opts.createdMinutesAgo ?? 0))),
+        link.id,
+      )
+      .run()
+    return { folioId, link }
+  }
+
+  it('a link left closing because Devolada was down is closed by a later run', async () => {
+    await connectToFake(fake, org.adminEmail)
+    const { link } = await closingLink()
+    fake.down()
+    await sweepDevoladaPayments(env, NOW)
+    expect((await linkById(link.id)).state).toBe('closing')
+    fake.up()
+    await sweepDevoladaPayments(env, at(15))
+    expect((await linkById(link.id)).state).toBe('closed')
+    expect(fake.link(link.devolada_link_id).closedAt).not.toBeNull()
+    expect(fake.callsTo('closePaymentLink').at(-1)!.idempotencyKey).toBe(`close:${link.id}`)
+  })
+
+  it('LINK_CLOSED counts as closed', async () => {
+    await connectToFake(fake, org.adminEmail)
+    const { link } = await closingLink()
+    fake.failNext('closePaymentLink', 'link_closed')
+    await sweepDevoladaPayments(env, NOW)
+    expect((await linkById(link.id)).state).toBe('closed')
+  })
+
+  it("a closing link whose retired key Devolada rejects moves to the current key, or fails when no key can read it", async () => {
+    const first = await connectToFake(fake, org.adminEmail)
+    const { link: rotated } = await closingLink()
+    // A rotation within the same business: the new key can read the old key's link.
+    const rotatedKey = fake.addKey(first.businessId)
+    expect((await call(org.adminEmail, 'PUT', '/organizations/me/devolada', { api_key: rotatedKey })).status).toBe(200)
+    fake.revokeKey(first.apiKey)
+    await sweepDevoladaPayments(env, NOW)
+    expect(await linkById(rotated.id)).toMatchObject({
+      state: 'closing',
+      credential_id: await currentCredentialId(org.organizationId),
+    })
+    await sweepDevoladaPayments(env, at(15))
+    expect((await linkById(rotated.id)).state).toBe('closed')
+
+    // A switch to another business, whose key cannot read the link: it fails.
+    const { link: lost } = await closingLink()
+    await connectToFake(fake, org.adminEmail)
+    fake.revokeKey(rotatedKey)
+    await sweepDevoladaPayments(env, at(30))
+    expect((await linkById(lost.id)).state).toBe('failed')
+  })
+
+  it('a closing link whose current key is rejected stays closing, and the connection is broken', async () => {
+    const business = await connectToFake(fake, org.adminEmail)
+    const { link } = await closingLink()
+    fake.revokeKey(business.apiKey)
+    await sweepDevoladaPayments(env, NOW)
+    expect((await linkById(link.id)).state).toBe('closing')
+    expect(await connectionRow(org.organizationId)).toMatchObject({
+      status: 'broken',
+      broken_reason: 'DEVOLADA_CREDENTIAL_REJECTED',
+    })
+  })
+
+  it('a link marked closing while its create was still running is closed once the create stored its id', async () => {
+    await connectToFake(fake, org.adminEmail)
+    // The create's outcome stored Devolada's id after the cancellation marked the row: closed.
+    const { link } = await closingLink({ createdMinutesAgo: 1 })
+    await sweepDevoladaPayments(env, NOW)
+    expect((await linkById(link.id)).state).toBe('closed')
+  })
+
+  it('one whose create never recorded an id is first replayed with the same key, once that create is surely over', async () => {
+    await connectToFake(fake, org.adminEmail)
+    const young = await closingLink({ forgetId: true, createdMinutesAgo: 1 })
+    const old = await closingLink({ forgetId: true, createdMinutesAgo: 6 })
+    const createsBefore = fake.callsTo('createPaymentLink').length
+    await sweepDevoladaPayments(env, NOW)
+
+    // Still running, perhaps: left alone.
+    expect(await linkById(young.link.id)).toMatchObject({ state: 'closing', devolada_link_id: null })
+    // Surely over: the same key answers the link Devolada created, which is then closed.
+    const replays = fake.callsTo('createPaymentLink').slice(createsBefore)
+    expect(replays.map((c) => c.idempotencyKey)).toEqual([old.link.id])
+    expect(await linkById(old.link.id)).toMatchObject({
+      state: 'closed',
+      devolada_link_id: old.link.devolada_link_id,
+    })
+    expect(fake.link(old.link.devolada_link_id).closedAt).not.toBeNull()
+  })
+})
+

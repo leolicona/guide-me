@@ -12,9 +12,6 @@ import {
 export interface TransferPaymentFieldsProps {
   /** The organization's Devolada connection (`MyOrganization.devolada`); absent = never connected. */
   devolada?: OrganizationDevoladaSummary
-  /** The transfer pays an apartado's deposit, which keeps today's manual path, reference included,
-   *  until deposits get their enlace (devolada-transfer-verification T058). */
-  deposit?: boolean
   /** US-A88 — the org's `payment_reference_required`. */
   referenceRequired: boolean
   reference: string
@@ -36,19 +33,20 @@ function ConsequenceLine({ icon, children }: { icon: ReactNode; children: ReactN
 }
 
 // US-AG41 — what picking Transferencia asks of the seller, and what it sets in motion, by the
-// organization's Devolada connection (devolada-transfer-verification D6, D16):
-// - connected, on a full sale: an enlace collects the money, so no reference is offered (FR-009);
+// organization's Devolada connection (devolada-transfer-verification D6, D8, D16):
+// - connected: an enlace collects the money, so no reference is offered (FR-009). That holds for
+//   whatever the transfer pays — a full sale, an apartado's deposit (T058), a balance (SettleSheet);
 // - broken: today's manual path, and the seller is told why (FR-010);
 // - otherwise: the bank reference (optional per org, US-A88), the money held for an admin (US-A67).
 export function TransferPaymentFields({
   devolada,
-  deposit = false,
   referenceRequired,
   reference,
   onReferenceChange,
 }: TransferPaymentFieldsProps) {
-  // D6 — mirrors confirmSale's `collectsByLink`, as PosCheckoutPage does for the request.
-  if (devolada?.status === 'connected' && !deposit) {
+  // D6 — mirrors the server's `collectsByLink` (confirmSale, settleBooking, settleFolioLine), as
+  // PosCheckoutPage and SettleSheet do for the request they send.
+  if (devolada?.status === 'connected') {
     return (
       <ConsequenceLine icon={<LinkRounded sx={{ fontSize: 18 }} />}>
         {TRANSFER_BY_LINK_COPY}

@@ -37,6 +37,13 @@ export type ErrorCode =
   // A cancelled sale refused by a write that needs it alive. In use before it was declared
   // (devolada-transfer-verification research defect 9); the resolve endpoint raises it too.
   | 'FOLIO_CANCELLED'
+  // A settlement refused (US-AG07, US-AG54): in use before they were declared (research defect 9),
+  // declared now that the settle core shared with Devolada raises them (devolada D8).
+  | 'ALREADY_SETTLED'
+  | 'BOOKING_EXPIRED'
+  | 'FOLIO_LINE_NOT_FOUND'
+  | 'LINE_ALREADY_CANCELLED'
+  | 'LINE_ALREADY_PAID'
   // Automatic transfer verification with Devolada (specs/006-devolada-transfer-verification
   // FR-023; contracts/turistear-api.md § Error codes). Connecting (D2, D3):
   | 'DEVOLADA_CREDENTIAL_REJECTED'

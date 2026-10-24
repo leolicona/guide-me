@@ -1,8 +1,10 @@
 import { http, HttpResponse } from 'msw'
+import { aFolio } from './folios'
 
 // devolada-transfer-verification — mirrors src/services/devoladaService.ts one to one. The shapes
-// copy what api-turistear/test/devolada/connection.test.ts, checkout-link.test.ts and
-// webhook.test.ts assert (constitution IV): a fixture no API test would produce is a fiction.
+// copy what api-turistear/test/devolada/connection.test.ts, checkout-link.test.ts,
+// webhook.test.ts, verdicts.test.ts and apartados.test.ts assert (constitution IV): a fixture no
+// API test would produce is a fiction.
 
 /** A connected test-mode connection, healthy, with no previous key still in use. */
 export const aConnection = (over: Record<string, unknown> = {}) => ({
@@ -66,4 +68,6 @@ export const devoladaHandlers = [
       connection: aConnection({ status: 'disconnected', mode: null, key_hint: null, webhook: null }),
     }),
   ),
+  // D15 — the admin's decision answers the sale as it stands after it (`readFolioDetail`).
+  http.post('/api/devolada/payments/:id/resolve', () => HttpResponse.json({ folio: aFolio() })),
 ]

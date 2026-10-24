@@ -3,7 +3,7 @@ import { http, HttpResponse } from 'msw'
 import { renderWithProviders, screen } from '../../../test/renderWithProviders'
 import { expectNoA11yViolations } from '../../../test/axe'
 import { server } from '../../../test/server'
-import { aPaymentLink } from '../../../test/handlers/devolada'
+import { aLinkPayment, aPaymentLink } from '../../../test/handlers/devolada'
 import { FolioCard, type FolioCardFolio } from './FolioCard'
 import { FolioStatusChip } from './FolioStatusChip'
 import type { Fulfillment } from '../types'
@@ -344,6 +344,157 @@ describe('devolada-transfer-verification US1 — a sale Devolada is resolving', 
 
     expect(await screen.findByText('por verificar')).toBeInTheDocument()
     expect(screen.queryByText(/Esperando pago|Verificando pago|enlace/i)).toBeNull()
+    await expectNoA11yViolations(container)
+  })
+})
+
+// --- devolada-transfer-verification US2 — a payment someone has to weigh (FR-015) -----------------
+
+describe('devolada-transfer-verification US2 — the label and the amounts on the card', () => {
+  // «Verificar y enviar» reads the session and the org to build its message.
+  beforeEach(() => {
+    server.use(
+      http.get('/api/me', () =>
+        HttpResponse.json({
+          user: { id: 'u1', name: 'Ana Ramírez', email: 'ana@x.com', role: 'admin' },
+        }),
+      ),
+      http.get('/api/organizations/me', () =>
+        HttpResponse.json({
+          organization: { id: 'o1', name: 'Turistear Ya!', timezone: 'America/Cancun' },
+        }),
+      ),
+    )
+  })
+
+  // A transfer sale the admin has to look at: pending, not Devolada's to clear on its own.
+  const pending = (link: Record<string, unknown>, over: Partial<FolioCardFolio> = {}) =>
+    aFolio({
+      payment_verification: 'pending',
+      deliverable: false,
+      tickets_sent_at: null,
+      verification_auto: false,
+      payment_link: aPaymentLink(link) as PaymentLinkView,
+      ...over,
+    })
+
+  const renderCard = (folio: FolioCardFolio, surface: 'admin' | 'seller' = 'admin') =>
+    renderWithProviders(
+      <FolioCard
+        folio={folio}
+        to="/folios/f1"
+        byline="Ana Ramírez"
+        soldAt="hoy 14:32"
+        surface={surface}
+      />,
+    )
+
+  // Each label of FR-015, with the amounts Devolada reported for it. «Recibido» appears only where
+  // Banxico reported money: an amount nobody reported is not a zero.
+  const LABELS: [string, FolioCardFolio, string, Record<string, string>][] = [
+    [
+      'partial',
+      pending({
+        label: 'partial',
+        payment: aLinkPayment({ status: 'partial', received: 100_000, match: 'short' }),
+      }),
+      'Pago incompleto',
+      { Solicitado: '$1,500.00', Declarado: '$1,500.00', Recibido: '$1,000.00' },
+    ],
+    [
+      'invalid',
+      pending({ label: 'invalid', payment: aLinkPayment({ status: 'invalid' }) }),
+      'Banxico no confirma la transferencia',
+      { Solicitado: '$1,500.00', Declarado: '$1,500.00' },
+    ],
+    [
+      'unapplied',
+      aFolio({
+        status: 'cancelled',
+        refund_status: 'none',
+        deliverable: false,
+        tickets_sent_at: null,
+        devolada_attention: true,
+        payment_link: aPaymentLink({
+          state: 'closed',
+          label: 'unapplied',
+          payment: aLinkPayment({ status: 'unapplied', received: 150_000, match: 'exact' }),
+        }) as PaymentLinkView,
+      }),
+      'Dinero por devolver',
+      { Solicitado: '$1,500.00', Declarado: '$1,500.00', Recibido: '$1,500.00' },
+    ],
+    [
+      'needs_tracking_key',
+      pending({
+        label: 'needs_tracking_key',
+        payment: aLinkPayment({ awaiting: 'payer_tracking_key', awaiting_reason: 'no_match' }),
+      }),
+      'Pide al cliente su clave de rastreo',
+      { Solicitado: '$1,500.00', Declarado: '$1,500.00' },
+    ],
+    [
+      'credit_paused',
+      pending({ label: 'credit_paused', payment: aLinkPayment({ status: 'queued_for_credit' }) }),
+      'Verificación en pausa',
+      { Solicitado: '$1,500.00', Declarado: '$1,500.00' },
+    ],
+    [
+      'not_received',
+      pending({ state: 'expired', label: 'not_received', payment: aLinkPayment({ status: 'expired', claimed: null }) }),
+      'No se recibió la transferencia',
+      { Solicitado: '$1,500.00' },
+    ],
+  ]
+
+  it.each(LABELS)('%s: its label, icon-paired, and the amounts in words', async (_label, folio, copy, amounts) => {
+    const { container } = renderCard(folio)
+
+    expect(screen.getByText(copy)).toBeInTheDocument()
+    for (const [word, amount] of Object.entries(amounts)) {
+      expect(screen.getByLabelText(`${word}: ${amount}`)).toBeInTheDocument()
+    }
+    for (const word of ['Solicitado', 'Declarado', 'Recibido'].filter((w) => !(w in amounts))) {
+      expect(screen.queryByText(word)).toBeNull()
+    }
+    await expectNoA11yViolations(container)
+  })
+
+  it('a sale exception keeps «Verificar y enviar»: the admin verifies or rejects it, as today', async () => {
+    const [, partial] = LABELS[0]
+    const { container } = renderCard(partial)
+
+    expect(screen.getByRole('button', { name: /Verificar y enviar/ })).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Revisar pago' })).toBeNull()
+    await expectNoA11yViolations(container)
+  })
+
+  it('money to return on a cancelled sale opens the sale: «Revisar pago»', async () => {
+    const [, unapplied] = LABELS[2]
+    const { container } = renderCard(unapplied)
+
+    expect(screen.getByRole('link', { name: 'Revisar pago' })).toHaveAttribute('href', '/folios/f1')
+    expect(screen.queryByRole('button', { name: /Verificar y enviar/ })).toBeNull()
+    await expectNoA11yViolations(container)
+  })
+
+  it('the seller reads the tracking key to ask for, and is handed no admin verb', async () => {
+    const [, trackingKey] = LABELS[3]
+    const { container } = renderCard({ ...trackingKey, devolada_attention: true }, 'seller')
+
+    expect(screen.getByText('Pide al cliente su clave de rastreo')).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Revisar pago' })).toBeNull()
+    expect(screen.queryByRole('button', { name: /Verificar y enviar/ })).toBeNull()
+    await expectNoA11yViolations(container)
+  })
+
+  it('a payment Devolada is clearing on its own carries no amounts', async () => {
+    const { container } = renderCard(
+      pending({ label: 'validating', payment: aLinkPayment() }, { verification_auto: true }),
+    )
+
+    expect(screen.getByText('Verificando pago')).toBeInTheDocument()
+    expect(screen.queryByText('Solicitado')).toBeNull()
     await expectNoA11yViolations(container)
   })
 })

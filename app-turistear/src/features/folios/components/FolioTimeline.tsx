@@ -19,6 +19,7 @@ import { MoneyText, SectionCard } from '../../../components'
 import { useOrgDateFormatter } from '../../organization'
 import {
   PAYMENT_LINK_LABEL_COPY,
+  PAYMENT_NOT_RECEIVED_SOURCE_COPY,
   type PaymentLinkLabel,
   type PaymentLinkTone,
 } from '../../devolada'
@@ -195,6 +196,10 @@ function eventPrimary(ev: FolioEvent): ReactNode {
           return scope ? `${scope} — por administración` : 'Cancelado por administración'
         case 'agent':
           return str(p, 'kind') === 'express_void' ? 'Venta Express anulada' : 'Cancelado en mostrador'
+        // devolada-transfer-verification D11 — the system withdrew the sale because Devolada
+        // showed the transfer never arrived; always the whole sale, never one line.
+        case 'payment_not_received':
+          return PAYMENT_NOT_RECEIVED_SOURCE_COPY
         default:
           return scope ?? 'Cancelado'
       }

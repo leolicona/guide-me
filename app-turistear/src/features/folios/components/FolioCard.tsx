@@ -7,9 +7,15 @@ import PaymentsRounded from '@mui/icons-material/PaymentsRounded'
 import CheckCircleRounded from '@mui/icons-material/CheckCircleRounded'
 import ScheduleRounded from '@mui/icons-material/ScheduleRounded'
 import BlockRounded from '@mui/icons-material/BlockRounded'
+import AccountBalanceRounded from '@mui/icons-material/AccountBalanceRounded'
 import { MoneyText } from '../../../components'
 import { BookingWhatsAppButton, TicketWhatsAppButton, isUrgentBooking } from '../../bookings'
-import { PaymentLinkStatusChip, type PaymentLinkView } from '../../devolada'
+import {
+  PaymentLinkStatusChip,
+  REVIEW_PAYMENT_COPY,
+  paymentAmountsCopy,
+  type PaymentLinkView,
+} from '../../devolada'
 import { MessageWhatsAppButton } from './MessageWhatsAppButton'
 import { VerifyAndSendButton } from './VerifyAndSendButton'
 import {
@@ -21,6 +27,7 @@ import {
   folioMoneyAxis,
   folioSoldSummary,
   folioTimeChip,
+  linkEvidence,
   type DeliveryMark,
   type MoneyReading,
   type RailTone,
@@ -196,6 +203,8 @@ export interface FolioCardFolio {
    *  Both decided by the server; absent or null without Devolada. */
   payment_link?: PaymentLinkView | null
   verification_auto?: boolean
+  /** D14 — a Devolada payment of the sale needs the admin. Decided by the server. */
+  devolada_attention?: boolean
 }
 
 /** US-A84 — the time channel's tone, mapped to MUI's chip colours. `default` is the grey resting
@@ -259,6 +268,10 @@ export function FolioCard({
   const linkReadsMoney = folio.verification_auto === true && reading.kind === 'unverified'
   const moneyLinkChip = link && linkReadsMoney ? link : null
   const rowLinkChip = link && !linkReadsMoney ? link : null
+  // FR-015 — a payment someone has to weigh carries its amounts beside its label: what the enlace
+  // asked, what the receipt claims, what arrived. A payment Devolada is clearing on its own has
+  // none to show.
+  const evidence = linkEvidence(rowLinkChip)
   // D14 — a MIXED folio names its lines: one mark per line, icon-paired, only when the states
   // actually differ (a uniform folio stays quiet).
   const lineMarks = (folio.lines ?? []).filter((l) => l.money_state)
@@ -359,6 +372,26 @@ export function FolioCard({
               )}
             </Stack>
           )}
+          {/* devolada-transfer-verification FR-015 — the amounts the label is about, each through
+              MoneyText and named in words: an amount Devolada has not reported is left out, never
+              shown as zero. */}
+          {evidence && (
+            <Stack
+              direction="row"
+              spacing={1.5}
+              useFlexGap
+              sx={{ mt: 0.5, flexWrap: 'wrap', alignItems: 'baseline' }}
+            >
+              {paymentAmountsCopy(evidence).map(({ key, label, cents }) => (
+                <Stack key={key} direction="row" spacing={0.5} sx={{ alignItems: 'baseline' }}>
+                  <Typography variant="caption" color="textSecondary" component="span">
+                    {label}
+                  </Typography>
+                  <MoneyText cents={cents} variant="body2" srLabel={label} />
+                </Stack>
+              ))}
+            </Stack>
+          )}
           {/* D14 (line-autonomy) — a MIXED folio names its lines, one icon-paired mark each: the
               detail's truth, at a glance, only where the states differ. */}
           {mixed && (
@@ -414,6 +447,19 @@ export function FolioCard({
           </Button>
         ) : action === 'verify' ? (
           <VerifyAndSendButton folio={{ ...folio, lines: folio.lines ?? [] }} />
+        ) : action === 'resolve' ? (
+          // devolada-transfer-verification D15 — a Devolada payment the admin decides: a settlement
+          // to verify or discard, money to return. Taken on the sale, beside the amounts and the
+          // receipt it rests on, like the request and the refund.
+          <Button
+            component={RouterLink}
+            to={to}
+            variant="contained"
+            disableElevation
+            startIcon={<AccountBalanceRounded />}
+          >
+            {REVIEW_PAYMENT_COPY}
+          </Button>
         ) : action === 'refund' ? (
           <Button
             component={RouterLink}

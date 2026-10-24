@@ -1,6 +1,37 @@
-import { describe, it, expect } from 'vitest'
-import { renderWithProviders, screen } from '../../../test/renderWithProviders'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { http, HttpResponse } from 'msw'
+import { server } from '../../../test/server'
+import {
+  createTestQueryClient,
+  renderWithProviders,
+  screen,
+  userEvent,
+  waitFor,
+  within,
+} from '../../../test/renderWithProviders'
+import { expectNoA11yViolations } from '../../../test/axe'
+import { aPaymentLink } from '../../../test/handlers/devolada'
+import type { OrganizationDevoladaSummary, PaymentLinkView } from '../../devolada'
+import { MY_ORG_QUERY_KEY } from '../../organization'
 import { BookingActions, type BookingFolio } from './BookingActions'
+
+const anOrganization = (devolada?: OrganizationDevoladaSummary) => ({
+  id: 'o1',
+  name: 'Descubre Huasca',
+  timezone: 'America/Cancun',
+  payment_reference_required: true,
+  ...(devolada ? { devolada } : {}),
+})
+
+// Every apartado mounts its settle sheets, which read the organization (US-A88, devolada D16).
+const orgWith = (devolada?: OrganizationDevoladaSummary) =>
+  http.get('/api/organizations/me', () =>
+    HttpResponse.json({ organization: anOrganization(devolada) }),
+  )
+
+beforeEach(() => {
+  server.use(orgWith())
+})
 
 // US-AG52 (D16) — Reagendar exists on BOTH kinds of live folio. The paid branch shipped first as
 // API-only: the endpoint moved paid folios and re-signed their QR, S-8b proved it — and no seller
@@ -194,5 +225,226 @@ describe('US-AG52 — where Reagendar lives', () => {
       <BookingActions folio={folio({ status: 'cancelled' })} />,
     )
     expect(container).toBeEmptyDOMElement()
+  })
+})
+
+// --- devolada-transfer-verification US3 (research D8, D16, D19; contracts/turistear-api.md
+// § Action copy) ---------------------------------------------------------------------------------
+//
+// While a settlement enlace is open, what it collects reads «Liquidación en verificación» in place
+// of its settle button, and the enlace itself is on the screen to send. A line cancellation the
+// server refuses meanwhile (SETTLEMENT_IN_PROGRESS) says why. The copy is the contract's.
+
+const VERIFYING = 'Liquidación en verificación'
+const IN_PROGRESS = 'La venta ya tiene un enlace de pago para liquidar; espera su resultado'
+
+const IN_A_DAY = Math.floor(Date.now() / 1000) + 86_400
+
+const settlementLink = (over: Partial<PaymentLinkView> = {}) =>
+  aPaymentLink({
+    id: 'link-settle-1',
+    kind: 'settlement',
+    amount: 90_000,
+    expires_at: Math.floor(Date.now() / 1000) + 3_600,
+    ...over,
+  }) as PaymentLinkView
+
+/** A two-line apartado, both lines still owing, as the sale detail reads it. */
+const twoLineApartado = (over: Partial<BookingFolio> = {}): BookingFolio =>
+  folio({
+    status: 'booking',
+    total: 150_000,
+    amount_paid: 60_000,
+    payment_method: 'transfer',
+    customer_name: 'María Fernández',
+    customer_phone: '9981234567',
+    agent: { name: 'Ana' },
+    lines: [
+      {
+        id: 'l1',
+        service_id: 'svc-1',
+        slot_id: 's1',
+        service_name: 'Isla Mujeres',
+        slot_date: FUTURE_DATE,
+        slot_start_time: '09:00',
+        quantity: 1,
+        line_type: 'slot' as const,
+        money_state: 'booking',
+        pending_balance: 55_000,
+        booking_expires_at: IN_A_DAY,
+      },
+      {
+        id: 'l2',
+        service_id: 'svc-1',
+        slot_id: 's2',
+        service_name: 'Chichén Itzá',
+        slot_date: FUTURE_DATE,
+        slot_start_time: '07:30',
+        quantity: 1,
+        line_type: 'slot' as const,
+        money_state: 'booking',
+        pending_balance: 35_000,
+        booking_expires_at: IN_A_DAY,
+      },
+    ],
+    ...over,
+  })
+
+/** A one-line apartado: its settle is the main button. */
+const oneLineApartado = (over: Partial<BookingFolio> = {}): BookingFolio =>
+  folio({
+    status: 'booking',
+    total: 300_000,
+    amount_paid: 90_000,
+    pending_balance: 210_000,
+    payment_method: 'transfer',
+    customer_name: 'María Fernández',
+    customer_phone: '9981234567',
+    agent: { name: 'Ana' },
+    ...over,
+  })
+
+/** The row of one owing line, named by its service. */
+const lineRow = (name: string) => screen.getByRole('group', { name })
+
+describe('devolada-transfer-verification US3 — while a settlement enlace is open', () => {
+  it('a whole-sale enlace shows its card, and «Liquidación en verificación» replaces «Liquidar saldo»', async () => {
+    const { container } = renderWithProviders(
+      <BookingActions folio={oneLineApartado({ payment_links: [settlementLink({ amount: 210_000 })] })} />,
+    )
+
+    expect(screen.getByRole('heading', { name: 'Enlace de pago' })).toBeInTheDocument()
+    expect(screen.getByLabelText(/Monto del enlace: \$2,100\.00/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Cobrar por WhatsApp' })).toBeInTheDocument()
+
+    expect(screen.queryByRole('button', { name: 'Liquidar saldo' })).not.toBeInTheDocument()
+    // A state, never colour alone: the chip carries its icon and its words.
+    const chip = screen.getByText(VERIFYING).closest('.MuiChip-root')!
+    expect(chip.querySelector('svg')).toBeInTheDocument()
+    // The rest of the apartado's verbs are not the enlace's business.
+    expect(screen.getByRole('button', { name: 'Reagendar' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Cancelar apartado' })).toBeInTheDocument()
+    await expectNoA11yViolations(container)
+  })
+
+  it('a whole-sale enlace on a multi-line apartado holds every settle, and leaves each line its Cancelar', () => {
+    renderWithProviders(<BookingActions folio={twoLineApartado({ payment_links: [settlementLink()] })} />)
+
+    expect(screen.queryByRole('button', { name: 'Liquidar todo' })).not.toBeInTheDocument()
+    expect(screen.queryAllByRole('button', { name: 'Liquidar' })).toHaveLength(0)
+    // Said once, where «Liquidar todo» was — not once per line.
+    expect(screen.getAllByText(VERIFYING)).toHaveLength(1)
+    expect(screen.getAllByRole('button', { name: 'Cancelar' })).toHaveLength(2)
+  })
+
+  it('one line’s enlace holds every settle until it resolves: the chip on its line and in the main button’s place (D19)', () => {
+    renderWithProviders(
+      <BookingActions
+        folio={twoLineApartado({
+          payment_links: [settlementLink({ folio_line_id: 'l1', amount: 55_000 })],
+        })}
+      />,
+    )
+
+    const held = lineRow('Isla Mujeres')
+    expect(within(held).getByText(VERIFYING)).toBeInTheDocument()
+    expect(within(held).queryByRole('button', { name: 'Liquidar' })).not.toBeInTheDocument()
+
+    // Until PR 3 the server refuses any other settle while the enlace is open: none is offered.
+    const other = lineRow('Chichén Itzá')
+    expect(within(other).queryByRole('button', { name: 'Liquidar' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Liquidar todo' })).not.toBeInTheDocument()
+    expect(screen.getAllByText(VERIFYING)).toHaveLength(2)
+    expect(screen.getByLabelText(/Monto del enlace: \$550\.00/)).toBeInTheDocument()
+  })
+
+  it.each([
+    ['a settlement enlace that expired unpaid', settlementLink({ state: 'expired', label: 'not_received' })],
+    ['an open enlace that collects the deposit', settlementLink({ kind: 'deposit' })],
+  ])('%s leaves the settle buttons, and no card here', (_, link) => {
+    renderWithProviders(<BookingActions folio={oneLineApartado({ payment_links: [link] })} />)
+
+    expect(screen.getByRole('button', { name: 'Liquidar saldo' })).toBeInTheDocument()
+    expect(screen.queryByText(VERIFYING)).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Enlace de pago' })).not.toBeInTheDocument()
+  })
+
+  it('«Cobrar por WhatsApp» sends the settlement’s enlace, signed by the sale’s seller and organization', async () => {
+    const opened = vi.spyOn(window, 'open').mockReturnValue(null)
+    // The organization already loaded, as it has by the time a seller opens a sale.
+    const queryClient = createTestQueryClient()
+    queryClient.setQueryData(MY_ORG_QUERY_KEY, anOrganization())
+    renderWithProviders(
+      <BookingActions folio={oneLineApartado({ payment_links: [settlementLink({ amount: 210_000 })] })} />,
+      { queryClient },
+    )
+
+    await userEvent.click(screen.getByRole('button', { name: 'Cobrar por WhatsApp' }))
+    const url = decodeURIComponent(String(opened.mock.calls[0]![0]))
+    expect(url).toContain('https://wa.me/52')
+    expect(url).toContain('Hola María Fernández, te escribe Ana de Descubre Huasca.')
+    expect(url).toContain('Para liquidar tu reserva, transfiere $2,100.00')
+    expect(url).toContain('https://link.devoladapago.com/p/kq7m2x9d4tbn3wpa')
+  })
+
+  it('a line cancellation refused while the enlace collects says why, and keeps only the way out', async () => {
+    server.use(
+      http.post('/api/pos/folios/:id/lines/:lineId/cancel', () =>
+        HttpResponse.json(
+          { error: { code: 'SETTLEMENT_IN_PROGRESS', message: 'A settlement link is open' } },
+          { status: 409 },
+        ),
+      ),
+    )
+    renderWithProviders(<BookingActions folio={twoLineApartado({ payment_links: [settlementLink()] })} />)
+
+    await userEvent.click(within(lineRow('Chichén Itzá')).getByRole('button', { name: 'Cancelar' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Cancelar actividad' }))
+
+    // Closed sheets stay mounted, hidden: what the seller reads is the open one.
+    const sheet = screen.getByRole('dialog')
+    expect(await within(sheet).findByText(IN_PROGRESS)).toBeInTheDocument()
+    expect(within(sheet).queryByText(/No se pudo cancelar/)).not.toBeInTheDocument()
+    // Retrying cannot succeed until the enlace resolves.
+    expect(within(sheet).queryByRole('button', { name: 'Cancelar actividad' })).not.toBeInTheDocument()
+    await expectNoA11yViolations(document.body)
+
+    // The refusal belonged to that sheet: the next one opens clean.
+    await userEvent.click(within(sheet).getByRole('button', { name: 'Conservar' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    await userEvent.click(within(lineRow('Isla Mujeres')).getByRole('button', { name: 'Cancelar' }))
+    const next = await screen.findByRole('dialog')
+    expect(within(next).getByRole('button', { name: 'Cancelar actividad' })).toBeInTheDocument()
+    expect(within(next).queryByText(IN_PROGRESS)).not.toBeInTheDocument()
+  })
+
+  // FR-010 — a transfer settled on the manual path closes its sheet as settled, the refetched sale
+  // reads paid, and BookingActions switches to its paid branch: the alert must survive the switch.
+  it('the alert of a settlement that got no enlace outlives the sale turning paid', async () => {
+    server.use(
+      orgWith({ status: 'connected', mode: 'test' }),
+      http.post('/api/pos/folios/:id/settle', () =>
+        HttpResponse.json({
+          folio: { ...oneLineApartado(), status: 'paid', payment_verification: 'pending' },
+          payment_link: null,
+          payment_link_error: 'DEVOLADA_UNAVAILABLE',
+        }),
+      ),
+    )
+    const { rerender } = renderWithProviders(<BookingActions folio={oneLineApartado()} />)
+
+    await userEvent.click(screen.getByRole('button', { name: 'Liquidar saldo' }))
+    const sheet = await screen.findByRole('dialog')
+    await within(sheet).findByText('Se generará un enlace de pago para cobrar por WhatsApp')
+    await userEvent.click(within(sheet).getByRole('button', { name: 'Cobrar y liquidar' }))
+
+    const copy = 'No se pudo crear el enlace de pago; un administrador verificará la transferencia'
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(await screen.findByRole('alert')).toHaveTextContent(copy)
+
+    // The refetch: the same sale, now paid and awaiting an admin's verification.
+    rerender(<BookingActions folio={folio({ payment_verification: 'pending' })} />)
+    expect(screen.getByRole('button', { name: 'Reagendar' })).toBeInTheDocument()
+    expect(screen.getByRole('alert')).toHaveTextContent(copy)
   })
 })
