@@ -206,7 +206,7 @@ export function FolioDetailScreen({ surface }: FolioDetailScreenProps) {
   // Opens the composer with the receipt pre-filled. The message itself is a pure function
   // (`refundReceipt.ts`) so the three figures it must contain are testable without a page.
   const openRefundReceipt = (f: FolioDetail | undefined) => {
-    const url = f && refundReceiptUrl(f)
+    const url = f && refundReceiptUrl(f, org?.name ?? 'Turistear Ya!')
     if (url) window.open(url, '_blank')
   }
 
