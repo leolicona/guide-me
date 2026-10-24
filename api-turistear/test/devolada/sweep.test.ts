@@ -271,6 +271,8 @@ describe('credentials (D21)', () => {
 describe('links in other states (D12, D19)', () => {
   it('a link left creating for more than 5 minutes becomes abandoned; a younger one is left alone', async () => {
     await connectToFake(fake, org.adminEmail)
+    // Devolada is down: the abandoned link's replay (US4, below) cannot run this time.
+    fake.failNext('createPaymentLink', 'unreachable')
     const credentialId = await currentCredentialId(org.organizationId)
     const stale = await insertLink({
       organizationId: org.organizationId,
@@ -474,3 +476,156 @@ describe('closing links (D12 step 3, D13, D21)', () => {
   })
 })
 
+
+// devolada-transfer-verification US4 — the sweep replays abandoned links and follows closed ones
+// whose payment is still in flight (D12 steps 1 and 3, FR-012, D21).
+describe('abandoned links (D12 step 3, US4)', () => {
+  /** A transfer sale whose link create timed out: `abandoned`, with no Devolada id. */
+  const abandonedSale = async () => {
+    fake.failNext('createPaymentLink', 'timeout')
+    const res = await sellByTransfer(org.agentEmail, org.slotId)
+    expect(res.status, res.text).toBe(201)
+    expect(res.json.payment_link_error).toBe('DEVOLADA_UNAVAILABLE')
+    const [link] = await linkRows(res.json.folio.id)
+    expect(link).toMatchObject({ state: 'abandoned', devolada_link_id: null })
+    return { folioId: res.json.folio.id as string, link }
+  }
+
+  it('once its create is surely over, the sweep replays it with the same key and closes the link as `abandoned`', async () => {
+    await connectToFake(fake, org.adminEmail)
+    const { folioId, link } = await abandonedSale()
+    const createsBefore = fake.callsTo('createPaymentLink').length
+
+    // Still within 5 minutes of the create: left alone.
+    await sweepDevoladaPayments(env, at(1))
+    expect(fake.callsTo('createPaymentLink')).toHaveLength(createsBefore)
+
+    await sweepDevoladaPayments(env, at(6))
+    const [replay] = fake.callsTo('createPaymentLink').slice(createsBefore)
+    expect(replay!.idempotencyKey).toBe(link.id)
+    const after = await linkById(link.id)
+    expect(after).toMatchObject({ state: 'closed', closed_reason: 'abandoned' })
+    expect(fake.link(after.devolada_link_id).closedAt).not.toBeNull()
+    // The timeline says so, by «Sistema».
+    const closed = await env.DB.prepare(
+      `SELECT actor_id, payload FROM folio_events WHERE folio_id = ? AND event_type = 'payment_link_closed'`,
+    )
+      .bind(folioId)
+      .all<any>()
+    expect(closed.results.map((e) => ({ actor_id: e.actor_id, payload: JSON.parse(e.payload) }))).toEqual([
+      { actor_id: null, payload: { link_id: link.id, reason: 'abandoned' } },
+    ])
+    // The sale stays on the manual path it took: nothing cancelled, still pending for the admin.
+    expect(await folioRow(folioId)).toMatchObject({ cancelled_at: null, payment_verification: 'pending' })
+  })
+
+  it('a link the sweep moved from `creating` is replayed in the same run', async () => {
+    await connectToFake(fake, org.adminEmail)
+    const { link } = await sale()
+    await env.DB.prepare(`UPDATE devolada_links SET state = 'creating', devolada_link_id = NULL WHERE id = ?`)
+      .bind(link.id)
+      .run()
+    await sweepDevoladaPayments(env, at(6))
+    expect(await linkById(link.id)).toMatchObject({ state: 'closed', closed_reason: 'abandoned' })
+  })
+
+  it('a refused replay means Devolada never created it: the link is `failed`', async () => {
+    await connectToFake(fake, org.adminEmail)
+    const { link } = await abandonedSale()
+    fake.failNext('createPaymentLink', 'link_closed')
+    await sweepDevoladaPayments(env, at(6))
+    expect(await linkById(link.id)).toMatchObject({ state: 'failed', devolada_link_id: null })
+    expect(fake.callsTo('closePaymentLink')).toHaveLength(0)
+  })
+
+  it('a rejected current key keeps it `abandoned` and breaks the connection', async () => {
+    const business = await connectToFake(fake, org.adminEmail)
+    const { link } = await abandonedSale()
+    fake.revokeKey(business.apiKey)
+    await sweepDevoladaPayments(env, at(6))
+    expect((await linkById(link.id)).state).toBe('abandoned')
+    expect(await connectionRow(org.organizationId)).toMatchObject({
+      status: 'broken',
+      broken_reason: 'DEVOLADA_CREDENTIAL_REJECTED',
+    })
+  })
+
+  it('a rejected retired key takes D21’s fallback: with no Devolada id, no other key can find it, so it fails', async () => {
+    const first = await connectToFake(fake, org.adminEmail)
+    const { link } = await abandonedSale()
+    await connectToFake(fake, org.adminEmail)
+    fake.revokeKey(first.apiKey)
+    await sweepDevoladaPayments(env, at(6))
+    expect((await linkById(link.id)).state).toBe('failed')
+  })
+})
+
+describe('closed links whose payment is still in flight (D12 step 1, FR-012, US4)', () => {
+  /** A cancelled apartado whose settlement link was closed under a payment Devolada is validating. */
+  const closedUnderPayment = async () => {
+    const res = await call(org.agentEmail, 'POST', '/pos/folios', {
+      customer_name: 'Cliente Test',
+      customer_phone: '+52 55 1234 5678',
+      payment_method: 'cash',
+      down_payment: 45000,
+      lines: [{ slot_id: org.slotId, quantity: 1, unit_price: 150000 }],
+    })
+    const folioId = res.json.folio.id as string
+    const settled = await call(org.agentEmail, 'POST', `/pos/folios/${folioId}/settle`, { method: 'transfer' })
+    const link = await linkById(settled.json.payment_link.id)
+    const paymentId = fake.submitProof(link.devolada_link_id)
+    // The `validating` notification arrives; the cancellation closes the link under it.
+    await sweepDevoladaPayments(env, NOW)
+    expect((await call(org.agentEmail, 'POST', `/pos/folios/${folioId}/cancel`, {})).status).toBe(200)
+    await vi.waitFor(async () => expect((await linkById(link.id)).state).toBe('closed'))
+    return { folioId, link, paymentId }
+  }
+
+  it('its verdict is applied by the sweep when the notification is lost: money to return', async () => {
+    await connectToFake(fake, org.adminEmail)
+    const { folioId, link, paymentId } = await closedUnderPayment()
+    fake.advance(paymentId, 'unapplied')
+
+    // Checked under 10 minutes ago (the sweep above): skipped.
+    await sweepDevoladaPayments(env, at(5))
+    expect((await env.DB.prepare(`SELECT status FROM devolada_payments WHERE link_id = ?`).bind(link.id).first<any>()).status).toBe('validating')
+
+    await sweepDevoladaPayments(env, at(11))
+    const detail = (await call(org.adminEmail, 'GET', `/folios/${folioId}`)).json.folio
+    expect(detail.payment_links.find((l: any) => l.id === link.id)).toMatchObject({ label: 'unapplied' })
+    expect(detail.devolada_attention).toBe(true)
+
+    // Final now: the sweep stops reading it.
+    const reads = fake.callsTo('listPayments').length
+    await sweepDevoladaPayments(env, at(30))
+    expect(fake.callsTo('listPayments')).toHaveLength(reads)
+  })
+
+  it('it is read with its own credential, a retired one included; once its payment is final that key is erased', async () => {
+    const first = await connectToFake(fake, org.adminEmail)
+    const { link, paymentId } = await closedUnderPayment()
+    // A rotation within the business: the first key is retired, kept while the link is unresolved.
+    const rotatedKey = fake.addKey(first.businessId)
+    expect((await call(org.adminEmail, 'PUT', '/organizations/me/devolada', { api_key: rotatedKey })).status).toBe(200)
+    fake.advance(paymentId, 'unapplied')
+    await sweepDevoladaPayments(env, at(11))
+    expect(listCallsFor(first.apiKey).length).toBeGreaterThan(0)
+    expect(listCallsFor(rotatedKey)).toHaveLength(0)
+    expect((await env.DB.prepare(`SELECT status FROM devolada_payments WHERE link_id = ?`).bind(link.id).first<any>()).status).toBe('unapplied')
+    const retired = (await credentialRows(org.organizationId)).find((c: any) => c.id === link.credential_id)
+    expect(retired).toMatchObject({ ciphertext: null, erased_at: sec(at(11)) })
+  })
+
+  it('one no key can read any more becomes `failed`, and its retired credential is then erased', async () => {
+    const first = await connectToFake(fake, org.adminEmail)
+    const { link } = await closedUnderPayment()
+    // A switch to another business, whose key cannot read the link; the first key is revoked.
+    await connectToFake(fake, org.adminEmail)
+    fake.revokeKey(first.apiKey)
+    await sweepDevoladaPayments(env, at(11))
+    expect((await linkById(link.id)).state).toBe('failed')
+    await sweepDevoladaPayments(env, at(12))
+    const retired = (await credentialRows(org.organizationId)).find((c: any) => c.id === link.credential_id)
+    expect(retired.erased_at).not.toBeNull()
+  })
+})

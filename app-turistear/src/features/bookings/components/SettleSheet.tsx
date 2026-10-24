@@ -71,7 +71,8 @@ export function SettleSheet({
   // D8 — the enlace this settle answered. Nothing was recorded: the sale is still an apartado, and
   // collecting is now «Cobrar por WhatsApp».
   const issued = settle.data?.payment_link ? settle.data : null
-  // D8, D19 — the balance is already being collected by an open settlement enlace.
+  // D8, D13 — refused while the sale's settlement enlace collects it: a transfer of another scope,
+  // or a settlement that would close that enlace while its payment is in flight.
   const inProgress =
     settle.error instanceof ServiceError && settle.error.code === 'SETTLEMENT_IN_PROGRESS'
 

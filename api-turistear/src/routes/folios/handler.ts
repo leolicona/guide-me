@@ -75,7 +75,16 @@ import {
 // US-A22 (line-autonomy) — the refund debt's per-line split shares the allocation engine's
 // largest-remainder rule, and the cascade ordering keeps every split deterministic.
 import { orderForCascade, prorateByWeight } from '../../utils/folioAllocations'
-import { openSettlementLink, SETTLEMENT_IN_PROGRESS_MESSAGE } from '../devolada/links'
+import {
+  closeOpenLinksAfterWrite,
+  closesLinkInFlight,
+  lineCancellationReasonSql,
+  linkClosedEventsStatement,
+  markLinksClosingStatement,
+  SETTLEMENT_IN_PROGRESS_MESSAGE,
+  type ClosedLink,
+} from '../devolada/links'
+import { replaceSettlementLink } from '../pos/settleCore'
 
 export type FoliosContext = Context<{
   Bindings: CloudflareBindings
@@ -458,7 +467,7 @@ const applyCancellation = async (
   // Cancellation Policy Engine — how much of the collected money and commission to reverse. OMITTED
   // (no policy configured) means "reverse everything", the pre-feature behaviour (D1).
   reversal?: { refundAmount: number; reversedCommission: number },
-): Promise<boolean> => {
+): Promise<{ won: boolean; closedLinks: ClosedLink[] }> => {
   // The agent whose ledger the cancellation reversal (US-LG05/LG06) attributes to.
   const [meta] = await db
     .select({ agentId: folios.agentId })
@@ -479,7 +488,7 @@ const applyCancellation = async (
       ),
     )
     .returning({ id: folios.id })
-  if (won.length === 0) return false
+  if (won.length === 0) return { won: false, closedLinks: [] }
 
   const statements: BatchItem<'sqlite'>[] = []
 
@@ -602,6 +611,10 @@ const applyCancellation = async (
         ),
       ),
   )
+  // devolada-transfer-verification D13 — the sale stops taking money: its open links close, a
+  // payment in flight included (what arrives after is rightly `unapplied`). Only the winner gets here.
+  const closingIndex = statements.length
+  statements.push(markLinksClosingStatement(db, org, folioId, 'cancelled', { at: now }))
   // US-A24 — the narrative row, derived from the same folioUpdate the flip wrote, so the event and
   // the audit columns can never disagree. It rides the WINNER's batch: only the guarded flip's
   // winner reaches this point, so a racing cancellation can never write a second `cancelled` row.
@@ -622,9 +635,11 @@ const applyCancellation = async (
       },
       at: now,
     }),
+    // D13 — and, after it, each enlace the cancellation closed.
+    linkClosedEventsStatement(db, org, folioId, { at: now, actorId: folioUpdate.cancelledBy ?? null }),
   )
-  await db.batch(statements as [BatchItem<'sqlite'>, ...BatchItem<'sqlite'>[]])
-  return true
+  const results = await db.batch(statements as [BatchItem<'sqlite'>, ...BatchItem<'sqlite'>[]])
+  return { won: true, closedLinks: results[closingIndex] as ClosedLink[] }
 }
 
 // Cancellation Policy Engine — price a cancellation, or decide there is no policy to price it with.
@@ -789,9 +804,9 @@ export const cancelFolioPriced = async (
     reason: string | null
     source: 'admin' | 'agent' | 'tourist_request' | 'system_expiry'
   },
-): Promise<{ won: boolean; outcome: CancellationOutcome }> => {
+): Promise<{ won: boolean; outcome: CancellationOutcome; closedLinks: ClosedLink[] }> => {
   const outcome = await quoteCancellation(db, org, folioId, now)
-  const won = await applyCancellation(
+  const { won, closedLinks } = await applyCancellation(
     db,
     org,
     folioId,
@@ -810,7 +825,7 @@ export const cancelFolioPriced = async (
     },
     { refundAmount: outcome.refund, reversedCommission: outcome.reversedCommission },
   )
-  return { won, outcome }
+  return { won, outcome, closedLinks }
 }
 
 // Fire-and-forget cancellation email — a Resend failure must never fail a committed
@@ -937,7 +952,7 @@ export const cancelFolio = async (c: FoliosContext) => {
   // D17 — the ladder prices every cancellation. There is no second path: the legacy branch (a
   // lodging-only refund for stays, nothing at all for tours) was deleted in Phase 2, and
   // `quoteCancellation` always returns an outcome because `resolvePolicy` always resolves.
-  const { won, outcome } = await cancelFolioPriced(db, org, id, lines, now, {
+  const { won, outcome, closedLinks } = await cancelFolioPriced(db, org, id, lines, now, {
     cancelledBy: admin.userId,
     reason: input.reason ?? null,
     source: 'admin',
@@ -946,6 +961,8 @@ export const cancelFolio = async (c: FoliosContext) => {
     // A concurrent cancellation won the guarded flip after our pre-check.
     throw new ApiError('CONFLICT', 409, 'This folio is already cancelled')
   }
+  // devolada-transfer-verification D13 — the links the batch marked close at Devolada, after it.
+  if (closedLinks.length) c.executionCtx.waitUntil(closeOpenLinksAfterWrite({ db, env: c.env }, org, id ?? ''))
 
   const folioOut = await readFolio(db, org, id)
   if (folioOut) await queueCancellationEmail(c, db, org, id, folioOut)
@@ -979,7 +996,7 @@ export const cancelFolioLinesPriced = async (
     source: 'admin' | 'agent' | 'tourist_request' | 'system_expiry'
   },
   opts?: { creditInsteadOfRefund?: { validDays: number } },
-): Promise<{ won: boolean; outcome: CancellationOutcome; cancelledLineIds: string[] }> => {
+): Promise<{ won: boolean; outcome: CancellationOutcome; cancelledLineIds: string[]; closedLinks: ClosedLink[] }> => {
   const [folioMeta] = await db
     .select({ agentId: folios.agentId })
     .from(folios)
@@ -1018,6 +1035,7 @@ export const cancelFolioLinesPriced = async (
       won: false,
       outcome: await quoteCancellation(db, org, folioId, now, lineIds),
       cancelledLineIds: [],
+      closedLinks: [],
     }
   }
 
@@ -1058,7 +1076,7 @@ export const cancelFolioLinesPriced = async (
       .returning({ id: folioLines.id })
     if (flip.length > 0) winners.push(line)
   }
-  if (winners.length === 0) return { won: false, outcome, cancelledLineIds: [] }
+  if (winners.length === 0) return { won: false, outcome, cancelledLineIds: [], closedLinks: [] }
   // Residual: a race that took SOME of the targets leaves the outcome priced over the full live
   // set — the same pre-check-then-commit residual every cancellation path accepts.
 
@@ -1162,6 +1180,17 @@ export const cancelFolioLinesPriced = async (
         ),
       ),
   )
+  // devolada-transfer-verification D13 — the settlement links this cancellation changes close, read
+  // after the folio's own flip: a whole-sale link (`amount_changed` while the sale keeps a live line)
+  // and the cancelled lines' own; another line's link still asks what its line owes. Once no live
+  // line is left, the sale is cancelled and every open link closes.
+  const closingIndex = statements.length
+  statements.push(
+    markLinksClosingStatement(db, org, folioId, lineCancellationReasonSql(org, folioId), {
+      at: now,
+      forLines: winners.map((l) => l.id),
+    }),
+  )
   // The narrative names each line (D13/D9) — payload identity, never a join.
   for (const line of winners) {
     statements.push(
@@ -1188,8 +1217,15 @@ export const cancelFolioLinesPriced = async (
       }),
     )
   }
-  await db.batch(statements as [BatchItem<'sqlite'>, ...BatchItem<'sqlite'>[]])
-  return { won: true, outcome, cancelledLineIds: winners.map((l) => l.id) }
+  // D13 — and, after the lines' rows, each enlace the cancellation closed.
+  statements.push(linkClosedEventsStatement(db, org, folioId, { at: now, actorId: by.cancelledBy }))
+  const results = await db.batch(statements as [BatchItem<'sqlite'>, ...BatchItem<'sqlite'>[]])
+  return {
+    won: true,
+    outcome,
+    cancelledLineIds: winners.map((l) => l.id),
+    closedLinks: results[closingIndex] as ClosedLink[],
+  }
 }
 
 // US-A22 (docs/folios/line-autonomy.spec.md, F2) — cancel ONE line; the siblings come out
@@ -1228,10 +1264,9 @@ export const cancelFolioLine = async (c: FoliosContext) => {
       'El pago está por verificar — verifica o rechaza el pago antes de cancelar',
     )
   }
-  // devolada-transfer-verification D19 — the apartado's balance is being collected by a settlement
-  // link. Until PR 3 closes and replaces it, a line cancellation would leave it asking a stale
-  // amount, so it waits for the link's result.
-  if (await openSettlementLink(db, org, id ?? '')) {
+  // devolada-transfer-verification D13 — the cancellation would close a settlement link whose
+  // payment is in flight: that payment would turn `unapplied`, so it waits for the verdict.
+  if (await closesLinkInFlight(db, org, id ?? '', { forLines: [lineId ?? ''] })) {
     throw new ApiError('SETTLEMENT_IN_PROGRESS', 409, SETTLEMENT_IN_PROGRESS_MESSAGE)
   }
 
@@ -1248,7 +1283,7 @@ export const cancelFolioLine = async (c: FoliosContext) => {
   }
 
   const now = new Date()
-  const { won, outcome } = await cancelFolioLinesPriced(db, org, id, [lineId], now, {
+  const { won, outcome, closedLinks } = await cancelFolioLinesPriced(db, org, id, [lineId], now, {
     cancelledBy: admin.userId,
     reason: input.reason ?? null,
     source: 'admin',
@@ -1256,6 +1291,13 @@ export const cancelFolioLine = async (c: FoliosContext) => {
   if (!won) {
     throw new ApiError('LINE_ALREADY_CANCELLED', 409, 'This line is already cancelled')
   }
+  // devolada-transfer-verification D13 — the closed links close at Devolada, after the write; a
+  // whole-sale settlement link gets a replacement for the new balance while the sale still owes.
+  if (closedLinks.length) c.executionCtx.waitUntil(closeOpenLinksAfterWrite({ db, env: c.env }, org, id ?? ''))
+  const replacement = await replaceSettlementLink(
+    { db, env: c.env },
+    { organizationId: org, folioId: id ?? '', closed: closedLinks },
+  )
 
   // Written notice (D20), line-scoped (D13): a second line's cancellation months later is a
   // second message — the guard keyed by (folio, line, event, channel) cannot swallow it.
@@ -1274,7 +1316,7 @@ export const cancelFolioLine = async (c: FoliosContext) => {
       lines: folioOut.lines.filter((l) => l.id === lineId),
     })
   }
-  return c.json({ folio: folioOut, cancellation: serializeOutcome(outcome) })
+  return c.json({ folio: folioOut, cancellation: serializeOutcome(outcome), ...replacement })
 }
 
 // --- Tourist cancellation requests (US-T04) + refund tracking (US-A23/US-T05) ---
@@ -1548,7 +1590,7 @@ export const approveCancellationRequest = async (c: FoliosContext) => {
   // than merely corrected. Approving is an authorisation, not a pricing decision, so this endpoint
   // takes no body fields (D10). `refundFieldsFor` still opens no obligation when the refund is 0,
   // which covers the unpaid-folio case the old `owesRefund` guard handled.
-  const { won, outcome } = await cancelFolioPriced(db, org, folio.id, lines, now, {
+  const { won, outcome, closedLinks } = await cancelFolioPriced(db, org, folio.id, lines, now, {
     cancelledBy: admin.userId,
     reason: request.reason ?? 'Solicitud de cancelación del cliente',
     source: 'tourist_request',
@@ -1559,6 +1601,8 @@ export const approveCancellationRequest = async (c: FoliosContext) => {
     // request whose folio was already cancelled directly).
     throw new ApiError('CONFLICT', 409, 'This folio is already cancelled')
   }
+  // devolada-transfer-verification D13 — the links the batch marked close at Devolada, after it.
+  if (closedLinks.length) c.executionCtx.waitUntil(closeOpenLinksAfterWrite({ db, env: c.env }, org, folio.id))
 
   await db
     .update(folioRequests)

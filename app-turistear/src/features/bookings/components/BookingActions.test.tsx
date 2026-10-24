@@ -10,7 +10,7 @@ import {
   within,
 } from '../../../test/renderWithProviders'
 import { expectNoA11yViolations } from '../../../test/axe'
-import { aPaymentLink } from '../../../test/handlers/devolada'
+import { aLinkPayment, aPaymentLink } from '../../../test/handlers/devolada'
 import type { OrganizationDevoladaSummary, PaymentLinkView } from '../../devolada'
 import { MY_ORG_QUERY_KEY } from '../../organization'
 import { BookingActions, type BookingFolio } from './BookingActions'
@@ -228,12 +228,13 @@ describe('US-AG52 — where Reagendar lives', () => {
   })
 })
 
-// --- devolada-transfer-verification US3 (research D8, D16, D19; contracts/turistear-api.md
+// --- devolada-transfer-verification US3, US4 (research D8, D13, D16; contracts/turistear-api.md
 // § Action copy) ---------------------------------------------------------------------------------
 //
-// While a settlement enlace is open, what it collects reads «Liquidación en verificación» in place
-// of its settle button, and the enlace itself is on the screen to send. A line cancellation the
-// server refuses meanwhile (SETTLEMENT_IN_PROGRESS) says why. The copy is the contract's.
+// While a settlement enlace is open, it is on the screen to send. A settle that would close it waits
+// only while its payment is in flight: «Liquidación en verificación» stands in its place. A line
+// cancellation the server refuses meanwhile (SETTLEMENT_IN_PROGRESS) says why, and one that replaced
+// the enlace says the customer's enlace changed. The copy is the contract's.
 
 const VERIFYING = 'Liquidación en verificación'
 const IN_PROGRESS = 'La venta ya tiene un enlace de pago para liquidar; espera su resultado'
@@ -307,8 +308,15 @@ const oneLineApartado = (over: Partial<BookingFolio> = {}): BookingFolio =>
 /** The row of one owing line, named by its service. */
 const lineRow = (name: string) => screen.getByRole('group', { name })
 
-describe('devolada-transfer-verification US3 — while a settlement enlace is open', () => {
-  it('a whole-sale enlace shows its card, and «Liquidación en verificación» replaces «Liquidar saldo»', async () => {
+/** The settlement enlace's payment, as Devolada is still verifying it: in flight. */
+const inFlight = (over: Partial<PaymentLinkView> = {}) =>
+  settlementLink({ label: 'validating', payment: aLinkPayment() as PaymentLinkView['payment'], ...over })
+
+const REPLACED = 'El enlace de pago cambió — vuelve a enviarlo'
+const NOT_REPLACED = 'El enlace de pago cambió y no se pudo crear el nuevo — vuelve a liquidar el saldo'
+
+describe('devolada-transfer-verification US3, US4 — while a settlement enlace is open', () => {
+  it('waiting for its first payment, the whole-sale enlace leads and «Liquidar saldo» stays: settling another way closes it', async () => {
     const { container } = renderWithProviders(
       <BookingActions folio={oneLineApartado({ payment_links: [settlementLink({ amount: 210_000 })] })} />,
     )
@@ -316,7 +324,17 @@ describe('devolada-transfer-verification US3 — while a settlement enlace is op
     expect(screen.getByRole('heading', { name: 'Enlace de pago' })).toBeInTheDocument()
     expect(screen.getByLabelText(/Monto del enlace: \$2,100\.00/)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Cobrar por WhatsApp' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Liquidar saldo' })).toBeInTheDocument()
+    expect(screen.queryByText(VERIFYING)).not.toBeInTheDocument()
+    await expectNoA11yViolations(container)
+  })
 
+  it('with its payment in flight, «Liquidación en verificación» replaces «Liquidar saldo»', async () => {
+    const { container } = renderWithProviders(
+      <BookingActions folio={oneLineApartado({ payment_links: [inFlight({ amount: 210_000 })] })} />,
+    )
+
+    expect(screen.getByRole('heading', { name: 'Enlace de pago' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Liquidar saldo' })).not.toBeInTheDocument()
     // A state, never colour alone: the chip carries its icon and its words.
     const chip = screen.getByText(VERIFYING).closest('.MuiChip-root')!
@@ -327,8 +345,8 @@ describe('devolada-transfer-verification US3 — while a settlement enlace is op
     await expectNoA11yViolations(container)
   })
 
-  it('a whole-sale enlace on a multi-line apartado holds every settle, and leaves each line its Cancelar', () => {
-    renderWithProviders(<BookingActions folio={twoLineApartado({ payment_links: [settlementLink()] })} />)
+  it('a whole-sale enlace in flight on a multi-line apartado holds every settle, and leaves each line its Cancelar', () => {
+    renderWithProviders(<BookingActions folio={twoLineApartado({ payment_links: [inFlight()] })} />)
 
     expect(screen.queryByRole('button', { name: 'Liquidar todo' })).not.toBeInTheDocument()
     expect(screen.queryAllByRole('button', { name: 'Liquidar' })).toHaveLength(0)
@@ -337,25 +355,32 @@ describe('devolada-transfer-verification US3 — while a settlement enlace is op
     expect(screen.getAllByRole('button', { name: 'Cancelar' })).toHaveLength(2)
   })
 
-  it('one line’s enlace holds every settle until it resolves: the chip on its line and in the main button’s place (D19)', () => {
+  it('one line’s enlace in flight: the chip on its line and in the main button’s place; the other line settles on', () => {
     renderWithProviders(
       <BookingActions
-        folio={twoLineApartado({
-          payment_links: [settlementLink({ folio_line_id: 'l1', amount: 55_000 })],
-        })}
+        folio={twoLineApartado({ payment_links: [inFlight({ folio_line_id: 'l1', amount: 55_000 })] })}
       />,
     )
 
     const held = lineRow('Isla Mujeres')
     expect(within(held).getByText(VERIFYING)).toBeInTheDocument()
     expect(within(held).queryByRole('button', { name: 'Liquidar' })).not.toBeInTheDocument()
-
-    // Until PR 3 the server refuses any other settle while the enlace is open: none is offered.
-    const other = lineRow('Chichén Itzá')
-    expect(within(other).queryByRole('button', { name: 'Liquidar' })).not.toBeInTheDocument()
+    // Settling the other line leaves this enlace open, so the server takes it.
+    expect(within(lineRow('Chichén Itzá')).getByRole('button', { name: 'Liquidar' })).toBeInTheDocument()
+    // Settling the whole sale would close it: held.
     expect(screen.queryByRole('button', { name: 'Liquidar todo' })).not.toBeInTheDocument()
     expect(screen.getAllByText(VERIFYING)).toHaveLength(2)
     expect(screen.getByLabelText(/Monto del enlace: \$550\.00/)).toBeInTheDocument()
+  })
+
+  it('one line’s enlace waiting for its first payment holds nothing', () => {
+    renderWithProviders(
+      <BookingActions folio={twoLineApartado({ payment_links: [settlementLink({ folio_line_id: 'l1' })] })} />,
+    )
+
+    expect(screen.getAllByRole('button', { name: 'Liquidar' })).toHaveLength(2)
+    expect(screen.getByRole('button', { name: 'Liquidar todo' })).toBeInTheDocument()
+    expect(screen.queryByText(VERIFYING)).not.toBeInTheDocument()
   })
 
   it.each([
@@ -387,7 +412,85 @@ describe('devolada-transfer-verification US3 — while a settlement enlace is op
     expect(url).toContain('https://link.devoladapago.com/p/kq7m2x9d4tbn3wpa')
   })
 
-  it('a line cancellation refused while the enlace collects says why, and keeps only the way out', async () => {
+  it('a line cancellation that replaced the whole-sale enlace says so, with the new enlace to send (US4)', async () => {
+    const replacement = settlementLink({ id: 'link-settle-2', amount: 35_000, url: 'https://link.devoladapago.com/p/nuevo' })
+    server.use(
+      http.post('/api/pos/folios/:id/lines/:lineId/cancel', () =>
+        HttpResponse.json({
+          folio: twoLineApartado(),
+          cancellation: { refund: 0, retention: 0, kept_commission: 0, reversed_commission: 0 },
+          payment_link: replacement,
+        }),
+      ),
+    )
+    const { container, rerender } = renderWithProviders(
+      <BookingActions folio={twoLineApartado({ payment_links: [settlementLink()] })} />,
+    )
+
+    await userEvent.click(within(lineRow('Isla Mujeres')).getByRole('button', { name: 'Cancelar' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Cancelar actividad' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+
+    // Until the sale is read again, the answer's enlace stands in for the one it replaced.
+    expect(await screen.findByText(REPLACED)).toBeInTheDocument()
+    expect(screen.getAllByRole('heading', { name: 'Enlace de pago' })).toHaveLength(1)
+    expect(screen.getByLabelText(/Monto del enlace: \$350\.00/)).toBeInTheDocument()
+    await expectNoA11yViolations(container)
+
+    // Once the replacement no longer collects, the notice goes with it, and the sale's own open
+    // enlace shows.
+    rerender(
+      <BookingActions
+        folio={twoLineApartado({
+          payment_links: [
+            settlementLink({ id: 'link-settle-3', folio_line_id: 'l2', amount: 20_000 }),
+            { ...replacement, state: 'closed', label: 'closed' },
+          ],
+        })}
+      />,
+    )
+    expect(screen.queryByText(REPLACED)).not.toBeInTheDocument()
+    expect(screen.getByLabelText(/Monto del enlace: \$200\.00/)).toBeInTheDocument()
+  })
+
+  it('…and when no replacement could be created, says to settle the balance again (US4)', async () => {
+    server.use(
+      http.post('/api/pos/folios/:id/lines/:lineId/cancel', () =>
+        HttpResponse.json({
+          folio: twoLineApartado(),
+          cancellation: { refund: 0, retention: 0, kept_commission: 0, reversed_commission: 0 },
+          payment_link: null,
+          payment_link_error: 'DEVOLADA_UNAVAILABLE',
+        }),
+      ),
+    )
+    renderWithProviders(<BookingActions folio={twoLineApartado({ payment_links: [settlementLink()] })} />)
+
+    await userEvent.click(within(lineRow('Isla Mujeres')).getByRole('button', { name: 'Cancelar' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Cancelar actividad' }))
+    expect(await screen.findByText(NOT_REPLACED)).toBeInTheDocument()
+    expect(screen.queryByText(REPLACED)).not.toBeInTheDocument()
+  })
+
+  it('a line cancellation without an enlace to replace says nothing about enlaces', async () => {
+    server.use(
+      http.post('/api/pos/folios/:id/lines/:lineId/cancel', () =>
+        HttpResponse.json({
+          folio: twoLineApartado(),
+          cancellation: { refund: 0, retention: 0, kept_commission: 0, reversed_commission: 0 },
+        }),
+      ),
+    )
+    renderWithProviders(<BookingActions folio={twoLineApartado()} />)
+
+    await userEvent.click(within(lineRow('Isla Mujeres')).getByRole('button', { name: 'Cancelar' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Cancelar actividad' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(screen.queryByText(REPLACED)).not.toBeInTheDocument()
+    expect(screen.queryByText(NOT_REPLACED)).not.toBeInTheDocument()
+  })
+
+  it('a line cancellation refused while the enlace’s payment is in flight says why, and keeps only the way out', async () => {
     server.use(
       http.post('/api/pos/folios/:id/lines/:lineId/cancel', () =>
         HttpResponse.json(
@@ -396,7 +499,7 @@ describe('devolada-transfer-verification US3 — while a settlement enlace is op
         ),
       ),
     )
-    renderWithProviders(<BookingActions folio={twoLineApartado({ payment_links: [settlementLink()] })} />)
+    renderWithProviders(<BookingActions folio={twoLineApartado({ payment_links: [inFlight()] })} />)
 
     await userEvent.click(within(lineRow('Chichén Itzá')).getByRole('button', { name: 'Cancelar' }))
     await userEvent.click(await screen.findByRole('button', { name: 'Cancelar actividad' }))
