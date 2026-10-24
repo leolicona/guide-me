@@ -60,6 +60,25 @@ describe('US-A86 — the outbox shows the clock-produced half', () => {
     expect(screen.queryByText(/\{org_name\}/)).not.toBeInTheDocument()
   })
 
+  // bug: payment-rejected-folio-copy — the server sends the message filled from the sale; the page
+  // shows it and sends it exactly, with the organization and the seller the template names.
+  it('shows and sends the message the server filled', async () => {
+    const message =
+      'Hola María González, no pudimos confirmar el pago de tu compra en Buceo Cancún, así que ' +
+      'tuvimos que cancelarla. Si crees que es un error, escríbeme. — Lucía Vende'
+    withRows([aRow({ event: 'payment_rejected', message })])
+    renderWithProviders(<OutboxPage />)
+
+    expect(await screen.findByText(message)).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: /Enviar por WhatsApp/ }))
+    await waitFor(() => {
+      expect(window.open).toHaveBeenCalledWith(
+        `https://wa.me/529981234567?text=${encodeURIComponent(message)}`,
+        '_blank',
+      )
+    })
+  })
+
   it('the tap opens the composer AND records the send', async () => {
     withRows([aRow()])
     renderWithProviders(<OutboxPage />)

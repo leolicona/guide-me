@@ -4,7 +4,7 @@ import { getDb } from '../../db/client'
 import { folios, notifications } from '../../db/schema'
 import { ApiError } from '../../types/errors'
 import type { AppVariables } from '../../types/context'
-import { EVENTS, readOutbox, type NotificationEvent } from '../../utils/notifications'
+import { EVENTS, readOutbox, renderOutboxMessage, type NotificationEvent } from '../../utils/notifications'
 
 type NotificationsContext = Context<{
   Bindings: CloudflareBindings
@@ -12,6 +12,23 @@ type NotificationsContext = Context<{
 }>
 
 const tsOrNull = (d: Date | null) => (d ? Math.floor(d.getTime() / 1000) : null)
+
+const messageOf = (r: Awaited<ReturnType<typeof readOutbox>>[number]): string | null => {
+  const template = EVENTS[r.event as NotificationEvent]?.template
+  if (!template) return null
+  return renderOutboxMessage(template, {
+    customerName: r.customerName,
+    orgName: r.orgName,
+    agentName: r.agentName,
+    timezone: r.timezone,
+    total: r.total,
+    amountPaid: r.amountPaid,
+    refundAmount: r.refundAmount === null ? null : Number(r.refundAmount),
+    creditAmount: r.creditAmount,
+    creditExpiresAt: tsOrNull(r.creditExpiresAt),
+    bookingExpiresAt: r.bookingExpiresAt === null ? null : Number(r.bookingExpiresAt),
+  })
+}
 
 /**
  * The admin's outbox (US-A86). Read-only oversight over the whole organization.
@@ -52,6 +69,9 @@ export const listNotifications = async (c: NotificationsContext) => {
       customer_phone: r.customerPhone,
       // The message itself, so the drain screen can open the composer without a second read.
       template: EVENTS[r.event as NotificationEvent]?.template ?? null,
+      // bug: payment-rejected-folio-copy — and filled from the sale, so the composer sends it as is:
+      // the organization, the seller and the money, never a cut placeholder.
+      message: messageOf(r),
     })),
   })
 }
