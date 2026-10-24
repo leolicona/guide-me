@@ -12,6 +12,7 @@ import { emitNotification } from '../../utils/notifications'
 import type { PaymentLinkView } from '../../utils/devoladaLinkView'
 import {
   issuePaymentLink,
+  linkClosedEventsStatement,
   markLinksClosingStatement,
   type ClosedLink,
   type PaymentLinkError,
@@ -441,6 +442,7 @@ export async function applySettlement(
         kinds: ['settlement'],
         ...(line ? { forLines: [line.id] } : {}),
       }),
+      linkClosedEventsStatement(db, org, folioId, { at: input.at, actorId: input.actorId }),
     )
   }
 

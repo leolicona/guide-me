@@ -5,7 +5,7 @@ import { sendTicketConfirmationEmail } from '../../services/resend'
 import { folioEventRowWhere } from '../../utils/folioEvents'
 import { displayMethodSql } from '../../utils/folioPayments'
 import { emitNotification } from '../../utils/notifications'
-import { markLinksClosingStatement, type ClosedLink } from '../devolada/links'
+import { linkClosedEventsStatement, markLinksClosingStatement, type ClosedLink } from '../devolada/links'
 import { issuePortalLink, signLineTickets } from './handler'
 
 // devolada-transfer-verification D10 — verifying one payment at a time, without a request.
@@ -119,7 +119,10 @@ export async function verifyFolioPayment(
 
   // D13 — gated like the event: only the links of rows this batch's own flip verified.
   const closing = input.closeVerifiedLinks
-    ? [markLinksClosingStatement(db, org, folioId, 'verified_by_admin', { at, rowsVerified: { at, actorId } })]
+    ? [
+        markLinksClosingStatement(db, org, folioId, 'verified_by_admin', { at, rowsVerified: { at, actorId } }),
+        linkClosedEventsStatement(db, org, folioId, { at, actorId }),
+      ]
     : []
   const [flipped, rolled, , closed] = await db.batch([flip, rollup, event, ...closing])
   return {

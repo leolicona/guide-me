@@ -18,7 +18,7 @@ import { applySettlement, planSettlement } from '../pos/settleCore'
 import { cancelForUnreceivedTransfer } from '../pos/unreceivedTransfer'
 import { releaseClearedFolio, verifyFolioPayment } from '../pos/verifyCore'
 import { setCreditPaused } from './connection'
-import { closePaymentLinkRemote } from './links'
+import { closePaymentLinkRemote, linkClosedEventsStatement } from './links'
 
 // devolada-transfer-verification D9 — applying what Devolada reports for a payment. The webhook and
 // the sweep share this one function, and both call it with a RE-READ, never with a webhook body.
@@ -310,18 +310,21 @@ export async function applyDevoladaPayment(
       }
       // D13 — a link the admin's Verificar left open under this payment closes now that its verdict
       // is final: the sale already holds that money.
-      const [kept] = await db
-        .update(devoladaLinks)
-        .set({ state: 'closing', closedReason: 'verified_by_admin', updatedAt: now })
-        .where(
-          and(
-            eq(devoladaLinks.id, link.id),
-            eq(devoladaLinks.organizationId, org),
-            eq(devoladaLinks.state, 'open'),
-            appliedSql(link),
-          ),
-        )
-        .returning({ id: devoladaLinks.id })
+      const [[kept]] = await db.batch([
+        db
+          .update(devoladaLinks)
+          .set({ state: 'closing', closedReason: 'verified_by_admin', updatedAt: now })
+          .where(
+            and(
+              eq(devoladaLinks.id, link.id),
+              eq(devoladaLinks.organizationId, org),
+              eq(devoladaLinks.state, 'open'),
+              appliedSql(link),
+            ),
+          )
+          .returning({ id: devoladaLinks.id }),
+        linkClosedEventsStatement(db, org, link.folioId, { at: now, actorId: null }),
+      ])
       if (kept) deps.waitUntil(closePaymentLinkRemote(deps, link))
       // Otherwise the sale stays pending: it shows in Por verificar with the amounts and its label,
       // and the admin uses Verificar or Rechazar as today (FR-018). A deposit's apartado waits (D8).

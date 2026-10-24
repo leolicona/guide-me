@@ -13,7 +13,7 @@ import {
   markConnectionBroken,
   type LinkCredential,
 } from './connection'
-import { closePaymentLinkRemote, replayPaymentLinkCreate } from './links'
+import { closePaymentLinkRemote, linkClosedEventsStatement, replayPaymentLinkCreate } from './links'
 
 // devolada-transfer-verification D12 — the recovery sweep, a third independent run on the API's
 // cron (every 15 minutes, dev and production; a preview has none).
@@ -292,11 +292,17 @@ async function sweepOrganization(
       if (replayed === 'rate_limited') throw new OrgStop()
       if (replayed === 'pending') result.failed += 1
       if (typeof replayed === 'string') continue
-      const [marked] = await db
-        .update(devoladaLinks)
-        .set({ state: 'closing', closedReason: 'abandoned', updatedAt: new Date(nowSec * 1000) })
-        .where(and(eq(devoladaLinks.id, link.id), eq(devoladaLinks.organizationId, org), eq(devoladaLinks.state, 'abandoned')))
-        .returning()
+      const at = new Date(nowSec * 1000)
+      const [[marked]] = await db.batch([
+        db
+          .update(devoladaLinks)
+          .set({ state: 'closing', closedReason: 'abandoned', updatedAt: at })
+          .where(
+            and(eq(devoladaLinks.id, link.id), eq(devoladaLinks.organizationId, org), eq(devoladaLinks.state, 'abandoned')),
+          )
+          .returning(),
+        linkClosedEventsStatement(db, org, link.folioId, { at, actorId: null }),
+      ])
       if (!marked) continue
       spend()
       if (!credential.isCurrent) spend()

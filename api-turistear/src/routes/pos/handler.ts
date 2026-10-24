@@ -99,6 +99,7 @@ import {
   closeOpenLinksAfterWrite,
   closesLinkInFlight,
   issuePaymentLink,
+  linkClosedEventsStatement,
   markLinksClosingStatement,
   openSettlementLink,
   SETTLEMENT_IN_PROGRESS_MESSAGE,
@@ -2568,7 +2569,10 @@ export const rejectPayment = async (c: PosContext) => {
   // devolada-transfer-verification D13 — the void sale stops taking money: its open links close, a
   // payment in flight included (what arrives after is rightly `unapplied`), and then at Devolada.
   const closingIndex = statements.length
-  statements.push(markLinksClosingStatement(db, org, id ?? '', 'rejected', { at: now }))
+  statements.push(
+    markLinksClosingStatement(db, org, id ?? '', 'rejected', { at: now }),
+    linkClosedEventsStatement(db, org, id ?? '', { at: now, actorId: admin.userId }),
+  )
   const results = await db.batch(statements as [BatchItem<'sqlite'>, ...BatchItem<'sqlite'>[]])
   if ((results[closingIndex] as ClosedLink[]).length) {
     c.executionCtx.waitUntil(closeOpenLinksAfterWrite({ db, env: c.env }, org, id ?? ''))

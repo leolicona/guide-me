@@ -79,6 +79,7 @@ import {
   closeOpenLinksAfterWrite,
   closesLinkInFlight,
   lineCancellationReasonSql,
+  linkClosedEventsStatement,
   markLinksClosingStatement,
   SETTLEMENT_IN_PROGRESS_MESSAGE,
   type ClosedLink,
@@ -634,6 +635,8 @@ const applyCancellation = async (
       },
       at: now,
     }),
+    // D13 — and, after it, each enlace the cancellation closed.
+    linkClosedEventsStatement(db, org, folioId, { at: now, actorId: folioUpdate.cancelledBy ?? null }),
   )
   const results = await db.batch(statements as [BatchItem<'sqlite'>, ...BatchItem<'sqlite'>[]])
   return { won: true, closedLinks: results[closingIndex] as ClosedLink[] }
@@ -1214,6 +1217,8 @@ export const cancelFolioLinesPriced = async (
       }),
     )
   }
+  // D13 — and, after the lines' rows, each enlace the cancellation closed.
+  statements.push(linkClosedEventsStatement(db, org, folioId, { at: now, actorId: by.cancelledBy }))
   const results = await db.batch(statements as [BatchItem<'sqlite'>, ...BatchItem<'sqlite'>[]])
   return {
     won: true,

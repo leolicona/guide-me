@@ -12,7 +12,12 @@ import {
 import { folioEventRowWhere } from '../../utils/folioEvents'
 import { buildCancellationReversal } from '../../utils/folioPayments'
 import { emitNotification } from '../../utils/notifications'
-import { closeOpenLinksAfterWrite, closePaymentLinkRemote, markLinksClosingStatement } from '../devolada/links'
+import {
+  closeOpenLinksAfterWrite,
+  closePaymentLinkRemote,
+  linkClosedEventsStatement,
+  markLinksClosingStatement,
+} from '../devolada/links'
 import { reconcileSlotTotals } from '../services/zones.reconcile'
 
 // devolada-transfer-verification D11 — cancelling a sale when the money never arrived (FR-016).
@@ -241,6 +246,8 @@ export async function cancelForUnreceivedTransfer(
       },
       cancelledHere,
     ),
+    // …and each of the sale's other links it closed; ungated, it reads only what this batch marked.
+    linkClosedEventsStatement(db, org, folioId, { at, actorId: null }),
   ]
   const [won] = await db.batch([cancelSale, ...statements])
   // Nothing matched: something changed after step 2 — another cancellation, a verification, money

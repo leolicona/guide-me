@@ -2,6 +2,7 @@ import { and, eq, inArray, isNull, ne, or, sql, type SQL } from 'drizzle-orm'
 import type { Db } from '../../db/client'
 import {
   devoladaLinks,
+  folioEvents,
   folioLines,
   organizations,
   type DevoladaBrokenReason,
@@ -422,6 +423,33 @@ export function markLinksClosingStatement(
       closedReason: devoladaLinks.closedReason,
       requestedBy: devoladaLinks.requestedBy,
     })
+}
+
+/**
+ * D13 (data-model § New `folio_events` types) — the timeline row of each link a write marked
+ * `closing` in the same batch: `payment_link_closed`, by whoever stopped the sale (NULL = the
+ * system), with the link and its reason, scoped to the link's line when it has one. It reads the
+ * links that batch stamped at its own instant, so it follows the marking statement; its id is the
+ * link's, so a link is told closed once, whoever runs it again.
+ */
+export function linkClosedEventsStatement(
+  db: Db,
+  organizationId: string,
+  folioId: string,
+  { at, actorId }: { at: Date; actorId: string | null },
+) {
+  const atSec = Math.floor(at.getTime() / 1000)
+  // Drizzle's insert-select names every column in the table's own order (`folioEventRowWhere`).
+  return db
+    .insert(folioEvents)
+    .select(
+      sql`select 'payment_link_closed:' || l.id, l.organization_id, l.folio_id, 'payment_link_closed', ${actorId},
+          l.folio_line_id, json_object('link_id', l.id, 'reason', l.closed_reason), 0, ${atSec}
+        from devolada_links l
+        where l.organization_id = ${organizationId} and l.folio_id = ${folioId}
+          and l.state = 'closing' and l.closed_reason is not null and l.updated_at = ${atSec}`,
+    )
+    .onConflictDoNothing()
 }
 
 /**

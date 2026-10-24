@@ -506,6 +506,15 @@ describe('abandoned links (D12 step 3, US4)', () => {
     const after = await linkById(link.id)
     expect(after).toMatchObject({ state: 'closed', closed_reason: 'abandoned' })
     expect(fake.link(after.devolada_link_id).closedAt).not.toBeNull()
+    // The timeline says so, by «Sistema».
+    const closed = await env.DB.prepare(
+      `SELECT actor_id, payload FROM folio_events WHERE folio_id = ? AND event_type = 'payment_link_closed'`,
+    )
+      .bind(folioId)
+      .all<any>()
+    expect(closed.results.map((e) => ({ actor_id: e.actor_id, payload: JSON.parse(e.payload) }))).toEqual([
+      { actor_id: null, payload: { link_id: link.id, reason: 'abandoned' } },
+    ])
     // The sale stays on the manual path it took: nothing cancelled, still pending for the admin.
     expect(await folioRow(folioId)).toMatchObject({ cancelled_at: null, payment_verification: 'pending' })
   })

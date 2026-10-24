@@ -112,6 +112,34 @@ const closedAtDevolada = async (link: { id: string; devolada_link_id: string }) 
   expect(fake.callsTo('closePaymentLink').some((c) => c.idempotencyKey === `close:${link.id}`)).toBe(true)
 }
 
+/** The timeline rows that say an enlace closed (data-model § New `folio_events` types). */
+const closedEvents = async (folioId: string) =>
+  (
+    await env.DB.prepare(
+      `SELECT id, actor_id, folio_line_id, payload FROM folio_events
+       WHERE folio_id = ? AND event_type = 'payment_link_closed' ORDER BY rowid`,
+    )
+      .bind(folioId)
+      .all<any>()
+  ).results.map((e) => ({ ...e, payload: JSON.parse(e.payload) }))
+
+/** One row for the enlace, by `actorId`, with its reason. */
+const expectClosedEvent = async (
+  folioId: string,
+  link: { id: string },
+  reason: string,
+  actorId: string | null,
+  folioLineId: string | null = null,
+) =>
+  expect((await closedEvents(folioId)).filter((e) => e.payload.link_id === link.id)).toEqual([
+    {
+      id: `payment_link_closed:${link.id}`,
+      actor_id: actorId,
+      folio_line_id: folioLineId,
+      payload: { link_id: link.id, reason },
+    },
+  ])
+
 const ticketNotices = async (folioId: string) =>
   (
     await env.DB.prepare(`SELECT COUNT(*) AS n FROM notifications WHERE folio_id = ? AND event = 'tickets_delivered'`)
@@ -131,19 +159,22 @@ describe('every cancellation closes the sale’s open links (D13)', () => {
   }
 
   it.each([
-    ['an admin', (folioId: string) => call(org.adminEmail, 'POST', `/folios/${folioId}/cancel`, {})],
-    ['the seller', (folioId: string) => call(org.agentEmail, 'POST', `/pos/folios/${folioId}/cancel`, {})],
+    ['an admin', (folioId: string) => call(org.adminEmail, 'POST', `/folios/${folioId}/cancel`, {}), 'admin'],
+    ['the seller', (folioId: string) => call(org.agentEmail, 'POST', `/pos/folios/${folioId}/cancel`, {}), 'agent'],
     [
       "the approval of the customer's request",
       async (folioId: string) => call(org.adminEmail, 'POST', `/folios/requests/${await requestCancellation(folioId)}/approve`),
+      'admin',
     ],
-  ])('cancelled by %s, an open settlement link closes as `cancelled`, then at Devolada', async (_, cancel) => {
+  ] as const)('cancelled by %s, an open settlement link closes as `cancelled`, then at Devolada', async (_, cancel, by) => {
     const folioId = await apartado('cash')
     const link = await settlementLink(folioId)
     const res = await cancel(folioId)
     expect(res.status, res.text).toBe(200)
     expect(await linkById(link.id)).toMatchObject({ closed_reason: 'cancelled' })
     await closedAtDevolada(link)
+    // The timeline says so once, by whoever cancelled, also after the close at Devolada.
+    await expectClosedEvent(folioId, link, 'cancelled', by === 'admin' ? org.adminId : org.agentId)
   })
 })
 
@@ -158,6 +189,7 @@ describe('a line cancellation closes what it changes, and replaces a whole-sale 
 
       expect(await linkById(old.id)).toMatchObject({ closed_reason: 'amount_changed' })
       await closedAtDevolada(old)
+      await expectClosedEvent(folioId, old, 'amount_changed', by === 'admin' ? org.adminId : org.agentId)
       const plan = await planSettlement(
         getDb(env),
         { organizationId: org.organizationId, folioId, folioLineId: null },
@@ -199,6 +231,8 @@ describe('a line cancellation closes what it changes, and replaces a whole-sale 
     expect(await linkById(link.id)).toMatchObject({ closed_reason: 'cancelled' })
     expect(res.json).not.toHaveProperty('payment_link')
     await closedAtDevolada(link)
+    // Line-scoped, like the line's own cancellation.
+    await expectClosedEvent(folioId, link, 'cancelled', org.agentId, second)
   })
 
   it("a line's own link stays open when another line is cancelled", async () => {
@@ -209,6 +243,7 @@ describe('a line cancellation closes what it changes, and replaces a whole-sale 
     expect(await linkById(link.id)).toMatchObject({ state: 'open', closed_reason: null })
     expect(res.json).not.toHaveProperty('payment_link')
     expect(fake.callsTo('closePaymentLink')).toHaveLength(0)
+    expect(await closedEvents(folioId)).toEqual([])
   })
 })
 
@@ -225,6 +260,7 @@ describe('the other writes that stop a sale taking a payment close its link, wit
     expect((await call(org.adminEmail, 'POST', `/pos/folios/${folioId}/reject`, {})).status).toBe(200)
     expect(await linkById(link.id)).toMatchObject({ closed_reason: 'rejected' })
     await closedAtDevolada(link)
+    await expectClosedEvent(folioId, link, 'rejected', org.adminId)
   })
 
   it('Verificar, for the links of the rows it verified: `verified_by_admin`', async () => {
@@ -232,6 +268,7 @@ describe('the other writes that stop a sale taking a payment close its link, wit
     expect((await call(org.adminEmail, 'POST', `/pos/folios/${folioId}/verify`)).status).toBe(200)
     expect(await linkById(link.id)).toMatchObject({ closed_reason: 'verified_by_admin' })
     await closedAtDevolada(link)
+    await expectClosedEvent(folioId, link, 'verified_by_admin', org.adminId)
   })
 
   it("verifying a deposit by hand leaves the sale's settlement link open: it collects no row", async () => {
@@ -258,8 +295,10 @@ describe('the other writes that stop a sale taking a payment close its link, wit
     if (closes) {
       expect(await linkById(link.id)).toMatchObject({ closed_reason: 'settled_otherwise' })
       await closedAtDevolada(link)
+      await expectClosedEvent(lines.folioId, link, 'settled_otherwise', org.agentId, linked ? lines[linked] : null)
     } else {
       expect(await linkById(link.id)).toMatchObject({ state: 'open', closed_reason: null })
+      expect(await closedEvents(lines.folioId)).toEqual([])
     }
   })
 
@@ -273,6 +312,9 @@ describe('the other writes that stop a sale taking a payment close its link, wit
     expect(await linkById(deposit.id)).toMatchObject({ state: 'expired', closed_reason: null })
     expect(await linkById(settlement.id)).toMatchObject({ closed_reason: 'cancelled' })
     await closedAtDevolada(settlement)
+    // By «Sistema»; the claimed link expired, so it is not told closed.
+    await expectClosedEvent(folioId, settlement, 'cancelled', null)
+    expect((await closedEvents(folioId)).map((e) => e.payload.link_id)).toEqual([settlement.id])
   })
 })
 
@@ -307,11 +349,13 @@ describe('never under a payment in flight while the sale lives (D13)', () => {
   })
 
   it('…an invalid verdict closes it as `verified_by_admin`', async () => {
-    const { link, paymentId } = await verifiedInFlight()
+    const { folioId, link, paymentId } = await verifiedInFlight()
     fake.advance(paymentId, 'invalid')
     await notify(paymentId)
     expect(await linkById(link.id)).toMatchObject({ closed_reason: 'verified_by_admin' })
     await closedAtDevolada(link)
+    // Closed by the verdict the admin's Verificar waited for: «Sistema».
+    await expectClosedEvent(folioId, link, 'verified_by_admin', null)
   })
 
   it('…an expired one cancels nothing', async () => {
