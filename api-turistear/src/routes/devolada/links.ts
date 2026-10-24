@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNull } from 'drizzle-orm'
+import { and, eq, inArray, isNull, ne, or, sql, type SQL } from 'drizzle-orm'
 import type { Db } from '../../db/client'
 import {
   devoladaLinks,
@@ -6,11 +6,13 @@ import {
   organizations,
   type DevoladaBrokenReason,
   type DevoladaLink,
+  type DevoladaLinkClosedReason,
   type DevoladaLinkKind,
 } from '../../db/schema'
 import { devoladaClient } from '../../services/devolada'
 import { folioEventRow } from '../../utils/folioEvents'
 import { toPaymentLinkView, type PaymentLinkView } from '../../utils/devoladaLinkView'
+import { currentPaymentStatusSql, linkMoneyAppliedSql } from '../../utils/devoladaSql'
 import { naiveEpoch } from '../../utils/tz'
 import {
   brokenReasonOf,
@@ -335,10 +337,154 @@ export async function closePaymentLinkRemote(
 
 export const SETTLEMENT_IN_PROGRESS_MESSAGE = 'The sale already has a payment link to settle it; wait for its result'
 
+// ─── D13 — a sale that stops taking money closes its links ──────────────────────────────────────
+//
+// Every write that stops a sale from taking a payment marks the links it touches `closing` IN ITS
+// OWN BATCH, with the reason, so a link's state never disagrees with the money; after the write,
+// `closeOpenLinksAfterWrite` closes them at Devolada under `waitUntil`, and the sweep retries what
+// it could not (D12 step 3). A link whose money already reached the sale is never closed while its
+// payment is in flight: closing it would turn that payment `unapplied` — money to return that the
+// sale already holds, verified by hand or accepted (D13, D15). Its verdict ends it (apply).
+
+/** Which open links a write touches. Omitted, every open link of the sale. */
+export interface LinkClosingScope {
+  kinds?: DevoladaLinkKind[]
+  /**
+   * A write about these lines only: settlement links are limited to the whole-sale ones and these
+   * lines' own. Another line's link still asks exactly what its line owes, so it stays open (D13).
+   */
+  forLines?: string[]
+  /**
+   * Only the links that collect a row verified at this instant by this actor: the rows the admin's
+   * Verificar flipped in the same batch (D13). A settlement link collects no row while open.
+   */
+  rowsVerified?: { at: Date; actorId: string | null }
+}
+
+// `coalesce`: a link with no payment yet has no current status, and NULL must read as "not in flight".
+const IN_FLIGHT_SQL = sql`coalesce(${currentPaymentStatusSql(sql`devolada_links.id`)}, '') in ('validating', 'queued_for_credit')`
+/** Never closed by a write: the link's money reached the sale, and its payment is in flight. */
+const KEPT_UNTIL_VERDICT_SQL = sql`(${linkMoneyAppliedSql('devolada_links')} and ${IN_FLIGHT_SQL})`
+
+function closingScopeSql(organizationId: string, folioId: string, scope: LinkClosingScope): (SQL | undefined)[] {
+  const { kinds, forLines, rowsVerified } = scope
+  return [
+    eq(devoladaLinks.organizationId, organizationId),
+    eq(devoladaLinks.folioId, folioId),
+    inArray(devoladaLinks.state, ['creating', 'open']),
+    kinds ? inArray(devoladaLinks.kind, kinds) : undefined,
+    forLines
+      ? or(
+          ne(devoladaLinks.kind, 'settlement'),
+          isNull(devoladaLinks.folioLineId),
+          forLines.length ? inArray(devoladaLinks.folioLineId, forLines) : undefined,
+        )
+      : undefined,
+    rowsVerified
+      ? sql`exists (select 1 from folio_payments vp
+          where vp.id = devolada_links.folio_payment_id and vp.organization_id = devolada_links.organization_id
+            and vp.verification = 'verified' and vp.verified_at = ${Math.floor(rowsVerified.at.getTime() / 1000)}
+            and vp.verified_by is ${rowsVerified.actorId})`
+      : undefined,
+    sql`not ${KEPT_UNTIL_VERDICT_SQL}`,
+  ]
+}
+
+/** A link a write marked `closing`, as `markLinksClosingStatement` returns it. */
+export interface ClosedLink {
+  id: string
+  kind: DevoladaLinkKind
+  folioLineId: string | null
+  closedReason: DevoladaLinkClosedReason | null
+  requestedBy: string
+}
+
+/**
+ * D13 — the statement that marks the links a write touches `closing`, with the reason, for that
+ * write's own `db.batch`. Un-awaited; it returns the links it marked (`ClosedLink`). `gate` is the
+ * batch's own transition (constitution V): without it, the statement runs for whoever reaches it.
+ */
+export function markLinksClosingStatement(
+  db: Db,
+  organizationId: string,
+  folioId: string,
+  reason: DevoladaLinkClosedReason | SQL,
+  { at, gate, ...scope }: LinkClosingScope & { at: Date; gate?: SQL },
+) {
+  return db
+    .update(devoladaLinks)
+    .set({ state: 'closing', closedReason: reason, updatedAt: at })
+    .where(and(...closingScopeSql(organizationId, folioId, scope), gate))
+    .returning({
+      id: devoladaLinks.id,
+      kind: devoladaLinks.kind,
+      folioLineId: devoladaLinks.folioLineId,
+      closedReason: devoladaLinks.closedReason,
+      requestedBy: devoladaLinks.requestedBy,
+    })
+}
+
+/**
+ * D13 — why a line cancellation closes a link, read at the statement's turn in the batch, after the
+ * folio's own flip: a whole-sale link no longer matches the balance (`amount_changed`) while the
+ * sale keeps a live line; a cancelled line's own link, and every link once the last line goes,
+ * `cancelled`.
+ */
+export const lineCancellationReasonSql = (organizationId: string, folioId: string): SQL =>
+  sql`case when devolada_links.folio_line_id is null and exists (
+    select 1 from folios rf where rf.id = ${folioId} and rf.organization_id = ${organizationId} and rf.cancelled_at is null
+  ) then 'amount_changed' else 'cancelled' end`
+
+/**
+ * FR-011, D13 — whether a write of this scope would close a link whose payment is in flight. While
+ * the sale lives, that write answers 409 `SETTLEMENT_IN_PROGRESS`, and the seller waits for the
+ * verdict: closing the link would turn the customer's payment `unapplied`, money to return.
+ */
+export async function closesLinkInFlight(
+  db: Db,
+  organizationId: string,
+  folioId: string,
+  scope: LinkClosingScope,
+): Promise<boolean> {
+  const [row] = await db
+    .select({ id: devoladaLinks.id })
+    .from(devoladaLinks)
+    .where(and(...closingScopeSql(organizationId, folioId, scope), IN_FLIGHT_SQL))
+    .limit(1)
+  return !!row
+}
+
+/**
+ * D13 — after the write that marked them, closes the sale's `closing` links at Devolada, each with
+ * its own credential (D21). For `waitUntil`: it never throws, and a link it cannot close stays
+ * `closing` for the sweep (D12 step 3).
+ */
+export async function closeOpenLinksAfterWrite(
+  deps: IssueLinkDeps,
+  organizationId: string,
+  folioId: string,
+): Promise<void> {
+  try {
+    const closing = await deps.db
+      .select()
+      .from(devoladaLinks)
+      .where(
+        and(
+          eq(devoladaLinks.organizationId, organizationId),
+          eq(devoladaLinks.folioId, folioId),
+          eq(devoladaLinks.state, 'closing'),
+        ),
+      )
+    for (const link of closing) await closePaymentLinkRemote(deps, link)
+  } catch (err) {
+    console.error('[devolada] closing the links of a sale failed', folioId, err)
+  }
+}
+
 /**
  * D8 — the sale's settlement link still taking money (`creating` or `open`): one per sale, by the
- * partial unique index. Until PR 3 closes and replaces settlement links, it holds every other
- * settlement and every line cancellation of the sale (research D19).
+ * partial unique index. A transfer settlement of its scope gets it back; one of another scope waits
+ * for it (contracts § settle).
  */
 export async function openSettlementLink(
   db: Db,

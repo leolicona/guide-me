@@ -9,6 +9,13 @@ import { folioEventRow, folioEventRowWhere } from '../../utils/folioEvents'
 import { allocationRows, commissionRow, depositMethodSql, paymentRow } from '../../utils/folioPayments'
 import { deriveBookingExpiresAtSql, deriveStatusSql } from '../../utils/folioStatus'
 import { emitNotification } from '../../utils/notifications'
+import type { PaymentLinkView } from '../../utils/devoladaLinkView'
+import {
+  issuePaymentLink,
+  markLinksClosingStatement,
+  type ClosedLink,
+  type PaymentLinkError,
+} from '../devolada/links'
 import { issuePortalLink, signLineTickets } from './handler'
 
 // devolada-transfer-verification D8 — settling an apartado's balance, without a request.
@@ -246,21 +253,22 @@ export async function applySettlement(
   deps: SettleDeps,
   plan: SettlementPlan,
   input: SettlementInput,
-): Promise<{ recorded: boolean; cleared: boolean }> {
+): Promise<{ recorded: boolean; cleared: boolean; closedLinks: ClosedLink[] }> {
   const { db, env } = deps
   const { organizationId: org, folioId, folio, line } = plan
   const { claim } = input
   // The QR can mint now only if THIS money clears AND no earlier payment awaits an admin (US-A67).
   const cleared = input.verification !== 'pending' && folio.paymentVerification !== 'pending'
   const proven = input.verification === 'verified'
-  if (claim && plan.amount <= 0) return { recorded: false, cleared }
+  if (claim && plan.amount <= 0) return { recorded: false, cleared, closedLinks: [] }
 
   const paymentId = crypto.randomUUID()
-  // The link is still claimable, and its sale still alive.
+  // The link is still claimable — unclaimed, and not closed by a write that changed what the sale
+  // owes (D13) — and its sale still alive.
   const claimable: SQL | undefined = claim
     ? sql`EXISTS (SELECT 1 FROM devolada_links cl
         WHERE cl.id = ${claim.linkId} AND cl.organization_id = ${org} AND cl.folio_id = ${folioId}
-          AND cl.kind = 'settlement' AND cl.folio_payment_id IS NULL)
+          AND cl.kind = 'settlement' AND cl.folio_payment_id IS NULL AND cl.closed_reason IS NULL)
       AND EXISTS (SELECT 1 FROM folios cf WHERE cf.id = ${folioId} AND cf.organization_id = ${org} AND cf.cancelled_at IS NULL)`
     : undefined
   // The link now holds THIS batch's row: every later statement is gated on it.
@@ -421,8 +429,24 @@ export async function applySettlement(
     )
   }
 
+  // D13 — a settlement collected some other way (cash, card, or a transfer recorded by hand) closes
+  // the open settlement links that ask part of what it settles: any for the whole sale; for one
+  // line, a whole-sale link or that line's own. Another line's link still asks what its line owes.
+  // The seller's settle refuses first when such a link's payment is in flight (FR-011).
+  const closingIndex = claim ? -1 : statements.length
+  if (!claim) {
+    statements.push(
+      markLinksClosingStatement(db, org, folioId, 'settled_otherwise', {
+        at: input.at,
+        kinds: ['settlement'],
+        ...(line ? { forLines: [line.id] } : {}),
+      }),
+    )
+  }
+
   const results = await db.batch(statements as [BatchItem<'sqlite'>, ...BatchItem<'sqlite'>[]])
-  if (claim && (results[claimIndex] as unknown[]).length === 0) return { recorded: false, cleared }
+  if (claim && (results[claimIndex] as unknown[]).length === 0) return { recorded: false, cleared, closedLinks: [] }
+  const closedLinks = closingIndex >= 0 ? (results[closingIndex] as ClosedLink[]) : []
 
   if (cleared && plan.completing) {
     // The deferred half of the paid path: the portal token, and for the whole sale the ticket email.
@@ -445,7 +469,63 @@ export async function applySettlement(
       await emitNotification(db, { organizationId: org, folioId, event: 'tickets_delivered', hasEmail })
     }
   }
-  return { recorded: true, cleared }
+  return { recorded: true, cleared, closedLinks }
+}
+
+/** D8 — what a settlement link shows the customer: the organization, the first line and its date. */
+export async function settlementConcept(db: Db, plan: SettlementPlan): Promise<string> {
+  const first = plan.line ?? plan.lines.find((l) => !l.cancelledAt)
+  const orgName =
+    (await db.select({ name: organizations.name }).from(organizations).where(eq(organizations.id, plan.organizationId)).limit(1))[0]
+      ?.name ?? 'Turistear Ya!'
+  return first ? `${orgName} · ${first.serviceName} ${first.slotDate ?? first.checkIn ?? ''}`.trim() : orgName
+}
+
+/** The fields a line cancellation's response adds when it replaced the settlement link (D13). */
+export type ReplacementLink = { payment_link: PaymentLinkView } | { payment_link: null; payment_link_error: PaymentLinkError }
+
+/**
+ * D13 — a line cancellation closed the whole-sale settlement link (`amount_changed`): while the sale
+ * still owes, a replacement asks the new balance, issued after the write (constitution VIII) by the
+ * seller who issued the first one, who collects the settlement (D8). Nothing when no replacement
+ * applies: the cancellation closed no whole-sale link, or the sale no longer owes — its settlement
+ * already recorded (D15), or its clock run out — or the organization has no key any more.
+ */
+export async function replaceSettlementLink(
+  deps: Pick<SettleDeps, 'db' | 'env'>,
+  { organizationId, folioId, closed }: { organizationId: string; folioId: string; closed: ClosedLink[] },
+): Promise<ReplacementLink | null> {
+  const { db } = deps
+  const old = closed.find((l) => l.kind === 'settlement' && l.folioLineId === null && l.closedReason === 'amount_changed')
+  if (!old) return null
+  let plan: SettlementPlan
+  try {
+    plan = await planSettlement(db, { organizationId, folioId, folioLineId: null }, { now: new Date() })
+  } catch (err) {
+    if (err instanceof ApiError) return null
+    throw err
+  }
+  if (plan.amount <= 0) return null
+  try {
+    const result = await issuePaymentLink(deps, {
+      organizationId,
+      folioId,
+      folioPaymentId: null,
+      folioLineId: null,
+      kind: 'settlement',
+      amount: plan.amount,
+      requestedBy: old.requestedBy,
+      customerName: plan.folio.customerName,
+      concept: await settlementConcept(db, plan),
+    })
+    if (result.link) return { payment_link: result.link }
+    return result.error ? { payment_link: null, payment_link_error: result.error } : null
+  } catch (err) {
+    // Another request opened the sale's settlement link first (one per sale), or the write failed:
+    // no replacement from here. The sale shows the link that is open, if any, and can settle again.
+    console.error('[devolada] replacement settlement link failed', folioId, err)
+    return { payment_link: null, payment_link_error: 'DEVOLADA_UNAVAILABLE' }
+  }
 }
 
 /** The ticket email of a sale the whole-sale settlement cleared, fire-and-forget (waitUntil). */

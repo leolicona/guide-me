@@ -96,13 +96,17 @@ import { readConnectionSummary } from '../devolada/connection'
 import { loadPaymentLinkViews } from '../../utils/devoladaLinkView'
 import { devoladaAttentionFilter, verificationAutoFilter } from '../../utils/folioPendingWork'
 import {
+  closeOpenLinksAfterWrite,
+  closesLinkInFlight,
   issuePaymentLink,
+  markLinksClosingStatement,
   openSettlementLink,
   SETTLEMENT_IN_PROGRESS_MESSAGE,
+  type ClosedLink,
   type IssueLinkResult,
   type PaymentLinkError,
 } from '../devolada/links'
-import { applySettlement, planSettlement } from './settleCore'
+import { applySettlement, planSettlement, replaceSettlementLink, settlementConcept } from './settleCore'
 
 export type PosContext = Context<{
   Bindings: CloudflareBindings
@@ -2220,13 +2224,16 @@ async function settle(c: PosContext, folioLineId: string | null) {
   const body: SettleInput = parsed.data
   const settleMethod = body.method ?? plan.folio.depositMethod
 
-  // devolada-transfer-verification D8, D19 — one open settlement link per sale. A transfer
-  // settlement of the same scope (the same line, or the whole sale) gets that link back. Until
-  // PR 3 closes and replaces settlement links, every other settlement waits for it.
+  // devolada-transfer-verification D8, D13 — one open settlement link per sale. A transfer
+  // settlement of the same scope (the same line, or the whole sale) gets that link back, and one of
+  // another scope waits for it. Any other method settles, closing the link when it settles part of
+  // what the link collects (`applySettlement`) — unless that link's payment is in flight: closing it
+  // would turn the customer's payment `unapplied`, so the seller waits for the verdict (FR-011).
   const respondWithOpenLink = async () => {
+    if (settleMethod !== 'transfer') return null
     const open = await openSettlementLink(db, org, id)
     if (!open) return null
-    if (settleMethod === 'transfer' && open.folioLineId === folioLineId) {
+    if (open.folioLineId === folioLineId) {
       const folio = await readFolio(db, org, agent.userId, id, c.env.QR_SECRET, c.env.API_BASE_URL)
       return c.json({ folio, payment_link: folio?.payment_links.find((l) => l.id === open.id) ?? null })
     }
@@ -2234,6 +2241,12 @@ async function settle(c: PosContext, folioLineId: string | null) {
   }
   const answered = await respondWithOpenLink()
   if (answered) return answered
+  if (
+    settleMethod !== 'transfer' &&
+    (await closesLinkInFlight(db, org, id, { kinds: ['settlement'], ...(folioLineId ? { forLines: [folioLineId] } : {}) }))
+  ) {
+    throw new ApiError('SETTLEMENT_IN_PROGRESS', 409, SETTLEMENT_IN_PROGRESS_MESSAGE)
+  }
 
   // devolada-transfer-verification D8, FR-009 — a connected organization's transfer is collected
   // by a link: no reference is asked, and no settlement is recorded until Devolada proves it. A
@@ -2256,10 +2269,6 @@ async function settle(c: PosContext, folioLineId: string | null) {
 
   let linkError: PaymentLinkError | null = null
   if (byLink) {
-    const live = plan.lines.filter((l) => !l.cancelledAt)
-    const first = plan.line ?? live[0]
-    const [orgRow] = await db.select({ name: organizations.name }).from(organizations).where(eq(organizations.id, org)).limit(1)
-    const orgName = orgRow?.name ?? 'Turistear Ya!'
     try {
       const result = await issuePaymentLink(
         { db, env: c.env },
@@ -2272,7 +2281,7 @@ async function settle(c: PosContext, folioLineId: string | null) {
           amount: plan.amount,
           requestedBy: agent.userId,
           customerName: plan.folio.customerName,
-          concept: first ? `${orgName} · ${first.serviceName} ${first.slotDate ?? first.checkIn ?? ''}`.trim() : orgName,
+          concept: await settlementConcept(db, plan),
         },
       )
       if (result.link) {
@@ -2291,7 +2300,7 @@ async function settle(c: PosContext, folioLineId: string | null) {
 
   // Today's manual settlement — also the fallback when no link could be created (FR-010): the
   // `failed` or `abandoned` link stays as the record, and the answer says why.
-  await applySettlement(deps, plan, {
+  const { closedLinks } = await applySettlement(deps, plan, {
     method: settleMethod,
     reference: body.payment_reference ?? null,
     verification: settleMethod === 'transfer' ? 'pending' : 'not_required',
@@ -2300,6 +2309,8 @@ async function settle(c: PosContext, folioLineId: string | null) {
     actorId: agent.userId,
     at: new Date(),
   })
+  // D13 — the settlement links it closed close at Devolada, after the write.
+  if (closedLinks.length) c.executionCtx.waitUntil(closeOpenLinksAfterWrite({ db, env: c.env }, org, id ?? ''))
   const folio = await readFolio(db, org, agent.userId, id, c.env.QR_SECRET, c.env.API_BASE_URL)
   return c.json(linkError ? { folio, payment_link: null, payment_link_error: linkError } : { folio })
 }
@@ -2337,10 +2348,9 @@ export const cancelBookingLine = async (c: PosContext) => {
       'El pago está por verificar — verifica o rechaza el pago antes de cancelar',
     )
   }
-  // devolada-transfer-verification D19 — the apartado's balance is being collected by a settlement
-  // link. Until PR 3 closes and replaces it, a line cancellation would leave it asking a stale
-  // amount, so it waits for the link's result.
-  if (await openSettlementLink(db, org, id ?? '')) {
+  // devolada-transfer-verification D13 — the cancellation would close a settlement link whose
+  // payment is in flight: that payment would turn `unapplied`, so it waits for the verdict.
+  if (await closesLinkInFlight(db, org, id ?? '', { forLines: [lineId ?? ''] })) {
     throw new ApiError('SETTLEMENT_IN_PROGRESS', 409, SETTLEMENT_IN_PROGRESS_MESSAGE)
   }
   const [line] = await db
@@ -2354,7 +2364,7 @@ export const cancelBookingLine = async (c: PosContext) => {
   }
 
   const now = new Date()
-  const { won, outcome } = await cancelFolioLinesPriced(db, org, id, [lineId], now, {
+  const { won, outcome, closedLinks } = await cancelFolioLinesPriced(db, org, id, [lineId], now, {
     cancelledBy: agent.userId,
     reason: body.reason ?? null,
     source: 'agent',
@@ -2362,6 +2372,13 @@ export const cancelBookingLine = async (c: PosContext) => {
   if (!won) {
     throw new ApiError('LINE_ALREADY_CANCELLED', 409, 'This line is already cancelled')
   }
+  // devolada-transfer-verification D13 — the closed links close at Devolada, after the write; a
+  // whole-sale settlement link gets a replacement for the new balance while the sale still owes.
+  if (closedLinks.length) c.executionCtx.waitUntil(closeOpenLinksAfterWrite({ db, env: c.env }, org, id ?? ''))
+  const replacement = await replaceSettlementLink(
+    { db, env: c.env },
+    { organizationId: org, folioId: id ?? '', closed: closedLinks },
+  )
 
   // Written notice (D20), line-scoped (D13) — same event the admin's line cancel emits.
   await emitNotification(db, {
@@ -2381,6 +2398,7 @@ export const cancelBookingLine = async (c: PosContext) => {
       kept_commission: outcome.keptCommission,
       reversed_commission: outcome.reversedCommission,
     },
+    ...replacement,
   })
 }
 
@@ -2419,14 +2437,17 @@ export const verifyPayment = async (c: PosContext) => {
   // state; money amounts are untouched (verify moves no money).
   const now = new Date()
   const deps = { db, env: c.env, waitUntil: (p: Promise<unknown>) => c.executionCtx.waitUntil(p) }
-  const { flipped, rollupVerified } = await verifyFolioPayment(deps, {
+  const { flipped, rollupVerified, closedLinks } = await verifyFolioPayment(deps, {
     organizationId: org,
     folioId: id,
     paymentId: 'all',
     actorId: admin.userId,
     at: now,
     eventPayload: { reference: folio.paymentReference },
+    closeVerifiedLinks: true,
   })
+  // D13 — the links of the rows it verified close at Devolada, after the write.
+  if (closedLinks.length) c.executionCtx.waitUntil(closeOpenLinksAfterWrite({ db, env: c.env }, org, id ?? ''))
 
   // A booking (deposit) is confirmed but mints no QR — its tickets wait for settle.
   if (folio.status !== 'paid') {
@@ -2544,7 +2565,14 @@ export const rejectPayment = async (c: PosContext) => {
       clawback: true,
     })),
   )
-  await db.batch(statements as [BatchItem<'sqlite'>, ...BatchItem<'sqlite'>[]])
+  // devolada-transfer-verification D13 — the void sale stops taking money: its open links close, a
+  // payment in flight included (what arrives after is rightly `unapplied`), and then at Devolada.
+  const closingIndex = statements.length
+  statements.push(markLinksClosingStatement(db, org, id ?? '', 'rejected', { at: now }))
+  const results = await db.batch(statements as [BatchItem<'sqlite'>, ...BatchItem<'sqlite'>[]])
+  if ((results[closingIndex] as ClosedLink[]).length) {
+    c.executionCtx.waitUntil(closeOpenLinksAfterWrite({ db, env: c.env }, org, id ?? ''))
+  }
 
   const out = await readFolio(db, org, folio.agentId, id, c.env.QR_SECRET, c.env.API_BASE_URL)
   // US-A86 — obligatory rather than useful: their sale was cancelled because we could not confirm
@@ -2612,7 +2640,7 @@ export const cancelBooking = async (c: PosContext) => {
   const now = new Date()
   // Seat release, zone reconcile, reservation release and the proportional ledger reversal all live
   // inside this call — the same batch the admin path commits.
-  const { won, outcome } = await cancelFolioPriced(db, org, id, lineRows, now, {
+  const { won, outcome, closedLinks } = await cancelFolioPriced(db, org, id, lineRows, now, {
     cancelledBy: agent.userId,
     reason: body.reason ?? null,
     source: 'agent',
@@ -2622,6 +2650,8 @@ export const cancelBooking = async (c: PosContext) => {
     // twice, which is exactly what the guard is for.
     throw new ApiError('NOT_A_BOOKING', 409, 'Only a live booking can be cancelled here')
   }
+  // devolada-transfer-verification D13 — the links the batch marked close at Devolada, after it.
+  if (closedLinks.length) c.executionCtx.waitUntil(closeOpenLinksAfterWrite({ db, env: c.env }, org, id ?? ''))
 
   const updated = await readFolio(db, org, agent.userId, id, c.env.QR_SECRET, c.env.API_BASE_URL)
   // The same notice the admin path sends. It matters more here: this cancellation can now open a

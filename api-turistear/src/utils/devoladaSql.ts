@@ -18,6 +18,24 @@ export const currentPaymentStatusSql = (linkId: SQL): SQL =>
         order by dp.devolada_created_at desc, dp.rowid desc limit 1)`
 
 /**
+ * The money a link collects reached its sale: a sale or deposit link's row is verified (by Devolada,
+ * or by the admin's Verificar), or a settlement link holds the row it recorded (D8, D15). A `paid`
+ * link always means this (data-model § devolada_links). `alias` names the outer `devolada_links` row.
+ */
+export const linkMoneyAppliedSql = (alias: string): SQL =>
+  sql.raw(`(${alias}.folio_payment_id is not null and (${alias}.kind = 'settlement' or exists (
+    select 1 from folio_payments ap where ap.id = ${alias}.folio_payment_id and ap.verification = 'verified')))`)
+
+/**
+ * D9 — a `confirmed` payment whose money settled nothing: its link never ended `paid`, and its sale
+ * was cancelled, or a write closed the link first (D13) — in both cases a close that never reached
+ * Devolada in time. Money to return, like `unapplied`. `payment` and `link` name the outer rows.
+ */
+export const confirmedToReturnSql = (payment: string, link: string): SQL =>
+  sql.raw(`(${payment}.status = 'confirmed' and ${link}.state <> 'paid' and (${link}.closed_reason is not null
+    or exists (select 1 from folios fc where fc.id = ${payment}.folio_id and fc.cancelled_at is not null)))`)
+
+/**
  * A link that something may still happen to at Devolada: creating, open, closing or abandoned,
  * or closed while its current payment is in flight (data-model § devolada_links). Its credential is
  * kept until none is left (research D12, D21). `alias` names the outer `devolada_links` row.

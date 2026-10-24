@@ -10,6 +10,7 @@ import {
   type DevoladaPaymentStatus,
 } from '../../db/schema'
 import type { DevoladaPaymentRead } from '../../services/devolada'
+import { linkMoneyAppliedSql } from '../../utils/devoladaSql'
 import { folioEventRowWhere } from '../../utils/folioEvents'
 import { deriveStatusSql } from '../../utils/folioStatus'
 import { ApiError } from '../../types/errors'
@@ -181,10 +182,7 @@ async function recordVerdict(db: Db, link: DevoladaLink, row: DevoladaPayment, n
  */
 const appliedSql = (link: Pick<DevoladaLink, 'id' | 'organizationId'>) => sql`EXISTS (
   SELECT 1 FROM devolada_links al
-  WHERE al.id = ${link.id} AND al.organization_id = ${link.organizationId}
-    AND al.folio_payment_id IS NOT NULL
-    AND (al.kind = 'settlement' OR EXISTS (
-      SELECT 1 FROM folio_payments ap WHERE ap.id = al.folio_payment_id AND ap.verification = 'verified')))`
+  WHERE al.id = ${link.id} AND al.organization_id = ${link.organizationId} AND ${linkMoneyAppliedSql('al')})`
 
 async function moneyApplied(db: Db, link: DevoladaLink): Promise<boolean> {
   const [row] = await db
@@ -299,7 +297,7 @@ export async function applyDevoladaPayment(
       return applyConfirmedSale(deps, link, stored, sale.status, now)
     }
     case 'partial':
-    case 'invalid':
+    case 'invalid': {
       if (link.kind === 'settlement') {
         // D9 — the link closes, and the admin accepts or dismisses the payment (D15); the apartado
         // waits for that decision (D8).
@@ -310,9 +308,25 @@ export async function applyDevoladaPayment(
         deps.waitUntil(closePaymentLinkRemote(deps, link))
         return recordVerdict(db, link, stored, now)
       }
-      // The sale stays pending: it shows in Por verificar with the amounts and its label, and the
-      // admin uses Verificar or Rechazar as today (FR-018). A deposit's apartado waits (D8).
+      // D13 — a link the admin's Verificar left open under this payment closes now that its verdict
+      // is final: the sale already holds that money.
+      const [kept] = await db
+        .update(devoladaLinks)
+        .set({ state: 'closing', closedReason: 'verified_by_admin', updatedAt: now })
+        .where(
+          and(
+            eq(devoladaLinks.id, link.id),
+            eq(devoladaLinks.organizationId, org),
+            eq(devoladaLinks.state, 'open'),
+            appliedSql(link),
+          ),
+        )
+        .returning({ id: devoladaLinks.id })
+      if (kept) deps.waitUntil(closePaymentLinkRemote(deps, link))
+      // Otherwise the sale stays pending: it shows in Por verificar with the amounts and its label,
+      // and the admin uses Verificar or Rechazar as today (FR-018). A deposit's apartado waits (D8).
       return recordVerdict(db, link, stored, now)
+    }
     case 'unapplied':
       // «Dinero por devolver»: an attention item until the admin marks it returned (D15).
       return recordVerdict(db, link, stored, now)
@@ -401,6 +415,8 @@ async function applyConfirmedSale(
  * and dated by the verdict. The link is the claim, so nothing is recorded twice; a claim already
  * taken — by the admin's accept (D15), or another processor — records nothing more, and the link
  * ends `paid`. A payment submitted before its link expired is recorded past the apartado's clock.
+ * A link a write closed (D13: a cash settlement, a line cancellation) no longer asks what the sale
+ * owes: its confirmed money records nothing and is money to return (D9).
  */
 async function applyConfirmedSettlement(
   deps: ApplyDeps,
@@ -437,7 +453,11 @@ async function applyConfirmedSettlement(
     recordedAt: verdictAt,
     claim: { linkId: link.id, markPaid: true },
   })
-  if (!recorded) return markLinkPaid(db, link, stored, now)
+  // Not recorded: the claim was taken — by the admin's accept, or another processor — and the link
+  // ends `paid`; or a write closed the link first (D13), and the money is money to return.
+  if (!recorded) {
+    return (await moneyApplied(db, link)) ? markLinkPaid(db, link, stored, now) : recordVerdict(db, link, stored, now)
+  }
   return finish(db, stored, now)
 }
 

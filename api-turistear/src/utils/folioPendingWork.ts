@@ -21,6 +21,7 @@
 import { and, eq, gte, inArray, ne, or, sql, type SQL } from 'drizzle-orm'
 import type { Db } from '../db/client'
 import { folioRequests, folios } from '../db/schema'
+import { confirmedToReturnSql } from './devoladaSql'
 import { naiveEpoch, orgToday } from './tz'
 
 /** How many days of ordinary sales the list carries by default (D9). A parameter, not a law: the
@@ -51,9 +52,9 @@ export const verificationPendingFilter = (org: string): SQL =>
  * admin when it is:
  * - `partial` or `invalid` on a settlement link: the admin accepts or dismisses it (D15). On a sale
  *   or deposit link the sale stays pending, and today's Verificar or Rechazar decide it (FR-018);
- * - `unapplied`, or `confirmed` on a cancelled sale without having been applied to it (its link
- *   never ended `paid`): money to return (D9), until marked returned. Money applied before an
- *   ordinary cancellation was priced by that cancellation;
+ * - `unapplied`, or `confirmed` without having been applied to its sale (its link never ended
+ *   `paid`) because the sale was cancelled or a write closed the link first: money to return (D9,
+ *   D13), until marked returned. Money applied before an ordinary cancellation was priced by it;
  * - in flight and stalled — `validating` awaiting the payer's tracking key, `queued_for_credit` —
  *   or last seen in flight on a link no credential can read (`failed`, D21), while nobody decided
  *   it by hand: no resolution, the sale not cancelled, and a sale or deposit link's row still
@@ -73,9 +74,7 @@ export const devoladaAttentionFilter = (org: string): SQL =>
       and (
         (dp.status in ('partial', 'invalid') and l.kind = 'settlement')
         or dp.status = 'unapplied'
-        or (dp.status = 'confirmed' and l.state <> 'paid' and exists (
-          select 1 from folios fc where fc.id = dp.folio_id and fc.cancelled_at is not null
-        ))
+        or ${confirmedToReturnSql('dp', 'l')}
         or (
           ((dp.status = 'validating' and dp.awaiting is not null)
             or dp.status = 'queued_for_credit'
