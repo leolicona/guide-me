@@ -197,20 +197,26 @@ describe('credentials (D21)', () => {
     await sweepDevoladaPayments(env, at(1))
     expect((await credentialRows(org.organizationId))[0].ciphertext).toBeTruthy()
 
-    // Once its payment is final, nothing it serves is unresolved: erased, the row kept for audit.
+    // Once its payment is final, nothing it serves is unresolved; still, a key retired under 15
+    // minutes ago may be the one a request is writing a link with (T075): kept until then.
     await env.DB.prepare(`UPDATE devolada_payments SET status = 'unapplied' WHERE link_id = ?`).bind(link.id).run()
-    await sweepDevoladaPayments(env, at(2))
+    await sweepDevoladaPayments(env, at(14))
+    expect((await credentialRows(org.organizationId))[0].ciphertext).toBeTruthy()
+    // Erased, the row kept for audit.
+    await sweepDevoladaPayments(env, at(16))
     const [erased] = await credentialRows(org.organizationId)
     expect(erased.id).toBe(firstCredential.id)
-    expect(erased).toMatchObject({ ciphertext: null, iv: null, erased_at: sec(at(2)) })
+    expect(erased).toMatchObject({ ciphertext: null, iv: null, erased_at: sec(at(16)) })
   })
 
-  it("a disconnected organization's key is erased once it has no unresolved link", async () => {
+  it("a disconnected organization's key is erased once it has no unresolved link, 15 minutes after it was retired", async () => {
     await connectToFake(fake, org.adminEmail)
     await call(org.adminEmail, 'DELETE', '/organizations/me/devolada')
     await sweepDevoladaPayments(env, NOW)
+    expect((await credentialRows(org.organizationId))[0].ciphertext).toBeTruthy()
+    await sweepDevoladaPayments(env, at(15))
     const [credential] = await credentialRows(org.organizationId)
-    expect(credential).toMatchObject({ ciphertext: null, erased_at: sec(NOW) })
+    expect(credential).toMatchObject({ ciphertext: null, erased_at: sec(at(15)) })
   })
 
   it('a rejected retired key: the link moves to the current key when it can read it, otherwise it fails and goes to the admin, never cancelled', async () => {
@@ -608,12 +614,12 @@ describe('closed links whose payment is still in flight (D12 step 1, FR-012, US4
     const rotatedKey = fake.addKey(first.businessId)
     expect((await call(org.adminEmail, 'PUT', '/organizations/me/devolada', { api_key: rotatedKey })).status).toBe(200)
     fake.advance(paymentId, 'unapplied')
-    await sweepDevoladaPayments(env, at(11))
+    await sweepDevoladaPayments(env, at(16))
     expect(listCallsFor(first.apiKey).length).toBeGreaterThan(0)
     expect(listCallsFor(rotatedKey)).toHaveLength(0)
     expect((await env.DB.prepare(`SELECT status FROM devolada_payments WHERE link_id = ?`).bind(link.id).first<any>()).status).toBe('unapplied')
     const retired = (await credentialRows(org.organizationId)).find((c: any) => c.id === link.credential_id)
-    expect(retired).toMatchObject({ ciphertext: null, erased_at: sec(at(11)) })
+    expect(retired).toMatchObject({ ciphertext: null, erased_at: sec(at(16)) })
   })
 
   it('one no key can read any more becomes `failed`, and its retired credential is then erased', async () => {
@@ -624,7 +630,7 @@ describe('closed links whose payment is still in flight (D12 step 1, FR-012, US4
     fake.revokeKey(first.apiKey)
     await sweepDevoladaPayments(env, at(11))
     expect((await linkById(link.id)).state).toBe('failed')
-    await sweepDevoladaPayments(env, at(12))
+    await sweepDevoladaPayments(env, at(16))
     const retired = (await credentialRows(org.organizationId)).find((c: any) => c.id === link.credential_id)
     expect(retired.erased_at).not.toBeNull()
   })

@@ -1,4 +1,4 @@
-import { and, asc, eq, isNotNull, isNull, lte, or, sql } from 'drizzle-orm'
+import { and, asc, eq, isNull, lte, or, sql } from 'drizzle-orm'
 import { getDb, type Db } from '../../db/client'
 import { devoladaCredentials, devoladaLinks, type DevoladaLink } from '../../db/schema'
 import { devoladaClient, type DevoladaPaymentRead } from '../../services/devolada'
@@ -388,21 +388,30 @@ async function applySaleRead(
  * key goes once its last link resolves and every payment of its links has its verdict. Candidates
  * are read across organizations; each erase is guarded again by its own organization and by the
  * same condition, read through the `(credential_id, state)` index.
+ *
+ * Only a key retired at least ERASE_AFTER_RETIRED_SECONDS ago (T075): a request that loaded it as
+ * the current key just before the admin replaced it may still be writing its link, which then
+ * keeps it.
  */
+const ERASE_AFTER_RETIRED_SECONDS = 15 * 60
+
 const noUnresolvedLink = sql`not exists (
   select 1 from devolada_links dl
   where dl.credential_id = ${devoladaCredentials.id} and ${unresolvedLinkSql('dl')}
 )`
 
-/** The retired, unerased credentials with no unresolved link, across organizations. */
-export const erasableCredentialsQuery = (db: Db) =>
+const retiredLongEnough = (now: Date) =>
+  lte(devoladaCredentials.retiredAt, new Date(now.getTime() - ERASE_AFTER_RETIRED_SECONDS * 1000))
+
+/** The credentials retired long enough ago, unerased, with no unresolved link, across organizations. */
+export const erasableCredentialsQuery = (db: Db, now: Date) =>
   db
     .select({ id: devoladaCredentials.id, organizationId: devoladaCredentials.organizationId })
     .from(devoladaCredentials)
-    .where(and(isNotNull(devoladaCredentials.retiredAt), isNull(devoladaCredentials.erasedAt), noUnresolvedLink))
+    .where(and(retiredLongEnough(now), isNull(devoladaCredentials.erasedAt), noUnresolvedLink))
 
 async function eraseRetiredCredentials(db: Db, now: Date): Promise<void> {
-  const candidates = await erasableCredentialsQuery(db)
+  const candidates = await erasableCredentialsQuery(db, now)
   for (const credential of candidates) {
     await db
       .update(devoladaCredentials)
@@ -411,7 +420,7 @@ async function eraseRetiredCredentials(db: Db, now: Date): Promise<void> {
         and(
           eq(devoladaCredentials.id, credential.id),
           eq(devoladaCredentials.organizationId, credential.organizationId),
-          isNotNull(devoladaCredentials.retiredAt),
+          retiredLongEnough(now),
           isNull(devoladaCredentials.erasedAt),
           noUnresolvedLink,
         ),

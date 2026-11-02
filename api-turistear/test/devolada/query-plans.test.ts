@@ -104,7 +104,7 @@ describe('BUG-042 — the Devolada reads enter an index', () => {
   })
 
   it("the sweep's cleanup of retired credentials", async () => {
-    const plan = await planOf(erasableCredentialsQuery(db))
+    const plan = await planOf(erasableCredentialsQuery(db, NOW))
     expect(plan.some((row) => row.detail.startsWith('CORRELATED'))).toBe(true)
     expect(scansInsideCorrelated(plan), details(plan).join('\n')).toEqual([])
     expect(details(plan).some((l) => /SEARCH dl USING .*INDEX devolada_links_credential_idx/.test(l))).toBe(true)

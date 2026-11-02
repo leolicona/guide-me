@@ -1,5 +1,5 @@
 import type { Context } from 'hono'
-import { and, eq, sql } from 'drizzle-orm'
+import { and, eq, lte, sql } from 'drizzle-orm'
 import { getDb } from '../../db/client'
 import { devoladaEvents, devoladaLinks } from '../../db/schema'
 import { devoladaClient } from '../../services/devolada'
@@ -13,7 +13,9 @@ import type { DevoladaWebhookEvent } from './schema'
 //   4. the link is found by Devolada's own link id, a globally unique key — the one lookup
 //      constitution III exempts from the actor's organization, since a webhook has no actor;
 //   5. the event's mode must be the link's;
-//   6. an event already processed is skipped, one whose processing failed is processed again;
+//   6. an event already processed is skipped, one whose processing failed is processed again —
+//      at most once per RETRY_SPACING, so a replayed delivery cannot spend the organization's
+//      calls to Devolada (T075);
 //   7. the payment is RE-READ with the link's own credential (D21), one of the owning
 //      organization's own — another business's payment answers NOT_FOUND — and D9 is applied to
 //      that answer, never to the body.
@@ -27,6 +29,9 @@ export type WebhooksEnv = {
 type Outcome = 'applied' | 'no_change' | 'mode_mismatch' | 'failed'
 
 const unavailable = () => new ApiError('DEVOLADA_UNAVAILABLE', 503, 'Devolada could not be reached')
+
+/** Devolada retries a failed delivery 1, 5, 15, 60 and 240 minutes later (D4): never sooner. */
+const RETRY_SPACING_MS = 30_000
 
 export const receiveDevoladaWebhook = async (c: Context<WebhooksEnv>) => {
   const event = c.get('devoladaEvent')
@@ -73,11 +78,22 @@ export const receiveDevoladaWebhook = async (c: Context<WebhooksEnv>) => {
           eq(devoladaEvents.eventId, event.eventId),
           eq(devoladaEvents.organizationId, org),
           eq(devoladaEvents.outcome, 'failed'),
+          lte(devoladaEvents.receivedAt, new Date(now.getTime() - RETRY_SPACING_MS)),
         ),
       )
       .returning({ eventId: devoladaEvents.eventId })
-    // Already applied, already a no-op, or a mode mismatch: a duplicate changes nothing.
-    if (!retried[0]) return c.json({ received: true })
+    if (!retried[0]) {
+      const [held] = await db
+        .select({ outcome: devoladaEvents.outcome })
+        .from(devoladaEvents)
+        .where(and(eq(devoladaEvents.eventId, event.eventId), eq(devoladaEvents.organizationId, org)))
+        .limit(1)
+      // A failed event seen within RETRY_SPACING: one attempt is still running, or a delivery was
+      // replayed. Nothing is read now, and Devolada's next retry processes it.
+      if (held?.outcome === 'failed') throw unavailable()
+      // Already applied, already a no-op, or a mode mismatch: a duplicate changes nothing.
+      return c.json({ received: true })
+    }
   }
 
   // 5. The event's mode must be the link's own, copied from the credential that created it.

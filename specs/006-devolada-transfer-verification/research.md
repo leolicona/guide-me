@@ -144,7 +144,7 @@ says otherwise.
 
      Both failures make Devolada retry after 1, 5, 15, 60 and 240 minutes.
 
-  No timestamp window is enforced.
+  No timestamp window is enforced. A failed event is processed again at most once every 30 seconds: a delivery of it sooner answers 503 without reading Devolada, so a replayed delivery cannot spend the organization's calls, and Devolada's own retries (at least a minute apart) still process it *(amended 2026-11-02 by T075's security review)*.
 - **Rationale**:
   - FR-013 and SC-005.
   - The signature proves Devolada sent the message, not which business it concerns. The `paymentLinkId` lookup plus a re-read with that organization's own credential does: another business's payment answers `NOT_FOUND`.
@@ -358,7 +358,7 @@ says otherwise.
        - `creating` for more than 5 minutes: the request that wrote it died before recording an outcome, so the link becomes `abandoned` (D6);
        - `abandoned`: replay the create with the same key; if the link exists, close it;
        - `closing`: send `PATCH {close: true}` until Devolada acknowledges. A link a cancellation marked `closing` while its create was still running, and whose create never recorded Devolada's id, is first replayed with the same key to learn it.
-    4. A retired credential with no unresolved link is erased (D21). Disconnecting retires the current one, so a disconnected organization's key goes once its last link resolves and every payment of its links has its verdict. *(Amended 2026-10-15 by /speckit-analyze: closed links whose payment is in flight, and links left in `creating`. Amended 2026-10-16: the current credential's rejection, and `closing` links without Devolada's id.)*
+    4. A retired credential with no unresolved link is erased (D21), once it has been retired for 15 minutes: a request that loaded it as the current key just before the admin replaced it may still be writing its link *(amended 2026-11-02 by T075's security review)*. Disconnecting retires the current one, so a disconnected organization's key goes once its last link resolves and every payment of its links has its verdict. *(Amended 2026-10-15 by /speckit-analyze: closed links whose payment is in flight, and links left in `creating`. Amended 2026-10-16: the current credential's rejection, and `closing` links without Devolada's id.)*
   - Budget: at most 50 Devolada calls per organization per run (the limit is 120 a minute, shared with live traffic). `RATE_LIMITED` stops that organization until the next run.
   - Order, so the budget never starves a sale: links past `expires_at` first, then never-checked links, then the oldest `last_checked_at`. Every notification applied also stamps `last_checked_at`, so the sweep spends its budget only on links nothing has reported on for 10 minutes.
   - Scale: SC-003 and SC-009 hold while an organization has at most 50 such links per run. Production today has 5 transfers in 75 days. Past that, each extra 50 links adds one run (15 minutes) to a lost verdict's delay; raising the budget toward Devolada's limit is the lever. *(Amended 2026-10-15 by /speckit-analyze.)*

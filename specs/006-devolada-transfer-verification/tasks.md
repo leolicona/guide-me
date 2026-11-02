@@ -772,7 +772,7 @@ Write each story's tests first and watch them fail.
   - the sweep's credential cleanup (T032) and its selection of closed links whose payment is in flight (T071).
 
   Assert that no `SCAN` happens inside a correlated subquery (BUG-042, constitution § Additional constraints). *(PR 3: the sweep's closed links whose payment is in flight, and the writes' closing statement.)*
-- [ ] T075 [P] Run `/security-review` over `api-turistear/src/routes/webhooks/`, `api-turistear/src/utils/devoladaSignature.ts`, `api-turistear/src/utils/devoladaCredential.ts` and `api-turistear/src/services/devolada.ts`. Confirm:
+- [X] T075 [P] Run `/security-review` over `api-turistear/src/routes/webhooks/`, `api-turistear/src/utils/devoladaSignature.ts`, `api-turistear/src/utils/devoladaCredential.ts` and `api-turistear/src/services/devolada.ts`. Confirm:
   - no key or ciphertext in any log or response;
   - the signature is verified before parsing;
   - the organization is resolved only through `devolada_link_id`;
@@ -780,6 +780,8 @@ Write each story's tests first and watch them fail.
   - no file but `api-turistear/src/services/devolada.ts` names Devolada's host or paths, the key set included (constitution VIII; grep);
   - the 64 KiB limit is enforced;
   - the production mode policy holds.
+
+  *(Run 2026-11-02, by hand and by an independent review: the `/security-review` skill reviews only a branch's own diff, and this code is already on `main`. Every property holds. Two low-severity hardenings ride PR 3: a failed webhook event is processed again at most once every 30 seconds, and a retired credential is erased only 15 minutes after it was retired — research D4, D12. Accepted as low and left as they are: a stored key's mode is checked at connect, not again when used (separate per-environment secrets keep a key from crossing environments); the webhook verifies the body decoded as UTF-8, which is the same string it parses; connecting is not rate-limited for an admin; `upsertSnapshot`'s retry on a conflict cannot loop while `devolada_link_id` is unique. The deploy workflows stop on a malformed `DEVOLADA_CREDENTIAL_KEY` and never print it.)*
 - [ ] T076 Run `specs/006-devolada-transfer-verification/quickstart.md`:
   - §1, including the scope-boundary `git diff --exit-code` check;
   - §2 steps 1-14 against Devolada test businesses;
