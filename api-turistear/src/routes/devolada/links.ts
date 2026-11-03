@@ -41,6 +41,7 @@ import {
  */
 export const MIN_LINK_LIFETIME = 15 * 60
 
+/** D7 — a link lives 24 hours at most, and never past the first service. */
 const LINK_MAX_LIFETIME = 24 * 60 * 60
 
 export type PaymentLinkError =
@@ -364,7 +365,7 @@ export interface LinkClosingScope {
 
 // `coalesce`: a link with no payment yet has no current status, and NULL must read as "not in flight".
 const IN_FLIGHT_SQL = sql`coalesce(${currentPaymentStatusSql(sql`devolada_links.id`)}, '') in ('validating', 'queued_for_credit')`
-/** Never closed by a write: the link's money reached the sale, and its payment is in flight. */
+/** D13 — never closed by a write: the link's money reached the sale, and its payment is in flight. */
 const KEPT_UNTIL_VERDICT_SQL = sql`(${linkMoneyAppliedSql('devolada_links')} and ${IN_FLIGHT_SQL})`
 
 function closingScopeSql(organizationId: string, folioId: string, scope: LinkClosingScope): (SQL | undefined)[] {

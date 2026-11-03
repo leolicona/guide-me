@@ -4,7 +4,9 @@
 
 **Created**: 2026-10-05
 
-**Status**: Draft
+**Status**: Implemented — 2026-11-03, in pull requests #176 (US1), #178 (US2, US3) and #179
+(US4), with defect 11 fixed by #177 (research D19). What the build changed is amended in place
+below and in [`research.md`](./research.md), each marked *amended in build*.
 
 **Input**: User description: "Evalúa integrar esta api de validación transferencia automatizada" —
 Devolada's collections API v1, supplied as OpenAPI and kept verbatim in
@@ -219,9 +221,11 @@ by «Sistema» with its seats released.
    deposit and its own hold rules intact. A sale is never cancelled automatically while it holds
    money that was cleared. *(Amended by plan D8: a settlement is recorded only once confirmed.)*
 5. **Given** money that arrives for a link already closed (*unapplied*) — including a sale
-   cancelled under scenario 3 whose customer paid late, and a sale cancelled while its payment was
-   being verified — **Then** the admin is alerted that money arrived for a sale that no longer
-   takes it, with the amount, so they can return it, even if Devolada's notification was lost.
+   cancelled under scenario 3 whose customer paid late, a sale cancelled while its payment was
+   being verified, and a payment confirmed on a link that a cash settlement or a line cancellation
+   closed first (amended in build, research D9) — **Then** the admin is alerted that money arrived
+   for a sale that no longer takes it, with the amount, so they can return it, even if Devolada's
+   notification was lost.
 6. **Given** a payment waiting for the customer's tracking key, **Then** the seller sees «Pide al
    cliente su clave de rastreo» on the sale, and the sale keeps waiting without expiring.
 7. **Given** the organization's validation credit at Devolada has run out, **Then** the admin sees
@@ -292,12 +296,15 @@ admin alert. *(A sale whose transfer is still pending cannot be cancelled, only 
 **Acceptance Scenarios**:
 
 1. **Given** a sale with an open link, **When** the sale is cancelled by a person, **Then** its link
-   is closed. *(The apartado expiry never closes an open link: a deposit or settlement link
-   expires by the apartado's clock, before its release time, and one whose payment is still being
-   verified holds the apartado, FR-016.)*
+   is closed, unless the link's money already reached the sale and its payment is still being
+   verified: that link closes with its verdict (FR-011; amended in build). *(The apartado expiry
+   never closes an open link: a deposit or settlement link expires by the apartado's clock, before
+   its release time, and one whose payment is still being verified holds the apartado, FR-016.)*
 2. **Given** an open link for the whole balance, **When** a line of the sale is cancelled and the
-   amount due changes, **Then** the link is closed and a new link for the new amount replaces it. A
-   link for one line's balance closes, with no replacement, only when that line is cancelled.
+   amount due changes, **Then** the link is closed and a new link for the new amount replaces it,
+   and the seller is told to send it again; when the new link cannot be created, the seller is told
+   to settle the balance again. A link for one line's balance closes, with no replacement, only
+   when that line is cancelled. *(The second notice amended in build.)*
 3. **Given** a payment with an open link, **When** an admin rejects it, **Then** its link is closed.
 4. **Given** an apartado whose settlement transfer is being verified, **When** a seller cancels a
    line, or settles another way, in a way that would close that link, **Then** it is refused until
@@ -318,6 +325,9 @@ admin alert. *(A sale whose transfer is still pending cannot be cancelled, only 
   forgery, or a test-mode verdict reaching production) → changes nothing, and is logged for diagnosis.
 - **The customer corrects a misread receipt** (*superseded*) → the first payment is ignored and the
   corrected one is followed.
+- **A payment starts being verified in the instant between the check and a write that closes its
+  link** → the write goes ahead and the link closes; the payment's verdict arrives as money to
+  return, never lost (Story 2, scenario 5). *(Added in build, research D13.)*
 - **The admin verifies by hand while Devolada is still validating** → the manual verification
   stands, and the link stays open until Devolada's verdict, which is recorded but releases nothing a
   second time (FR-011). A sale an admin verified is never cancelled automatically.
@@ -396,9 +406,12 @@ admin alert. *(A sale whose transfer is still pending cannot be cancelled, only 
   (Assumptions). While the sale stays alive, a link is never closed under a payment being verified:
   the admin's manual Verificar leaves it open until the verdict, and a line cancellation or another
   settlement that would close it is refused until then. Cancelling or rejecting the sale still
-  closes it. A link for one line's balance closes only when that line is cancelled or settled; one
-  for the whole balance closes when the amount due changes, and a line cancellation replaces it.
-  *(Clarified 2026-10-15)*
+  closes it, except a link whose money already reached the sale (a row the admin verified, a
+  settlement accepted) while its payment is in flight: closing it would turn money the sale already
+  holds into money to return, so it stays open until the verdict. A link for one line's balance
+  closes only when that line is cancelled or settled; one for the whole balance closes when the
+  amount due changes, and a line cancellation replaces it. *(Clarified 2026-10-15; the exception
+  amended in build, research D13.)*
 
 **Verdicts**
 
