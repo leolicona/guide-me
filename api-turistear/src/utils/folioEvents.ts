@@ -36,6 +36,8 @@ export type FolioEventType =
   | 'transfer_not_received'
 
 interface FolioEventInput {
+  /** The row's id, when a later statement of the same batch must find this very row; else random. */
+  id?: string
   organizationId: string
   folioId: string
   type: FolioEventType
@@ -73,7 +75,7 @@ export const folioEventRow = (db: Db, input: FolioEventInput) =>
 // insert-select names every column in the table's own order, so the values follow that order.
 export const folioEventRowWhere = (db: Db, input: FolioEventInput, gate: SQL) => {
   const values: Record<string, unknown> = {
-    id: crypto.randomUUID(),
+    id: input.id ?? crypto.randomUUID(),
     organizationId: input.organizationId,
     folioId: input.folioId,
     eventType: input.type,

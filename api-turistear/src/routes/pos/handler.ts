@@ -43,7 +43,7 @@ import {
   type RescheduleMove,
 } from './reschedule'
 import { emitNotification } from '../../utils/notifications'
-import { folioEventRow, readFolioEvents } from '../../utils/folioEvents'
+import { folioEventRow, folioEventRowWhere, readFolioEvents } from '../../utils/folioEvents'
 import {
   nightsBetween,
   parseCsvInts,
@@ -2491,26 +2491,51 @@ export const rejectPayment = async (c: PosContext) => {
       agentId: folios.agentId,
       paymentVerification: folios.paymentVerification,
       paymentReference: folios.paymentReference,
+      cancelledAt: folios.cancelledAt,
     })
     .from(folios)
     .where(and(eq(folios.id, id), eq(folios.organizationId, org)))
     .limit(1)
   const folio = folioRows[0]
   if (!folio) throw new ApiError('NOT_FOUND', 404, 'Folio not found')
-  if (folio.paymentVerification !== 'pending') {
+  // bug: reject-rereleases-cancelled-seats — a cancelled sale's transfer still reads `pending`
+  // (research defect 5), but there is nothing left to reject: its seats and money went back already.
+  if (folio.paymentVerification !== 'pending' || folio.cancelledAt) {
     throw new ApiError('NOT_PENDING_VERIFICATION', 409, 'This payment is not awaiting verification')
   }
 
+  // Only the live lines give seats back: a line cancelled earlier released its own.
   const lineRows = await db
     .select({
+      id: folioLines.id,
       slotId: folioLines.slotId,
       quantity: folioLines.quantity,
       zoneId: folioLines.zoneId,
     })
     .from(folioLines)
-    .where(and(eq(folioLines.folioId, id), eq(folioLines.organizationId, org)))
+    .where(and(eq(folioLines.folioId, id), eq(folioLines.organizationId, org), isNull(folioLines.cancelledAt)))
 
-  const now = new Date()
+  // Stored to the second: the gates below compare the stamps this batch writes.
+  const atSec = Math.floor(Date.now() / 1000)
+  const now = new Date(atSec * 1000)
+  const reason = body.reason ?? 'Pago electrónico rechazado'
+  // bug: reject-rereleases-cancelled-seats — one batch, one Rechazar (constitution V). The first
+  // statement cancels the sale only while it is live and its payment pending. The event row is
+  // written only by the batch whose first statement did: a second Rechazar by the same admin in
+  // the same second finds the sale's stamp, but also its `transfer_rejected` row. Every later
+  // statement is gated on this batch's own row, so a Rechazar that lost changes nothing.
+  const eventId = crypto.randomUUID()
+  const cancelledHere = sql`EXISTS (SELECT 1 FROM folios g
+    WHERE g.id = ${id} AND g.organization_id = ${org}
+      AND g.cancelled_at = ${atSec} AND g.cancelled_by = ${admin.userId})`
+  const notRejectedBefore = sql`NOT EXISTS (SELECT 1 FROM folio_events pe
+    WHERE pe.folio_id = ${id} AND pe.organization_id = ${org} AND pe.event_type = 'transfer_rejected')`
+  const rejectedHere = sql`EXISTS (SELECT 1 FROM folio_events ge WHERE ge.id = ${eventId})`
+  // A line's seats go back only if this batch cancelled that line.
+  const lineCancelledHere = (lineId: string) => sql`(${rejectedHere} AND EXISTS (SELECT 1 FROM folio_lines gl
+    WHERE gl.id = ${lineId} AND gl.organization_id = ${org} AND gl.cancelled_at = ${atSec}
+      AND gl.cancelled_by = ${admin.userId} AND gl.cancellation_source = 'admin'))`
+
   const statements: BatchItem<'sqlite'>[] = [
     db
       .update(folios)
@@ -2518,11 +2543,34 @@ export const rejectPayment = async (c: PosContext) => {
         // TECH_DEBT #25 — status/refund derive from the lines; the stamp is the fact.
         cancelledAt: now,
         cancelledBy: admin.userId,
-        cancellationReason: body.reason ?? 'Pago electrónico rechazado',
+        cancellationReason: reason,
         cancellationClawback: true, // the sale was void — the seller loses the commission
         updatedAt: now,
       })
-      .where(and(eq(folios.id, id), eq(folios.organizationId, org))),
+      .where(
+        and(
+          eq(folios.id, id),
+          eq(folios.organizationId, org),
+          isNull(folios.cancelledAt),
+          eq(folios.paymentVerification, 'pending'),
+        ),
+      )
+      .returning({ id: folios.id }),
+    // US-A24 — one action, one row (D9): the rejection IS the cancellation, so no second
+    // `cancelled` event is written for the same tap.
+    folioEventRowWhere(
+      db,
+      {
+        id: eventId,
+        organizationId: org,
+        folioId: id,
+        type: 'transfer_rejected',
+        actorId: admin.userId,
+        payload: { reference: folio.paymentReference, reason },
+        at: now,
+      },
+      sql`${cancelledHere} AND ${notRejectedBefore}`,
+    ),
     // US-A22 (line-autonomy) — the lines record the same fact the folio does. This hand-rolled
     // cancel path predates F2's per-line stamps; the derived status field (D11) is what exposed
     // the gap — a rejected folio's lines still read as live.
@@ -2534,26 +2582,20 @@ export const rejectPayment = async (c: PosContext) => {
           eq(folioLines.folioId, id),
           eq(folioLines.organizationId, org),
           sql`${folioLines.cancelledAt} is null`,
+          rejectedHere,
         ),
       ),
-    // US-A24 — one action, one row (D9): the rejection IS the cancellation, so no second
-    // `cancelled` event is written for the same tap.
-    folioEventRow(db, {
-      organizationId: org,
-      folioId: id,
-      type: 'transfer_rejected',
-      actorId: admin.userId,
-      payload: {
-        reference: folio.paymentReference,
-        reason: body.reason ?? 'Pago electrónico rechazado',
-      },
-      at: now,
-    }),
   ]
   // Release the held spots and the stay reservations, through the builder D11 shares
-  // (devolada-transfer-verification). Every line of the sale is passed, as before (research defect 3).
+  // (devolada-transfer-verification): each live line's, once this batch cancelled it.
   statements.push(
-    ...buildInventoryReleaseStatements(db, { organizationId: org, folioId: id, lines: lineRows, at: now }),
+    ...buildInventoryReleaseStatements(db, {
+      organizationId: org,
+      folioId: id,
+      at: now,
+      gate: rejectedHere,
+      lines: lineRows.map((l) => ({ ...l, gate: lineCancelledHere(l.id) })),
+    }),
   )
   // US-LG — the void sale reverses out of the ledger (its electronic money leaves the sales bucket;
   // the seller's commission is clawed back). Dated now (cancelled_at).
@@ -2564,16 +2606,21 @@ export const rejectPayment = async (c: PosContext) => {
       collectedBy: folio.agentId,
       at: now,
       clawback: true,
+      gate: rejectedHere,
     })),
   )
   // devolada-transfer-verification D13 — the void sale stops taking money: its open links close, a
   // payment in flight included (what arrives after is rightly `unapplied`), and then at Devolada.
   const closingIndex = statements.length
   statements.push(
-    markLinksClosingStatement(db, org, id ?? '', 'rejected', { at: now }),
+    markLinksClosingStatement(db, org, id ?? '', 'rejected', { at: now, gate: rejectedHere }),
     linkClosedEventsStatement(db, org, id ?? '', { at: now, actorId: admin.userId }),
   )
   const results = await db.batch(statements as [BatchItem<'sqlite'>, ...BatchItem<'sqlite'>[]])
+  // Nothing matched: another Rechazar, a verification or a cancellation got there first.
+  if ((results[0] as { id: string }[]).length === 0) {
+    throw new ApiError('NOT_PENDING_VERIFICATION', 409, 'This payment is not awaiting verification')
+  }
   if ((results[closingIndex] as ClosedLink[]).length) {
     c.executionCtx.waitUntil(closeOpenLinksAfterWrite({ db, env: c.env }, org, id ?? ''))
   }
