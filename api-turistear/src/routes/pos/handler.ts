@@ -2422,13 +2422,16 @@ export const verifyPayment = async (c: PosContext) => {
       status: deriveStatusSql, // TECH_DEBT #25
       paymentVerification: folios.paymentVerification,
       paymentReference: folios.paymentReference,
+      cancelledAt: folios.cancelledAt,
     })
     .from(folios)
     .where(and(eq(folios.id, id), eq(folios.organizationId, org)))
     .limit(1)
   const folio = folioRows[0]
   if (!folio) throw new ApiError('NOT_FOUND', 404, 'Folio not found')
-  if (folio.paymentVerification !== 'pending') {
+  // bug: verify-cancelled-sale — a sale Rechazar or the apartado sweep cancelled still reads
+  // `pending` (research defect 5), but a cancelled sale is never verified (devolada D9).
+  if (folio.paymentVerification !== 'pending' || folio.cancelledAt) {
     throw new ApiError('NOT_PENDING_VERIFICATION', 409, 'This payment is not awaiting verification')
   }
 
@@ -2446,7 +2449,19 @@ export const verifyPayment = async (c: PosContext) => {
     at: now,
     eventPayload: { reference: folio.paymentReference },
     closeVerifiedLinks: true,
+    // A cancellation that lands between the read above and this batch still verifies nothing.
+    refuseCancelled: true,
   })
+  if (!flipped) {
+    const [after] = await db
+      .select({ cancelledAt: folios.cancelledAt })
+      .from(folios)
+      .where(and(eq(folios.id, id ?? ''), eq(folios.organizationId, org)))
+      .limit(1)
+    if (after?.cancelledAt) {
+      throw new ApiError('NOT_PENDING_VERIFICATION', 409, 'This payment is not awaiting verification')
+    }
+  }
   // D13 — the links of the rows it verified close at Devolada, after the write.
   if (closedLinks.length) c.executionCtx.waitUntil(closeOpenLinksAfterWrite({ db, env: c.env }, org, id ?? ''))
 
