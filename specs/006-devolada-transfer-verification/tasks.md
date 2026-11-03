@@ -786,10 +786,18 @@ Write each story's tests first and watch them fail.
   - §1, including the scope-boundary `git diff --exit-code` check;
   - §2 steps 1-14 against Devolada test businesses;
   - §3, on the pull request's preview and, after the merge, on dev.
-- [ ] T077 [P] Register the thirteen defects of research.md § Defects found through `/speckit-bug-assess`, one entry each under `.specify/bugs/<slug>/`, without fixing them in this feature. Defect 11 is the exception: take it through the whole lite path (`-assess`, `-fix`, `-test`) before PR 2 ships, because D11 newly sends that message.
-- [ ] T078 [P] Audit the citations. Every file in `api-turistear/test/devolada/` and every new app test cites `devolada-transfer-verification US<n>`. Every non-obvious rule under `api-turistear/src/routes/devolada/` and `api-turistear/src/routes/pos/{verifyCore,settleCore,unreceivedTransfer}.ts` cites `D<n>`. Each new route's suite has `seedTwoOrgs` cases.
-- [ ] T079 Amend `specs/006-devolada-transfer-verification/spec.md` and `research.md` in place with whatever the build changed: decisions added or withdrawn in build, scenarios rewritten (constitution I). Set the spec's Status to `Implemented` once PR 3 merges.
-- [ ] T080 [P] Add a §4 «Measuring the outcomes» to `specs/006-devolada-transfer-verification/quickstart.md`. Give the read-only aggregate SQL that measures, per organization and without customer data:
+
+  *(Run 2026-11-03, after PR 3 merged as 6bd538e. §1 passes: the Devolada suites (12 files, 219 tests), the scope-boundary suites (24 tests), and the three scope-boundary files unchanged since before PR 1 (`git diff --exit-code b1b81d5^`); app lint 0 errors, app 1000 tests, API 1242 tests, the scripts' 15 tests, both builds. On dev: *Deploy Dev* of 6bd538e is green, and the Worker carries `DEVOLADA_CREDENTIAL_KEY`; a badly signed request to `/api/webhooks/devolada` answers 401 `WEBHOOK_SIGNATURE_INVALID`. Still to run, by a person with a Devolada test business: §2 steps 1-14, and §3's connect, notification and steps 2-4 on dev.)*
+- [X] T077 [P] Register the thirteen defects of research.md § Defects found through `/speckit-bug-assess`, one entry each under `.specify/bugs/<slug>/`, without fixing them in this feature. Defect 11 is the exception: take it through the whole lite path (`-assess`, `-fix`, `-test`) before PR 2 ships, because D11 newly sends that message.
+
+  *(Done 2026-11-03: defect 11 fixed by #177; the other twelve assessed against `main` after PR 3, each re-located and marked with what this feature already guards. Research § Defects names each slug.)*
+- [X] T078 [P] Audit the citations. Every file in `api-turistear/test/devolada/` and every new app test cites `devolada-transfer-verification US<n>`. Every non-obvious rule under `api-turistear/src/routes/devolada/` and `api-turistear/src/routes/pos/{verifyCore,settleCore,unreceivedTransfer}.ts` cites `D<n>`. Each new route's suite has `seedTwoOrgs` cases.
+
+  *(Done 2026-11-03. Every file in `test/devolada/` and every app test the feature added cites `devolada-transfer-verification US<n>`; the two app tests #177 changed cite `bug: payment-rejected-folio-copy`, as a lite-path fix does. Eight non-obvious rules gained their `D<n>` (constants of the sweep and the link lifetime, the closing rule's kept links, the snapshot and `paid` rules of `apply.ts`, the probe). The connection, resolve and webhook routes each have cross-organization cases with `seedTwoOrgs`.)*
+- [X] T079 Amend `specs/006-devolada-transfer-verification/spec.md` and `research.md` in place with whatever the build changed: decisions added or withdrawn in build, scenarios rewritten (constitution I). Set the spec's Status to `Implemented` once PR 3 merges.
+
+  *(Done 2026-11-03. research.md was amended during each PR (D4, D9, D12, D13, defect 11); spec.md now carries FR-011's exception for a link whose money reached the sale, US2 scenario 5's confirmed payment on a link a write closed, US4 scenarios 1-2, and the in-between edge case, each marked amended in build.)*
+- [X] T080 [P] Add a §4 «Measuring the outcomes» to `specs/006-devolada-transfer-verification/quickstart.md`. Give the read-only aggregate SQL that measures, per organization and without customer data:
   - SC-001: confirmed payments released with no admin action;
   - SC-002: minutes from the verdict to the tickets;
   - SC-004: payments waiting more than 24 h without a label;

@@ -57,7 +57,7 @@ export const brokenReasonOf = (failure: Pick<DevoladaFailure, 'kind' | 'code'>):
 type ProbeResult = { ok: true; mode: DevoladaMode } | { ok: false; failure: DevoladaFailure }
 
 /**
- * A one-time link born expired: the one call that uses the credential, reports its mode, and fails
+ * D2 — a one-time link born expired: the one call that uses the credential, reports its mode, and fails
  * exactly where a real sale would fail (a business without its CLABE). A fresh Idempotency-Key per
  * attempt, so a refusal is never replayed to a later, fixed attempt.
  */

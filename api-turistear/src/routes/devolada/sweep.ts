@@ -30,11 +30,11 @@ import { closePaymentLinkRemote, linkClosedEventsStatement, replayPaymentLinkCre
 // flight is re-read too, until that payment's verdict (FR-012). Links left `closing` are closed at
 // Devolada until it acknowledges, and abandoned ones are replayed with the same key and closed.
 
-/** A link nothing has reported on for this long is re-read. */
+/** D12 — a link nothing has reported on for this long is re-read. */
 const RECHECK_AFTER_SECONDS = 10 * 60
-/** Devolada allows 120 calls a minute per business, shared with live traffic. */
+/** D12 — Devolada allows 120 calls a minute per business, shared with live traffic. */
 const CALL_BUDGET_PER_ORG = 50
-/** A row left `creating` this long belongs to a request that died before recording an outcome. */
+/** D6, D12 — a row left `creating` this long belongs to a request that died before recording an outcome. */
 const CREATING_TIMEOUT_SECONDS = 5 * 60
 
 export interface DevoladaSweepResult {

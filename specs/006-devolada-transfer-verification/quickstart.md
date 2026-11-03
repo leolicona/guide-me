@@ -124,3 +124,136 @@ cron (research D17).
 
 **In production, after the `v*` tag**: connecting with a test key is refused with
 `DEVOLADA_MODE_NOT_ALLOWED`.
+
+## 4 · Measuring the outcomes
+
+Four read-only queries, one per success criterion the data can measure. Each answers per
+organization, with counts, shares and seconds only: no customer, sale or payment identifier leaves
+the database. Save one to a file and run it against the environment you want to measure:
+
+```bash
+pnpm --filter api-turistear exec wrangler d1 execute guideme-db-prod --env production --remote --file sc-001.sql
+pnpm --filter api-turistear exec wrangler d1 execute guideme-db --env dev --remote --file sc-001.sql
+```
+
+The first lines (`params`) are the only ones to edit: `since` starts the period measured, and
+`mode` is `'real'` in production and `'test'` on dev, where every key is a test key. The queries were
+checked against a database with every migration applied: each returns the expected figures on
+seeded rows, and none plans a `SCAN` inside a correlated subquery (BUG-042).
+
+**SC-001 — released with no admin action** (target: `pct` at least 95). A confirmed payment counts
+as released by the system when its link ended `paid` and the row it collected was verified by no
+one (`verified_by` NULL: «Sistema»). Money to return (research D9) is left out: it settles nothing.
+A confirmed payment still waiting to be applied counts against.
+
+```sql
+WITH params AS (SELECT CAST(strftime('%s', '2026-11-01') AS INTEGER) AS since, 'real' AS mode),
+confirmed AS (
+  SELECT dp.organization_id, dl.state AS link_state, fp.verified_by
+  FROM devolada_payments dp
+  JOIN devolada_links dl ON dl.id = dp.link_id
+  LEFT JOIN folio_payments fp ON fp.id = dl.folio_payment_id
+  WHERE dp.status = 'confirmed'
+    AND dl.mode = (SELECT mode FROM params)
+    AND coalesce(dp.verdict_at, dp.devolada_created_at) >= (SELECT since FROM params)
+    -- Money to return settles nothing (research D9): not a sale to release.
+    AND NOT (dl.state <> 'paid' AND (dl.closed_reason IS NOT NULL
+      OR EXISTS (SELECT 1 FROM folios f WHERE f.id = dp.folio_id AND f.cancelled_at IS NOT NULL)))
+)
+SELECT o.name AS organization,
+  count(*) AS confirmed,
+  sum(c.link_state = 'paid' AND c.verified_by IS NULL) AS released_by_system,
+  round(100.0 * sum(c.link_state = 'paid' AND c.verified_by IS NULL) / count(*), 1) AS pct
+FROM confirmed c JOIN organizations o ON o.id = c.organization_id
+GROUP BY c.organization_id ORDER BY o.name;
+```
+
+**SC-002 — seconds from the verdict to the tickets** (target: `pct_within_120s` at least 95).
+`verdict_at` is Devolada's verdict; `applied_at` is when this system applied it, in the request that
+signed the QR, sent the email and unlocked WhatsApp. Only payments the system released are measured,
+and only the kinds that release tickets (a deposit releases none). Both times are in seconds.
+
+```sql
+WITH params AS (SELECT CAST(strftime('%s', '2026-11-01') AS INTEGER) AS since, 'real' AS mode),
+released AS (
+  SELECT dp.organization_id, max(0, dp.applied_at - dp.verdict_at) AS secs
+  FROM devolada_payments dp
+  JOIN devolada_links dl ON dl.id = dp.link_id
+  JOIN folio_payments fp ON fp.id = dl.folio_payment_id
+  WHERE dp.status = 'confirmed' AND dp.applied_status = 'confirmed'
+    AND dl.state = 'paid' AND dl.kind IN ('sale', 'settlement') AND fp.verified_by IS NULL
+    AND dl.mode = (SELECT mode FROM params)
+    AND dp.verdict_at >= (SELECT since FROM params)
+),
+ranked AS (
+  SELECT organization_id, secs,
+    row_number() OVER (PARTITION BY organization_id ORDER BY secs) AS n,
+    count(*) OVER (PARTITION BY organization_id) AS total
+  FROM released
+)
+SELECT o.name AS organization,
+  max(r.total) AS released,
+  round(100.0 * sum(r.secs <= 120) / max(r.total), 1) AS pct_within_120s,
+  max(CASE WHEN r.n = (r.total + 1) / 2 THEN r.secs END) AS median_secs,
+  max(CASE WHEN r.n = (95 * r.total + 99) / 100 THEN r.secs END) AS p95_secs
+FROM ranked r JOIN organizations o ON o.id = r.organization_id
+GROUP BY r.organization_id ORDER BY o.name;
+```
+
+**SC-004 — transfers waiting more than 24 hours** (target: `without_label` 0). A pending transfer of
+a connected organization, received after it connected, on a live sale. Every link gives its sale a
+label (contracts § Labels), so a transfer without a link has none. `link_still_open` is not a
+failure of SC-004, but a link lives 24 hours at most (D7): a non-zero count means the sweep cannot
+reach Devolada for that organization.
+
+```sql
+WITH params AS (SELECT CAST(strftime('%s', 'now') AS INTEGER) - 24 * 3600 AS cutoff),
+waiting AS (
+  SELECT fp.organization_id,
+    (SELECT dl.state FROM devolada_links dl
+      WHERE dl.organization_id = fp.organization_id AND dl.folio_id = fp.folio_id
+        AND dl.folio_payment_id = fp.id
+      ORDER BY dl.created_at DESC LIMIT 1) AS link_state
+  FROM folio_payments fp
+  JOIN devolada_connections dc ON dc.organization_id = fp.organization_id AND dc.status <> 'disconnected'
+  JOIN folios f ON f.id = fp.folio_id
+  WHERE fp.entry_type = 'payment' AND fp.method = 'transfer' AND fp.verification = 'pending'
+    AND f.cancelled_at IS NULL
+    AND fp.created_at >= dc.connected_at AND fp.created_at < (SELECT cutoff FROM params)
+)
+SELECT o.name AS organization,
+  count(*) AS waiting_over_24h,
+  sum(w.link_state IS NULL) AS without_label,
+  sum(w.link_state IN ('creating', 'open')) AS link_still_open
+FROM waiting w JOIN organizations o ON o.id = w.organization_id
+GROUP BY w.organization_id ORDER BY o.name;
+```
+
+**SC-008 — the transfers' share of payments** (hypothesis: `after` above 5%, against today's 0.5%).
+Every positive payment row 60 days before connecting and up to 60 days after, by count and by
+amount, cancelled sales included. `days_after_connecting` below 60 means the window is still
+open. `connected_at` is the latest connection: an organization that reconnected is measured from
+then.
+
+```sql
+WITH windows AS (
+  SELECT organization_id, connected_at AS t0,
+    min(60, (CAST(strftime('%s', 'now') AS INTEGER) - connected_at) / 86400) AS days_after
+  FROM devolada_connections
+),
+pays AS (
+  SELECT w.organization_id, w.days_after,
+    CASE WHEN fp.created_at >= w.t0 THEN 'after' ELSE 'before' END AS period,
+    fp.method, fp.amount
+  FROM windows w
+  JOIN folio_payments fp ON fp.organization_id = w.organization_id
+  WHERE fp.entry_type = 'payment' AND fp.amount > 0
+    AND fp.created_at >= w.t0 - 60 * 86400 AND fp.created_at < w.t0 + 60 * 86400
+)
+SELECT o.name AS organization, p.period, max(p.days_after) AS days_after_connecting,
+  count(*) AS payments,
+  round(100.0 * sum(p.method = 'transfer') / count(*), 1) AS transfer_pct_by_count,
+  round(100.0 * sum(CASE WHEN p.method = 'transfer' THEN p.amount ELSE 0 END) / sum(p.amount), 1) AS transfer_pct_by_amount
+FROM pays p JOIN organizations o ON o.id = p.organization_id
+GROUP BY p.organization_id, p.period ORDER BY o.name, p.period DESC;
+```

@@ -57,7 +57,7 @@ const toDate = (sec: number | null): Date | null => (sec === null ? null : new D
 
 /**
  * Stores Devolada's latest word on a payment. A final status is never overwritten by another
- * status: Devolada promises a verdict is final, and an older re-read must not undo it.
+ * status: Devolada promises a verdict is final, and an older re-read must not undo it (D9).
  */
 async function upsertSnapshot(
   db: Db,
@@ -193,7 +193,7 @@ async function moneyApplied(db: Db, link: DevoladaLink): Promise<boolean> {
   return !!row?.applied
 }
 
-/** The link collected its money: it ends `paid` — only while that money was applied. */
+/** The link collected its money: it ends `paid` — only while that money was applied (D9). */
 const linkPaidStatement = (db: Db, link: DevoladaLink, now: Date) =>
   db
     .update(devoladaLinks)
