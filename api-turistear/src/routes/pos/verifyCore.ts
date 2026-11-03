@@ -5,6 +5,7 @@ import { sendTicketConfirmationEmail } from '../../services/resend'
 import { folioEventRowWhere } from '../../utils/folioEvents'
 import { displayMethodSql } from '../../utils/folioPayments'
 import { emitNotification } from '../../utils/notifications'
+import { linkClosedEventsStatement, markLinksClosingStatement, type ClosedLink } from '../devolada/links'
 import { issuePortalLink, signLineTickets } from './handler'
 
 // devolada-transfer-verification D10 — verifying one payment at a time, without a request.
@@ -35,6 +36,12 @@ export interface VerifyFolioPaymentInput {
   refuseCancelled?: boolean
   /** The `payment_verified` event's payload. */
   eventPayload?: Record<string, unknown>
+  /**
+   * The admin's Verificar (D13): the links that collect the rows this call verifies stop taking
+   * money (`verified_by_admin`), in the same batch — except one whose payment is in flight, which
+   * its verdict ends. Verifying a deposit leaves the sale's settlement link open: it collects no row.
+   */
+  closeVerifiedLinks?: boolean
 }
 
 /**
@@ -43,12 +50,13 @@ export interface VerifyFolioPaymentInput {
  * THIS call's row flip matched and whether THIS call's rollup matched: only a call that got both
  * may release the tickets, so a second processor (the webhook and the sweep at once, a Devolada
  * retry, an admin who verified by hand first) never signs the QR again — which would invalidate the
- * codes already delivered — nor sends the email twice.
+ * codes already delivered — nor sends the email twice. With `closeVerifiedLinks`, also the links
+ * it marked `closing`.
  */
 export async function verifyFolioPayment(
   deps: Pick<VerifyDeps, 'db'>,
   input: VerifyFolioPaymentInput,
-): Promise<{ flipped: boolean; rollupVerified: boolean }> {
+): Promise<{ flipped: boolean; rollupVerified: boolean; closedLinks: ClosedLink[] }> {
   const { db } = deps
   const { organizationId: org, folioId, paymentId, actorId, at } = input
   const atSec = Math.floor(at.getTime() / 1000)
@@ -109,8 +117,19 @@ export async function verifyFolioPayment(
       ${paymentId === 'all' ? sql`` : sql`AND p.id = ${paymentId}`})`,
   )
 
-  const [flipped, rolled] = await db.batch([flip, rollup, event])
-  return { flipped: flipped.length > 0, rollupVerified: rolled.length > 0 }
+  // D13 — gated like the event: only the links of rows this batch's own flip verified.
+  const closing = input.closeVerifiedLinks
+    ? [
+        markLinksClosingStatement(db, org, folioId, 'verified_by_admin', { at, rowsVerified: { at, actorId } }),
+        linkClosedEventsStatement(db, org, folioId, { at, actorId }),
+      ]
+    : []
+  const [flipped, rolled, , closed] = await db.batch([flip, rollup, event, ...closing])
+  return {
+    flipped: flipped.length > 0,
+    rollupVerified: rolled.length > 0,
+    closedLinks: (closed as ClosedLink[] | undefined) ?? [],
+  }
 }
 
 /**

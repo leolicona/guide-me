@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNull, ne, sql, type SQL } from 'drizzle-orm'
+import { and, eq, isNull, sql, type SQL } from 'drizzle-orm'
 import type { BatchItem } from 'drizzle-orm/batch'
 import type { Db } from '../../db/client'
 import {
@@ -12,7 +12,12 @@ import {
 import { folioEventRowWhere } from '../../utils/folioEvents'
 import { buildCancellationReversal } from '../../utils/folioPayments'
 import { emitNotification } from '../../utils/notifications'
-import { closePaymentLinkRemote } from '../devolada/links'
+import {
+  closeOpenLinksAfterWrite,
+  closePaymentLinkRemote,
+  linkClosedEventsStatement,
+  markLinksClosingStatement,
+} from '../devolada/links'
 import { reconcileSlotTotals } from '../services/zones.reconcile'
 
 // devolada-transfer-verification D11 — cancelling a sale when the money never arrived (FR-016).
@@ -167,21 +172,6 @@ export async function cancelForUnreceivedTransfer(
     .select({ id: folioLines.id, slotId: folioLines.slotId, zoneId: folioLines.zoneId, quantity: folioLines.quantity })
     .from(folioLines)
     .where(and(eq(folioLines.folioId, folioId), eq(folioLines.organizationId, org), isNull(folioLines.cancelledAt)))
-  // The sale's other links that still take money: the batch marks them `closing` (D13).
-  const otherLinkIds = (
-    await db
-      .select({ id: devoladaLinks.id })
-      .from(devoladaLinks)
-      .where(
-        and(
-          eq(devoladaLinks.organizationId, org),
-          eq(devoladaLinks.folioId, folioId),
-          inArray(devoladaLinks.state, ['creating', 'open']),
-          ne(devoladaLinks.id, link.id),
-        ),
-      )
-  ).map((l) => l.id)
-
   // 3. The batch. `cancelledHere` holds only once the first statement took effect; a line's own
   //    gate, only once the second statement cancelled that line.
   const cancelledHere = sql`EXISTS (SELECT 1 FROM folios g
@@ -243,18 +233,7 @@ export async function cancelForUnreceivedTransfer(
       lines: liveLines.map((l) => ({ ...l, gate: lineCancelledHere(l.id) })),
     }),
     // D13 — the sale's other links stop taking money; the claimed one already ended `expired`.
-    db
-      .update(devoladaLinks)
-      .set({ state: 'closing', closedReason: 'cancelled', updatedAt: at })
-      .where(
-        and(
-          eq(devoladaLinks.organizationId, org),
-          eq(devoladaLinks.folioId, folioId),
-          inArray(devoladaLinks.state, ['creating', 'open']),
-          ne(devoladaLinks.id, link.id),
-          cancelledHere,
-        ),
-      ),
+    markLinksClosingStatement(db, org, folioId, 'cancelled', { at, gate: cancelledHere }),
     folioEventRowWhere(
       db,
       {
@@ -267,6 +246,8 @@ export async function cancelForUnreceivedTransfer(
       },
       cancelledHere,
     ),
+    // …and each of the sale's other links it closed; ungated, it reads only what this batch marked.
+    linkClosedEventsStatement(db, org, folioId, { at, actorId: null }),
   ]
   const [won] = await db.batch([cancelSale, ...statements])
   // Nothing matched: something changed after step 2 — another cancellation, a verification, money
@@ -280,21 +261,10 @@ export async function cancelForUnreceivedTransfer(
     event: 'payment_rejected',
     hasEmail: !!sale.customerEmail,
   })
-  const closing = otherLinkIds.length
-    ? await db
-        .select()
-        .from(devoladaLinks)
-        .where(
-          and(
-            eq(devoladaLinks.organizationId, org),
-            inArray(devoladaLinks.id, otherLinkIds),
-            eq(devoladaLinks.state, 'closing'),
-          ),
-        )
-    : []
   deps.waitUntil(
     (async () => {
-      for (const l of [link, ...closing]) await closePaymentLinkRemote(deps, l)
+      await closePaymentLinkRemote(deps, link)
+      await closeOpenLinksAfterWrite(deps, org, folioId)
     })(),
   )
   return 'cancelled'

@@ -54,7 +54,7 @@ export interface PaymentLinkView {
   payment: PaymentLinkPaymentView | null
 }
 
-type LabelLink = Pick<DevoladaLink, 'state'>
+type LabelLink = Pick<DevoladaLink, 'state'> & { closedReason?: DevoladaLink['closedReason'] }
 type LabelPayment = Pick<DevoladaPayment, 'status' | 'awaiting'>
 
 /**
@@ -69,10 +69,10 @@ export function deriveLinkLabel(
 ): PaymentLinkLabel {
   const p = currentPayment
   if (link.state === 'failed' || link.state === 'abandoned' || link.state === 'creating') return 'link_failed'
-  // A cancelled sale is never verified: confirmed money that reached it after the cancellation is
-  // money to return (D9). A `paid` link's money was applied before: the sale was cancelled later,
-  // and its cancellation priced that money.
-  if (p?.status === 'confirmed' && (!saleCancelled || link.state === 'paid')) return 'confirmed'
+  // A cancelled sale is never verified, and a link a write closed (D13) no longer collects what the
+  // sale owes: confirmed money that arrives on either is money to return (D9). A `paid` link's money
+  // was applied before: the sale was cancelled later, and its cancellation priced that money.
+  if (p?.status === 'confirmed' && (link.state === 'paid' || (!saleCancelled && !link.closedReason))) return 'confirmed'
   if (p?.status === 'unapplied' || p?.status === 'confirmed') return 'unapplied'
   if (p?.status === 'partial') return 'partial'
   if (p?.status === 'invalid') return 'invalid'

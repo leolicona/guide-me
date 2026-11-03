@@ -213,10 +213,32 @@ describe('the re-read decides (D4)', () => {
     expect(first.json.error.code).toBe('DEVOLADA_UNAVAILABLE')
     expect((await eventRow('evt_retry')).outcome).toBe('failed')
 
+    // Devolada's first retry comes a minute later.
+    await env.DB.prepare(`UPDATE devolada_events SET received_at = received_at - 60 WHERE event_id = 'evt_retry'`).run()
     const retry = await deliver(await fake.signedEvent(paymentId, { eventId: 'evt_retry' }))
     expect(retry.status).toBe(200)
     expect((await folioRow(folioId)).payment_verification).toBe('verified')
     expect(await eventRow('evt_retry')).toMatchObject({ outcome: 'applied', attempts: 2 })
+  })
+
+  // T075 — a captured delivery replayed while its event is failed cannot spend the organization's
+  // calls to Devolada: within 30 seconds of the last attempt it reads nothing and answers 503, so
+  // Devolada's own retry still processes it.
+  it('a failed event delivered again within 30 seconds reads nothing and answers 503', async () => {
+    const { folioId, link } = await sale()
+    const paymentId = fake.submitProof(link.devolada_link_id)
+    fake.advance(paymentId, 'confirmed')
+    fake.failNext('getPayment', 'unreachable')
+    expect((await deliver(await fake.signedEvent(paymentId, { eventId: 'evt_replay' }))).status).toBe(503)
+    const reads = fake.callsTo('getPayment').length
+
+    for (let i = 0; i < 3; i += 1) {
+      const replay = await deliver(await fake.signedEvent(paymentId, { eventId: 'evt_replay' }))
+      expect(replay.status).toBe(503)
+    }
+    expect(fake.callsTo('getPayment')).toHaveLength(reads)
+    expect(await eventRow('evt_replay')).toMatchObject({ outcome: 'failed', attempts: 1 })
+    expect((await folioRow(folioId)).payment_verification).toBe('pending')
   })
 
   it("the keys being unreachable is 503, so Devolada retries", async () => {

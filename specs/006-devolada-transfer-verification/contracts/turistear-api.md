@@ -102,6 +102,7 @@ never appear (research D16).
 | BookingActions chip, in place of the settle buttons: while a settlement link is open (PR 2), and from PR 3 only while its payment is in flight | Liquidación en verificación |
 | Line cancellation or settlement refused (`SETTLEMENT_IN_PROGRESS`) | La venta ya tiene un enlace de pago para liquidar; espera su resultado |
 | Line cancel replaced the link | El enlace de pago cambió — vuelve a enviarlo |
+| Line cancel closed the link, and its replacement could not be created (`payment_link: null`) | El enlace de pago cambió y no se pudo crear el nuevo — vuelve a liquidar el saldo *(added 2026-10-24 in build, PR 3)* |
 | Settlement exception, a settlement Devolada is still verifying, or one no key can read any more: accept | Verificar |
 | Settlement exception, or a settlement no key can read any more: dismiss | Descartar (the sale stays an apartado; unlike «Rechazar pago», it cancels nothing) |
 | Unapplied money, returned | Ya lo devolví |
@@ -291,7 +292,7 @@ For a connected organization with `"method": "transfer"`, no settlement is recor
 |---|---|---|
 | `accept` | settlement link, payment `partial` or `invalid`, or still in flight (*validating*, awaiting a tracking key, `queued_for_credit`), unresolved | records the settlement as the admin (`verified_by` = admin), past the apartado's clock too when the payment was submitted before its link expired (D8), and releases tickets if the sale is now paid and cleared. For a payment in flight the link stays open until the verdict, which records nothing more and ends the link (`paid` when confirmed; D13, D15) |
 | `dismiss` | settlement link, payment `partial` or `invalid`, or in flight on a link no credential can read (`failed`, D21), unresolved | closes the link when a credential can still reach it; the apartado continues |
-| `returned` | payment `unapplied`, or `confirmed` that reached a cancelled sale without being applied to it (its link never ended `paid`), unresolved | records that the money was returned outside the system |
+| `returned` | payment `unapplied`, or `confirmed` without being applied to its sale (its link never ended `paid`) because the sale was cancelled or a write closed the link first (D13), unresolved | records that the money was returned outside the system |
 
 `note` is optional, up to 500 characters. It is validated and not stored yet: the data model has no place for it (amended 2026-10-16, in build). While a settlement payment awaits `accept` or `dismiss`, the apartado does not expire: the sweep holds it past its release time, or only its line for a settlement of one line (research D8).
 

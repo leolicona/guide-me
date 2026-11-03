@@ -5,7 +5,7 @@ import { devoladaLinks, devoladaPayments, folios } from '../../db/schema'
 import { ApiError } from '../../types/errors'
 import type { AppVariables } from '../../types/context'
 import { readFolioDetail } from '../../utils/folioDetail'
-import { IN_FLIGHT_STATUSES } from '../../utils/devoladaSql'
+import { confirmedToReturnSql, IN_FLIGHT_STATUSES } from '../../utils/devoladaSql'
 import { applySettlement, planSettlement, type SettlementPlan } from '../pos/settleCore'
 import { closePaymentLinkRemote } from './links'
 import type { ResolveDevoladaPaymentInput } from './schema'
@@ -18,7 +18,7 @@ import type { ResolveDevoladaPaymentInput } from './schema'
 // - `dismiss`: a settlement exception, or a settlement payment in flight on a link no credential
 //   can read (D21), is set aside: the apartado continues;
 // - `returned`: the admin returned money that settled nothing — an `unapplied` payment, or a
-//   `confirmed` one that reached a cancelled sale (D9).
+//   `confirmed` one that reached a cancelled sale or a link a write had closed (D9, D13).
 //
 // The note is validated (≤ 500 characters) and not stored: the data model has no place for it yet.
 
@@ -56,16 +56,17 @@ export const resolveDevoladaPayment = async (c: DevoladaContext) => {
 
   switch (action) {
     case 'returned': {
-      // Confirmed money is to return only when it reached a cancelled sale without being applied to
-      // it: its link never ended `paid` (D9).
+      // Confirmed money is to return only when it settled nothing: its link never ended `paid`, and
+      // the sale was cancelled or a write closed the link first (D9, D13).
       const owesBack =
         payment.status === 'unapplied' ||
-        (payment.status === 'confirmed' && found.cancelledAt !== null && found.link.state !== 'paid')
+        (payment.status === 'confirmed' &&
+          found.link.state !== 'paid' &&
+          (found.cancelledAt !== null || found.link.closedReason !== null))
       if (!owesBack || payment.resolution !== null) throw notResolvable()
-      const saleCancelled = sql`EXISTS (SELECT 1 FROM folios fc
-        WHERE fc.id = ${payment.folioId} AND fc.organization_id = ${org} AND fc.cancelled_at IS NOT NULL)
-        AND EXISTS (SELECT 1 FROM devolada_links rl
-        WHERE rl.id = ${payment.linkId} AND rl.organization_id = ${org} AND rl.state <> 'paid')`
+      const confirmedToReturn = sql`EXISTS (SELECT 1 FROM devolada_links rl
+        WHERE rl.id = ${payment.linkId} AND rl.organization_id = ${org}
+          AND ${confirmedToReturnSql('devolada_payments', 'rl')})`
       const [claimed] = await db
         .update(devoladaPayments)
         .set({ resolution: 'returned', resolvedBy: admin.userId, resolvedAt: now, updatedAt: now })
@@ -76,7 +77,7 @@ export const resolveDevoladaPayment = async (c: DevoladaContext) => {
             isNull(devoladaPayments.resolution),
             or(
               eq(devoladaPayments.status, 'unapplied'),
-              and(eq(devoladaPayments.status, 'confirmed'), saleCancelled),
+              and(eq(devoladaPayments.status, 'confirmed'), confirmedToReturn),
             ),
           ),
         )

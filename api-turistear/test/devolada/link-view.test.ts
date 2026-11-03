@@ -30,6 +30,12 @@ describe('deriveLinkLabel — one case per row of § Labels, first match wins', 
     ['unapplied', link('closed'), pay('unapplied'), false],
     // A cancelled sale is never verified: its confirmed money is money to return.
     ['unapplied', link('closed'), pay('confirmed'), true],
+    // devolada-transfer-verification US4 — so is confirmed money on a link a write closed first (D13):
+    // a cash settlement, or a line cancellation that changed the balance.
+    ['unapplied', { state: 'closed', closedReason: 'settled_otherwise' }, pay('confirmed'), false],
+    ['unapplied', { state: 'closing', closedReason: 'amount_changed' }, pay('confirmed'), false],
+    // A link the admin's Verificar closed ends `paid` when its money arrives: that money is the sale's.
+    ['confirmed', { state: 'paid', closedReason: 'verified_by_admin' }, pay('confirmed'), false],
     ['partial', link('open'), pay('partial'), false],
     ['invalid', link('open'), pay('invalid'), false],
     ['not_received', link('open'), pay('expired'), false],

@@ -185,10 +185,9 @@ export function FolioDetailScreen({ surface }: FolioDetailScreenProps) {
     liveLines.length > 1 &&
     (line.slot_date ?? line.check_in ?? '') >= todayIso
 
-  // devolada-transfer-verification D8, D19 — refused while a settlement enlace is open: until PR 3
-  // closes and replaces enlaces, the cancellation would leave it asking for a stale balance (a sale
-  // the admin verified by hand keeps its enlace open until the verdict, D15). Retrying cannot
-  // succeed until that enlace resolves, so the sheet keeps only its way out.
+  // devolada-transfer-verification D8, D13 — refused while the cancellation would close a settlement
+  // enlace whose payment is in flight: closing it would turn that payment into money to return.
+  // Retrying cannot succeed until that payment's verdict, so the sheet keeps only its way out.
   const lineCancelRefusedBySettlement =
     cancelLine.error instanceof ServiceError && cancelLine.error.code === 'SETTLEMENT_IN_PROGRESS'
   const closeLineDialog = () => {

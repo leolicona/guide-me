@@ -111,7 +111,7 @@ Connecting, replacing the key and disconnecting each retire the previous current
 | `url` | text NULL | the payer's page, sent by WhatsApp |
 | `expires_at` | integer NOT NULL | D7 |
 | `state` | text NOT NULL | see below |
-| `closed_reason` | text NULL | `cancelled` · `rejected` · `amount_changed` · `settled_otherwise` · `verified_by_admin` · `abandoned`, each written as D13 says; `cancelled` also when the link's own line is cancelled |
+| `closed_reason` | text NULL | `cancelled` · `rejected` · `amount_changed` · `settled_otherwise` · `verified_by_admin` · `abandoned`, each written as D13 says; `cancelled` also when the link's own line is cancelled. Set only by a write on our side: a link Devolada's own verdict closes (a `partial` or `invalid` settlement) keeps NULL, and only such a link can still record a settlement (D8, D13) |
 | `requested_by` | text NOT NULL → users | the seller who issued it; becomes `collected_by` of a settlement recorded under D8 |
 | `create_attempts` | integer NOT NULL DEFAULT 1 | suffixes the idempotency key after a refusal (D5) |
 | `last_checked_at` | integer NULL | last re-read (D12); NULL = never checked, so the next sweep checks it |
@@ -203,7 +203,7 @@ open ── no credential can read it (D21) ────────────
 **Attention** is derived, never stored (constitution II). A payment needs the admin when any of these holds:
 - `status ∈ {partial, invalid}` ∧ link `kind = 'settlement'` ∧ `resolution IS NULL`;
 - `status = 'unapplied'` ∧ `resolution IS NULL`;
-- `status = 'confirmed'` on a cancelled sale ∧ `resolution IS NULL` ∧ its link never ended `paid` (treated as `unapplied`, D9). A `paid` link's money reached the sale before an ordinary cancellation, which priced it *(amended 2026-10-16 in build)*;
+- `status = 'confirmed'` on a cancelled sale ∧ `resolution IS NULL` ∧ its link never ended `paid` (treated as `unapplied`, D9). A `paid` link's money reached the sale before an ordinary cancellation, which priced it *(amended 2026-10-16 in build)*. The same holds on a live sale for a link a write closed first (`closed_reason` set, D13): a cash settlement, or a line cancellation that changed the balance or cancelled the link's line. Its money settled nothing *(amended 2026-10-24 in build, PR 3)*;
 - `status = 'validating'` ∧ `awaiting IS NOT NULL`, while nobody has decided the payment by hand;
 - `status = 'queued_for_credit'`, while nobody has decided the payment by hand: validation credit is paused, and the admin tops it up at Devolada;
 - the payment of a link no credential can read (`failed` by D21), last seen in flight, while nobody has decided it by hand. Its label is the link's, «Sin enlace de pago — verificar a mano».

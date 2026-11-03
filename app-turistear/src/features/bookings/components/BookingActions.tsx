@@ -11,6 +11,9 @@ import EventRepeatRounded from '@mui/icons-material/EventRepeatRounded'
 import { ConfirmSheet, MoneyText, StatusChip } from '../../../components'
 import { ServiceError } from '../../../services/authService'
 import {
+  isPaymentInFlight,
+  LINK_NOT_REPLACED_COPY,
+  LINK_REPLACED_COPY,
   PaymentLinkCard,
   SETTLEMENT_IN_PROGRESS_COPY,
   SETTLEMENT_VERIFYING_COPY,
@@ -52,7 +55,8 @@ export interface BookingFolio {
     cancelled_at?: number | null
   }[]
   /** devolada-transfer-verification D14 — the sale's payment links, newest first. An open
-   *  settlement link stands in for the settle buttons it would refuse (D8, D19). */
+   *  settlement link whose payment is in flight stands in for the settle buttons it would refuse
+   *  (D8, D13). */
   payment_links?: PaymentLinkView[]
   /** Who that enlace's WhatsApp message goes to, and whose name it carries (contracts § The
    *  WhatsApp message for a link). */
@@ -165,8 +169,9 @@ export function ExpiredBookingBanner({ folio }: { folio: BookingFolio }) {
   )
 }
 
-// devolada-transfer-verification D16, D19 — in place of a settle button while a settlement enlace
-// collects that balance. A state, not an action: functional amber with its icon, never teal.
+// devolada-transfer-verification D13, D16 — in place of a settle button while the payment of the
+// settlement enlace it would close is in flight. A state, not an action: functional amber with its
+// icon, never teal.
 function SettlingChip({ sx }: { sx?: SxProps<Theme> }) {
   return (
     <StatusChip
@@ -226,6 +231,10 @@ export function BookingActions({
   // US-AG54 — the line being settled / cancelled alone (null = whole-folio gestures).
   const [settleLine, setSettleLine] = useState<{ id: string; name: string; balance: number } | null>(null)
   const [cancelLine, setCancelLine] = useState<{ id: string; name: string } | null>(null)
+  // devolada-transfer-verification D13 — a line cancellation that closed the whole-sale settlement
+  // enlace answers its replacement, or null when none could be created. The customer holds the old
+  // enlace, so the seller is told to send the new one.
+  const [replaced, setReplaced] = useState<{ link: PaymentLinkView | null } | null>(null)
 
   // D11 — same service only. A stay is nights under a per-night guard rather than a slot, and is
   // deferred with its own scenarios. The sheet fetches the SELECTED line's calendar itself — the
@@ -261,18 +270,30 @@ export function BookingActions({
     folio.payment_method && folio.payment_method !== 'Mixto' ? folio.payment_method : 'cash'
   const multiLine = apartadaLines.length > 1
 
-  // devolada-transfer-verification D8, D16, D19 — the settlement enlaces still collecting (one per
-  // sale). Until PR 3 closes and replaces them, every settle waits for an open one: the server
-  // answers any other SETTLEMENT_IN_PROGRESS, so no settle button is offered. «Liquidación en
-  // verificación» stands in the main button's place, and on the line a line's enlace collects.
+  // devolada-transfer-verification D8, D13, D16 — the settlement enlace still collecting (one per
+  // sale), on its card. A settle that would close it waits only while its payment is in flight: the
+  // server answers SETTLEMENT_IN_PROGRESS then, so that settle is not offered, and «Liquidación en
+  // verificación» stands in its place — on the line a line's enlace collects, and in the main
+  // button's place, since settling the whole sale closes it too. While the enlace waits for its
+  // first payment every button stays: settling another way closes it (`settled_otherwise`).
   const settlementLinks = (folio.payment_links ?? []).filter(
     (l) => l.kind === 'settlement' && l.state === 'open',
   )
-  const settlingLineIds = new Set(settlementLinks.flatMap((l) => l.folio_line_id ?? []))
-  const mainSettling = settlementLinks.length > 0
+  const settlingLinks = settlementLinks.filter(isPaymentInFlight)
+  const settlingLineIds = new Set(settlingLinks.flatMap((l) => l.folio_line_id ?? []))
+  // A whole-sale enlace in flight holds each line's settle as well: any of them would close it.
+  const wholeSaleSettling = settlingLinks.some((l) => l.folio_line_id === null)
+  const mainSettling = settlingLinks.length > 0
+  // D13 — the replacement leads, from the sale once refetched (one open settlement enlace per sale),
+  // or from the cancellation's answer until then, in place of the enlace it replaced. Once it no
+  // longer collects, the notice goes with it, and the sale's own open enlaces are shown.
+  const replacement = replaced?.link
+    ? (folio.payment_links?.find((l) => l.id === replaced.link!.id) ?? replaced.link)
+    : null
+  const linkCards = replacement?.state === 'open' ? [replacement] : settlementLinks
 
-  // D8, D19 — a line cancellation refused because an enlace is collecting the balance. Retrying
-  // cannot succeed until that enlace resolves, so the sheet keeps only its way out.
+  // D8, D13 — a line cancellation refused because it would close an enlace whose payment is in
+  // flight. Retrying cannot succeed until that payment's verdict, so the sheet keeps only its way out.
   const cancelRefusedBySettlement =
     cancel.error instanceof ServiceError && cancel.error.code === 'SETTLEMENT_IN_PROGRESS'
   // The shared mutation's refusal belongs to the sheet that met it, not to the next one opened.
@@ -314,19 +335,24 @@ export function BookingActions({
         {settleSheets}
         <Stack spacing={1.5}>
           {/* devolada-transfer-verification D16 — the enlace collecting the balance leads: sending
-              it is how the seller collects now. */}
-          {settlementLinks.map((link) => (
-            <SettlementLinkCard key={link.id} folio={folio} link={link} />
+              it is how the seller collects now. D13 — after a line cancellation replaced it, the
+              notice says the customer's enlace changed. */}
+          {replaced && !replaced.link && <Alert severity="warning">{LINK_NOT_REPLACED_COPY}</Alert>}
+          {linkCards.map((link) => (
+            <Fragment key={link.id}>
+              {link.id === replacement?.id && <Alert severity="warning">{LINK_REPLACED_COPY}</Alert>}
+              <SettlementLinkCard folio={folio} link={link} />
+            </Fragment>
           ))}
           {/* US-AG54 — one row per line still owing: its balance, its deadline, its verbs. The
               whole-folio buttons keep the common case at one tap below. */}
           {multiLine &&
             apartadaLines.map((line) => {
-              // D19 — this line's settle: the chip while its own enlace collects it, nothing while
-              // any other enlace collects (the chip below says so once).
+              // D13 — this line's settle: the chip while its own enlace's payment is in flight,
+              // nothing while the whole sale's is (the chip below says so once).
               const settle = settlingLineIds.has(line.id!) ? (
                 <SettlingChip />
-              ) : mainSettling ? null : (
+              ) : wholeSaleSettling ? null : (
                 <Button
                   size="small"
                   variant="outlined"
@@ -496,7 +522,15 @@ export function BookingActions({
           busy={cancel.isPending}
           onConfirm={() =>
             cancelLine &&
-            cancel.mutate({ id: folio.id, lineId: cancelLine.id }, { onSuccess: () => setCancelLine(null) })
+            cancel.mutate(
+              { id: folio.id, lineId: cancelLine.id },
+              {
+                onSuccess: (result) => {
+                  setCancelLine(null)
+                  if (result.payment_link !== undefined) setReplaced({ link: result.payment_link })
+                },
+              },
+            )
           }
           hideConfirm={cancelRefusedBySettlement}
           error={

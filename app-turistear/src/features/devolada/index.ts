@@ -6,6 +6,7 @@ export { PaymentLinkCard } from './components/PaymentLinkCard'
 export type { PaymentLinkCardProps } from './components/PaymentLinkCard'
 export { PaymentLinkStatusChip } from './components/PaymentLinkStatusChip'
 export * from './copy'
+export { isPaymentInFlight } from './linkState'
 export * from './hooks'
 export type * from './types'
 // D15 — the admin's three decisions on a Devolada payment, as the resolve endpoint names them.

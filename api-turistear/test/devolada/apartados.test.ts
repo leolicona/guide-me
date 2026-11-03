@@ -313,8 +313,10 @@ describe('settling by transfer records nothing until it is proven (D8)', () => {
   })
 })
 
-describe('a settlement in progress holds the sale (D8, D19)', () => {
-  it("with one line's link open, everything else waits; the same line's transfer gets its link back", async () => {
+// A cash settlement or a line cancellation while a settlement link is open closes or keeps that link
+// by what it touches (US4, D13): test/devolada/link-closing.test.ts.
+describe('one settlement link per sale (D8)', () => {
+  it("with one line's link open, a transfer of another scope waits; the same line's transfer gets its link back", async () => {
     await connectToFake(fake, org.adminEmail)
     const later = await seedSlot(org.organizationId, org.serviceId, { daysAhead: 5 })
     const { folioId } = await apartado('cash', [org.slotId, later])
@@ -323,12 +325,8 @@ describe('a settlement in progress holds the sale (D8, D19)', () => {
     const before = (await ledger(folioId)).length
 
     for (const refused of [
-      await settle(folioId, { method: 'cash' }),
-      await settle(folioId, { method: 'cash' }, first.id),
       await settle(folioId, { method: 'transfer' }, first.id),
       await settle(folioId, { method: 'transfer' }),
-      await call(org.agentEmail, 'POST', `/pos/folios/${folioId}/lines/${first.id}/cancel`, {}),
-      await call(org.adminEmail, 'POST', `/folios/${folioId}/lines/${first.id}/cancel`, {}),
     ]) {
       expect(refused.status, refused.text).toBe(409)
       expect(refused.json.error.code).toBe('SETTLEMENT_IN_PROGRESS')
