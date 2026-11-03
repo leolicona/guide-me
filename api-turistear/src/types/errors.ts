@@ -19,6 +19,8 @@ export type ErrorCode =
   // BUG-030 — cancelling while a transfer awaits verification would run the ladder over money the
   // company never confirmed and mint a refund PIN for it. Verify or reject the payment first.
   | 'PAYMENT_UNVERIFIED'
+  // bug: reject-rereleases-cancelled-seats — Verificar and Rechazar on a payment nobody awaits.
+  | 'NOT_PENDING_VERIFICATION'
   | 'SERVICE_INACTIVE'
   | 'SERVICE_HAS_FOLIOS'
   // Accommodation/lodging (docs/lodging/accommodation-stays.spec.md §4.6, v2) — introduced &
